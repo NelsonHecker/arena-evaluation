@@ -24,9 +24,9 @@ from rosbag2_py import (
 )
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan, JointState
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry, Path
-from std_msgs.msg import Int16
+from std_msgs.msg import Int16, Empty
 
 try:
     from arena_people_msgs.msg import Pedestrians
@@ -35,7 +35,7 @@ except ImportError:
     HAS_PEDESTRIANS = False
 
 from arena_robots_msgs.msg import CollisionEvents
-from task_generator_msgs.msg import EpisodeRecord
+from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 import arena_evaluation_msgs.srv as arena_evaluation_srvs
 
 
@@ -74,6 +74,13 @@ class DataRecorder(Node):
             depth=10,
         )
 
+        # For latched topics (TRANSIENT_LOCAL publishers) — subscriber must match durability
+        self.latched_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            depth=1,
+        )
+
         self.clock_sub = self.create_subscription(Clock, "/clock", self.clock_callback, self.qos)
         
         # Service
@@ -85,7 +92,6 @@ class DataRecorder(Node):
 
         self._setup_subscriptions()
 
-        # Start the first episode recording
         self._start_new_recording()
 
     # ──────────────────────────────────────────────────────────────
@@ -119,7 +125,7 @@ class DataRecorder(Node):
             self.writer.open(storage_options, converter_options)
             self.topics_metadata = {}
             self.last_recorded_times = {}
-            # Topics are registered lazily on first real write — no eager pre-registration needed
+            # Topics are registered lazily on first real write
 
         self.get_logger().info(f"Started new episode recording at: {self.current_episode_dir}")
 
@@ -139,7 +145,6 @@ class DataRecorder(Node):
                 except BaseException:
                     pass
 
-            # Seal the bag
             self.writer = None
 
         # Write metadata.yaml alongside the recording
@@ -148,23 +153,31 @@ class DataRecorder(Node):
 
         metadata = {
             "episode_id": episode_id,
-            "robot_model": msg.robots,
+            "robot_model": list(msg.robots),
             "planner_type": self.model,
             "environment_map": msg.world,
-            "episode_result": msg.outcome_state,
-            "episode_info": msg.outcome_info,
+            "seed": int(msg.seed),
             "tm_obstacles": msg.tm_obstacles,
             "tm_robots": msg.tm_robots,
+            "tm_modules": list(msg.tm_modules),
+            "goal_uuid": msg.goal_uuid,
+            "start_time": {
+                "sec": msg.start_time.sec,
+                "nanosec": msg.start_time.nanosec
+            },
+            "integrity": msg.integrity,
+            "episode_result": msg.outcome_state,
+            "episode_info": msg.outcome_info,
             "obstacles_params": self._unflatten_dict(obstacles_params),
             "robots_params": self._unflatten_dict(robots_params),
-            "recorded_topics": list(self._topic_registry.keys()),
+            "recorded_topics": sorted([f"/{t.lstrip('/')}" for t in self.topics_metadata.keys()]),
         }
 
         metadata_path = os.path.join(self.current_episode_dir, "metadata.yaml")
         with open(metadata_path, "w") as f:
             yaml.dump(metadata, f, default_flow_style=False)
 
-        # Rename current_episode → episode_<id>
+        # Rename current_episode
         episode_dir = os.path.join(self.result_dir, f"episode_{episode_id}")
         if os.path.exists(episode_dir):
             shutil.rmtree(episode_dir)
@@ -174,7 +187,6 @@ class DataRecorder(Node):
             f"Episode {episode_id} finalized → {episode_dir}"
         )
 
-        # Immediately begin recording the next episode
         self._start_new_recording()
 
     # ──────────────────────────────────────────────────────────────
@@ -184,46 +196,74 @@ class DataRecorder(Node):
     def _setup_subscriptions(self):
         namespace = self.get_namespace().strip('/')
         ns_prefix = f"/{namespace}" if namespace else ""
-        
-        # Hardcoded topics under the robot sub-namespace
+        parts = namespace.split('/')
+        robot_name = parts[-1] if parts else ""
+        parent_ns = "/" + "/".join(parts[:-1]) if len(parts) >= 1 else ""
+        grandparent_ns = "/" + "/".join(parts[:-2]) if len(parts) >= 2 else ""
+
+        self.subs = []
+
+        # ── Throttled Topics (high frequency telemetry) ────────────────────
+        # Subscribe upfront so we don't miss the first few seconds of data
         throttled_topics = [
             (f"{ns_prefix}/cmd_vel", Twist),
             (f"{ns_prefix}/joint_states", JointState),
+            (f"{ns_prefix}/lidar", LaserScan),
         ]
 
-        # arena_peds is published at the task generator level (parent namespace), not per-robot
-        parent_ns = "/" + "/".join(namespace.split('/')[:-1]) if "/" in namespace else ""
+        if robot_name:
+            throttled_topics.append((f"{ns_prefix}/{robot_name}_velocity_controller/odom", Odometry))
+
         if HAS_PEDESTRIANS:
             throttled_topics.append((f"{parent_ns}/arena_peds", Pedestrians))
         else:
             self.get_logger().warn("arena_people_msgs not found! arena_peds will NOT be recorded.")
-            
-        self.subs = []
+
         for topic_name, msg_type in throttled_topics:
             self._register_topic(topic_name, msg_type)
             callback = self._create_throttled_callback(topic_name)
             sub = self.create_subscription(msg_type, topic_name, callback, self.qos)
             self.subs.append(sub)
 
-        # Dynamic topic discovery timer (runs every 2 seconds) to find flexible topics like scan and odom
-        self.discovery_timer = self.create_timer(2.0, self.discover_topics)
+        # ── Unthrottled Topics (event-driven or rare updates) ──────────────
+        unthrottled_topics = [
+            (f"{ns_prefix}/collision_events", CollisionEvents),
+            (f"{ns_prefix}/plan", Path),
+            (f"{parent_ns}/goal_pose", PoseStamped),
+            (f"{parent_ns}/{robot_name}/goal_pose" if robot_name and parent_ns else "", PoseStamped),
+            (f"{parent_ns}/initialpose", PoseWithCovarianceStamped),
+            (f"{parent_ns}/{robot_name}/initialpose" if robot_name and parent_ns else "", PoseWithCovarianceStamped),
+        ]
 
-        # Unthrottled / Event topics
-        self._register_topic(f"{ns_prefix}/collision_events", CollisionEvents)
-        self.subs.append(self.create_subscription(
-            CollisionEvents, f"{ns_prefix}/collision_events", self.collision_events_callback, self.qos))
+        for topic_name, msg_type in unthrottled_topics:
+            if not topic_name:
+                continue
+            self._register_topic(topic_name, msg_type)
+            callback = self._create_unthrottled_callback(topic_name)
+            sub = self.create_subscription(msg_type, topic_name, callback, self.qos)
+            self.subs.append(sub)
 
-        # EpisodeRecord is published by the task generator, one level above the robot namespace
-        parent_ns = "/" + "/".join(namespace.split('/')[:-1]) if "/" in namespace else ""
+        # EpisodeRecord triggers finalizing and rotating the current episode recording.
         episode_topic = f"{parent_ns}/state/episode"
         self._register_topic(episode_topic, EpisodeRecord)
-        self.subs.append(self.create_subscription(
-            EpisodeRecord, episode_topic, self.episode_record_callback, self.qos))
+        sub = self.create_subscription(
+            EpisodeRecord, episode_topic, self.episode_record_callback, self.qos
+        )
+        self.subs.append(sub)
         self.get_logger().info(f"Subscribed to EpisodeRecord on {episode_topic}")
 
-        self._register_topic(f"{ns_prefix}/plan", Path)
-        self.subs.append(self.create_subscription(
-            Path, f"{ns_prefix}/plan", self._create_unthrottled_callback(f"{ns_prefix}/plan"), self.qos))
+        # Latched fleet state (requires TRANSIENT_LOCAL QoS)
+        robots_topic = f"{parent_ns}/state/robots"
+        self._register_topic(robots_topic, RobotFleet)
+        sub = self.create_subscription(
+            RobotFleet, robots_topic,
+            self._create_unthrottled_callback(robots_topic), self.latched_qos
+        )
+        self.subs.append(sub)
+        self.get_logger().info(f"Subscribed to RobotFleet on {robots_topic}")
+
+        # Dynamic discovery timer running at 1.0s interval as a fallback
+        self.discovery_timer = self.create_timer(1.0, self.discover_topics)
 
     def discover_topics(self):
         namespace = self.get_namespace().strip('/')
