@@ -1,42 +1,70 @@
 - name: teb-polite
-  mobile.local_planner: teb
-  mobile.inter_planner: polite
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: polite
 - name: teb-aggressive
-  mobile.local_planner: teb
-  mobile.inter_planner: aggressive
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: aggressive
 - name: rosnav-polite
-  mobile.local_planner: rosnav
-  mobile.inter_planner: polite
+  mobile:
+    driver: nav2
+    local_planner: rosnav
+    inter_planner: polite
 - name: rosnav-aggressive
-  mobile.local_planner: rosnav
-  mobile.inter_planner: aggressive
+  mobile:
+    driver: nav2
+    local_planner: rosnav
+    inter_planner: aggressive
 - name: cohan-polite
-  mobile.local_planner: cohan
-  mobile.inter_planner: polite
+  mobile:
+    driver: nav2
+    local_planner: cohan
+    inter_planner: polite
 - name: cohan-aggressive
-  mobile.local_planner: cohan
-  mobile.inter_planner: aggressive
+  mobile:
+    driver: nav2
+    local_planner: cohan
+    inter_planner: aggressive
 - name: teb-basic
-  mobile.local_planner: teb
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: bypass
 - name: dwa-basic
-  mobile.local_planner: dwa
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: dwa
+    inter_planner: bypass
 - name: dragon-basic
-  mobile.local_planner: dragon
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: dragon
+    inter_planner: bypass
 - name: rosnav-basic
-  mobile.local_planner: rosnav
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: rosnav
+    inter_planner: bypass
 - name: applr-basic
-  mobile.local_planner: applr
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: applr
+    inter_planner: bypass
 - name: lflh-basic
-  mobile.local_planner: lflh
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: lflh
+    inter_planner: bypass
 - name: trail-basic
-  mobile.local_planner: trail
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: trail
+    inter_planner: bypass
 - name: cohan-basic
-  mobile.local_planner: cohan
-  mobile.inter_planner: bypass
+  mobile:
+    driver: nav2
+    local_planner: cohan
+    inter_planner: bypass

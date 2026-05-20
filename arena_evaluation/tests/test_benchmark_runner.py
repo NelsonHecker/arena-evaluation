@@ -551,6 +551,33 @@ def test_build_launch_args_no_sim_when_simulator_none():
     assert "world:=map1" in args
 
 
+def test_build_launch_args_dict_cap_driver_and_kwargs():
+    """Dict-form cap emits driver as top-level and kwargs as dot-joined args."""
+    cell = _make_cell(contestant_args={"mobile": {"driver": "nav2", "local_planner": "teb", "inter_planner": "bypass"}})
+    args = build_launch_args(cell, "gazebo")
+    assert "mobile:=nav2" in args
+    assert "mobile.local_planner:=teb" in args
+    assert "mobile.inter_planner:=bypass" in args
+
+
+def test_build_launch_args_dict_cap_no_driver():
+    """Dict-form cap without driver: only sub-keys are emitted."""
+    cell = _make_cell(contestant_args={"mobile": {"local_planner": "dwa"}})
+    args = build_launch_args(cell, "gazebo")
+    assert not any(a == "mobile:=" or a == "mobile:=None" for a in args)
+    assert "mobile.local_planner:=dwa" in args
+
+
+def test_build_launch_args_dict_cap_stage_collision_dropped():
+    """Dict-form cap sub-key colliding with stage-owned key is dropped."""
+    cell = _make_cell(contestant_args={"mobile": {"driver": "nav2", "local_planner": "teb"}, "sim": "isaac"})
+    args = build_launch_args(cell, "gazebo")
+    assert "sim:=gazebo" in args
+    assert "sim:=isaac" not in args
+    assert "mobile:=nav2" in args
+    assert "mobile.local_planner:=teb" in args
+
+
 # ---------------------------------------------------------------------------
 # build_pending
 # ---------------------------------------------------------------------------

@@ -210,6 +210,49 @@ def test_contest_parse_list_all_keys_except_name_go_to_args():
 
 
 # ---------------------------------------------------------------------------
+# Contest.parse - list form (dict-cap)
+# ---------------------------------------------------------------------------
+
+def test_contest_parse_list_dict_cap():
+    """Dict-valued arg stores the cap dict as-is."""
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = [{"name": "teb", "mobile": {"driver": "nav2", "local_planner": "teb"}}]
+    result = Contest.parse("c", obj)
+
+    assert len(result.contestants) == 1
+    c = result.contestants[0]
+    assert c.name == "teb"
+    assert c.args["mobile"] == {"driver": "nav2", "local_planner": "teb"}
+
+
+def test_contest_parse_list_dict_cap_multiple():
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = [
+        {"name": "a", "mobile": {"driver": "nav2", "local_planner": "teb"}},
+        {"name": "b", "mobile": {"driver": "nav2", "local_planner": "dwa"}},
+    ]
+    result = Contest.parse("c", obj)
+
+    assert len(result.contestants) == 2
+    assert result.contestants[0].args["mobile"]["local_planner"] == "teb"
+    assert result.contestants[1].args["mobile"]["local_planner"] == "dwa"
+
+
+def test_contest_parse_list_dict_cap_no_driver():
+    """Dict-cap without driver: only sub-keys are emitted."""
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = [{"name": "x", "mobile": {"local_planner": "teb"}}]
+    result = Contest.parse("c", obj)
+
+    cap = result.contestants[0].args["mobile"]
+    assert "driver" not in cap
+    assert cap["local_planner"] == "teb"
+
+
+# ---------------------------------------------------------------------------
 # Contest.parse - sweep form
 # ---------------------------------------------------------------------------
 
@@ -304,6 +347,62 @@ def test_contest_parse_invalid_type_raises():
 
     with pytest.raises(ValueError, match="contest must be list or dict"):
         Contest.parse("c", "not_a_valid_type")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Contest.parse - sweep form (dict-cap)
+# ---------------------------------------------------------------------------
+
+def test_contest_parse_sweep_dict_cap_one_inner_axis():
+    """Dict-form cap with one sweep axis inside."""
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = {"mobile": {"driver": "nav2", "local_planner": ["teb", "dwa"], "inter_planner": "bypass"}}
+    result = Contest.parse("c", obj)
+
+    assert len(result.contestants) == 2
+    names = [c.name for c in result.contestants]
+    assert names == ["teb", "dwa"]
+    for c in result.contestants:
+        cap = c.args["mobile"]
+        assert cap["driver"] == "nav2"
+        assert cap["inter_planner"] == "bypass"
+    assert result.contestants[0].args["mobile"]["local_planner"] == "teb"
+    assert result.contestants[1].args["mobile"]["local_planner"] == "dwa"
+
+
+def test_contest_parse_sweep_dict_cap_two_inner_axes():
+    """Dict-form cap with two sweep axes → cartesian product."""
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = {"mobile": {"driver": "nav2", "local_planner": ["teb", "dwa"], "inter_planner": ["polite", "aggressive"]}}
+    result = Contest.parse("c", obj)
+
+    assert len(result.contestants) == 4
+    names = [c.name for c in result.contestants]
+    assert names == ["teb-polite", "teb-aggressive", "dwa-polite", "dwa-aggressive"]
+
+
+def test_contest_parse_sweep_dict_cap_no_axes():
+    """Dict-form cap with no list values → single contestant."""
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = {"mobile": {"driver": "nav2", "local_planner": "teb"}}
+    result = Contest.parse("c", obj)
+
+    assert len(result.contestants) == 1
+    assert result.contestants[0].name == "single"
+    assert result.contestants[0].args["mobile"] == {"driver": "nav2", "local_planner": "teb"}
+
+
+def test_contest_parse_sweep_dict_cap_with_prefix():
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = {"name": "basic", "mobile": {"driver": "nav2", "inter_planner": "bypass", "local_planner": ["teb", "dwa"]}}
+    result = Contest.parse("c", obj)
+
+    names = [c.name for c in result.contestants]
+    assert names == ["basic-teb", "basic-dwa"]
 
 
 # ---------------------------------------------------------------------------

@@ -88,15 +88,37 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
         args.append(f"record_data_dir:={step.record_dir}")
     own_keys = {a.split(":=", 1)[0] for a in args}
     for k, v in step.contestant.args.items():
-        if not v:
-            continue
-        if k in own_keys:
-            _log.warning(
-                "contestant %r: arg %r=%r ignored, controlled by stage",
-                step.contestant.name, k, v,
-            )
-            continue
-        args.append(f"{k}:={v}")
+        if isinstance(v, dict):
+            driver = v.get("driver")
+            if driver:
+                if k in own_keys:
+                    _log.warning(
+                        "contestant %r: arg %r=%r ignored, controlled by stage",
+                        step.contestant.name, k, driver,
+                    )
+                else:
+                    args.append(f"{k}:={driver}")
+            for ik, iv in v.items():
+                if ik == "driver" or not iv:
+                    continue
+                fk = f"{k}.{ik}"
+                if fk in own_keys:
+                    _log.warning(
+                        "contestant %r: arg %r=%r ignored, controlled by stage",
+                        step.contestant.name, fk, iv,
+                    )
+                    continue
+                args.append(f"{fk}:={iv}")
+        else:
+            if not v:
+                continue
+            if k in own_keys:
+                _log.warning(
+                    "contestant %r: arg %r=%r ignored, controlled by stage",
+                    step.contestant.name, k, v,
+                )
+                continue
+            args.append(f"{k}:={v}")
     return args
 
 
