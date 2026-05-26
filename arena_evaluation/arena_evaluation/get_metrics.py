@@ -5,6 +5,13 @@ import os
 import arena_evaluation.scripts.metrics as Metrics
 from ament_index_python.packages import get_package_share_directory
 
+try:
+    from arena_evaluation.mcap_to_csv import convert_directory
+    CAN_CONVERT_MCAP = True
+except ImportError as e:
+    print(f"MCAP conversion module not loaded: {e}. Skipping MCAP check.")
+    CAN_CONVERT_MCAP = False
+
 
 def main():
 
@@ -19,6 +26,9 @@ def main():
             "data",
             arguments.dir
     ) 
+
+    if CAN_CONVERT_MCAP:
+        convert_directory(dir_arg)
 
     if arguments.pedsim:
         metrics = Metrics.PedsimMetrics(dir=dir_arg)

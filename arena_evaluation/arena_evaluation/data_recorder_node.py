@@ -74,7 +74,7 @@ class DataRecorder(Node):
             depth=10,
         )
 
-        # For latched topics (TRANSIENT_LOCAL publishers) — subscriber must match durability
+        # For latched topics subscriber must match durability
         self.latched_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -82,8 +82,7 @@ class DataRecorder(Node):
         )
 
         self.clock_sub = self.create_subscription(Clock, "/clock", self.clock_callback, self.qos)
-        
-        # Service
+
         self.change_directory_service = self.create_service(
             arena_evaluation_srvs.ChangeDirectory,
             'change_directory',

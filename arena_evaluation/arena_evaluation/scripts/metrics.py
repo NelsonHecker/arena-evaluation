@@ -75,7 +75,7 @@ class Math:
 
     @classmethod
     def round_values(cls, values, digits=3):
-        return [round(v, digits) for v in values]
+        return [float(round(v, digits)) for v in values]
 
     @classmethod
     def grouping(cls, base: np.ndarray, size: int) -> np.ndarray:
@@ -209,18 +209,16 @@ class Metrics:
         data = pd.concat(self._load_data(), axis=1, join="inner")
         data = data.loc[:, ~data.columns.duplicated()].copy()
 
-        i = 0
-
+        unique_episodes = sorted(data["episode"].dropna().unique())
         episode_data = self._episode_data = {}
 
-        while True:
+        for i in unique_episodes:
             current_episode = data[data["episode"] == i]
 
             if len(current_episode) < Config.MIN_EPISODE_LENGTH:
-                break
+                continue
 
-            episode_data[i] = self._analyze_episode(current_episode, i)
-            i = i + 1
+            episode_data[int(i)] = self._analyze_episode(current_episode, int(i))
 
     @property
     def data(self) -> pd.DataFrame:
@@ -266,7 +264,7 @@ class Metrics:
             velocity=Math.round_values(vel_absolute),
             collision_amount=collision_amount,
             collisions=list(collisions),
-            path=[list(p) for p in positions],
+            path=positions.tolist(),
             angle_over_length=np.abs(turn.sum() / path_length.sum()),
             #            action_type = list(self._get_action_type(episode["cmd_vel"])),
             time_diff=time,  # Ros time in ns
@@ -279,37 +277,33 @@ class Metrics:
         )
 
     def _get_robot_params(self):
-
-        # print("Current working directory:", os.getcwd())
-
+        # Resolve the robot model name
         with open(os.path.join(self.dir, "params.yaml")) as file:
-
             content = yaml.safe_load(file)
+            model = content.get("model", "")
+            if not model:
+                namespace = content.get("namespace", "")
+                if namespace:
+                    model = namespace.split("/")[-1]
+            if not model:
+                model = "jackal"  # default fallback
 
-            model = content["model"]
+        # Load physical radius from the arena_robots package (robots/<model>/caps/mobile.yaml)
+        try:
+            caps_file = os.path.join(
+                get_package_share_directory("arena_robots"),
+                "robots",
+                model,
+                "caps",
+                "mobile.yaml"
+            )
+            with open(caps_file, "r") as file:
+                caps_content = yaml.safe_load(file)
+                radius = float(caps_content.get("radius", 0.25))
+        except Exception:
+            radius = 0.25  # standard fallback fallback
 
-        # robot_model_params_file = os.path.join(
-        #     get_package_share_directory(
-        #         "arena_simulation_setup"),
-        #         "entities",
-        #         "robots",
-        #         model,
-        #         "model_params.yaml"
-        # )
-
-        robot_model_params_file = os.path.join(
-            get_package_share_directory(
-                "arena_simulation_setup"),
-            "entities",
-            "robots",
-            "waffle",
-            "model_params.yaml"
-        )
-
-        with open(robot_model_params_file, "r") as file:
-            robot_model_param = yaml.safe_load(file)
-            nested = robot_model_param['/**']['ros__parameters']
-            return nested
+        return {"robot_radius": radius}
 
     def _get_mean_position(self, episode, key):
 

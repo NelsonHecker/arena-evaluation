@@ -2,7 +2,6 @@
 
 import seaborn as sns
 import pandas as pd
-import rospkg
 import os
 import traceback
 import numpy as np
@@ -11,7 +10,8 @@ import matplotlib.pyplot as plt
 import json
 import yaml
 
-from arena_evaluation.utils import Utils
+from ament_index_python.packages import get_package_share_directory
+from arena_evaluation.scripts.utils import Utils
 
 """
     TODO: 
@@ -102,7 +102,11 @@ def read_datasets(data_paths):
     scenarios = []
 
     for path in data_paths:
-        base_path = os.path.join("data", path)
+        base_path = os.path.join(
+            get_package_share_directory("arena_evaluation"),
+            "data",
+            path
+        )
         metrics = os.path.join(base_path, "metrics.csv")
         params = os.path.join(base_path, "params.yaml")
 
@@ -136,7 +140,7 @@ def read_datasets(data_paths):
     # If datasets used different scenario files a comparison makes no sense
     assert len(set(scenarios)) == 1, "Scenario files are not the same"
 
-    return pd.concat(datasets), scenarios[0]
+    return pd.concat(datasets), scenarios[0], params_content.get("map_file", "demo")
 
 
 ## FOR RESULT
@@ -304,10 +308,10 @@ class DiscreteValuePlotter:
 
 class PathVisualizer:
 
-    def __init__(self, scenario):
+    def __init__(self, scenario, map_name=None):
         # self.scenario_file, self.scenario_content = PathVisualizer.read_scenario_file(scenario)
 
-        self.map_name = "small_warehouse" # self.scenario_content["map"]
+        self.map_name = map_name or "demo"
         self.map_path, self.map_content = PathVisualizer.read_map_file(self.map_name)
 
         print(self.map_content)
@@ -415,7 +419,7 @@ class PathVisualizer:
 
     @staticmethod
     def read_scenario_file(scenario):
-        name = os.path.join(rospkg.RosPack().get_path("task_generator"), "scenarios", scenario)
+        name = os.path.join(get_package_share_directory("task_generator"), "scenarios", scenario)
 
         with open(name) as file:
             content = yaml.safe_load(file)
@@ -424,7 +428,7 @@ class PathVisualizer:
 
     @staticmethod
     def read_map_file(map_name):
-        map_path = os.path.join(rospkg.RosPack().get_path("arena_simulation_setup"), "environments", "maps", map_name)
+        map_path = os.path.join(get_package_share_directory("arena_simulation_setup"), "worlds", map_name, "map")
 
         with open(os.path.join(map_path, "map.yaml")) as file:
             content = yaml.safe_load(file)
@@ -449,15 +453,11 @@ def create_plots_from_declaration_file(declaration_file):
         location = os.path.join("plots", declaration_file.get("save_location", ""))
         os.environ[SAVE_PLOTS_LOCATION] = location
 
-        try:
-            os.mkdir(location)
-        except:
-            traceback.print_exc()
-            print("Path", location, "cannot be created")
+        os.makedirs(location, exist_ok=True)
 
     ## Dataset setup
 
-    dataset, scenario = read_datasets(declaration_file["datasets"])
+    dataset, scenario, map_name = read_datasets(declaration_file["datasets"])
 
     ## Plot Result
 
@@ -550,7 +550,7 @@ def create_plots_from_declaration_file(declaration_file):
 
     # Plot paths
 
-    path_visualizer = PathVisualizer(scenario)
+    path_visualizer = PathVisualizer(scenario, map_name=map_name)
 
     episode_plots_for_namespaces = declaration_file.get("episode_plots_for_namespaces", None)
 
