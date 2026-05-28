@@ -9,7 +9,6 @@ from ..storage.schemas import PlotSpec
 class VizManifest(BaseModel):
     """
     Manifest configuring which plots to generate for a benchmark.
-    Follows schema defined in SRD §8.5.
     """
     manifest_version: str = "1.0"
     plots: list[PlotSpec] = Field(default_factory=list)

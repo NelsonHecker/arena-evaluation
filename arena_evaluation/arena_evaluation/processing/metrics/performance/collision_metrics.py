@@ -89,7 +89,6 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
             if event_count > collision_amount:
                 collision_amount = int(event_count)
                 
-        # Determine result based on SRD §10.1 logic
         time_to_goal = prior_results.get("time_to_goal", 0.0)
         
         if time_to_goal >= self.TIMEOUT_THRESHOLD_S:

@@ -19,7 +19,7 @@ This package contains the shared data types and infrastructure used by **all** o
 
 ### `RunMetadata`
 
-Pydantic model matching the `metadata.yaml` schema (SRD §12.1). Written by the recorder and read by the processing pipeline.
+Pydantic model matching the `metadata.yaml` schema. Written by the recorder and read by the processing pipeline.
 
 ```python
 from arena_evaluation.storage.schemas import RunMetadata
