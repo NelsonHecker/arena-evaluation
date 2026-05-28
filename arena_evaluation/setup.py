@@ -31,8 +31,9 @@ setup(
     license='BSD',
     entry_points={
         'console_scripts': [
-        'record = arena_evaluation.data_recorder_node:main',
-        'metrics = arena_evaluation.get_metrics:main',
+        'record = arena_evaluation.ingestion.recorder:main',
+        'evaluation = arena_evaluation.cli:main',
+        'metrics = arena_evaluation.scripts.metrics:main',
         'benchmark = arena_evaluation.benchmark.runner:cli_main',
         'evaluation_cli = arena_evaluation.benchmark.cli:main',
         ],

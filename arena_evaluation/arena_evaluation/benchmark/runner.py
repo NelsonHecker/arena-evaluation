@@ -151,7 +151,7 @@ def build_pending(
                 contestant=contestant,
                 stage=stage,
                 episodes=int(round(stage.episodes * scale_episodes)),
-                record_dir=record_root / contestant.name / stage.name,
+                record_dir=record_root / "recordings" / contestant.name / stage.name,
             )
             if step.key in seen:
                 raise ValueError(f"duplicate step key: {step.key!r}")

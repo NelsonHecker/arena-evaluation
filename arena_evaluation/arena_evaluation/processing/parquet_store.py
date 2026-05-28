@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import pathlib
+import json
+import polars as pl
+
+from ..storage.schemas import RunMetadata
+from ..storage.exceptions import SchemaViolationError
+
+
+class ParquetStore:
+    """
+    Reads and writes metric DataFrames to Parquet format, embedding metadata in the footer.
+    """
+    METADATA_KEY = "arena_evaluation_metadata"
+    
+    @staticmethod
+    def write(df: pl.DataFrame, dest: pathlib.Path, metadata: RunMetadata | None = None) -> None:
+        """
+        Write a DataFrame to Parquet, optionally embedding RunMetadata as JSON.
+        """
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        
+        # We need PyArrow to embed custom metadata
+        table = df.to_arrow()
+        
+        if metadata is not None:
+            # Add custom metadata to existing schema metadata
+            meta_dict = table.schema.metadata or {}
+            meta_dict[ParquetStore.METADATA_KEY.encode()] = json.dumps(
+                metadata.model_dump(exclude_none=True)
+            ).encode()
+            
+            # Replace schema with new metadata
+            table = table.replace_schema_metadata(meta_dict)
+            
+        import pyarrow.parquet as pq
+        pq.write_table(table, dest)
+
+    @staticmethod
+    def read(source: pathlib.Path) -> tuple[pl.DataFrame, dict | None]:
+        """
+        Read a Parquet file and extract its embedded metadata if any.
+        Returns (DataFrame, metadata_dict).
+        """
+        if not source.exists():
+            raise FileNotFoundError(f"Parquet file not found: {source}")
+            
+        import pyarrow.parquet as pq
+        table = pq.read_table(source)
+        
+        metadata_dict = None
+        if table.schema.metadata:
+            meta_bytes = table.schema.metadata.get(ParquetStore.METADATA_KEY.encode())
+            if meta_bytes:
+                metadata_dict = json.loads(meta_bytes.decode())
+                
+        df = pl.from_arrow(table)
+        return df, metadata_dict
+
+    @staticmethod
+    def combine(sources: list[pathlib.Path], dest: pathlib.Path) -> None:
+        """
+        Combine multiple metrics.parquet files into a single combined_metrics.parquet.
+        """
+        if not sources:
+            return
+            
+        dfs = []
+        for src in sources:
+            try:
+                df, _ = ParquetStore.read(src)
+                dfs.append(df)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to read {src} for combining: {e}")
+                
+        if not dfs:
+            return
+            
+        try:
+            combined = pl.concat(dfs, how="diagonal")
+        except Exception as e:
+            raise SchemaViolationError(f"Failed to combine parquet files due to schema mismatch: {e}")
+            
+        ParquetStore.write(combined, dest)

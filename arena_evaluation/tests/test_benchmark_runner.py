@@ -718,7 +718,7 @@ def test_build_pending_record_dir_set_from_record_root(tmp_path: pathlib.Path):
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
     assert len(steps) == 1
-    assert steps[0].record_dir == tmp_path / "pa" / "s1"
+    assert steps[0].record_dir == tmp_path / "recordings" / "pa" / "s1"
 
 
 def test_build_pending_duplicate_key_raises(tmp_path: pathlib.Path):

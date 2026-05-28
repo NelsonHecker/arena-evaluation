@@ -1,0 +1,679 @@
+import argparse
+import os
+import shutil
+import threading
+import traceback
+from datetime import datetime, timezone
+import yaml
+import pathlib
+import sys
+import signal
+
+import rclpy
+from ament_index_python.packages import get_package_share_directory
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.serialization import serialize_message
+
+import rosbag2_py
+from rosgraph_msgs.msg import Clock
+from sensor_msgs.msg import LaserScan, JointState
+from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
+from nav_msgs.msg import Odometry, Path
+
+try:
+    from arena_people_msgs.msg import Pedestrians
+    HAS_PEDESTRIANS = True
+except ImportError:
+    class Pedestrians:
+        pass
+    HAS_PEDESTRIANS = False
+
+try:
+    from arena_robots_msgs.msg import CollisionEvents
+    HAS_COLLISION = True
+except ImportError:
+    class CollisionEvents:
+        pass
+    HAS_COLLISION = False
+
+try:
+    from task_generator_msgs.msg import EpisodeRecord, RobotFleet
+    HAS_TASK_GEN = True
+except ImportError:
+    class EpisodeRecord:
+        pass
+    class RobotFleet:
+        pass
+    HAS_TASK_GEN = False
+
+import arena_evaluation_msgs.srv as arena_evaluation_srvs
+
+from .metadata import IngestionMetadata
+from ..storage.manifest import MetadataWriter
+
+
+class DataRecorderNode(Node):
+    def __init__(self):
+        super().__init__('arena_evaluation_data_recorder')
+
+        self.base_dir = get_package_share_directory("arena_evaluation")
+
+        # ── Resolve record_data_dir ────────────────────────────────────────
+        # Priority 1: ROS parameter (set by benchmark runner launch args)
+        if not self.has_parameter("record_data_dir"):
+            try:
+                self.declare_parameter("record_data_dir", "")
+            except Exception:
+                pass
+        record_data_dir = self.get_parameter("record_data_dir").get_parameter_value().string_value
+
+        # Priority 2: --dir / -d command line argument
+        if not record_data_dir:
+            for idx, arg in enumerate(sys.argv):
+                if arg in ("--dir", "-d") and idx + 1 < len(sys.argv):
+                    record_data_dir = sys.argv[idx + 1]
+                    break
+                elif arg.startswith("--dir="):
+                    record_data_dir = arg[6:].strip()
+                    break
+
+        # Priority 3: default to auto-timestamped folder
+        if not record_data_dir:
+            record_data_dir = "auto:/"
+
+        # ── Handle auto:/ prefix ───────────────────────────────────────────
+        if record_data_dir.startswith("auto:/"):
+            if not self.has_parameter("data_recorder_autoprefix"):
+                try:
+                    self.declare_parameter("data_recorder_autoprefix", "")
+                except Exception:
+                    pass
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            param_value = self.get_parameter("data_recorder_autoprefix").value
+            if not param_value:
+                self.set_parameters([Parameter("data_recorder_autoprefix", Parameter.Type.STRING, timestamp)])
+            else:
+                timestamp = param_value
+            # Relative path: resolved below against the workspace root
+            record_data_dir = os.path.join("data", "recordings", timestamp)
+
+        # ── Resolve to absolute path ───────────────────────────────────────
+        # The old recorder wrote to install/share/arena_evaluation/data/<dir>.
+        # We now write to the workspace root's data/ folder instead so files
+        # are NOT inside the install tree (where they would get clobbered on build).
+        record_data_dir_path = pathlib.Path(record_data_dir)
+        if not record_data_dir_path.is_absolute():
+            # Walk up from base_dir (install/arena_evaluation/share/arena_evaluation)
+            # to find the workspace root (4 levels up: share -> arena_evaluation -> install -> ws)
+            workspace_root = pathlib.Path(self.base_dir).parents[3]
+            record_data_dir_path = workspace_root / record_data_dir_path
+
+        self.run_dir = record_data_dir_path.resolve()
+
+        # If the user passed a bare directory like 'data' (no unique subfolder),
+        # auto-append a timestamped recordings sub-path so we don't write
+        # directly into the root data dir.
+        bare_names = {"data", "recordings"}
+        if self.run_dir.name in bare_names or not record_data_dir_path.parts[1:]:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            self.run_dir = self.run_dir / "recordings" / timestamp
+
+        # Ensure the directory exists and is writable before doing anything else
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.run_dir.chmod(0o777)
+        except Exception:
+            pass
+
+        # ── Infer benchmark/planner/stage from path ────────────────────────
+        parts = self.run_dir.parts
+        try:
+            # Expected benchmark structure: <root>/data/<benchmark_id>/recordings/<planner>/<stage>
+            if len(parts) >= 5 and parts[-3] == "recordings":
+                self.benchmark_id = parts[-4]
+                self.planner = parts[-2]
+                self.stage = parts[-1]
+            else:
+                # Simple recording: <root>/data/recordings/<timestamp>
+                self.benchmark_id = "unknown"
+                self.planner = "unknown"
+                self.stage = "unknown"
+        except Exception:
+            self.benchmark_id = "unknown"
+            self.planner = "unknown"
+            self.stage = "unknown"
+
+        # ── Robot/world metadata from ROS parameters ───────────────────────
+        namespace = self.get_namespace().strip('/')
+        ns_parts = [p for p in namespace.split('/') if p]
+        robot_name_from_ns = ns_parts[-1] if ns_parts else ""
+
+        for param_name, default_val in [
+            ("robot", ""),
+            ("world", "unknown"),
+            ("suite_name", "unknown"),
+            ("contest_name", "unknown"),
+            ("model", ""),
+        ]:
+            if not self.has_parameter(param_name):
+                try:
+                    self.declare_parameter(param_name, default_val)
+                except Exception:
+                    pass
+
+        robot_param = self.get_parameter("robot").value
+        self.robot_model = robot_param if robot_param else robot_name_from_ns if robot_name_from_ns else "unknown"
+        self.world = self.get_parameter("world").value
+        self.suite_name = self.get_parameter("suite_name").value
+        self.contest_name = self.get_parameter("contest_name").value
+        self.model = self.get_parameter("model").value or self.robot_model
+
+        # ── Paths ──────────────────────────────────────────────────────────
+        # The MCAP is written directly to run_dir/recording.mcap — no FolderManager
+        # path sandboxing here; that is a processing-time concern.
+        self.mcap_path = self.run_dir / "recording.mcap"
+        self.metadata_path = self.run_dir / "metadata.yaml"
+
+        # Rotate any pre-existing MCAP so rosbag2 doesn't crash on open
+        if self.mcap_path.exists():
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = self.run_dir / f"recording_backup_{ts}.mcap"
+            try:
+                shutil.move(str(self.mcap_path), str(backup))
+                self.get_logger().warn(f"Backed up existing MCAP to {backup}")
+            except Exception:
+                shutil.rmtree(self.mcap_path, ignore_errors=True)
+
+        # ── Write params.yaml and initial metadata.yaml ────────────────────
+        self.write_params()
+        self.config = self.read_config()
+        self.freqs = self.config.get("record_frequencies", {"default": 20.0})
+
+        # Write initial metadata before opening the writer so we always have a
+        # metadata.yaml even if the node crashes before the first episode.
+        print(f"[DataRecorder] Writing initial metadata to {self.metadata_path}", flush=True)
+        self._write_initial_metadata()
+        print(f"[DataRecorder] Initial metadata written OK", flush=True)
+
+        # ── Thread-safe writer ─────────────────────────────────────────────
+        self.current_time = None
+        self._clock_received_count = 0
+        self.last_recorded_times: dict[str, int] = {}
+        self.writer_lock = threading.Lock()
+        self.writer: rosbag2_py.SequentialWriter | None = None
+        self.topics_metadata: dict[str, rosbag2_py.TopicMetadata] = {}
+        self._topic_registry: dict[str, rosbag2_py.TopicMetadata] = {}
+        self._write_drop_count = 0
+        self._write_success_count = 0
+
+        self.qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=10,
+        )
+        self.latched_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            depth=1,
+        )
+
+        self.is_shutting_down = False
+        self.episodes_recorded = 0
+        self.recorded_topics: set[str] = set()
+
+        print(f"[DataRecorder] Subscribing to /clock for sim time", flush=True)
+        self.clock_sub = self.create_subscription(Clock, "/clock", self.clock_callback, self.qos)
+
+        self.change_directory_service = self.create_service(
+            arena_evaluation_srvs.ChangeDirectory,
+            'change_directory',
+            self.change_directory_callback,
+        )
+
+        print(f"[DataRecorder] Setting up topic subscriptions", flush=True)
+        self._setup_subscriptions()
+        print(f"[DataRecorder] Topic subscriptions ready. Opening MCAP writer...", flush=True)
+
+        # Open the MCAP writer last, after subscriptions are ready
+        self._start_recording()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Recording lifecycle
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _start_recording(self):
+        """Open the rosbag2 SequentialWriter on the continuous MCAP file.
+
+        rosbag2 treats the `uri` as a directory prefix: it creates a folder
+        named `uri` and puts `<uri>_0.mcap` inside.  We therefore pass only
+        the stem (e.g. "recording"), which produces run_dir/recording/recording_0.mcap.
+        """
+        # Strip .mcap extension so rosbag2 doesn't nest as recording.mcap/recording.mcap_0.mcap
+        mcap_uri = str(self.mcap_path.with_suffix(""))
+        print(f"[DataRecorder] Opening MCAP writer: uri={mcap_uri}", flush=True)
+        storage_options = rosbag2_py.StorageOptions(
+            uri=mcap_uri,
+            storage_id='mcap',
+            max_bagfile_size=0,
+            max_cache_size=0,
+            storage_preset_profile='zstd_small',
+        )
+        converter_options = rosbag2_py.ConverterOptions(
+            input_serialization_format='cdr',
+            output_serialization_format='cdr',
+        )
+
+        try:
+            with self.writer_lock:
+                self.writer = rosbag2_py.SequentialWriter()
+                self.writer.open(storage_options, converter_options)
+                self.topics_metadata = {}
+                self.last_recorded_times = {}
+            print(f"[DataRecorder] MCAP writer opened successfully at {mcap_uri}", flush=True)
+        except Exception as e:
+            print(f"[DataRecorder] FATAL: Failed to open MCAP writer: {e}", flush=True)
+            import traceback as tb
+            tb.print_exc()
+            self.writer = None
+
+        self.get_logger().info(f"Started continuous recording at: {self.mcap_path}")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Subscriptions
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _setup_subscriptions(self):
+        namespace = self.get_namespace().strip('/')
+        ns_prefix = f"/{namespace}" if namespace else ""
+        parts = namespace.split('/')
+        robot_name = parts[-1] if parts else ""
+        parent_ns = "/" + "/".join(parts[:-1]) if len(parts) >= 2 else ""
+
+        self.subs = []
+
+        # ── Throttled high-frequency topics ───────────────────────────────
+        throttled_topics = [
+            (f"{ns_prefix}/cmd_vel", Twist),
+            (f"{ns_prefix}/joint_states", JointState),
+            (f"{ns_prefix}/lidar", LaserScan),
+        ]
+
+        if robot_name:
+            throttled_topics.append((f"{ns_prefix}/{robot_name}_velocity_controller/odom", Odometry))
+
+        if HAS_PEDESTRIANS:
+            throttled_topics.append((f"{parent_ns}/arena_peds", Pedestrians))
+        else:
+            self.get_logger().warn("arena_people_msgs not found — arena_peds will NOT be recorded.")
+
+        for topic_name, msg_type in throttled_topics:
+            self._register_topic(topic_name, msg_type)
+            sub = self.create_subscription(msg_type, topic_name, self._create_throttled_callback(topic_name), self.qos)
+            self.subs.append(sub)
+
+        # ── Unthrottled event-driven topics ───────────────────────────────
+        unthrottled_topics = [
+            (f"{ns_prefix}/plan", Path),
+            (f"{parent_ns}/goal_pose", PoseStamped),
+            (f"{parent_ns}/initialpose", PoseWithCovarianceStamped),
+        ]
+        if robot_name and parent_ns:
+            unthrottled_topics += [
+                (f"{parent_ns}/{robot_name}/goal_pose", PoseStamped),
+                (f"{parent_ns}/{robot_name}/initialpose", PoseWithCovarianceStamped),
+            ]
+        if HAS_COLLISION:
+            unthrottled_topics.append((f"{ns_prefix}/collision_events", CollisionEvents))
+
+        for topic_name, msg_type in unthrottled_topics:
+            if not topic_name:
+                continue
+            self._register_topic(topic_name, msg_type)
+            sub = self.create_subscription(msg_type, topic_name, self._create_unthrottled_callback(topic_name), self.qos)
+            self.subs.append(sub)
+
+        # ── Episode lifecycle topics ───────────────────────────────────────
+        if HAS_TASK_GEN:
+            episode_topic = f"{parent_ns}/state/episode"
+            self._register_topic(episode_topic, EpisodeRecord)
+            sub = self.create_subscription(EpisodeRecord, episode_topic, self.episode_record_callback, self.qos)
+            self.subs.append(sub)
+            self.get_logger().info(f"Subscribed to EpisodeRecord on {episode_topic}")
+
+            robots_topic = f"{parent_ns}/state/robots"
+            self._register_topic(robots_topic, RobotFleet)
+            sub = self.create_subscription(RobotFleet, robots_topic, self._create_unthrottled_callback(robots_topic), self.latched_qos)
+            self.subs.append(sub)
+            self.get_logger().info(f"Subscribed to RobotFleet on {robots_topic}")
+
+        # Dynamic discovery fallback (picks up odom topics with non-standard names)
+        self.create_timer(1.0, self.discover_topics)
+
+    def discover_topics(self):
+        namespace = self.get_namespace().strip('/')
+        ns_prefix = f"/{namespace}" if namespace else ""
+
+        for name, types in self.get_topic_names_and_types():
+            if name in self._topic_registry:
+                continue
+            if not name.startswith(ns_prefix):
+                continue
+
+            is_scan = "scan" in name or "lidar" in name
+            is_odom = "odom" in name
+
+            if is_scan and "sensor_msgs/msg/LaserScan" in types:
+                self._subscribe_discovered(name, LaserScan)
+            elif is_odom and "nav_msgs/msg/Odometry" in types:
+                self._subscribe_discovered(name, Odometry)
+                # Refine robot_model from odom topic
+                if self.robot_model in ("unknown", ""):
+                    for part in reversed(name.split("/")):
+                        if part and part not in ("odom", "eval_sim", "task_generator_node", "arena") \
+                                and "velocity_controller" not in part \
+                                and not part.startswith("env_"):
+                            self.robot_model = part
+                            if hasattr(self, 'metadata') and self.metadata is not None:
+                                self.metadata.robot_model = [part]
+                                MetadataWriter.write(self.metadata, self.metadata_path)
+                            break
+
+    def _subscribe_discovered(self, topic_name: str, msg_type):
+        self._register_topic(topic_name, msg_type)
+        sub = self.create_subscription(msg_type, topic_name, self._create_throttled_callback(topic_name), self.qos)
+        self.subs.append(sub)
+        self.get_logger().info(f"Dynamically subscribed to: {topic_name}")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Callbacks
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def clock_callback(self, msg: Clock):
+        new_time = msg.clock.sec * int(1e9) + msg.clock.nanosec
+        self._clock_received_count += 1
+        if self._clock_received_count <= 5:
+            print(f"[DataRecorder] /clock tick #{self._clock_received_count}: sim_time_ns={new_time} ({new_time/1e9:.3f}s)", flush=True)
+        self.current_time = new_time
+
+    def episode_record_callback(self, msg: EpisodeRecord):
+        self.episodes_recorded += 1
+
+        # Write the EpisodeRecord into the bag using sim time
+        now = self.current_time
+        if now is None:
+            now = self.get_clock().now().nanoseconds
+        parent_ns = "/" + "/".join(self.get_namespace().strip('/').split('/')[:-1]) \
+            if "/" in self.get_namespace().strip('/') else ""
+        episode_topic = f"{parent_ns}/state/episode"
+        self._write_to_bag_at(episode_topic, msg, now)
+
+        # Then update the metadata.yaml
+        self._update_metadata_from_episode(msg)
+
+    def _resolve_throttle_ms(self, topic_name: str) -> float:
+        topic_lower = topic_name.lower()
+        for key, ms in self.freqs.items():
+            if key == "default":
+                continue
+            if key.lower() in topic_lower:
+                return float(ms)
+        return float(self.freqs.get("default", 20.0))
+
+    def _create_throttled_callback(self, topic_name: str):
+        throttle_ms = self._resolve_throttle_ms(topic_name)
+
+        def callback(msg):
+            # Never write until simulation clock has been received
+            if self.current_time is None:
+                if not hasattr(self, '_no_clock_warned'):
+                    self._no_clock_warned = set()
+                if topic_name not in self._no_clock_warned:
+                    #(f"[DataRecorder] Dropping {topic_name}: no /clock yet (current_time=None)", flush=True)
+                    self._no_clock_warned.add(topic_name)
+                return
+            now = self.current_time
+            last_time = self.last_recorded_times.get(topic_name, 0)
+            if (now - last_time) / 1e6 >= throttle_ms:
+                self._write_to_bag_at(topic_name, msg, now)
+                self.last_recorded_times[topic_name] = now
+        return callback
+
+    def _create_unthrottled_callback(self, topic_name: str):
+        def callback(msg):
+            # Never write until simulation clock has been received
+            if self.current_time is None:
+                return
+            self._write_to_bag_at(topic_name, msg, self.current_time)
+        return callback
+
+    def _write_to_bag_at(self, topic_name: str, msg, timestamp_ns: int):
+        if self.is_shutting_down:
+            return
+        with self.writer_lock:
+            if self.writer is None:
+                self._write_drop_count += 1
+                if self._write_drop_count <= 10 or self._write_drop_count % 100 == 0:
+                    print(f"[DataRecorder] DROP (writer=None) topic={topic_name} drop_count={self._write_drop_count}", flush=True)
+                return
+            try:
+                self._ensure_topic_in_bag(topic_name)
+                self.writer.write(topic_name.strip('/'), serialize_message(msg), timestamp_ns)
+                self.recorded_topics.add(topic_name.strip('/'))
+                self._write_success_count += 1
+                if self._write_success_count <= 5 or self._write_success_count % 500 == 0:
+                    print(f"[DataRecorder] WRITE OK topic={topic_name} ts={timestamp_ns} success_count={self._write_success_count}", flush=True)
+            except Exception as e:
+                self.get_logger().error(f"Error writing {topic_name}: {e}")
+                print(f"[DataRecorder] WRITE ERROR topic={topic_name} ts={timestamp_ns} err={e}", flush=True)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Topic registration helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _register_topic(self, topic_name: str, msg_type):
+        """Pre-register a topic so we know its type string before the first message."""
+        if topic_name in self._topic_registry:
+            return
+        try:
+            parts = msg_type.__module__.split('.')
+            type_str = f"{parts[0]}/msg/{msg_type.__name__}"
+        except AttributeError:
+            type_str = str(msg_type)
+
+        self._topic_registry[topic_name] = rosbag2_py.TopicMetadata(
+            id=0,
+            name=topic_name.strip('/'),
+            type=type_str,
+            serialization_format='cdr',
+        )
+
+    def _ensure_topic_in_bag(self, topic_name: str):
+        """Lazily call create_topic on first write. Must be called under writer_lock."""
+        strip = topic_name.strip('/')
+        if strip not in self.topics_metadata and topic_name in self._topic_registry:
+            self.writer.create_topic(self._topic_registry[topic_name])
+            self.topics_metadata[strip] = self._topic_registry[topic_name]
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Metadata helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _write_initial_metadata(self):
+        metadata = IngestionMetadata.create_initial_metadata(
+            benchmark_id=self.benchmark_id,
+            planner=self.planner,
+            stage=self.stage,
+            episodes_requested=0,
+            robot_model=self.robot_model,
+            suite_name=self.suite_name,
+            contest_name=self.contest_name,
+        )
+        MetadataWriter.write(metadata, self.metadata_path)
+        self.metadata = metadata
+
+    def _update_metadata_from_episode(self, msg: EpisodeRecord):
+        try:
+            if not self.metadata.robot_model or self.metadata.robot_model == ["unknown"]:
+                self.metadata.robot_model = list(msg.robots)
+            if not self.metadata.map or self.metadata.map == "unknown":
+                self.metadata.map = msg.world
+
+            self.metadata.tm_obstacles = msg.tm_obstacles
+            self.metadata.tm_robots = msg.tm_robots
+            self.metadata.tm_modules = list(msg.tm_modules)
+
+            obstacles_params = {p.name: self._param_value_to_py(p.value) for p in msg.obstacles_params}
+            robots_params = {p.name: self._param_value_to_py(p.value) for p in msg.robots_params}
+            self.metadata.obstacles_params = self._unflatten_dict(obstacles_params)
+            self.metadata.robots_params = self._unflatten_dict(robots_params)
+
+            MetadataWriter.write(self.metadata, self.metadata_path)
+        except Exception as e:
+            self.get_logger().error(f"Failed to update metadata from episode: {e}")
+
+    def _param_value_to_py(self, val):
+        from rcl_interfaces.msg import ParameterType
+        mapping = {
+            ParameterType.PARAMETER_BOOL: lambda v: v.bool_value,
+            ParameterType.PARAMETER_INTEGER: lambda v: v.integer_value,
+            ParameterType.PARAMETER_DOUBLE: lambda v: v.double_value,
+            ParameterType.PARAMETER_STRING: lambda v: v.string_value,
+            ParameterType.PARAMETER_BYTE_ARRAY: lambda v: list(v.byte_array_value),
+            ParameterType.PARAMETER_BOOL_ARRAY: lambda v: list(v.bool_array_value),
+            ParameterType.PARAMETER_INTEGER_ARRAY: lambda v: list(v.integer_array_value),
+            ParameterType.PARAMETER_DOUBLE_ARRAY: lambda v: list(v.double_array_value),
+            ParameterType.PARAMETER_STRING_ARRAY: lambda v: list(v.string_array_value),
+        }
+        return mapping.get(val.type, lambda v: str(v))(val)
+
+    def _unflatten_dict(self, d: dict) -> dict:
+        res: dict = {}
+        for k, v in d.items():
+            parts = k.split('.')
+            curr = res
+            for part in parts[:-1]:
+                curr = curr.setdefault(part, {})
+            curr[parts[-1]] = v
+        return res
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Misc helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def change_directory_callback(self, request, response):
+        self.get_logger().warn(
+            "change_directory called, but the new recorder uses a single continuous MCAP. Request ignored."
+        )
+        response.success = False
+        response.message = "Cannot change directory when single recording is active"
+        return response
+
+    def write_params(self):
+        params_path = self.run_dir / "params.yaml"
+        for param_name, default_val in [("map_file", ""), ("scenario_file", "")]:
+            if not self.has_parameter(param_name):
+                try:
+                    self.declare_parameter(param_name, default_val)
+                except Exception:
+                    pass
+
+        with open(params_path, "w") as f:
+            yaml.dump({
+                "model": self.model if hasattr(self, 'model') else "",
+                "map_file": self.get_parameter("map_file").value,
+                "scenario_file": self.get_parameter("scenario_file").value,
+                "namespace": self.get_namespace().strip('/'),
+            }, f)
+
+    def read_config(self):
+        config_path = os.path.join(self.base_dir, "config", "data_recorder_config.yaml")
+        try:
+            with open(config_path, "r") as f:
+                return yaml.safe_load(f)
+        except Exception:
+            return {"record_frequencies": {"default": 20.0}}
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Shutdown
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def finalize(self):
+        """Flush and close the writer, write final metadata."""
+        if self.is_shutting_down:
+            return
+        self.is_shutting_down = True
+
+        print(f"[DataRecorder] finalize() called. clock_ticks={self._clock_received_count} writes_ok={self._write_success_count} writes_dropped={self._write_drop_count} episodes={self.episodes_recorded}", flush=True)
+
+        try:
+            self.get_logger().info("Finalizing recording...")
+        except Exception:
+            print("[DataRecorder] Finalizing recording...", flush=True)
+
+        if hasattr(self, 'metadata') and self.metadata is not None:
+            self.metadata.recording_ended_at = datetime.now(timezone.utc).isoformat()
+            self.metadata.episodes_recorded = self.episodes_recorded
+            self.metadata.pedsim_available = any("arena_peds" in t for t in self.recorded_topics)
+            self.metadata.recorded_topics = sorted(self.recorded_topics)
+            try:
+                MetadataWriter.write(self.metadata, self.metadata_path)
+            except Exception as e:
+                print(f"Failed to write final metadata: {e}")
+
+        with self.writer_lock:
+            if self.writer is not None:
+                try:
+                    self.writer.close()
+                except Exception as e:
+                    print(f"Failed to close MCAP writer: {e}")
+                finally:
+                    self.writer = None
+
+        try:
+            self.get_logger().info(f"Recording finished. {self.episodes_recorded} episodes recorded to {self.mcap_path}")
+        except Exception:
+            print(f"Recording finished. {self.episodes_recorded} episodes recorded.")
+
+    def destroy_node(self):
+        self.finalize()
+        super().destroy_node()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    def handle_shutdown(signum, frame):
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+
+    try:
+        node = DataRecorderNode()
+        executor = MultiThreadedExecutor()
+        executor.add_node(node)
+        try:
+            executor.spin()
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        finally:
+            node.finalize()
+            node.destroy_node()
+            executor.shutdown()
+    except Exception as e:
+        print(f"Exception in main: {e}")
+        traceback.print_exc()
+        if rclpy.ok():
+            rclpy.shutdown()
+        sys.exit(1)
+
+    if rclpy.ok():
+        rclpy.shutdown()
+    sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
