@@ -209,6 +209,7 @@ class DataRecorderNode(Node):
         self._write_drop_count = 0
         self._write_success_count = 0
 
+
         self.qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.VOLATILE,
@@ -449,9 +450,45 @@ class DataRecorderNode(Node):
             self._write_to_bag_at(topic_name, msg, self.current_time)
         return callback
 
+    def _log_info(self, msg: str):
+        try:
+            if rclpy.ok():
+                self.get_logger().info(msg)
+            else:
+                print(f"[DataRecorder] [INFO] {msg}", flush=True)
+        except Exception:
+            print(f"[DataRecorder] [INFO] {msg}", flush=True)
+
+    def _log_warn(self, msg: str):
+        try:
+            if rclpy.ok():
+                self.get_logger().warn(msg)
+            else:
+                print(f"[DataRecorder] [WARN] {msg}", flush=True)
+        except Exception:
+            print(f"[DataRecorder] [WARN] {msg}", flush=True)
+
+    def _log_error(self, msg: str):
+        try:
+            if rclpy.ok():
+                self.get_logger().error(msg)
+            else:
+                print(f"[DataRecorder] [ERROR] {msg}", flush=True)
+        except Exception:
+            print(f"[DataRecorder] [ERROR] {msg}", flush=True)
+
     def _write_to_bag_at(self, topic_name: str, msg, timestamp_ns: int):
         if self.is_shutting_down:
             return
+
+        try:
+            serialized_msg = serialize_message(msg)
+        except Exception as e:
+            # Context might be shut down, print and exit cleanly without lock acquisition
+            if not self.is_shutting_down:
+                print(f"[DataRecorder] Serialization failed for {topic_name}: {e}", flush=True)
+            return
+
         with self.writer_lock:
             if self.writer is None:
                 self._write_drop_count += 1
@@ -460,13 +497,13 @@ class DataRecorderNode(Node):
                 return
             try:
                 self._ensure_topic_in_bag(topic_name)
-                self.writer.write(topic_name.strip('/'), serialize_message(msg), timestamp_ns)
+                self.writer.write(topic_name.strip('/'), serialized_msg, timestamp_ns)
                 self.recorded_topics.add(topic_name.strip('/'))
                 self._write_success_count += 1
                 if self._write_success_count <= 5 or self._write_success_count % 500 == 0:
                     print(f"[DataRecorder] WRITE OK topic={topic_name} ts={timestamp_ns} success_count={self._write_success_count}", flush=True)
             except Exception as e:
-                self.get_logger().error(f"Error writing {topic_name}: {e}")
+                self._log_error(f"Error writing {topic_name}: {e}")
                 print(f"[DataRecorder] WRITE ERROR topic={topic_name} ts={timestamp_ns} err={e}", flush=True)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -532,7 +569,7 @@ class DataRecorderNode(Node):
 
             MetadataWriter.write(self.metadata, self.metadata_path)
         except Exception as e:
-            self.get_logger().error(f"Failed to update metadata from episode: {e}")
+            self._log_error(f"Failed to update metadata from episode: {e}")
 
     def _param_value_to_py(self, val):
         from rcl_interfaces.msg import ParameterType
@@ -606,36 +643,41 @@ class DataRecorderNode(Node):
             return
         self.is_shutting_down = True
 
+        # Ignore signals to guarantee cleanup runs to completion without interruption
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        except Exception:
+            pass
+
         print(f"[DataRecorder] finalize() called. clock_ticks={self._clock_received_count} writes_ok={self._write_success_count} writes_dropped={self._write_drop_count} episodes={self.episodes_recorded}", flush=True)
 
-        try:
-            self.get_logger().info("Finalizing recording...")
-        except Exception:
-            print("[DataRecorder] Finalizing recording...", flush=True)
+        self._log_info("Finalizing recording...")
 
         if hasattr(self, 'metadata') and self.metadata is not None:
             self.metadata.recording_ended_at = datetime.now(timezone.utc).isoformat()
             self.metadata.episodes_recorded = self.episodes_recorded
             self.metadata.pedsim_available = any("arena_peds" in t for t in self.recorded_topics)
             self.metadata.recorded_topics = sorted(self.recorded_topics)
+            print(f"[DataRecorder] Writing final run-level metadata to {self.metadata_path}...", flush=True)
             try:
                 MetadataWriter.write(self.metadata, self.metadata_path)
+                print("[DataRecorder] Run-level metadata written successfully.", flush=True)
             except Exception as e:
-                print(f"Failed to write final metadata: {e}")
+                print(f"[DataRecorder] Failed to write final metadata: {e}", flush=True)
 
         with self.writer_lock:
             if self.writer is not None:
+                print("[DataRecorder] Closing MCAP writer...", flush=True)
                 try:
                     self.writer.close()
+                    print("[DataRecorder] MCAP writer closed successfully.", flush=True)
                 except Exception as e:
-                    print(f"Failed to close MCAP writer: {e}")
+                    print(f"[DataRecorder] Failed to close MCAP writer: {e}", flush=True)
                 finally:
                     self.writer = None
 
-        try:
-            self.get_logger().info(f"Recording finished. {self.episodes_recorded} episodes recorded to {self.mcap_path}")
-        except Exception:
-            print(f"Recording finished. {self.episodes_recorded} episodes recorded.")
+        self._log_info(f"Recording finished. {self.episodes_recorded} episodes recorded to {self.mcap_path}")
 
     def destroy_node(self):
         self.finalize()
@@ -645,26 +687,52 @@ class DataRecorderNode(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    def handle_shutdown(signum, frame):
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, handle_shutdown)
-    signal.signal(signal.SIGINT, handle_shutdown)
-
+    node = None
     try:
         node = DataRecorderNode()
+
+        # Register python signal handlers to cleanly execute node.finalize() on SIGINT/SIGTERM
+        def signal_handler(sig, frame):
+            # Ignore further SIGINT/SIGTERM to prevent re-entrant interrupts during cleanup
+            try:
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            except Exception:
+                pass
+            print(f"[DataRecorder] Signal {sig} received. Shutting down ROS context...", flush=True)
+            if rclpy.ok():
+                try:
+                    rclpy.shutdown()
+                except Exception:
+                    pass
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
         executor = MultiThreadedExecutor()
         executor.add_node(node)
         try:
             executor.spin()
-        except (KeyboardInterrupt, SystemExit):
+        except KeyboardInterrupt:
             pass
         finally:
-            node.finalize()
-            node.destroy_node()
+            # Ignore further SIGINT/SIGTERM to prevent interrupts during cleanup
+            try:
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            except Exception:
+                pass
+            print("[DataRecorder] Finalizing node...", flush=True)
+            if node:
+                node.finalize()
+            print("[DataRecorder] Shutting down executor...", flush=True)
             executor.shutdown()
+            print("[DataRecorder] Destroying node...", flush=True)
+            if node:
+                node.destroy_node()
     except Exception as e:
-        print(f"Exception in main: {e}")
+        print(f"[DataRecorder] Exception in main: {e}", flush=True)
         traceback.print_exc()
         if rclpy.ok():
             rclpy.shutdown()
