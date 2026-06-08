@@ -24,6 +24,7 @@ from arena_evaluation_msgs.msg import BenchmarkState
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
+from arena_evaluation_msgs.srv import ChangeDirectory
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from task_generator.constants import Constants
@@ -309,11 +310,15 @@ class BenchmarkRunner(ArenaMixinNode):
         self._spawn = self.create_client_wrapper(SpawnEnv, "/arena/spawn_env")
         self._despawn = self.create_client_wrapper(DespawnEnv, "/arena/despawn_env")
         self._env_records: dict[int, EnvRecord] = {}
-        self._env_gone_events: dict[int, asyncio.Event] = {}
         self._env_visible_events: dict[int, asyncio.Event] = {}
+        self._env_gone_events: dict[int, asyncio.Event] = {}
 
+        self._arena_proc: subprocess.Popen | None = None
+        self._arena_log_file = None
+        self._total_groups = 0
         self._episode_action_clients: dict[int, ActionClientWrapper] = {}
         self._queue_clients: dict[int, ClientWrapper] = {}
+        self._change_dir_clients: dict[int, ClientWrapper] = {}
         self._episode_records: dict[int, dict[int, EpisodeRecord]] = {}
         self._env_subs: dict[int, list] = {}
 
@@ -393,7 +398,7 @@ class BenchmarkRunner(ArenaMixinNode):
         finally:
             self._env_gone_events.pop(env_id, None)
 
-    async def _setup_env_clients(self, env_id: int, env_ns_root: str) -> None:
+    async def _setup_env_clients(self, env_id: int, env_ns_root: str, robot_name: str) -> None:
         """Create per-env action client, queue_episode client, and subscriptions. Idempotent."""
         if env_id in self._episode_action_clients:
             return
@@ -409,6 +414,12 @@ class BenchmarkRunner(ArenaMixinNode):
         )
         await queue_client.ensure(timeout_sec=30.0)
         self._queue_clients[env_id] = queue_client
+
+        change_dir_client = self.create_client_wrapper(
+            ChangeDirectory, f"{env_ns_root}/{robot_name}/change_directory"
+        )
+        # Don't fail if the service is not available (e.g. recording is disabled)
+        self._change_dir_clients[env_id] = change_dir_client
 
         def _on_episode_record(msg: EpisodeRecord) -> None:
             recs = self._episode_records.get(env_id)
@@ -433,6 +444,9 @@ class BenchmarkRunner(ArenaMixinNode):
         qc = self._queue_clients.pop(env_id, None)
         if qc is not None:
             qc.client.destroy()
+        cdc = self._change_dir_clients.pop(env_id, None)
+        if cdc is not None:
+            cdc.client.destroy()
         self._episode_records.pop(env_id, None)
         self._env_visible_events.pop(env_id, None)
 
@@ -488,7 +502,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                 except TimeoutError:
                     episodes_failed += 1
-                    self.get_logger().warning(
+                    _log.warning(
                         f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
                         f"TIMEOUT after {step.stage.timeout}s; cancelling and advancing"
                     )
@@ -502,7 +516,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 episode_id = result.episode_id
 
                 if result.state == RunEpisode.Result.FATAL:
-                    self.get_logger().error(
+                    _log.error(
                         f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
                         f"FATAL: {result.info} -- aborting step"
                     )
@@ -517,7 +531,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 rec = recs.get(episode_id)
                 if rec is None:
                     episodes_failed += 1
-                    self.get_logger().warning(
+                    _log.warning(
                         f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
                         f"no EpisodeRecord for episode_id={episode_id}; counted as failed"
                     )
@@ -532,7 +546,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     EpisodeRecord.FAILED: "FAILED",
                     EpisodeRecord.SKIPPED: "SKIPPED",
                 }.get(rec.outcome_state, str(rec.outcome_state))
-                self.get_logger().info(
+                _log.info(
                     f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
                     f"{state_label} info={rec.outcome_info!r} "
                     f"sim={ep_ended_sim - ep_started_sim:.1f}s "
@@ -553,7 +567,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     ended_at=ep_ended_sim,
                 )
         except _EnvDied as exc:
-            self.get_logger().warning(
+            _log.warning(
                 f"{step.key} env={env_id} env died mid-step after "
                 f"run={episodes_run}, failed={episodes_failed}: {exc}"
             )
@@ -566,7 +580,7 @@ class BenchmarkRunner(ArenaMixinNode):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.get_logger().exception(
+            _log.exception(
                 f"{step.key} env={env_id} unexpected error mid-step after "
                 f"run={episodes_run}, failed={episodes_failed}"
             )
@@ -623,9 +637,25 @@ class BenchmarkRunner(ArenaMixinNode):
             await self._await_env_visible(env_id)
             env_ns_root = self._env_records[env_id].fqn
 
-            await self._setup_env_clients(env_id, env_ns_root)
+            await self._setup_env_clients(env_id, env_ns_root, group[0].stage.robot)
 
             for idx, step in enumerate(group):
+                if idx > 0 and step.record_dir is not None:
+                    cd_client = self._change_dir_clients.get(env_id)
+                    if cd_client is not None:
+                        is_ready = await cd_client.ensure(timeout_sec=5.0)
+                        if is_ready:
+                            req = ChangeDirectory.Request()
+                            req.data = str(step.record_dir)
+                            try:
+                                resp = await self.await_ros(cd_client.client.call_async(req))
+                                if not resp.result:
+                                    _log.warning(f"change_directory to {step.record_dir} failed")
+                            except Exception as exc:
+                                _log.warning(f"change_directory to {step.record_dir} failed: {exc}")
+                        else:
+                            _log.warning(f"change_directory service {cd_client.client.srv_name} not ready for {step.record_dir}")
+
                 await self._push_stage_config(env_id, step)
 
                 try:
@@ -716,7 +746,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     with contextlib.suppress(asyncio.TimeoutError, Exception):
                         await self._wait_env_gone(env_id, timeout=30.0)
                 if keep_alive:
-                    self.get_logger().info(
+                    _log.info(
                         f"--noexit: keeping env {env_id} alive after last group {group[0].key}"
                     )
         return results
@@ -749,7 +779,7 @@ class BenchmarkRunner(ArenaMixinNode):
         try:
             BenchmarkRunner.exit_code = await self._run_steps()
         except Exception as exc:
-            self.get_logger().error(f"benchmark crashed: {exc!r}")
+            _log.error(f"benchmark crashed: {exc!r}")
             BenchmarkRunner.exit_code = 2
         finally:
             await self._shutdown_arena()
@@ -760,7 +790,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
     async def _shutdown_arena(self) -> None:
         if self._noexit:
-            self.get_logger().info(
+            _log.info(
                 "--noexit: leaving arena_runtime.launch.py running; Ctrl+C its terminal to stop"
             )
             return
@@ -780,6 +810,11 @@ class BenchmarkRunner(ArenaMixinNode):
                 continue
         with contextlib.suppress(ProcessLookupError):
             os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+            
+        if self._arena_log_file is not None:
+            with contextlib.suppress(Exception):
+                self._arena_log_file.close()
+            self._arena_log_file = None
 
     async def _run_steps(self) -> int:
         pending = self._build_pending()
@@ -788,17 +823,21 @@ class BenchmarkRunner(ArenaMixinNode):
         aborted_systemic = False
 
         self._publish_state(results, steps_total)
-        self.get_logger().info(f"benchmark: signalled READY on {STATE_TOPIC}")
+        _log.info(f"benchmark: signalled READY on {STATE_TOPIC}")
 
         passthrough = dict(self._arena_passthrough)
         cmd = [
             "ros2", "launch", "arena_bringup", "arena_runtime.launch.py",
             *(f"{k}:={v}" for k, v in passthrough.items()),
         ]
+        
+        log_path = self._run_dir.path / "runner.log"
+        self._arena_log_file = log_path.open("a")
+        
         self._arena_proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=self._arena_log_file,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
 
@@ -824,7 +863,7 @@ class BenchmarkRunner(ArenaMixinNode):
             """Write results, return True only on a systemic setup failure before any episode ran."""
             for res in group_results:
                 results[res.key] = res
-                self.get_logger().info(
+                _log.info(
                     f"[{res.status}] {res.key} env={res.env_id} "
                     f"episodes={res.episodes_run}/{res.episodes_total} "
                     f"(failed={res.episodes_failed}) "
@@ -863,7 +902,7 @@ class BenchmarkRunner(ArenaMixinNode):
                             r for r in group_results
                             if r.status == "failed" and r.error_kind in _SYSTEMIC
                         )
-                        self.get_logger().error(
+                        _log.error(
                             f"benchmark: {first_failed.key} hit a systemic setup failure "
                             f"({first_failed.error_kind}: {first_failed.error_detail}); "
                             f"aborting run before any episode ran, {len(groups)} pending group(s) skipped"
@@ -956,6 +995,14 @@ _KV_RE = re.compile(r"^\w+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+    logging.getLogger().setLevel(logging.DEBUG)
+    _log.setLevel(logging.INFO)
     p = argparse.ArgumentParser(prog="benchmark")
     p.add_argument("--suite", default="basic")
     p.add_argument("--contest", default="basic")
@@ -1097,6 +1144,8 @@ def cli_main(argv: list[str] | None = None) -> int:
         f"steps={len(steps)} dir={run_dir.path}",
         file=sys.stderr,
     )
+
+    run_dir.attach_log_handler(logging.getLogger())
 
     try:
         BenchmarkRunner.run_main(

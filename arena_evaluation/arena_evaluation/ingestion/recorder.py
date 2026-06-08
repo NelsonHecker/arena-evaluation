@@ -187,6 +187,8 @@ class DataRecorderNode(Node):
             except Exception:
                 shutil.rmtree(self.mcap_path, ignore_errors=True)
 
+        self._open_log_file()
+
         # ── Write params.yaml and initial metadata.yaml ────────────────────
         self.write_params()
         self.config = self.read_config()
@@ -194,9 +196,9 @@ class DataRecorderNode(Node):
 
         # Write initial metadata before opening the writer so we always have a
         # metadata.yaml even if the node crashes before the first episode.
-        print(f"[DataRecorder] Writing initial metadata to {self.metadata_path}", flush=True)
+        self._log_info(f"Writing initial metadata to {self.metadata_path}")
         self._write_initial_metadata()
-        print(f"[DataRecorder] Initial metadata written OK", flush=True)
+        self._log_info("Initial metadata written OK")
 
         # ── Thread-safe writer ─────────────────────────────────────────────
         self.current_time = None
@@ -225,7 +227,7 @@ class DataRecorderNode(Node):
         self.episodes_recorded = 0
         self.recorded_topics: set[str] = set()
 
-        print(f"[DataRecorder] Subscribing to /clock for sim time", flush=True)
+        self._log_info(f"Subscribing to /clock for sim time")
         self.clock_sub = self.create_subscription(Clock, "/clock", self.clock_callback, self.qos)
 
         self.change_directory_service = self.create_service(
@@ -234,9 +236,9 @@ class DataRecorderNode(Node):
             self.change_directory_callback,
         )
 
-        print(f"[DataRecorder] Setting up topic subscriptions", flush=True)
+        self._log_info(f"Setting up topic subscriptions")
         self._setup_subscriptions()
-        print(f"[DataRecorder] Topic subscriptions ready. Opening MCAP writer...", flush=True)
+        self._log_info(f"Topic subscriptions ready. Opening MCAP writer...")
 
         # Open the MCAP writer last, after subscriptions are ready
         self._start_recording()
@@ -245,6 +247,19 @@ class DataRecorderNode(Node):
     # Recording lifecycle
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _open_log_file(self):
+        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+            try:
+                self.log_file.close()
+            except Exception:
+                pass
+        self.log_file_path = self.run_dir / "recorder.log"
+        try:
+            self.log_file = open(self.log_file_path, "a", buffering=1) # Line buffered
+        except Exception as e:
+            print(f"[DataRecorder] Failed to open log file at {self.log_file_path}: {e}", flush=True)
+            self.log_file = None
+
     def _start_recording(self):
         """Open the rosbag2 SequentialWriter on the continuous MCAP file.
 
@@ -252,9 +267,10 @@ class DataRecorderNode(Node):
         named `uri` and puts `<uri>_0.mcap` inside.  We therefore pass only
         the stem (e.g. "recording"), which produces run_dir/recording/recording_0.mcap.
         """
+        self._log_info(f"Opening MCAP writer in {self.run_dir}")
         # Strip .mcap extension so rosbag2 doesn't nest as recording.mcap/recording.mcap_0.mcap
         mcap_uri = str(self.mcap_path.with_suffix(""))
-        print(f"[DataRecorder] Opening MCAP writer: uri={mcap_uri}", flush=True)
+        self._log_info(f"Opening MCAP writer: uri={mcap_uri}")
         storage_options = rosbag2_py.StorageOptions(
             uri=mcap_uri,
             storage_id='mcap',
@@ -270,17 +286,18 @@ class DataRecorderNode(Node):
         try:
             with self.writer_lock:
                 self.writer = rosbag2_py.SequentialWriter()
+                self._log_info("Calling writer.open() now...")
                 self.writer.open(storage_options, converter_options)
                 self.topics_metadata = {}
                 self.last_recorded_times = {}
-            print(f"[DataRecorder] MCAP writer opened successfully at {mcap_uri}", flush=True)
+            self._log_info(f"MCAP writer opened successfully at {mcap_uri}")
         except Exception as e:
-            print(f"[DataRecorder] FATAL: Failed to open MCAP writer: {e}", flush=True)
+            self._log_error(f"FATAL: Failed to open MCAP writer: {e}")
             import traceback as tb
-            tb.print_exc()
+            self._log_error(tb.format_exc())
             self.writer = None
 
-        self.get_logger().info(f"Started continuous recording at: {self.mcap_path}")
+        self._log_info(f"Started continuous recording at: {self.mcap_path}")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Subscriptions
@@ -396,7 +413,7 @@ class DataRecorderNode(Node):
         new_time = msg.clock.sec * int(1e9) + msg.clock.nanosec
         self._clock_received_count += 1
         if self._clock_received_count <= 5:
-            print(f"[DataRecorder] /clock tick #{self._clock_received_count}: sim_time_ns={new_time} ({new_time/1e9:.3f}s)", flush=True)
+            self._log_info(f"/clock tick #{self._clock_received_count}: sim_time_ns={new_time} ({new_time/1e9:.3f}s)")
         self.current_time = new_time
 
     def episode_record_callback(self, msg: EpisodeRecord):
@@ -432,7 +449,6 @@ class DataRecorderNode(Node):
                 if not hasattr(self, '_no_clock_warned'):
                     self._no_clock_warned = set()
                 if topic_name not in self._no_clock_warned:
-                    #(f"[DataRecorder] Dropping {topic_name}: no /clock yet (current_time=None)", flush=True)
                     self._no_clock_warned.add(topic_name)
                 return
             now = self.current_time
@@ -451,31 +467,40 @@ class DataRecorderNode(Node):
         return callback
 
     def _log_info(self, msg: str):
+        full_msg = f"[DataRecorder] [INFO] {msg}"
+        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+            self.log_file.write(f"[{datetime.now().isoformat()}] {full_msg}\n")
         try:
             if rclpy.ok():
                 self.get_logger().info(msg)
             else:
-                print(f"[DataRecorder] [INFO] {msg}", flush=True)
+                print(full_msg, flush=True)
         except Exception:
-            print(f"[DataRecorder] [INFO] {msg}", flush=True)
+            print(full_msg, flush=True)
 
     def _log_warn(self, msg: str):
+        full_msg = f"[DataRecorder] [WARN] {msg}"
+        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+            self.log_file.write(f"[{datetime.now().isoformat()}] {full_msg}\n")
         try:
             if rclpy.ok():
                 self.get_logger().warn(msg)
             else:
-                print(f"[DataRecorder] [WARN] {msg}", flush=True)
+                print(full_msg, flush=True)
         except Exception:
-            print(f"[DataRecorder] [WARN] {msg}", flush=True)
+            print(full_msg, flush=True)
 
     def _log_error(self, msg: str):
+        full_msg = f"[DataRecorder] [ERROR] {msg}"
+        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+            self.log_file.write(f"[{datetime.now().isoformat()}] {full_msg}\n")
         try:
             if rclpy.ok():
                 self.get_logger().error(msg)
             else:
-                print(f"[DataRecorder] [ERROR] {msg}", flush=True)
+                print(full_msg, flush=True)
         except Exception:
-            print(f"[DataRecorder] [ERROR] {msg}", flush=True)
+            print(full_msg, flush=True)
 
     def _write_to_bag_at(self, topic_name: str, msg, timestamp_ns: int):
         if self.is_shutting_down:
@@ -486,14 +511,14 @@ class DataRecorderNode(Node):
         except Exception as e:
             # Context might be shut down, print and exit cleanly without lock acquisition
             if not self.is_shutting_down:
-                print(f"[DataRecorder] Serialization failed for {topic_name}: {e}", flush=True)
+                self._log_error(f"Serialization failed for {topic_name}: {e}")
             return
 
         with self.writer_lock:
             if self.writer is None:
                 self._write_drop_count += 1
                 if self._write_drop_count <= 10 or self._write_drop_count % 100 == 0:
-                    print(f"[DataRecorder] DROP (writer=None) topic={topic_name} drop_count={self._write_drop_count}", flush=True)
+                    self._log_warn(f"DROP (writer=None) topic={topic_name} drop_count={self._write_drop_count}")
                 return
             try:
                 self._ensure_topic_in_bag(topic_name)
@@ -501,10 +526,9 @@ class DataRecorderNode(Node):
                 self.recorded_topics.add(topic_name.strip('/'))
                 self._write_success_count += 1
                 if self._write_success_count <= 5 or self._write_success_count % 500 == 0:
-                    print(f"[DataRecorder] WRITE OK topic={topic_name} ts={timestamp_ns} success_count={self._write_success_count}", flush=True)
+                    self._log_info(f"Write success count reached {self._write_success_count}")
             except Exception as e:
-                self._log_error(f"Error writing {topic_name}: {e}")
-                print(f"[DataRecorder] WRITE ERROR topic={topic_name} ts={timestamp_ns} err={e}", flush=True)
+                self._log_error(f"WRITE ERROR topic={topic_name} ts={timestamp_ns} err={e}")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Topic registration helpers
@@ -601,11 +625,93 @@ class DataRecorderNode(Node):
     # ──────────────────────────────────────────────────────────────────────────
 
     def change_directory_callback(self, request, response):
-        self.get_logger().warn(
-            "change_directory called, but the new recorder uses a single continuous MCAP. Request ignored."
-        )
-        response.success = False
-        response.message = "Cannot change directory when single recording is active"
+        """
+        Handle a ChangeDirectory request from the benchmark runner.
+        This cleanly finalizes the current recording and opens a new one
+        in the requested directory.
+        """
+        self._log_info(f"Changing directory to: {request.data}")
+
+        try:
+            # 1. Finalize current recording
+            with self.writer_lock:
+                if self.writer is not None:
+                    self.writer.close()
+                    self.writer = None
+
+            # 2. Switch to new directory
+            record_data_dir_path = pathlib.Path(request.data)
+            if not record_data_dir_path.is_absolute():
+                workspace_root = pathlib.Path(self.base_dir).parents[3]
+                record_data_dir_path = workspace_root / record_data_dir_path
+
+            self.run_dir = record_data_dir_path.resolve()
+            
+            bare_names = {"data", "recordings"}
+            if self.run_dir.name in bare_names or not record_data_dir_path.parts[1:]:
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                self.run_dir = self.run_dir / "recordings" / timestamp
+
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                self.run_dir.chmod(0o777)
+            except Exception:
+                pass
+
+            # 3. Re-infer benchmark/planner/stage from the new path
+            parts = self.run_dir.parts
+            try:
+                if len(parts) >= 5 and parts[-3] == "recordings":
+                    self.benchmark_id = parts[-4]
+                    self.planner = parts[-2]
+                    self.stage = parts[-1]
+                else:
+                    self.benchmark_id = "unknown"
+                    self.planner = "unknown"
+                    self.stage = "unknown"
+            except Exception:
+                self.benchmark_id = "unknown"
+                self.planner = "unknown"
+                self.stage = "unknown"
+
+            # 4. Update paths
+            self.mcap_path = self.run_dir / "recording.mcap"
+            self.metadata_path = self.run_dir / "metadata.yaml"
+            
+            # Rotate any pre-existing MCAP so rosbag2 doesn't crash on open
+            if self.mcap_path.exists():
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup = self.run_dir / f"recording_backup_{ts}.mcap"
+                try:
+                    shutil.move(str(self.mcap_path), str(backup))
+                    self._log_warn(f"Backed up existing MCAP to {backup}")
+                except Exception:
+                    shutil.rmtree(self.mcap_path, ignore_errors=True)
+
+            self._open_log_file()
+            self._log_info(f"Switched log file to {self.run_dir}")
+            
+            self.write_params()
+
+            # 6. Reset per-run counters
+            self.episodes_recorded = 0
+            self.recorded_topics = set()
+            self._write_drop_count = 0
+            self._write_success_count = 0
+
+            # 7. Open new MCAP writer
+            self._start_recording()
+
+            # 8. Write new metadata.yaml for the new directory
+            self._write_initial_metadata()
+
+            response.result = True
+        except Exception as e:
+            self._log_error(f"Failed to change directory: {e}")
+            import traceback
+            traceback.print_exc()
+            response.result = False
+
         return response
 
     def write_params(self):
@@ -700,6 +806,11 @@ def main(args=None):
             except Exception:
                 pass
             print(f"[DataRecorder] Signal {sig} received. Shutting down ROS context...", flush=True)
+            if node:
+                try:
+                    node.finalize()
+                except Exception as e:
+                    print(f"[DataRecorder] Error during finalize in signal handler: {e}", flush=True)
             if rclpy.ok():
                 try:
                     rclpy.shutdown()
