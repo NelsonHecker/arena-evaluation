@@ -4,7 +4,7 @@ import pathlib
 import json
 import polars as pl
 
-from ..storage.schemas import RunMetadata
+from ..storage.schemas import RunMetadata, TopicBundle
 from ..storage.exceptions import SchemaViolationError
 
 
@@ -84,3 +84,57 @@ class ParquetStore:
             raise SchemaViolationError(f"Failed to combine parquet files due to schema mismatch: {e}")
             
         ParquetStore.write(combined, dest)
+
+
+class TopicParquetStore:
+    """
+    Reads and writes a TopicBundle to individual Parquet files per topic.
+    """
+    @staticmethod
+    def write(bundle: TopicBundle, dest_dir: pathlib.Path) -> None:
+        """
+        Write non-None DataFrames in a TopicBundle to Parquet files using zstd compression.
+        """
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Iterate through the fields of the dataclass
+        import dataclasses
+        for field in dataclasses.fields(bundle):
+            df = getattr(bundle, field.name)
+            if df is not None and not df.is_empty():
+                # Write to a temporary file first for atomic writes
+                temp_path = dest_dir / f"{field.name}.parquet.tmp"
+                final_path = dest_dir / f"{field.name}.parquet"
+                
+                # Zstd compression provides excellent speed/compression ratio for columnar data
+                df.write_parquet(temp_path, compression="zstd")
+                temp_path.rename(final_path)
+
+    @staticmethod
+    def read(source_dir: pathlib.Path) -> TopicBundle | None:
+        """
+        Read Parquet files from source_dir to reconstruct a TopicBundle.
+        Returns None if no parquet files exist.
+        """
+        if not source_dir.exists() or not source_dir.is_dir():
+            return None
+            
+        parquet_files = list(source_dir.glob("*.parquet"))
+        if not parquet_files:
+            return None
+            
+        kwargs = {}
+        for p in parquet_files:
+            topic_name = p.stem
+            try:
+                df = pl.read_parquet(p)
+                kwargs[topic_name] = df
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to read extracted parquet {p}: {e}")
+                
+        if not kwargs:
+            return None
+            
+        return TopicBundle(**kwargs)
+

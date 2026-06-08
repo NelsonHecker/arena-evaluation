@@ -108,6 +108,7 @@ class TopicBundle:
     peds: pl.DataFrame | None = None
     episode_record: pl.DataFrame | None = None
     collision_events: pl.DataFrame | None = None
+    plan: pl.DataFrame | None = None
 
 
 @dataclass

@@ -133,10 +133,12 @@ data/<benchmark_id>/recordings/<planner>/<stage>/
 ### Processing Phase (offline)
 
 ```bash
+arena evaluation extract --benchmark-dir /opt/arena_ws/data/<benchmark_id>
 arena evaluation process --benchmark-dir /opt/arena_ws/data/<benchmark_id>
 ```
 
-Reads each `recording_0.mcap`, decodes all messages, temporally aligns them, splits by `EpisodeRecord` boundaries, and runs all metric calculators. Writes per-run and combined Parquet files.
+The `extract` command reads each `recording_0.mcap` and saves topics into compressed Parquet files under `run_dir/topics/` (the extraction cache).
+The `process` command reads these cached parquet files (or extracts them on-the-fly if missing), temporally aligns them, splits by `EpisodeRecord` boundaries, and runs all metric calculators. Writes per-run and combined Parquet files.
 
 ### Presentation Phase (offline)
 
@@ -158,13 +160,22 @@ The `arena evaluation` command is registered as part of the Arena feature system
 usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR]
 
 Commands:
-  process   Layer 3: Read MCAP(s) and compute metrics.parquet (no plots)
-  run       Full pipeline: process → report + plots
+  extract   Layer 3: Extract topics from MCAP into fast Parquet files (cache)
+  process   Layer 3: Compute metrics and write metrics.parquet (uses cached extraction by default)
+  run       Full pipeline: Extract (overwrite) → process → report + plots
   report    Layer 5: Generate report.html from existing metrics.parquet
   plot      Layer 5: Generate static PNG plots only (no HTML)
 ```
 
-`process` and `run` accept **either** `--run-dir` (single recording) or `--benchmark-dir` (full benchmark). `report` and `plot` only accept `--benchmark-dir`.
+`extract`, `process`, and `run` accept **either** `--run-dir` (single recording) or `--benchmark-dir` (full benchmark). `report` and `plot` only accept `--benchmark-dir`.
+
+### Extracting Topics (Cache)
+
+```bash
+# Extract MCAP data into fast, compressed Parquet files per topic:
+arena evaluation extract --benchmark-dir /opt/arena_ws/data/my_benchmark
+# Output: data/my_benchmark/recordings/<planner>/<stage>/topics/*.parquet
+```
 
 ### Processing a Single Run (ad-hoc recording)
 

@@ -44,11 +44,24 @@ class FolderManager:
 
     def mcap_path(self, run_dir: pathlib.Path) -> pathlib.Path:
         """Get the path for the step-level MCAP file."""
+        # rosbag2 pattern: run_dir/recording/<name>_0.mcap (or _1.mcap, ...)
+        recording_subdir = run_dir / "recording"
+        if recording_subdir.exists() and recording_subdir.is_dir():
+            # Skip zero-byte files — rosbag2 creates the file even when nothing is recorded
+            candidates = sorted(p for p in recording_subdir.glob("*.mcap") if p.stat().st_size > 0)
+            if candidates:
+                return self._safe_resolve(candidates[0])
+
+        # Legacy / flat file fallback
         return self._safe_resolve(run_dir / "recording.mcap")
     
     def legacy_csv_dir(self, run_dir: pathlib.Path) -> pathlib.Path:
         """Get the path for the legacy CSV directory (if applicable)."""
         return self._safe_resolve(run_dir)
+
+    def extracted_topics_path(self, run_dir: pathlib.Path) -> pathlib.Path:
+        """Get the path for the extracted topic parquet files directory."""
+        return self._safe_resolve(run_dir / "topics")
 
     def metrics_path(self, run_dir: pathlib.Path) -> pathlib.Path:
         """Get the path for the per-planner metrics Parquet file."""

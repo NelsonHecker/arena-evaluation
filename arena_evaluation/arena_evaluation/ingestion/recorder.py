@@ -271,12 +271,18 @@ class DataRecorderNode(Node):
         # Strip .mcap extension so rosbag2 doesn't nest as recording.mcap/recording.mcap_0.mcap
         mcap_uri = str(self.mcap_path.with_suffix(""))
         self._log_info(f"Opening MCAP writer: uri={mcap_uri}")
+
+        mcap_config_path = os.path.join(self.base_dir, "config", "mcap_writer_options.yaml")
+        if not os.path.exists(mcap_config_path):
+            self._log_warn(f"mcap_writer_options.yaml not found at {mcap_config_path} — recording WITHOUT compression")
+            mcap_config_path = ""
+
         storage_options = rosbag2_py.StorageOptions(
             uri=mcap_uri,
             storage_id='mcap',
             max_bagfile_size=0,
             max_cache_size=0,
-            storage_preset_profile='zstd_small',
+            storage_config_uri=mcap_config_path,
         )
         converter_options = rosbag2_py.ConverterOptions(
             input_serialization_format='cdr',
@@ -290,7 +296,7 @@ class DataRecorderNode(Node):
                 self.writer.open(storage_options, converter_options)
                 self.topics_metadata = {}
                 self.last_recorded_times = {}
-            self._log_info(f"MCAP writer opened successfully at {mcap_uri}")
+            self._log_info(f"MCAP writer opened successfully at {mcap_uri} (config: {mcap_config_path or 'none'})")
         except Exception as e:
             self._log_error(f"FATAL: Failed to open MCAP writer: {e}")
             import traceback as tb

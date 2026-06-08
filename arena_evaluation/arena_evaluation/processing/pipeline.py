@@ -4,14 +4,14 @@ import pathlib
 import datetime
 import polars as pl
 
-from ..storage.schemas import RobotParams, RunDescriptor
+from ..storage.schemas import RobotParams, RunDescriptor, TopicBundle
 from ..storage.folder_manager import FolderManager
 from ..storage.manifest import MetadataWriter
 
 from .mcap_reader import MCAPReader
 from .topic_aligner import TopicAligner
 from .episode_splitter import EpisodeSplitter
-from .parquet_store import ParquetStore
+from .parquet_store import ParquetStore, TopicParquetStore
 from .metrics.registry import MetricRegistry
 
 import arena_evaluation
@@ -19,30 +19,44 @@ import arena_evaluation
 class ProcessingPipeline:
     """
     Orchestrates the data processing pipeline:
-    MCAP -> Align -> Split -> Metrics -> Parquet
+    MCAP -> Extract -> Align -> Split -> Metrics -> Parquet
     """
     def __init__(self, folder_manager: FolderManager):
         self.folder_manager = folder_manager
         
-    def process_run(self, run: RunDescriptor) -> pathlib.Path | None:
+    def extract_run(self, run: RunDescriptor) -> TopicBundle | None:
         """
-        Process a single run described by a RunDescriptor and generate its metrics.parquet.
-        Returns the path to the generated parquet file, or None if the run is skipped.
+        Extract topics from MCAP and cache them as individual Parquet files.
+        Returns the TopicBundle if successful, else None.
         """
         run_dir = pathlib.Path(run.run_dir)
         mcap_path = self.folder_manager.mcap_path(run_dir)
-        metrics_path = self.folder_manager.metrics_path(run_dir)
-        metadata_path = run_dir / "metadata.yaml"
-
-        # Determine source
+        extracted_dir = self.folder_manager.extracted_topics_path(run_dir)
+        
         source_path = mcap_path
         if not source_path.exists():
-            # Check legacy csv dir
             if (run_dir / "odom.csv").exists():
                 source_path = run_dir
             else:
                 print(f"  [skip] No MCAP or legacy CSV found for {run.planner}/{run.stage}")
                 return None
+                
+        print(f"  Extracting {run.planner}/{run.stage} to {extracted_dir}...")
+        reader = MCAPReader(source_path)
+        bundle = reader.read()
+        
+        TopicParquetStore.write(bundle, extracted_dir)
+        return bundle
+
+    def process_run(self, run: RunDescriptor, force_extract: bool = False) -> pathlib.Path | None:
+        """
+        Process a single run described by a RunDescriptor and generate its metrics.parquet.
+        Returns the path to the generated parquet file, or None if the run is skipped.
+        """
+        run_dir = pathlib.Path(run.run_dir)
+        metrics_path = self.folder_manager.metrics_path(run_dir)
+        extracted_dir = self.folder_manager.extracted_topics_path(run_dir)
+        metadata_path = run_dir / "metadata.yaml"
 
         # 1. Read metadata
         metadata = MetadataWriter.read(metadata_path)
@@ -51,10 +65,18 @@ class ProcessingPipeline:
         robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
         robot_params = RobotParams.load(robot_model)
 
-        # 2. Read MCAP
-        print(f"  Reading {run.planner}/{run.stage}...")
-        reader = MCAPReader(source_path)
-        bundle = reader.read()
+        # 2. Extract or Load Topics
+        bundle = None
+        if not force_extract:
+            bundle = TopicParquetStore.read(extracted_dir)
+            if bundle:
+                print(f"  Loading cached topics for {run.planner}/{run.stage}...")
+                
+        if bundle is None:
+            bundle = self.extract_run(run)
+            
+        if bundle is None:
+            return None
 
         # 3. Align and Split
         print(f"  Splitting into episodes...")
@@ -100,7 +122,31 @@ class ProcessingPipeline:
         print(f"  Done: {metrics_path}")
         return metrics_path
 
-    def process_run_dir(self, run_dir: pathlib.Path) -> pathlib.Path | None:
+    def extract_run_dir(self, run_dir: pathlib.Path) -> TopicBundle | None:
+        """
+        Extract topics from a direct run directory.
+        """
+        run_dir = run_dir.resolve()
+        extracted_dir = self.folder_manager.extracted_topics_path(run_dir)
+        
+        recording_subdir = run_dir / "recording"
+        mcap_candidates = list(recording_subdir.glob("*.mcap")) if recording_subdir.exists() else []
+        if not mcap_candidates:
+            mcap_candidates = list(run_dir.glob("**/*.mcap"))
+        if not mcap_candidates:
+            print(f"Error: no .mcap file found under {run_dir}")
+            return None
+            
+        source_path = sorted(mcap_candidates)[0]
+        
+        print(f"  Extracting ad-hoc run to {extracted_dir}...")
+        reader = MCAPReader(source_path)
+        bundle = reader.read()
+        
+        TopicParquetStore.write(bundle, extracted_dir)
+        return bundle
+
+    def process_run_dir(self, run_dir: pathlib.Path, force_extract: bool = False) -> pathlib.Path | None:
         """
         Process a single recording directory directly, without needing a benchmark structure.
 
@@ -128,27 +174,26 @@ class ProcessingPipeline:
             planner=getattr(metadata, "planner", run_dir.name),
             stage=getattr(metadata, "stage", "unknown"),
         )
-
-        # Resolve the MCAP path relative to the run dir
-        # FolderManager expects the folder structure; bypass it for ad-hoc runs
-        recording_subdir = run_dir / "recording"
-        mcap_candidates = list(recording_subdir.glob("*.mcap")) if recording_subdir.exists() else []
-        if not mcap_candidates:
-            mcap_candidates = list(run_dir.glob("**/*.mcap"))
-        if not mcap_candidates:
-            print(f"Error: no .mcap file found under {run_dir}")
-            return None
-
-        source_path = sorted(mcap_candidates)[0]
+        
+        extracted_dir = self.folder_manager.extracted_topics_path(run_dir)
         metrics_path = run_dir / "metrics.parquet"
 
         # Re-use the core logic
         robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
         robot_params = RobotParams.load(robot_model)
 
-        print(f"  Reading MCAP: {source_path}")
-        reader = MCAPReader(source_path)
-        bundle = reader.read()
+        # 2. Extract or Load Topics
+        bundle = None
+        if not force_extract:
+            bundle = TopicParquetStore.read(extracted_dir)
+            if bundle:
+                print(f"  Loading cached topics for ad-hoc run...")
+                
+        if bundle is None:
+            bundle = self.extract_run_dir(run_dir)
+            
+        if bundle is None:
+            return None
 
         print(f"  Splitting into episodes...")
         aligner = TopicAligner()
@@ -184,7 +229,22 @@ class ProcessingPipeline:
         print(f"  Done: {metrics_path}")
         return metrics_path
 
-    def process_benchmark(self, benchmark_id: str) -> None:
+    def extract_benchmark(self, benchmark_id: str) -> None:
+        """
+        Extract all runs in a benchmark.
+        """
+        runs = self.folder_manager.discover_runs(benchmark_id)
+        if not runs:
+            print(f"No runs found for benchmark '{benchmark_id}'")
+            return
+            
+        print(f"Extracting benchmark {benchmark_id} ({len(runs)} runs)...")
+        for i, run in enumerate(runs):
+            print(f"[{i+1}/{len(runs)}] Extracting run {run.run_dir}...")
+            self.extract_run(run)
+        print("Done.")
+
+    def process_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """
         Process all runs in a benchmark and combine into a single parquet file.
         """
@@ -198,7 +258,7 @@ class ProcessingPipeline:
         print(f"Processing benchmark {benchmark_id} ({len(runs)} runs)...")
         for i, run in enumerate(runs):
             print(f"[{i+1}/{len(runs)}] Processing run {run.run_dir}...")
-            out_path = self.process_run(run)
+            out_path = self.process_run(run, force_extract=force_extract)
             if out_path:
                 parquet_files.append(out_path)
                 

@@ -115,6 +115,7 @@ class MCAPReader:
             "peds": defaultdict(list),
             "episode_record": defaultdict(list),
             "collision_events": defaultdict(list),
+            "plan": defaultdict(list),
         }
 
         with open(actual_path, "rb") as f:
@@ -150,16 +151,39 @@ class MCAPReader:
                 # Cmd_vel
                 elif topic.endswith("/cmd_vel"):
                     data["cmd_vel"]["time_ns"].append(ts_ns)
+                    data["cmd_vel"]["linear_x"].append(ros_msg.linear.x)
+                    data["cmd_vel"]["linear_y"].append(ros_msg.linear.y)
+                    data["cmd_vel"]["linear_z"].append(ros_msg.linear.z)
+                    data["cmd_vel"]["angular_x"].append(ros_msg.angular.x)
+                    data["cmd_vel"]["angular_y"].append(ros_msg.angular.y)
+                    data["cmd_vel"]["angular_z"].append(ros_msg.angular.z)
+                    # Keep legacy columns
                     data["cmd_vel"]["cmd_linear"].append(ros_msg.linear.x)
                     data["cmd_vel"]["cmd_angular"].append(ros_msg.angular.z)
                     
                 # Joint states
                 elif topic.endswith("/joint_states"):
                     data["joint_states"]["time_ns"].append(ts_ns)
-                    # For turtlebot3 etc
+                    data["joint_states"]["name"].append(list(ros_msg.name))
+                    data["joint_states"]["position"].append(list(ros_msg.position))
+                    data["joint_states"]["velocity"].append(list(ros_msg.velocity))
+                    data["joint_states"]["effort"].append(list(ros_msg.effort))
+                    
                     vels = list(ros_msg.velocity)
+                    # Keep legacy columns
                     data["joint_states"]["joint_vel_left"].append(vels[0] if len(vels) > 0 else 0.0)
                     data["joint_states"]["joint_vel_right"].append(vels[1] if len(vels) > 1 else 0.0)
+                    
+                # Plan
+                elif topic.endswith("/plan") or topic.endswith("/global_plan"):
+                    data["plan"]["time_ns"].append(ts_ns)
+                    poses_x = []
+                    poses_y = []
+                    for pose_stamped in ros_msg.poses:
+                        poses_x.append(pose_stamped.pose.position.x)
+                        poses_y.append(pose_stamped.pose.position.y)
+                    data["plan"]["poses_x"].append(poses_x)
+                    data["plan"]["poses_y"].append(poses_y)
                     
                 # Pedestrians (arena_people_msgs/Pedestrians)
                 elif topic.endswith("/arena_peds"):

@@ -56,14 +56,24 @@ Examples:
 
     # ── Subcommands ────────────────────────────────────────────────────────────
     subparsers.add_parser(
-        "run",
+        "extract",
         parents=[run_parent],
-        help="Full pipeline: Process MCAP → Parquet, then generate HTML report.",
+        help="Layer 3: Extract topics from MCAP into fast Parquet files (cache).",
     )
     subparsers.add_parser(
+        "run",
+        parents=[run_parent],
+        help="Full pipeline: Extract MCAP (overwrite) → Process → Parquet → HTML report.",
+    )
+    process_parser = subparsers.add_parser(
         "process",
         parents=[run_parent],
-        help="Layer 3: Read MCAP(s), compute metrics, write metrics.parquet (no plots).",
+        help="Layer 3: Compute metrics and write metrics.parquet (uses cached extraction by default).",
+    )
+    process_parser.add_argument(
+        "--force-extract",
+        action="store_true",
+        help="Force re-extraction of MCAP files, overwriting the topic cache.",
     )
     subparsers.add_parser(
         "report",
@@ -85,27 +95,41 @@ Examples:
         sys.exit(1)
 
     # ── Dispatch ───────────────────────────────────────────────────────────────
-    if args.command in ("run", "process"):
+    if args.command in ("extract", "run", "process"):
+        force_extract = getattr(args, "force_extract", False)
+        if args.command == "run":
+            force_extract = True  # Always overwrite cache when starting full pipeline
+
         if getattr(args, "run_dir", None):
             # Single recording directory — no benchmark structure required
             run_dir: pathlib.Path = args.run_dir
-            print(f"Processing single run: {run_dir}")
             fm = FolderManager(data_root=run_dir.parent)
             pipeline = ProcessingPipeline(fm)
-            out = pipeline.process_run_dir(run_dir)
-            if out:
-                print(f"Metrics written to: {out}")
+            
+            if args.command == "extract":
+                print(f"Extracting single run: {run_dir}")
+                pipeline.extract_run_dir(run_dir)
             else:
-                print("Processing failed — see errors above.")
-                sys.exit(1)
+                print(f"Processing single run: {run_dir}")
+                out = pipeline.process_run_dir(run_dir, force_extract=force_extract)
+                if out:
+                    print(f"Metrics written to: {out}")
+                else:
+                    print("Processing failed — see errors above.")
+                    sys.exit(1)
 
         else:
             # Benchmark directory — discover and process all runs
             benchmark_dir: pathlib.Path = args.benchmark_dir
-            print(f"Processing benchmark: {benchmark_dir.name}")
             fm = FolderManager(data_root=benchmark_dir.parent)
             pipeline = ProcessingPipeline(fm)
-            pipeline.process_benchmark(benchmark_dir.name)
+            
+            if args.command == "extract":
+                print(f"Extracting benchmark: {benchmark_dir.name}")
+                pipeline.extract_benchmark(benchmark_dir.name)
+            else:
+                print(f"Processing benchmark: {benchmark_dir.name}")
+                pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
 
     if args.command in ("run", "report", "plot"):
         target_dir = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)

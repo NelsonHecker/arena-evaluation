@@ -1,0 +1,13 @@
+## MCAP storage plugin writer options.
+## This file is passed via storage_config_uri to rosbag2_py.StorageOptions.
+## The MCAP storage plugin reads these keys directly; preset profile strings
+## from the Python API are silently ignored in Jazzy.
+##
+## compression:      "Zstd" | "Lz4" | "None"
+## compressionLevel: "Fastest" | "Fast" | "Default" | "Slow" | "Slowest"
+##
+## "Slow" corresponds to what the CLI preset "zstd_small" intends to do:
+## higher compression ratio, slightly more CPU on write (fine for sim recording).
+compression: "Zstd"
+compressionLevel: "Slow"
+noChunking: false

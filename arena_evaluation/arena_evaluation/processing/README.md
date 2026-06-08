@@ -5,7 +5,7 @@ This package reads recorded MCAP files and computes all navigational metrics. It
 The processing pipeline follows a strict left-to-right data flow:
 
 ```
-MCAPReader → TopicAligner → EpisodeSplitter → MetricRegistry → ParquetStore
+MCAPReader → TopicParquetStore → TopicAligner → EpisodeSplitter → MetricRegistry → ParquetStore
 ```
 
 ---
@@ -15,9 +15,9 @@ MCAPReader → TopicAligner → EpisodeSplitter → MetricRegistry → ParquetSt
 | File | Purpose |
 |---|---|
 | `mcap_reader.py` | Decodes MCAP → `TopicBundle` (one DataFrame per topic) |
+| `parquet_store.py` | Reads/writes cache (`TopicParquetStore`) and output (`ParquetStore`) |
 | `topic_aligner.py` | Aligns multi-rate topics onto a common odom time axis |
 | `episode_splitter.py` | Splits continuous stream into per-episode bundles |
-| `parquet_store.py` | Reads/writes `metrics.parquet` with embedded metadata |
 | `pipeline.py` | `ProcessingPipeline` orchestrator — runs the full chain |
 | `metrics/` | Pluggable metric calculators |
 
@@ -139,7 +139,7 @@ pipeline.process_benchmark("my_benchmark")
 For each discovered run:
 1. Reads `metadata.yaml` → `RunMetadata`
 2. Loads `RobotParams` from `arena_robots` caps
-3. `MCAPReader.read()` → `TopicBundle`
+3. Uses `TopicParquetStore.read()` to load cached topics from `run_dir/topics/`. If missing (or forced), calls `MCAPReader.read()` and writes the cache.
 4. `TopicAligner.align()` → aligned DataFrame
 5. `EpisodeSplitter.split()` → `list[AlignedEpisodeBundle]`
 6. `MetricRegistry.run()` → metrics DataFrame per episode
