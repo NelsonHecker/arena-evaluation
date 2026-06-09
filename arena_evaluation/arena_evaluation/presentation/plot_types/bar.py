@@ -40,7 +40,9 @@ class BarRenderer(BasePlotRenderer):
         fig.update_layout(
             title=self.spec.title,
             xaxis_title=diff_col.title(),
-            yaxis_title=self.spec.data_key.replace("_", " ").title()
+            yaxis_title=self.spec.data_key.replace("_", " ").title(),
+            template="plotly_white",
+            colorway=px.colors.qualitative.Pastel
         )
         
         return fig.to_html(full_html=False, include_plotlyjs=False)

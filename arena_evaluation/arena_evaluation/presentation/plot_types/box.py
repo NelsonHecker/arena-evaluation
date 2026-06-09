@@ -27,7 +27,9 @@ class BoxRenderer(BasePlotRenderer):
             labels={
                 self.spec.data_key: self.spec.data_key.replace("_", " ").title(),
                 self.spec.differentiate or "planner": (self.spec.differentiate or "planner").title()
-            }
+            },
+            template="plotly_white",
+            color_discrete_sequence=px.colors.qualitative.Pastel
         )
         return fig.to_html(full_html=False, include_plotlyjs=False)
 
@@ -37,7 +39,7 @@ class BoxRenderer(BasePlotRenderer):
             return
             
         pdf = df_filtered.to_pandas()
-        if pdf.empty:
+        if pdf.empty or pdf[self.spec.data_key].isna().all():
             return
             
         import matplotlib.pyplot as plt

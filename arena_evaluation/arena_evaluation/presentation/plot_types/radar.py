@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import polars as pl
 import plotly.graph_objects as go
+import plotly.express as px
 import numpy as np
 
 from .base import BasePlotRenderer
@@ -19,10 +20,15 @@ class RadarRenderer(BasePlotRenderer):
             return None
             
         # Define the metrics to include in the radar chart
-        metrics = ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"]
-        valid_metrics = [m for m in metrics if m in df_filtered.columns]
+        metrics = self.spec.options.get("metrics", ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"])
         
-        if not valid_metrics:
+        # Check if metrics exist and are not entirely Null
+        valid_metrics = []
+        for m in metrics:
+            if m in df_filtered.columns and not df_filtered[m].is_null().all():
+                valid_metrics.append(m)
+        
+        if len(valid_metrics) < 3:
             return None
             
         # Group by diff_col and calculate means
@@ -65,13 +71,16 @@ class RadarRenderer(BasePlotRenderer):
                 r=values,
                 theta=labels,
                 fill='toself',
-                name=row[diff_col]
+                name=row[diff_col],
+                opacity=0.6
             ))
             
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=True,
-            title=self.spec.title
+            title=self.spec.title,
+            template="plotly_white",
+            colorway=px.colors.qualitative.Pastel
         )
         
         return fig.to_html(full_html=False, include_plotlyjs=False)

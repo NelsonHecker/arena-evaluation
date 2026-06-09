@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import polars as pl
 import plotly.graph_objects as go
+import plotly.express as px
 import numpy as np
 
 from .base import BasePlotRenderer
@@ -35,12 +36,20 @@ class TrajectoryRenderer(BasePlotRenderer):
             episode = row.get("episode", 0)
             
             # path is list of [x,y,yaw]
-            path_arr = np.array(path)
+            try:
+                path_arr = np.array([list(p) for p in path])
+            except Exception:
+                continue
+                
             if path_arr.ndim != 2 or path_arr.shape[1] < 2:
                 continue
                 
             x = path_arr[:, 0]
             y = path_arr[:, 1]
+            
+            if self.spec.options.get("center_at_origin", False):
+                x = x - x[0]
+                y = y - y[0]
             
             fig.add_trace(go.Scatter(
                 x=x, y=y,
@@ -54,6 +63,8 @@ class TrajectoryRenderer(BasePlotRenderer):
             xaxis_title="X",
             yaxis_title="Y",
             yaxis=dict(scaleanchor="x", scaleratio=1), # Make it square
+            template="plotly_white",
+            colorway=px.colors.qualitative.Pastel
         )
         
         return fig.to_html(full_html=False, include_plotlyjs=False)
@@ -77,12 +88,21 @@ class TrajectoryRenderer(BasePlotRenderer):
             if path is None or len(path) == 0:
                 continue
                 
-            path_arr = np.array(path)
+            try:
+                path_arr = np.array([list(p) for p in path])
+            except Exception:
+                continue
+                
             if path_arr.ndim != 2 or path_arr.shape[1] < 2:
                 continue
                 
             x = path_arr[:, 0]
             y = path_arr[:, 1]
+            
+            if self.spec.options.get("center_at_origin", False):
+                x = x - x[0]
+                y = y - y[0]
+                
             planner = row.get(diff_col, "unknown")
             
             plt.plot(x, y, label=planner, alpha=0.6)

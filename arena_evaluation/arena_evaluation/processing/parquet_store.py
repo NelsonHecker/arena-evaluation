@@ -79,7 +79,7 @@ class ParquetStore:
             return
             
         try:
-            combined = pl.concat(dfs, how="diagonal")
+            combined = pl.concat(dfs, how="diagonal_relaxed")
         except Exception as e:
             raise SchemaViolationError(f"Failed to combine parquet files due to schema mismatch: {e}")
             

@@ -3,6 +3,8 @@ from .box import BoxRenderer
 from .bar import BarRenderer
 from .trajectory import TrajectoryRenderer
 from .radar import RadarRenderer
+from .scatter import ScatterRenderer
+from .histogram import HistogramRenderer
 
 __all__ = [
     "ViolinRenderer",
@@ -10,4 +12,6 @@ __all__ = [
     "BarRenderer",
     "TrajectoryRenderer",
     "RadarRenderer",
+    "ScatterRenderer",
+    "HistogramRenderer",
 ]

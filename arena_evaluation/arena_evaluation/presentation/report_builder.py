@@ -57,7 +57,7 @@ class ReportBuilder:
             try:
                 html_chunk = plotly_renderer.render(spec, df)
                 if html_chunk:
-                    html_plots.append(html_chunk)
+                    html_plots.append((spec.layout_group, html_chunk))
             except Exception as e:
                 print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
                 
@@ -68,6 +68,12 @@ class ReportBuilder:
         html_content = self._assemble_html(summary_html, html_plots, self.benchmark_dir.name)
         with open(self.report_path, "w") as f:
             f.write(html_content)
+            
+        # Write local plotly.min.js to keep html file size small but work completely offline
+        import plotly.offline
+        js_path = self.benchmark_dir / "plotly.min.js"
+        with open(js_path, "w") as f:
+            f.write(plotly.offline.get_plotlyjs())
             
         print(f"Report generated successfully: {self.report_path}")
         print(f"Static plots saved to: {self.plots_dir}")
@@ -96,10 +102,30 @@ class ReportBuilder:
             
         return summary.to_html(index=False, classes="table table-striped table-hover")
 
-    def _assemble_html(self, summary_html: str, plot_htmls: list[str], benchmark_id: str) -> str:
+    def _assemble_html(self, summary_html: str, plot_htmls: list[tuple[str|None, str]], benchmark_id: str) -> str:
         """Template for the final HTML report."""
         
-        plots_joined = "\n<hr>\n".join(plot_htmls)
+        # Group plots by layout_group
+        grouped_plots = {}
+        ordered_groups = []
+        for group, html in plot_htmls:
+            # If no group, assign a unique single-item group
+            key = group if group else f"__ungrouped_{len(ordered_groups)}"
+            if key not in grouped_plots:
+                grouped_plots[key] = []
+                ordered_groups.append(key)
+            grouped_plots[key].append(html)
+            
+        final_plot_htmls = []
+        for key in ordered_groups:
+            plots = grouped_plots[key]
+            if key.startswith("__ungrouped_") or len(plots) == 1:
+                final_plot_htmls.append(f'<div class="plot-container">{plots[0]}</div>')
+            else:
+                grid_items = "".join([f'<div class="plot-item">{p}</div>' for p in plots])
+                final_plot_htmls.append(f'<div class="plot-group"><h2>{key.replace("_", " ").title()}</h2><div class="plot-grid">{grid_items}</div></div>')
+                
+        plots_joined = "\n<hr>\n".join(final_plot_htmls)
         
         html = f"""
         <!DOCTYPE html>
@@ -108,13 +134,14 @@ class ReportBuilder:
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Arena Evaluation Report - {benchmark_id}</title>
-            <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+            <script src="plotly.min.js"></script>
             <style>
+                * {{ box-sizing: border-box; }}
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                     line-height: 1.6;
                     color: #333;
-                    max-width: 1200px;
+                    max-width: 1400px;
                     margin: 0 auto;
                     padding: 20px;
                 }}
@@ -124,7 +151,14 @@ class ReportBuilder:
                 th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
                 th {{ background-color: #f8f9fa; font-weight: bold; }}
                 tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                .plot-container {{ margin-bottom: 50px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; }}
+                
+                .plot-container {{ height: 600px; margin-bottom: 50px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; }}
+                .plot-container > div {{ height: 100%; width: 100%; }}
+                
+                .plot-group {{ margin-bottom: 50px; background: #f8f9fa; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }}
+                .plot-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; }}
+                .plot-item {{ height: 450px; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 10px; }}
+                .plot-item > div {{ height: 100%; width: 100%; }}
             </style>
         </head>
         <body>
@@ -138,7 +172,7 @@ class ReportBuilder:
             
             <h2>Metrics Analysis</h2>
             <div class="plots-section">
-                {"".join([f'<div class="plot-container">{p}</div>' for p in plot_htmls])}
+                {plots_joined}
             </div>
             
             <div style="margin-top: 50px; text-align: center; color: #7f8c8d; font-size: 0.9em;">

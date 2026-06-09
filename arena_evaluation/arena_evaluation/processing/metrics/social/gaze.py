@@ -29,10 +29,10 @@ class GazeMetricsCalculator(BaseMetricCalculator):
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
-            "time_looking_at_peds",
-            "time_looking_at_peds_total",
-            "time_looked_at_by_peds",
-            "time_looked_at_by_peds_total",
+            "time_looking_at_pedestrians",
+            "total_time_looking_at_pedestrians",
+            "time_looked_at_by_pedestrians",
+            "total_time_looked_at_by_pedestrians",
         ]
         
     def calculate(
@@ -127,8 +127,8 @@ class GazeMetricsCalculator(BaseMetricCalculator):
                 looked_at.append(0)
                 
         return {
-            "time_looking_at_peds": looking_at,
-            "time_looking_at_peds_total": looking_at_time,
-            "time_looked_at_by_peds": looked_at,
-            "time_looked_at_by_peds_total": looked_at_time,
+            "time_looking_at_pedestrians": looking_at,
+            "total_time_looking_at_pedestrians": looking_at_time,
+            "time_looked_at_by_pedestrians": looked_at,
+            "total_time_looked_at_by_pedestrians": looked_at_time,
         }

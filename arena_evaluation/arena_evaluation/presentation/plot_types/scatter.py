@@ -7,37 +7,49 @@ import plotly.express as px
 from .base import BasePlotRenderer
 
 
-class ViolinRenderer(BasePlotRenderer):
-    PLOT_TYPE = "violin"
+class ScatterRenderer(BasePlotRenderer):
+    PLOT_TYPE = "scatter"
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
-        if self.spec.data_key not in df_filtered.columns:
+        
+        x_col = self.spec.data_key
+        y_col = self.spec.options.get("y")
+        diff_col = self.spec.differentiate or "planner"
+        
+        if not y_col or x_col not in df_filtered.columns or y_col not in df_filtered.columns:
             return None
             
         pdf = df_filtered.to_pandas()
         if pdf.empty:
             return None
 
-        fig = px.violin(
+        fig = px.scatter(
             pdf,
-            y=self.spec.data_key,
-            color=self.spec.differentiate or "planner",
-            box=True,
-            points="all",
+            x=x_col,
+            y=y_col,
+            color=diff_col,
             title=self.spec.title,
-            labels={
-                self.spec.data_key: self.spec.data_key.replace("_", " ").title(),
-                self.spec.differentiate or "planner": (self.spec.differentiate or "planner").title()
-            },
             template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Pastel
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+            opacity=0.7
         )
+        
+        fig.update_layout(
+            xaxis_title=x_col.replace("_", " ").title(),
+            yaxis_title=y_col.replace("_", " ").title()
+        )
+        
         return fig.to_html(full_html=False, include_plotlyjs=False)
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
-        if self.spec.data_key not in df_filtered.columns:
+        
+        x_col = self.spec.data_key
+        y_col = self.spec.options.get("y")
+        diff_col = self.spec.differentiate or "planner"
+        
+        if not y_col or x_col not in df_filtered.columns or y_col not in df_filtered.columns:
             return
             
         pdf = df_filtered.to_pandas()
@@ -48,11 +60,12 @@ class ViolinRenderer(BasePlotRenderer):
         import seaborn as sns
         
         plt.figure(figsize=(10, 6))
-        sns.violinplot(
+        sns.scatterplot(
             data=pdf,
-            y=self.spec.data_key,
-            hue=self.spec.differentiate or "planner",
-            inner="box"
+            x=x_col,
+            y=y_col,
+            hue=diff_col,
+            alpha=0.7
         )
         plt.title(self.spec.title)
         plt.tight_layout()

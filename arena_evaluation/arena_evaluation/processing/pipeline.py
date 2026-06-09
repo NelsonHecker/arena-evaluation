@@ -104,6 +104,8 @@ class ProcessingPipeline:
             ep_metrics["robot"] = robot_model
             ep_metrics["stage"] = run.stage
             ep_metrics["benchmark_id"] = run.benchmark_id
+            ep_metrics["start"] = ep.start_pos
+            ep_metrics["goal"] = ep.goal_pos
 
             results.append(ep_metrics)
 
@@ -216,6 +218,8 @@ class ProcessingPipeline:
             ep_metrics["robot"] = robot_model
             ep_metrics["stage"] = descriptor.stage
             ep_metrics["benchmark_id"] = descriptor.benchmark_id
+            ep_metrics["start"] = ep.start_pos
+            ep_metrics["goal"] = ep.goal_pos
             results.append(ep_metrics)
 
         df = pl.DataFrame(results)

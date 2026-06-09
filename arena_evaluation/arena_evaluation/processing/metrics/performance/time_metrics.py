@@ -24,6 +24,8 @@ class TimeMetricsCalculator(BaseMetricCalculator):
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
+            "time",
+            "time_diff",
             "time_to_goal",
             "idling_time",
         ]
@@ -42,6 +44,8 @@ class TimeMetricsCalculator(BaseMetricCalculator):
         
         if N < 2:
             return {
+                "time": [],
+                "time_diff": 0,
                 "time_to_goal": 0.0,
                 "idling_time": 0.0,
             }
@@ -62,6 +66,8 @@ class TimeMetricsCalculator(BaseMetricCalculator):
             idling_time = float(np.sum(dt[idle_mask[:-1]]))
             
         return {
+            "time": time_ns.tolist(),
+            "time_diff": int(time_ns[-1] - time_ns[0]),
             "time_to_goal": duration_s,
             "idling_time": idling_time,
         }

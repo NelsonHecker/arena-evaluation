@@ -41,14 +41,29 @@ class EpisodeSplitter:
 
         record_df = bundle.episode_record
         
-        for i, row in enumerate(record_df.iter_rows(named=True)):
+        # Group records by episode_id while preserving order
+        # Usually, an episode has a start record and an end record.
+        # We can detect this by seeing if the next record has the same episode_id.
+        
+        rows = list(record_df.iter_rows(named=True))
+        
+        i = 0
+        while i < len(rows):
+            row = rows[i]
             start_time = row["time_ns"]
             
-            # End time is the start of the next episode, or EOF
-            if i + 1 < len(record_df):
-                end_time = record_df.item(i + 1, "time_ns") - 1
+            # Check if the next record is the end of this episode
+            if i + 1 < len(rows) and rows[i+1]["episode_id"] == row["episode_id"]:
+                # The next record is the 'end' record for the same episode
+                end_time = rows[i+1]["time_ns"]
+                i += 2 # Skip the end record for the next iteration
             else:
-                end_time = bundle.odom.select(pl.col("time_ns").max()).item()
+                # Only 1 record for this episode, or next record is a new episode.
+                if i + 1 < len(rows):
+                    end_time = rows[i + 1]["time_ns"] - 1
+                else:
+                    end_time = bundle.odom.select(pl.col("time_ns").max()).item()
+                i += 1
                 
             aligned_df = self.aligner.align(bundle, start_time, end_time)
             
@@ -62,8 +77,6 @@ class EpisodeSplitter:
                 params_str = row["robots_params"]
                 if params_str:
                     params_dict = yaml.safe_load(params_str)
-                    # Example format: {'robot_name': {'start': [x,y,z], 'goal': [x,y,z]}}
-                    # We grab the first robot we see
                     for robot_params in params_dict.values():
                         if "start" in robot_params:
                             start_pos = robot_params["start"]

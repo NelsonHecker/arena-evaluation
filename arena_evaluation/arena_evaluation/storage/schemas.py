@@ -131,3 +131,4 @@ class PlotSpec(BaseModel):
     differentiate: str | None = "planner"
     filter: dict[str, str] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)
+    layout_group: str | None = None

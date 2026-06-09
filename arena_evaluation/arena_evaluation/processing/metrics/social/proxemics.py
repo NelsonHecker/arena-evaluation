@@ -35,7 +35,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
         return [
             "num_pedestrians",
             "time_in_personal_space",
-            "time_in_personal_space_total",
+            "total_time_in_personal_space",
             "avg_velocity_in_personal_space",
         ]
         
@@ -61,7 +61,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
             return {
                 "num_pedestrians": 0,
                 "time_in_personal_space": [],
-                "time_in_personal_space_total": 0.0,
+                "total_time_in_personal_space": 0.0,
                 "avg_velocity_in_personal_space": 0.0,
             }
             
@@ -128,6 +128,6 @@ class ProxemicsCalculator(BaseMetricCalculator):
         return {
             "num_pedestrians": episode.num_pedestrians,
             "time_in_personal_space": in_personal_space_steps,
-            "time_in_personal_space_total": in_personal_space_time_s,
+            "total_time_in_personal_space": in_personal_space_time_s,
             "avg_velocity_in_personal_space": avg_vel,
         }

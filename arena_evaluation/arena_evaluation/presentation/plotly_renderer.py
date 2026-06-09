@@ -13,6 +13,8 @@ class PlotlyRenderer:
             BarRenderer,
             TrajectoryRenderer,
             RadarRenderer,
+            ScatterRenderer,
+            HistogramRenderer,
         )
         
         self.renderers = {
@@ -21,6 +23,8 @@ class PlotlyRenderer:
             "bar": BarRenderer,
             "trajectory": TrajectoryRenderer,
             "radar": RadarRenderer,
+            "scatter": ScatterRenderer,
+            "histogram": HistogramRenderer,
         }
 
     def render(self, spec: PlotSpec, df: pl.DataFrame) -> str | None:
