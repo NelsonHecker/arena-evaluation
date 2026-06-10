@@ -46,6 +46,15 @@ class ReportBuilder:
         html_plots = []
         
         for spec in manifest.plots:
+            # Check if metric data is available for this plot
+            if spec.data_key != "*":
+                if spec.data_key not in df.columns:
+                    print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' not found in metrics.")
+                    continue
+                if df[spec.data_key].null_count() == len(df):
+                    print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' has no calculated data (all values null).")
+                    continue
+
             # Generate static PNG
             png_path = self.plots_dir / f"{spec.id}.png"
             try:
@@ -86,13 +95,21 @@ class ReportBuilder:
         if "planner" not in df.columns:
             return ""
             
-        # Group by planner and calculate success rate, avg time, avg path length
-        summary = df.group_by("planner").agg([
-            pl.col("success").mean().alias("success_rate"),
-            pl.col("time_to_goal").mean().alias("avg_time"),
-            pl.col("path_length").mean().alias("avg_path_length"),
-            pl.col("collision_amount").mean().alias("avg_collisions")
-        ]).to_pandas()
+        # Group by planner and calculate success rate, avg time, avg path length dynamically
+        agg_exprs = []
+        if "success" in df.columns and not df["success"].is_null().all():
+            agg_exprs.append(pl.col("success").mean().alias("success_rate"))
+        if "time_to_goal" in df.columns and not df["time_to_goal"].is_null().all():
+            agg_exprs.append(pl.col("time_to_goal").mean().alias("avg_time"))
+        if "path_length" in df.columns and not df["path_length"].is_null().all():
+            agg_exprs.append(pl.col("path_length").mean().alias("avg_path_length"))
+        if "collision_amount" in df.columns and not df["collision_amount"].is_null().all():
+            agg_exprs.append(pl.col("collision_amount").mean().alias("avg_collisions"))
+            
+        if not agg_exprs:
+            return ""
+
+        summary = df.group_by("planner").agg(agg_exprs).to_pandas()
         
         # Format columns
         if "success_rate" in summary.columns:

@@ -20,6 +20,7 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
     NAME = "path_efficiency"
     CATEGORY = "performance"
     DEPENDS_ON = ["path_metrics"]
+    REQUIRED_TOPICS = ["odom"]
     
     @classmethod
     def output_keys(cls) -> list[str]:

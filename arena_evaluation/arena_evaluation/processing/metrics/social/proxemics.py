@@ -27,6 +27,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
+    REQUIRED_TOPICS = ["odom", "peds"]
     
     PERSONAL_SPACE_RADIUS = 1.2
     

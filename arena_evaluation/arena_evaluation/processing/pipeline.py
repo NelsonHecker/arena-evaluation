@@ -94,9 +94,14 @@ class ProcessingPipeline:
         registry = MetricRegistry(robot_params)
         pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
 
+        available_topics = set()
+        for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
+            if getattr(bundle, field, None) is not None:
+                available_topics.add(field)
+
         results = []
         for ep in episodes:
-            ep_metrics = registry.run(ep, pedsim_available=pedsim_avail)
+            ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
 
             # 5. Add identity columns
             ep_metrics["episode"] = ep.episode_id
@@ -211,9 +216,14 @@ class ProcessingPipeline:
         registry = MetricRegistry(robot_params)
         pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
 
+        available_topics = set()
+        for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
+            if getattr(bundle, field, None) is not None:
+                available_topics.add(field)
+
         results = []
         for ep in episodes:
-            ep_metrics = registry.run(ep, pedsim_available=pedsim_avail)
+            ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
             ep_metrics["episode"] = ep.episode_id
             ep_metrics["planner"] = descriptor.planner
             ep_metrics["robot"] = robot_model

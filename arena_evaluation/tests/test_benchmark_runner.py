@@ -1057,5 +1057,3 @@ def test_flatten_typed_values():
     assert by_name["a_bool"].value.bool_value is True
     assert by_name["a_float"].value.type == ParameterType.PARAMETER_DOUBLE
     assert by_name["a_float"].value.double_value == pytest.approx(3.14)
-
-

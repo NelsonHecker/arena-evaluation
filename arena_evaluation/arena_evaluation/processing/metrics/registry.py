@@ -97,6 +97,7 @@ class MetricRegistry:
                 "category": calc.CATEGORY,
                 "requires_pedsim": calc.REQUIRES_PEDSIM,
                 "depends_on": calc.DEPENDS_ON,
+                "required_topics": getattr(calc, "REQUIRED_TOPICS", []),
                 "outputs": calc.output_keys()
             }
             for name, calc in self.calculators.items()
@@ -109,7 +110,8 @@ class MetricRegistry:
     def run(
         self,
         episode: AlignedEpisodeBundle,
-        pedsim_available: bool = True
+        pedsim_available: bool = True,
+        available_topics: set[str] | None = None
     ) -> dict[str, typing.Any]:
         """
         Executes all calculators in topological order.
@@ -117,17 +119,53 @@ class MetricRegistry:
         Args:
             episode: The aligned episode data.
             pedsim_available: If False, calculators requiring pedsim are skipped.
+            available_topics: Topics that are available in the recording/run.
             
         Returns:
             A flat dictionary containing outputs from all executed calculators.
             Skipped or failed calculators have their output keys filled with None.
         """
         results = {}
+
+        if available_topics is None:
+            available_topics = set(["odom"])
+            if episode.data is not None:
+                cols = episode.data.columns
+                if "scan_ranges" in cols:
+                    available_topics.add("scan")
+                if "cmd_linear" in cols or "cmd_vel" in cols:
+                    available_topics.add("cmd_vel")
+                if "joint_vel_left" in cols or "joint_vel_right" in cols:
+                    available_topics.add("joint_states")
+                if "peds_positions" in cols:
+                    available_topics.add("peds")
+                if "collision_event" in cols:
+                    available_topics.add("collision_events")
+                if "pos_x_gt" in cols:
+                    available_topics.add("tf_gt")
         
         for stage in self.execution_stages:
             for calc_name in stage:
                 calc = self.calculators[calc_name]
                 
+                # Check topic dependencies
+                skip_due_to_topics = False
+                for req in getattr(calc, "REQUIRED_TOPICS", []):
+                    if isinstance(req, str):
+                        if req not in available_topics:
+                            skip_due_to_topics = True
+                            break
+                    elif isinstance(req, (list, tuple, set)):
+                        if not any(t in available_topics for t in req):
+                            skip_due_to_topics = True
+                            break
+
+                if skip_due_to_topics:
+                    # Fill with None for schema consistency
+                    for key in calc.output_keys():
+                        results[key] = None
+                    continue
+
                 if calc.REQUIRES_PEDSIM and not pedsim_available:
                     # Fill with None for schema consistency
                     for key in calc.output_keys():

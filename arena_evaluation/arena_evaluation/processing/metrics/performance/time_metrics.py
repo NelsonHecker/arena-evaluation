@@ -20,6 +20,7 @@ class TimeMetricsCalculator(BaseMetricCalculator):
     NAME = "time_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["motion_metrics"]
+    REQUIRED_TOPICS = ["odom"]
     
     @classmethod
     def output_keys(cls) -> list[str]:

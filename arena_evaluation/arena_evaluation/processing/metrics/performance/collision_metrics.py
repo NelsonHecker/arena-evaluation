@@ -22,6 +22,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     NAME = "collision_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics"]
+    REQUIRED_TOPICS = [("scan", "collision_events")]
     
     TIMEOUT_THRESHOLD_S = 180.0
     MAX_COLLISIONS = 3

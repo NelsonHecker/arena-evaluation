@@ -157,6 +157,8 @@ def _params_to_json(params: list) -> str:
     for p in params:
         try:
             value = Parameter.from_parameter_msg(p).value
+            if hasattr(value, "tolist"):
+                value = value.tolist()
         except Exception:
             value = str(p.value)
         rows.append({"name": p.name, "value": value})

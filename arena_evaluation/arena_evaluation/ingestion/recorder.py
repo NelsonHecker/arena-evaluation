@@ -336,7 +336,7 @@ class DataRecorderNode(Node):
         throttled_topics = [
             (f"{ns_prefix}/cmd_vel", Twist),
             (f"{ns_prefix}/joint_states", JointState),
-            (f"{ns_prefix}/lidar", LaserScan),
+            # (f"{ns_prefix}/lidar", LaserScan),
             ("/tf", TFMessage),
         ]
 
@@ -409,9 +409,9 @@ class DataRecorderNode(Node):
             is_scan = "scan" in name or "lidar" in name
             is_odom = "odom" in name
 
-            if is_scan and "sensor_msgs/msg/LaserScan" in types:
-                self._subscribe_discovered(name, LaserScan)
-            elif is_odom and "nav_msgs/msg/Odometry" in types:
+            # if is_scan and "sensor_msgs/msg/LaserScan" in types:
+            #     self._subscribe_discovered(name, LaserScan)
+            if is_odom and "nav_msgs/msg/Odometry" in types:
                 self._subscribe_discovered(name, Odometry)
                 # Refine robot_model from odom topic
                 if self.robot_model in ("unknown", ""):

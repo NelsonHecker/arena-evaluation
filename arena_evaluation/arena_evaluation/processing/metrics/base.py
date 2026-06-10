@@ -36,6 +36,10 @@ class BaseMetricCalculator(ABC):
     
     # List of calculator NAMEs that must be run before this one.
     DEPENDS_ON: list[str] = []
+    
+    # List of topics required by this calculator. Each entry can be a string
+    # (strictly required topic) or a collection/tuple of strings (any of the listed topics).
+    REQUIRED_TOPICS: list[str | list[str] | tuple[str, ...] | set[str]] = []
 
     def __init__(self, robot_params: RobotParams):
         """

@@ -30,6 +30,7 @@ class PathMetricsCalculator(BaseMetricCalculator):
     NAME = "path_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = []
+    REQUIRED_TOPICS = ["odom"]
     
     @classmethod
     def output_keys(cls) -> list[str]:

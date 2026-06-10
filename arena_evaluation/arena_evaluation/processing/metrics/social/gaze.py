@@ -23,6 +23,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
+    REQUIRED_TOPICS = ["odom", "peds"]
     
     GAZE_CONE_DEG = 5.0
     
