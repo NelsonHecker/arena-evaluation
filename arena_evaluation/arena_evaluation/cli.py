@@ -43,32 +43,29 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
             seen.add(resolved_root)
             unique_search_roots.append(resolved_root)
 
-    # Resolve benchmark_dir or run_dir from search roots
+    # Helper to resolve a single path
+    def _resolve_single_path(p: pathlib.Path, subdirs: tuple[str, ...]) -> pathlib.Path:
+        if p.exists():
+            return p.resolve()
+        for root in unique_search_roots:
+            for sub in subdirs:
+                candidate = root / sub / p
+                if candidate.is_dir():
+                    return candidate.resolve()
+        return p  # Unresolved, let it fail validation later
+
+    # Resolve benchmark_dirs or run_dirs from search roots
     if getattr(args, "run_dir", None) is not None:
-        run_dir: pathlib.Path = args.run_dir
-        if not run_dir.exists():
-            for root in unique_search_roots:
-                for sub in ("recordings", "recording"):
-                    candidate = root / sub / run_dir
-                    if candidate.is_dir():
-                        args.run_dir = candidate.resolve()
-                        break
-                else:
-                    continue
-                break
+        args.run_dir = [
+            _resolve_single_path(p, ("recordings", "recording"))
+            for p in args.run_dir
+        ]
 
     if getattr(args, "benchmark_dir", None) is not None:
-        benchmark_dir: pathlib.Path = args.benchmark_dir
-        if not benchmark_dir.exists():
-            for root in unique_search_roots:
-                for sub in ("benchmarks", "benchmark"):
-                    candidate = root / sub / benchmark_dir
-                    if candidate.is_dir():
-                        args.benchmark_dir = candidate.resolve()
-                        break
-                else:
-                    continue
-                break
+        args.benchmark_dir = [
+            _resolve_single_path(p, ("benchmarks", "benchmark"))
+            for p in args.benchmark_dir
+        ]
 
     return args
 
@@ -87,37 +84,35 @@ Examples:
   # Full pipeline (process + report) for a benchmark:
   evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
 
-  # Generate report from already-processed benchmark:
-  evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
+  # Generate report from multiple already-processed benchmarks:
+  evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
 """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # ── Shared parent parsers ──────────────────────────────────────────────────
-    # For commands that accept either a benchmark dir or a single run dir
+    # For commands that accept either benchmark dirs or run dirs
     run_parent = argparse.ArgumentParser(add_help=False)
     run_group = run_parent.add_mutually_exclusive_group(required=True)
     run_group.add_argument(
         "--benchmark-dir",
         type=pathlib.Path,
+        nargs="+",
         metavar="DIR",
-        help="Path to the benchmark root directory (contains multiple planner/stage runs)",
+        help="Path to one or more benchmark root directories (contains multiple planner/stage runs)",
     )
     run_group.add_argument(
         "--run-dir",
         type=pathlib.Path,
+        nargs="+",
         metavar="DIR",
-        help="Path to a single recording directory (contains metadata.yaml + recording/)",
+        help="Path to one or more single recording directories (contains metadata.yaml + recording/)",
     )
-
-    # For commands that only work at benchmark level (report, plot)
-    benchmark_parent = argparse.ArgumentParser(add_help=False)
-    benchmark_parent.add_argument(
-        "--benchmark-dir",
+    run_parent.add_argument(
+        "--output-dir",
         type=pathlib.Path,
-        required=True,
         metavar="DIR",
-        help="Path to the benchmark root directory",
+        help="Optional path to output directory for reports and plots. Defaults to the first input directory.",
     )
 
     # ── Subcommands ────────────────────────────────────────────────────────────
@@ -155,57 +150,61 @@ Examples:
     args = parser.parse_args()
     args = resolve_paths(args)
 
-    # ── Validate path ──────────────────────────────────────────────────────────
-    target_dir = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)
-    if target_dir is not None and (not target_dir.exists() or not target_dir.is_dir()):
-        print(f"Error: directory does not exist: {target_dir}")
+    # ── Validate paths ─────────────────────────────────────────────────────────
+    target_dirs = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)
+    if not target_dirs:
+        print("Error: No input directories provided.")
         sys.exit(1)
 
-    # ── Dispatch ───────────────────────────────────────────────────────────────
+    for d in target_dirs:
+        if not d.exists() or not d.is_dir():
+            print(f"Error: directory does not exist: {d}")
+            sys.exit(1)
+
+    # ── Dispatch Processing ────────────────────────────────────────────────────
     if args.command in ("extract", "run", "process"):
         force_extract = getattr(args, "force_extract", False)
         if args.command == "run":
             force_extract = True  # Always overwrite cache when starting full pipeline
 
         if getattr(args, "run_dir", None):
-            # Single recording directory — no benchmark structure required
-            run_dir: pathlib.Path = args.run_dir
-            fm = FolderManager(data_root=run_dir.parent)
-            pipeline = ProcessingPipeline(fm)
-            
-            if args.command == "extract":
-                print(f"Extracting single run: {run_dir}")
-                pipeline.extract_run_dir(run_dir)
-            else:
-                print(f"Processing single run: {run_dir}")
-                out = pipeline.process_run_dir(run_dir, force_extract=force_extract)
-                if out:
-                    print(f"Metrics written to: {out}")
+            for run_dir in args.run_dir:
+                fm = FolderManager(data_root=run_dir.parent)
+                pipeline = ProcessingPipeline(fm)
+                
+                if args.command == "extract":
+                    print(f"Extracting single run: {run_dir}")
+                    pipeline.extract_run_dir(run_dir)
                 else:
-                    print("Processing failed — see errors above.")
-                    sys.exit(1)
+                    print(f"Processing single run: {run_dir}")
+                    out = pipeline.process_run_dir(run_dir, force_extract=force_extract)
+                    if out:
+                        print(f"Metrics written to: {out}")
+                    else:
+                        print(f"Processing failed for {run_dir} — see errors above.")
 
         else:
-            # Benchmark directory — discover and process all runs
-            benchmark_dir: pathlib.Path = args.benchmark_dir
-            fm = FolderManager(data_root=benchmark_dir.parent)
-            pipeline = ProcessingPipeline(fm)
-            
-            if args.command == "extract":
-                print(f"Extracting benchmark: {benchmark_dir.name}")
-                pipeline.extract_benchmark(benchmark_dir.name)
-            else:
-                print(f"Processing benchmark: {benchmark_dir.name}")
-                pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
+            for benchmark_dir in args.benchmark_dir:
+                fm = FolderManager(data_root=benchmark_dir.parent)
+                pipeline = ProcessingPipeline(fm)
+                
+                if args.command == "extract":
+                    print(f"Extracting benchmark: {benchmark_dir.name}")
+                    pipeline.extract_benchmark(benchmark_dir.name)
+                else:
+                    print(f"Processing benchmark: {benchmark_dir.name}")
+                    pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
 
+    # ── Dispatch Presentation ──────────────────────────────────────────────────
     if args.command in ("run", "report", "plot"):
-        target_dir = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)
-        if target_dir is not None:
-            print(f"Building report/plots for: {target_dir.name}")
-            builder = ReportBuilder(target_dir)
-            builder.build()
-            print("Report generated successfully.")
-
+        output_dir = getattr(args, "output_dir", None)
+        if not output_dir:
+            output_dir = target_dirs[0]
+            
+        print(f"Building report/plots from {len(target_dirs)} sources into: {output_dir}")
+        builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir)
+        builder.build()
+        print("Report generation complete.")
 
 if __name__ == "__main__":
     main()

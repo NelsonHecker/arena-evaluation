@@ -14,7 +14,11 @@ class ViolinRenderer(BasePlotRenderer):
         df_filtered = self._apply_filters(df)
         if self.spec.data_key not in df_filtered.columns:
             return None
-            
+
+        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+        if diff_col not in df_filtered.columns:
+            return None
+
         pdf = df_filtered.to_pandas()
         if pdf.empty:
             return None
@@ -22,16 +26,16 @@ class ViolinRenderer(BasePlotRenderer):
         fig = px.violin(
             pdf,
             y=self.spec.data_key,
-            color=self.spec.differentiate or "planner",
+            color=diff_col,
             box=True,
             points="all",
             title=self.spec.title,
             labels={
                 self.spec.data_key: self.spec.data_key.replace("_", " ").title(),
-                self.spec.differentiate or "planner": (self.spec.differentiate or "planner").title()
+                diff_col: diff_col.lstrip("_").replace("_", " ").title(),
             },
             template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Pastel
+            color_discrete_sequence=px.colors.qualitative.Pastel,
         )
         return fig.to_html(full_html=False, include_plotlyjs=False)
 
@@ -39,20 +43,24 @@ class ViolinRenderer(BasePlotRenderer):
         df_filtered = self._apply_filters(df)
         if self.spec.data_key not in df_filtered.columns:
             return
-            
+
+        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+        if diff_col not in df_filtered.columns:
+            return
+
         pdf = df_filtered.to_pandas()
         if pdf.empty:
             return
-            
+
         import matplotlib.pyplot as plt
         import seaborn as sns
-        
+
         plt.figure(figsize=(10, 6))
         sns.violinplot(
             data=pdf,
             y=self.spec.data_key,
-            hue=self.spec.differentiate or "planner",
-            inner="box"
+            hue=diff_col,
+            inner="box",
         )
         plt.title(self.spec.title)
         plt.tight_layout()

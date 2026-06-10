@@ -105,7 +105,7 @@ params = RobotParams.load("jackal")
 
 ### `PlotSpec`
 
-Pydantic model for entries in `viz_manifest.yaml`.
+Pydantic model for entries in `viz_manifest.yaml`. Supports `auto_differentiate: bool` (default `True`) to automatically resolve the color axis when analyzing data across multiple benchmarks that vary by different dimensions (planner, robot, stage, etc).
 
 ---
 

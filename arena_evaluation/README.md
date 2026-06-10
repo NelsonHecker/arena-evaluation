@@ -205,9 +205,13 @@ arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
 ### Regenerate Report Only
 
 ```bash
+# Single benchmark report
 arena evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
 # Reads combined_metrics.parquet + viz_manifest.yaml
 # Writes: report.html + plots/*.png
+
+# Multi-benchmark merged report
+arena evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
 ```
 
 The benchmark management CLI is accessed via:

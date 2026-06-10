@@ -21,8 +21,14 @@ It operates entirely **offline** and requires no running ROS 2 environment.
 ## Usage
 
 ```bash
-# Via the evaluation CLI
+# Via the evaluation CLI (single benchmark)
 evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
+
+# Merge multiple benchmarks into one report
+evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
+
+# Merge specific ad-hoc runs
+evaluation report --run-dir /opt/arena_ws/data/recordings/runA /opt/arena_ws/data/recordings/runB --output-dir ./merged_report
 
 # Or as part of the full pipeline
 evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
@@ -34,10 +40,16 @@ Or programmatically:
 from arena_evaluation.presentation.report_builder import ReportBuilder
 from pathlib import Path
 
+# Single source
 builder = ReportBuilder(benchmark_dir=Path("/opt/arena_ws/data/my_benchmark"))
 builder.build()
-# Writes: /opt/arena_ws/data/my_benchmark/report.html
-#         /opt/arena_ws/data/my_benchmark/plots/*.png
+
+# Multi-source merge
+builder = ReportBuilder.from_dirs(
+    source_dirs=[Path("/opt/arena_ws/data/bench1"), Path("/opt/arena_ws/data/bench2")],
+    output_dir=Path("./merged_report")
+)
+builder.build()
 ```
 
 ---
@@ -89,8 +101,8 @@ plots:
 | `type` | ✅ | One of: `violin`, `box`, `bar`, `trajectory`, `radar` |
 | `title` | ✅ | Human-readable plot title |
 | `data_key` | ✅ | Column name in the combined metrics Parquet file |
-| `group_by` | — | Column for x-axis / color grouping (default: `"planner"`) |
-| `differentiate` | — | Additional color differentiation column (default: `"planner"`) |
+| `group_by` | — | Column for x-axis grouping (default: `"planner"`) |
+| `differentiate` | — | Additional color differentiation column. If set to `null` (the default behaviour), the pipeline will automatically detect varying dimensions across merged data (e.g. planner, robot, stage) and build compound labels (e.g., `dwa / burger / stage_1`) to prevent data collapse. |
 | `filter` | — | Dict of `{column: value}` to filter rows before plotting |
 | `options` | — | Dict of renderer-specific options |
 

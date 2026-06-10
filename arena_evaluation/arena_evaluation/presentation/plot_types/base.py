@@ -5,6 +5,7 @@ import polars as pl
 import pathlib
 
 from ...storage.schemas import PlotSpec
+from ..dimension_detector import resolve_differentiate
 
 
 class BasePlotRenderer(ABC):
@@ -31,12 +32,15 @@ class BasePlotRenderer(ABC):
         Saves the PNG to out_path.
         """
         pass
-        
+
+    def resolve_diff_col(self, df: pl.DataFrame) -> tuple[str, pl.DataFrame]:
+        return resolve_differentiate(self.spec, df)
+
     def _apply_filters(self, df: pl.DataFrame) -> pl.DataFrame:
         """Apply filters defined in the PlotSpec."""
         if not self.spec.filter:
             return df
-            
+
         res_df = df
         for k, v in self.spec.filter.items():
             if k in res_df.columns:

@@ -113,7 +113,7 @@ ParquetStore.write(df, metadata, dest_path)
 # Read
 df, metadata = ParquetStore.read(source_path)
 
-# Combine multiple runs
+# Combine multiple runs or multiple benchmarks
 ParquetStore.combine([path1, path2, path3], combined_path)
 ```
 

@@ -133,6 +133,7 @@ class PlotSpec(BaseModel):
     data_key: str
     group_by: list[str] | str | None = None
     differentiate: str | None = "planner"
+    auto_differentiate: bool = True
     filter: dict[str, str] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
