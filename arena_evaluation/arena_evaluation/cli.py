@@ -1,10 +1,76 @@
 import argparse
+import os
 import pathlib
 import sys
 
 from arena_evaluation.processing.pipeline import ProcessingPipeline
 from arena_evaluation.presentation.report_builder import ReportBuilder
 from arena_evaluation.storage.folder_manager import FolderManager
+
+def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
+    search_roots = []
+
+    # Check ARENA_DATA_DIR env variable
+    arena_data_dir_env = os.environ.get("ARENA_DATA_DIR")
+    if arena_data_dir_env:
+        search_roots.append(pathlib.Path(arena_data_dir_env))
+
+    # Check relative to CWD
+    cwd = pathlib.Path.cwd()
+    search_roots.append(cwd / "data")
+
+    # Walk up the CWD to find a "data" directory (e.g. if we are deep in src/Arena/...)
+    for parent in cwd.parents:
+        data_candidate = parent / "data"
+        if data_candidate.is_dir():
+            search_roots.append(data_candidate)
+
+    # Check package share directory
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        pkg_data = pathlib.Path(get_package_share_directory("arena_evaluation")) / "data"
+        if pkg_data.is_dir():
+            search_roots.append(pkg_data)
+    except Exception:
+        pass
+
+    # Deduplicate search roots while preserving order
+    unique_search_roots = []
+    seen = set()
+    for root in search_roots:
+        resolved_root = root.resolve()
+        if resolved_root not in seen and resolved_root.is_dir():
+            seen.add(resolved_root)
+            unique_search_roots.append(resolved_root)
+
+    # Resolve benchmark_dir or run_dir from search roots
+    if getattr(args, "run_dir", None) is not None:
+        run_dir: pathlib.Path = args.run_dir
+        if not run_dir.exists():
+            for root in unique_search_roots:
+                for sub in ("recordings", "recording"):
+                    candidate = root / sub / run_dir
+                    if candidate.is_dir():
+                        args.run_dir = candidate.resolve()
+                        break
+                else:
+                    continue
+                break
+
+    if getattr(args, "benchmark_dir", None) is not None:
+        benchmark_dir: pathlib.Path = args.benchmark_dir
+        if not benchmark_dir.exists():
+            for root in unique_search_roots:
+                for sub in ("benchmarks", "benchmark"):
+                    candidate = root / sub / benchmark_dir
+                    if candidate.is_dir():
+                        args.benchmark_dir = candidate.resolve()
+                        break
+                else:
+                    continue
+                break
+
+    return args
 
 def main():
     parser = argparse.ArgumentParser(
@@ -87,6 +153,7 @@ Examples:
     )
 
     args = parser.parse_args()
+    args = resolve_paths(args)
 
     # ── Validate path ──────────────────────────────────────────────────────────
     target_dir = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)
