@@ -124,10 +124,25 @@ class MCAPReader:
         tf_gt_poses = []
         env_prefix = None
 
+        from mcap.reader import NonSeekingReader
+
         with open(actual_path, "rb") as f:
-            reader = make_reader(f, decoder_factories=[DecoderFactory()])
+            reader = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
             
-            for schema, channel, message, ros_msg in reader.iter_decoded_messages():
+            msg_count = 0
+            def safe_iter(it):
+                nonlocal msg_count
+                try:
+                    for item in it:
+                        msg_count += 1
+                        yield item
+                except Exception as e:
+                    import logging
+                    logging.getLogger("mcap_reader").warning(
+                        f"MCAP reading hit a record error: {e}. Salvaged {msg_count} messages."
+                    )
+
+            for schema, channel, message, ros_msg in safe_iter(reader.iter_decoded_messages(log_time_order=False)):
                 topic = channel.topic
                 
                 # Dynamically detect the environment prefix (e.g. "env_0") to filter global /tf transforms

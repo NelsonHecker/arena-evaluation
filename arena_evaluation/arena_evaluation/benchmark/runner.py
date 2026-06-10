@@ -203,6 +203,22 @@ def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
     for k, v in d.items():
         name = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
+            if "min" in v and "max" in v and len(v) == 2:
+                n_name = f"{name}.n"
+                pv = ParameterValue()
+                val_min = v["min"]
+                val_max = v["max"]
+                if isinstance(val_min, int) and isinstance(val_max, int):
+                    pv.type = ParameterType.PARAMETER_INTEGER_ARRAY
+                    pv.integer_array_value = [val_min, val_max]
+                else:
+                    pv.type = ParameterType.PARAMETER_DOUBLE_ARRAY
+                    pv.double_array_value = [float(val_min), float(val_max)]
+                p = Parameter()
+                p.name = n_name
+                p.value = pv
+                out.append(p)
+                continue
             out.extend(_walk_dict(v, name))
             continue
         pv = ParameterValue()
@@ -218,6 +234,24 @@ def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
         elif isinstance(v, str):
             pv.type = ParameterType.PARAMETER_STRING
             pv.string_value = v
+        elif isinstance(v, list):
+            if not v:
+                pv.type = ParameterType.PARAMETER_STRING_ARRAY
+                pv.string_array_value = []
+            elif all(isinstance(x, bool) for x in v):
+                pv.type = ParameterType.PARAMETER_BOOL_ARRAY
+                pv.bool_array_value = v
+            elif all(isinstance(x, int) for x in v):
+                pv.type = ParameterType.PARAMETER_INTEGER_ARRAY
+                pv.integer_array_value = v
+            elif all(isinstance(x, float) for x in v):
+                pv.type = ParameterType.PARAMETER_DOUBLE_ARRAY
+                pv.double_array_value = v
+            elif all(isinstance(x, str) for x in v):
+                pv.type = ParameterType.PARAMETER_STRING_ARRAY
+                pv.string_array_value = v
+            else:
+                raise TypeError(f"unsupported mixed list type for {name!r}")
         else:
             raise TypeError(f"unsupported param type for {name!r}: {type(v).__name__}")
         p = Parameter()

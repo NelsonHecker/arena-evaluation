@@ -991,11 +991,10 @@ def test_flatten_random_nested_counts():
         tm_robots="random",
     )
     by_name = {p.name: p for p in obs}
-    assert "dynamic.min" in by_name
-    assert "dynamic.max" in by_name
-    assert by_name["dynamic.min"].value.type == ParameterType.PARAMETER_INTEGER
-    assert by_name["dynamic.min"].value.integer_value == 2
-    assert by_name["dynamic.max"].value.integer_value == 5
+    assert "dynamic.n" in by_name
+    assert by_name["dynamic.n"].value.type == ParameterType.PARAMETER_INTEGER_ARRAY
+    assert list(by_name["dynamic.n"].value.integer_array_value) == [2, 5]
+
 
 
 def test_flatten_empty_config_yields_empty():
