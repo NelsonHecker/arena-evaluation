@@ -22,6 +22,7 @@ from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan, JointState
 from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry, Path
+from tf2_msgs.msg import TFMessage
 
 try:
     from arena_people_msgs.msg import Pedestrians
@@ -157,12 +158,25 @@ class DataRecorderNode(Node):
             ("suite_name", "unknown"),
             ("contest_name", "unknown"),
             ("model", ""),
+            ("benchmark_id", ""),
+            ("planner", ""),
+            ("stage", ""),
         ]:
             if not self.has_parameter(param_name):
                 try:
                     self.declare_parameter(param_name, default_val)
                 except Exception:
                     pass
+                    
+        # Override path-inferred values with explicit ROS parameters if provided
+        param_benchmark = self.get_parameter("benchmark_id").value
+        if param_benchmark: self.benchmark_id = param_benchmark
+        
+        param_planner = self.get_parameter("planner").value
+        if param_planner: self.planner = param_planner
+        
+        param_stage = self.get_parameter("stage").value
+        if param_stage: self.stage = param_stage
 
         robot_param = self.get_parameter("robot").value
         self.robot_model = robot_param if robot_param else robot_name_from_ns if robot_name_from_ns else "unknown"
@@ -323,6 +337,7 @@ class DataRecorderNode(Node):
             (f"{ns_prefix}/cmd_vel", Twist),
             (f"{ns_prefix}/joint_states", JointState),
             (f"{ns_prefix}/lidar", LaserScan),
+            ("/tf", TFMessage),
         ]
 
         if robot_name:
@@ -372,6 +387,11 @@ class DataRecorderNode(Node):
             sub = self.create_subscription(RobotFleet, robots_topic, self._create_unthrottled_callback(robots_topic), self.latched_qos)
             self.subs.append(sub)
             self.get_logger().info(f"Subscribed to RobotFleet on {robots_topic}")
+
+        # Subscribe to /tf_static with latched QoS
+        self._register_topic("/tf_static", TFMessage)
+        sub_tf_static = self.create_subscription(TFMessage, "/tf_static", self._create_unthrottled_callback("/tf_static"), self.latched_qos)
+        self.subs.append(sub_tf_static)
 
         # Dynamic discovery fallback (picks up odom topics with non-standard names)
         self.create_timer(1.0, self.discover_topics)
@@ -573,6 +593,7 @@ class DataRecorderNode(Node):
             benchmark_id=self.benchmark_id,
             planner=self.planner,
             stage=self.stage,
+            map_name=self.world,
             episodes_requested=0,
             robot_model=self.robot_model,
             suite_name=self.suite_name,

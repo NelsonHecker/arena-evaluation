@@ -49,15 +49,19 @@ class ReportBuilder:
             # Generate static PNG
             png_path = self.plots_dir / f"{spec.id}.png"
             try:
-                seaborn_renderer.render(spec, df, png_path)
+                seaborn_renderer.render(spec, df, png_path, run_dir=self.benchmark_dir)
             except Exception as e:
                 print(f"Warning: Failed to render static plot {spec.id}: {e}")
                 
             # Generate interactive HTML chunk
             try:
-                html_chunk = plotly_renderer.render(spec, df)
+                html_chunk = plotly_renderer.render(spec, df, run_dir=self.benchmark_dir)
                 if html_chunk:
-                    html_plots.append((spec.layout_group, html_chunk))
+                    if isinstance(html_chunk, list):
+                        for chunk in html_chunk:
+                            html_plots.append((spec.layout_group, chunk))
+                    else:
+                        html_plots.append((spec.layout_group, html_chunk))
             except Exception as e:
                 print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
                 

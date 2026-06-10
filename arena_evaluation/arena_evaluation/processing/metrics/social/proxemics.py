@@ -49,8 +49,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
         if episode.data is None or "pos_x" not in episode.data.columns or "peds_positions" not in episode.data.columns:
             return {k: None for k in self.output_keys()}
             
-        pos_x = episode.data["pos_x"].to_numpy()
-        pos_y = episode.data["pos_y"].to_numpy()
+        pos_x, pos_y, _, _, _, _ = self.resolve_robot_pose(episode)
         time_ns = episode.data["time_ns"].to_numpy()
         peds_positions = episode.data["peds_positions"].to_list()
         

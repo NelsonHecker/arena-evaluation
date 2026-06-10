@@ -102,6 +102,7 @@ class ProcessingPipeline:
             ep_metrics["episode"] = ep.episode_id
             ep_metrics["planner"] = run.planner
             ep_metrics["robot"] = robot_model
+            ep_metrics["map"] = metadata.map
             ep_metrics["stage"] = run.stage
             ep_metrics["benchmark_id"] = run.benchmark_id
             ep_metrics["start"] = ep.start_pos
@@ -216,6 +217,7 @@ class ProcessingPipeline:
             ep_metrics["episode"] = ep.episode_id
             ep_metrics["planner"] = descriptor.planner
             ep_metrics["robot"] = robot_model
+            ep_metrics["map"] = metadata.map
             ep_metrics["stage"] = descriptor.stage
             ep_metrics["benchmark_id"] = descriptor.benchmark_id
             ep_metrics["start"] = ep.start_pos

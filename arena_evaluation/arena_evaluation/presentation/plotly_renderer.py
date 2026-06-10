@@ -27,10 +27,12 @@ class PlotlyRenderer:
             "histogram": HistogramRenderer,
         }
 
-    def render(self, spec: PlotSpec, df: pl.DataFrame) -> str | None:
+    def render(self, spec: PlotSpec, df: pl.DataFrame, run_dir: pathlib.Path | None = None) -> str | list[str] | None:
         renderer_cls = self.renderers.get(spec.type)
         if not renderer_cls:
             return None
             
         renderer = renderer_cls(spec)
+        if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
+            renderer.run_dir = run_dir
         return renderer.render_plotly(df)

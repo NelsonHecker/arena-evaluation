@@ -43,6 +43,56 @@ class BaseMetricCalculator(ABC):
         """
         self.robot_params = robot_params
 
+    def resolve_robot_pose(self, episode: "AlignedEpisodeBundle") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame.
+        Handles both absolute/relative TF ground truth (tf_gt) and fallback to raw odom.
+        Returns:
+            (pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans)
+        """
+        import numpy as np
+        
+        # 1. Extract raw odom
+        odom_x = episode.data["pos_x"].to_numpy().copy()
+        odom_y = episode.data["pos_y"].to_numpy().copy()
+        odom_yaw = episode.data["yaw"].to_numpy().copy()
+        
+        # 2. Transform raw odom to map frame if start_pos is available
+        if episode.start_pos and len(episode.start_pos) >= 2 and len(odom_x) > 0:
+            start_x, start_y = episode.start_pos[0], episode.start_pos[1]
+            start_yaw = episode.start_pos[2] if len(episode.start_pos) >= 3 else 0.0
+            
+            odom_x0 = odom_x[0]
+            odom_y0 = odom_y[0]
+            odom_yaw0 = odom_yaw[0]
+            
+            theta = start_yaw - odom_yaw0
+            cos_t = np.cos(theta)
+            sin_t = np.sin(theta)
+            
+            dx = odom_x - odom_x0
+            dy = odom_y - odom_y0
+            
+            odom_x_trans = start_x + dx * cos_t - dy * sin_t
+            odom_y_trans = start_y + dx * sin_t + dy * cos_t
+            odom_yaw_trans = odom_yaw + theta
+            odom_yaw_trans = (odom_yaw_trans + np.pi) % (2 * np.pi) - np.pi
+        else:
+            odom_x_trans, odom_y_trans, odom_yaw_trans = odom_x, odom_y, odom_yaw
+
+        # 3. Check if we should use ground truth TF
+        use_gt = "pos_x_gt" in episode.data.columns
+        if use_gt:
+            pos_x = episode.data["pos_x_gt"].to_numpy().copy()
+            pos_y = episode.data["pos_y_gt"].to_numpy().copy()
+            yaw = episode.data["yaw_gt"].to_numpy().copy()
+        else:
+            pos_x = odom_x_trans
+            pos_y = odom_y_trans
+            yaw = odom_yaw_trans
+            
+        return pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans
+
     @classmethod
     @abstractmethod
     def output_keys(cls) -> list[str]:

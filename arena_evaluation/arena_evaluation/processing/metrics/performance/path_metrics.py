@@ -35,6 +35,7 @@ class PathMetricsCalculator(BaseMetricCalculator):
     def output_keys(cls) -> list[str]:
         return [
             "path",
+            "path_odom",
             "path_length_values",
             "path_length",
             "curvature",
@@ -55,10 +56,9 @@ class PathMetricsCalculator(BaseMetricCalculator):
         if episode.data is None or "pos_x" not in episode.data.columns:
             return {k: None for k in self.output_keys()}
             
-        pos_x = episode.data["pos_x"].to_numpy()
-        pos_y = episode.data["pos_y"].to_numpy()
-        yaw = episode.data["yaw"].to_numpy()
-        
+        pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans = self.resolve_robot_pose(episode)
+        path_odom_3d = np.column_stack((odom_x_trans, odom_y_trans, odom_yaw_trans))
+            
         # Combine into (N, 3) and (N, 2) arrays
         path_3d = np.column_stack((pos_x, pos_y, yaw))
         path_2d = np.column_stack((pos_x, pos_y))
@@ -67,6 +67,7 @@ class PathMetricsCalculator(BaseMetricCalculator):
         if N < 2:
             return {
                 "path": path_3d.tolist(),
+                "path_odom": path_odom_3d.tolist(),
                 "path_length_values": [],
                 "path_length": 0.0,
                 "curvature": [],
@@ -92,6 +93,7 @@ class PathMetricsCalculator(BaseMetricCalculator):
         if N < 3:
             return {
                 "path": path_3d.tolist(),
+                "path_odom": path_odom_3d.tolist(),
                 "path_length_values": path_length_values.tolist(),
                 "path_length": path_length,
                 "curvature": [],
@@ -126,6 +128,7 @@ class PathMetricsCalculator(BaseMetricCalculator):
             
         return {
             "path": path_3d.tolist(),
+            "path_odom": path_odom_3d.tolist(),
             "path_length_values": path_length_values.tolist(),
             "path_length": path_length,
             "curvature": curvature.tolist(),

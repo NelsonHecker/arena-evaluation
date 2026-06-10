@@ -19,6 +19,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
     from sensor_msgs.msg import JointState
     from nav_msgs.msg import Path
+    from tf2_msgs.msg import TFMessage
 
     # Optional dependencies
     try:
@@ -55,6 +56,8 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "plan": TopicDefinition(f"{ns}/plan", Path, throttled=False),
         "goal_pose": TopicDefinition(f"{p_ns}/goal_pose", PoseStamped, throttled=False),
         "initialpose": TopicDefinition(f"{p_ns}/initialpose", PoseWithCovarianceStamped, throttled=False),
+        "tf": TopicDefinition("/tf", TFMessage, throttled=True),
+        "tf_static": TopicDefinition("/tf_static", TFMessage, throttled=False, qos_transient_local=True),
     }
 
     if HAS_PEDSIM:

@@ -45,6 +45,7 @@ class IngestionMetadata:
         benchmark_id: str,
         planner: str,
         stage: str,
+        map_name: str,
         episodes_requested: int,
         robot_model: str,
         suite_name: str,
@@ -56,7 +57,7 @@ class IngestionMetadata:
             benchmark_id=benchmark_id,
             planner=planner,
             robot_model=[robot_model],
-            map="unknown", # Usually passed down but difficult to extract cleanly at startup
+            map=map_name,
             stage=stage,
             episodes_requested=episodes_requested,
             suite_name=suite_name,

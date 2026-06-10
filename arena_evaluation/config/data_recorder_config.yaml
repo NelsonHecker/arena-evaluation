@@ -12,4 +12,5 @@ record_frequencies:
   robots: 0.0    # latched fleet state (recorded unthrottled)
   reset_start: 0.0 # event-driven (recorded unthrottled)
   reset_end: 0.0 # event-driven (recorded unthrottled)
+  tf: 20.0       # standard transform topic
   default: 20.0  # cmd_vel, joint_states, etc.

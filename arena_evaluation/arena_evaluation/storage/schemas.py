@@ -109,6 +109,10 @@ class TopicBundle:
     episode_record: pl.DataFrame | None = None
     collision_events: pl.DataFrame | None = None
     plan: pl.DataFrame | None = None
+    initialpose: pl.DataFrame | None = None
+    tf: pl.DataFrame | None = None
+    tf_static: pl.DataFrame | None = None
+    tf_gt: pl.DataFrame | None = None
 
 
 @dataclass
@@ -127,7 +131,7 @@ class PlotSpec(BaseModel):
     type: str
     title: str
     data_key: str
-    group_by: str | None = None
+    group_by: list[str] | str | None = None
     differentiate: str | None = "planner"
     filter: dict[str, str] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)

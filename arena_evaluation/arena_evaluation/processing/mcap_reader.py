@@ -116,17 +116,36 @@ class MCAPReader:
             "episode_record": defaultdict(list),
             "collision_events": defaultdict(list),
             "plan": defaultdict(list),
+            "initialpose": defaultdict(list),
+            "tf": defaultdict(list),
+            "tf_static": defaultdict(list),
         }
+
+        tf_gt_poses = []
+        env_prefix = None
 
         with open(actual_path, "rb") as f:
             reader = make_reader(f, decoder_factories=[DecoderFactory()])
             
             for schema, channel, message, ros_msg in reader.iter_decoded_messages():
                 topic = channel.topic
+                
+                # Dynamically detect the environment prefix (e.g. "env_0") to filter global /tf transforms
+                if env_prefix is None and ("env_" in topic or "env" in topic):
+                    import re
+                    match = re.search(r'env_(\d+)', topic)
+                    if match:
+                        env_prefix = f"env_{match.group(1)}"
+                
+                # Filter other namespaced topics to ensure we only read data for the active environment
+                if env_prefix and topic not in ("/tf", "tf", "/tf_static", "tf_static"):
+                    if env_prefix not in topic:
+                        continue
+                        
                 ts_ns = message.log_time
                 
                 # Odom
-                if topic.endswith("/odom"):
+                if topic.endswith("/odom") and "jackal_velocity_controller" not in topic:
                     data["odom"]["time_ns"].append(ts_ns)
                     data["odom"]["pos_x"].append(ros_msg.pose.pose.position.x)
                     data["odom"]["pos_y"].append(ros_msg.pose.pose.position.y)
@@ -174,16 +193,24 @@ class MCAPReader:
                     data["joint_states"]["joint_vel_left"].append(vels[0] if len(vels) > 0 else 0.0)
                     data["joint_states"]["joint_vel_right"].append(vels[1] if len(vels) > 1 else 0.0)
                     
-                # Plan
                 elif topic.endswith("/plan") or topic.endswith("/global_plan"):
                     data["plan"]["time_ns"].append(ts_ns)
                     poses_x = []
                     poses_y = []
+                    poses_yaw = []
                     for pose_stamped in ros_msg.poses:
                         poses_x.append(pose_stamped.pose.position.x)
                         poses_y.append(pose_stamped.pose.position.y)
+                        yaw = self._quaternion_to_yaw(
+                            pose_stamped.pose.orientation.x,
+                            pose_stamped.pose.orientation.y,
+                            pose_stamped.pose.orientation.z,
+                            pose_stamped.pose.orientation.w
+                        )
+                        poses_yaw.append(yaw)
                     data["plan"]["poses_x"].append(poses_x)
                     data["plan"]["poses_y"].append(poses_y)
+                    data["plan"]["poses_yaw"].append(poses_yaw)
                     
                 # Pedestrians (arena_people_msgs/Pedestrians)
                 elif topic.endswith("/arena_peds"):
@@ -228,6 +255,72 @@ class MCAPReader:
                 elif topic.endswith("/collision_events"):
                     data["collision_events"]["time_ns"].append(ts_ns)
                     data["collision_events"]["collision_event"].append(str(ros_msg))
+                    
+                # Initial Pose
+                elif topic.endswith("/initialpose"):
+                    data["initialpose"]["time_ns"].append(ts_ns)
+                    data["initialpose"]["pos_x"].append(ros_msg.pose.pose.position.x)
+                    data["initialpose"]["pos_y"].append(ros_msg.pose.pose.position.y)
+                    
+                    yaw = self._quaternion_to_yaw(
+                        ros_msg.pose.pose.orientation.x,
+                        ros_msg.pose.pose.orientation.y,
+                        ros_msg.pose.pose.orientation.z,
+                        ros_msg.pose.pose.orientation.w
+                    )
+                    data["initialpose"]["yaw"].append(yaw)
+
+                # TF and TF Static
+                elif topic in ("/tf", "tf", "/tf_static", "tf_static"):
+                    target_dict = data["tf_static"] if "static" in topic else data["tf"]
+                    for t in ros_msg.transforms:
+                        target_dict["time_ns"].append(ts_ns)
+                        target_dict["frame_id"].append(t.header.frame_id)
+                        target_dict["child_frame_id"].append(t.child_frame_id)
+                        target_dict["trans_x"].append(t.transform.translation.x)
+                        target_dict["trans_y"].append(t.transform.translation.y)
+                        target_dict["trans_z"].append(t.transform.translation.z)
+                        target_dict["rot_x"].append(t.transform.rotation.x)
+                        target_dict["rot_y"].append(t.transform.rotation.y)
+                        target_dict["rot_z"].append(t.transform.rotation.z)
+                        target_dict["rot_w"].append(t.transform.rotation.w)
+
+                        # Detect ground-truth map/world/odom -> base_link transform if available
+                        parent = t.header.frame_id.strip('/')
+                        child = t.child_frame_id.strip('/')
+                        parent_lower = parent.lower()
+                        child_lower = child.lower()
+                        
+                        is_world_frame = (
+                            parent_lower in ("map", "world", "odom") or
+                            parent_lower.endswith("/map") or
+                            parent_lower.endswith("/world") or
+                            parent_lower.endswith("/odom")
+                        )
+                        is_base_frame = (
+                            child_lower.endswith("base_link") or
+                            child_lower.endswith("base_footprint") or
+                            "base_link" in child_lower or
+                            "base_footprint" in child_lower
+                        )
+                        
+                        # Filter by env_prefix if detected to avoid mixing up TF frames from other environments in shared /tf topic
+                        if env_prefix and env_prefix not in child_lower:
+                            continue
+                            
+                        if is_world_frame and is_base_frame:
+                            yaw_val = self._quaternion_to_yaw(
+                                t.transform.rotation.x,
+                                t.transform.rotation.y,
+                                t.transform.rotation.z,
+                                t.transform.rotation.w
+                            )
+                            tf_gt_poses.append({
+                                "time_ns": ts_ns,
+                                "pos_x_gt": t.transform.translation.x,
+                                "pos_y_gt": t.transform.translation.y,
+                                "yaw_gt": yaw_val
+                            })
 
         # Convert dicts of lists to Polars DataFrames
         bundle = TopicBundle()
@@ -238,5 +331,10 @@ class MCAPReader:
                 # Sort by time to ensure join_asof works correctly later
                 df = df.sort("time_ns")
                 setattr(bundle, key, df)
+                
+        # Save TF ground-truth poses directly on the bundle
+        if tf_gt_poses:
+            print(f"  [MCAPReader] Found {len(tf_gt_poses)} TF ground-truth transforms. Storing as separate tf_gt channel...")
+            bundle.tf_gt = pl.DataFrame(tf_gt_poses).sort("time_ns")
                 
         return bundle

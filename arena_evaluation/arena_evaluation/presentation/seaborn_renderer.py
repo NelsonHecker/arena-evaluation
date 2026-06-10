@@ -32,10 +32,12 @@ class SeabornRenderer:
         import seaborn as sns
         sns.set_theme(style="whitegrid", palette="husl")
 
-    def render(self, spec: PlotSpec, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render(self, spec: PlotSpec, df: pl.DataFrame, out_path: pathlib.Path, run_dir: pathlib.Path | None = None) -> None:
         renderer_cls = self.renderers.get(spec.type)
         if not renderer_cls:
             return
             
         renderer = renderer_cls(spec)
+        if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
+            renderer.run_dir = run_dir
         renderer.render_seaborn(df, out_path)

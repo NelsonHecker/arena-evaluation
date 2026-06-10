@@ -17,10 +17,10 @@ class BasePlotRenderer(ABC):
         self.spec = spec
 
     @abstractmethod
-    def render_plotly(self, df: pl.DataFrame) -> str | None:
+    def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
         """
         Render interactive plot using Plotly.
-        Returns the HTML string representation of the plot.
+        Returns the HTML string representation of the plot, or a list of HTML strings.
         """
         pass
 

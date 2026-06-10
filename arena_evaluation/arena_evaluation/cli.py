@@ -77,12 +77,12 @@ Examples:
     )
     subparsers.add_parser(
         "report",
-        parents=[benchmark_parent],
+        parents=[run_parent],
         help="Layer 5: Generate an interactive HTML report from existing metrics.parquet.",
     )
     subparsers.add_parser(
         "plot",
-        parents=[benchmark_parent],
+        parents=[run_parent],
         help="Layer 5: Generate static PNG plots only (no HTML report).",
     )
 

@@ -86,6 +86,27 @@ class EpisodeSplitter:
             except Exception:
                 pass
                 
+            if not start_pos and bundle.initialpose is not None and len(bundle.initialpose) > 0:
+                # Find initialpose closest to start_time
+                df_init = bundle.initialpose.filter(pl.col("time_ns") >= start_time)
+                if len(df_init) > 0:
+                    row_init = df_init.row(0, named=True)
+                else:
+                    row_init = bundle.initialpose.row(-1, named=True)
+                start_pos = [row_init["pos_x"], row_init["pos_y"], row_init["yaw"]]
+                
+            # Fallback/Override: If initialpose yaw is inaccurate (common Flatland teleport bug),
+            # check the Global Planner's first pose which contains the true physical spawn yaw!
+            if start_pos and len(start_pos) == 3 and bundle.plan is not None and len(bundle.plan) > 0:
+                df_plan = bundle.plan.filter(pl.col("time_ns") >= start_time)
+                if len(df_plan) > 0:
+                    row_plan = df_plan.row(0, named=True)
+                    if "poses_yaw" in row_plan and len(row_plan["poses_yaw"]) > 0:
+                        plan_yaw = row_plan["poses_yaw"][0]
+                        # If there's a huge discrepancy (> 1.0 rad), trust the Global Planner.
+                        # Do not trust the planner if it only publishes dummy 0.0 orientations.
+                        if plan_yaw != 0.0 and abs(start_pos[2] - plan_yaw) > 1.0:
+                            start_pos[2] = plan_yaw
             episodes.append(
                 AlignedEpisodeBundle(
                     episode_id=row["episode_id"],
