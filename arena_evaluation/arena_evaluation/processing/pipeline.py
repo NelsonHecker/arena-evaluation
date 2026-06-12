@@ -93,6 +93,8 @@ class ProcessingPipeline:
         # 4. Calculate Metrics
         registry = MetricRegistry(robot_params)
         pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
+        if bundle.peds is not None:
+            pedsim_avail = True
 
         available_topics = set()
         for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
@@ -106,6 +108,13 @@ class ProcessingPipeline:
             # 5. Add identity columns
             ep_metrics["episode"] = ep.episode_id
             ep_metrics["planner"] = run.planner
+            
+            # Extract and add local_planner and inter_planner columns
+            from ..presentation.dimension_detector import split_planner_name
+            lp, ip = split_planner_name(run.planner)
+            ep_metrics["local_planner"] = lp
+            ep_metrics["inter_planner"] = ip
+            
             ep_metrics["robot"] = robot_model
             ep_metrics["map"] = metadata.map
             ep_metrics["stage"] = run.stage
@@ -215,6 +224,8 @@ class ProcessingPipeline:
         print(f"  Computing metrics for {len(episodes)} episodes...")
         registry = MetricRegistry(robot_params)
         pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
+        if bundle.peds is not None:
+            pedsim_avail = True
 
         available_topics = set()
         for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
@@ -226,6 +237,13 @@ class ProcessingPipeline:
             ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
             ep_metrics["episode"] = ep.episode_id
             ep_metrics["planner"] = descriptor.planner
+            
+            # Extract and add local_planner and inter_planner columns
+            from ..presentation.dimension_detector import split_planner_name
+            lp, ip = split_planner_name(descriptor.planner)
+            ep_metrics["local_planner"] = lp
+            ep_metrics["inter_planner"] = ip
+            
             ep_metrics["robot"] = robot_model
             ep_metrics["map"] = metadata.map
             ep_metrics["stage"] = descriptor.stage

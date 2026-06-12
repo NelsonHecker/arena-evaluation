@@ -93,7 +93,7 @@ class TopicParquetStore:
     @staticmethod
     def write(bundle: TopicBundle, dest_dir: pathlib.Path) -> None:
         """
-        Write non-None DataFrames in a TopicBundle to Parquet files using zstd compression.
+        Write non-None DataFrames/LazyFrames in a TopicBundle to Parquet files using zstd compression.
         """
         dest_dir.mkdir(parents=True, exist_ok=True)
         
@@ -101,14 +101,21 @@ class TopicParquetStore:
         import dataclasses
         for field in dataclasses.fields(bundle):
             df = getattr(bundle, field.name)
-            if df is not None and not df.is_empty():
-                # Write to a temporary file first for atomic writes
-                temp_path = dest_dir / f"{field.name}.parquet.tmp"
+            if df is not None:
                 final_path = dest_dir / f"{field.name}.parquet"
                 
-                # Zstd compression provides excellent speed/compression ratio for columnar data
-                df.write_parquet(temp_path, compression="zstd")
-                temp_path.rename(final_path)
+                # If it is a LazyFrame, check if the file is already written
+                if isinstance(df, pl.LazyFrame):
+                    if final_path.exists():
+                        # Already written by MCAPReader or cached
+                        continue
+                    df = df.collect()
+                
+                if not df.is_empty():
+                    # Write to a temporary file first for atomic writes
+                    temp_path = dest_dir / f"{field.name}.parquet.tmp"
+                    df.write_parquet(temp_path, compression="zstd")
+                    temp_path.rename(final_path)
 
     @staticmethod
     def read(source_dir: pathlib.Path) -> TopicBundle | None:
@@ -127,8 +134,10 @@ class TopicParquetStore:
         for p in parquet_files:
             topic_name = p.stem
             try:
-                df = pl.read_parquet(p)
-                kwargs[topic_name] = df
+                lf = pl.scan_parquet(p)
+                if "time_ns" in lf.columns:
+                    lf = lf.sort("time_ns")
+                kwargs[topic_name] = lf
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f"Failed to read extracted parquet {p}: {e}")

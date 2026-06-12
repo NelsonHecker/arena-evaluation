@@ -56,16 +56,22 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
 
     # Resolve benchmark_dirs or run_dirs from search roots
     if getattr(args, "run_dir", None) is not None:
-        args.run_dir = [
-            _resolve_single_path(p, ("recordings", "recording"))
-            for p in args.run_dir
-        ]
+        if isinstance(args.run_dir, list):
+            args.run_dir = [
+                _resolve_single_path(p, ("recordings", "recording"))
+                for p in args.run_dir
+            ]
+        else:
+            args.run_dir = _resolve_single_path(args.run_dir, ("recordings", "recording"))
 
     if getattr(args, "benchmark_dir", None) is not None:
-        args.benchmark_dir = [
-            _resolve_single_path(p, ("benchmarks", "benchmark"))
-            for p in args.benchmark_dir
-        ]
+        if isinstance(args.benchmark_dir, list):
+            args.benchmark_dir = [
+                _resolve_single_path(p, ("benchmarks", "benchmark"))
+                for p in args.benchmark_dir
+            ]
+        else:
+            args.benchmark_dir = _resolve_single_path(args.benchmark_dir, ("benchmarks", "benchmark"))
 
     return args
 

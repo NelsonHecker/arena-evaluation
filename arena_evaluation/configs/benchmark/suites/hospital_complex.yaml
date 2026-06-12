@@ -1,8 +1,9 @@
 stages:
-- name: hospital_stage_1
+# ── Jackal ───────────────────────────────────────────────────────────────────
+- name: hospital_stage_1_jackal
   map: hospital_1
   robot: jackal
-  episodes: 5
+  episodes: 20
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -16,10 +17,27 @@ stages:
         min: 4
         max: 4
 
-- name: hospital_stage_2
+- name: hospital_stage_2_jackal
   map: hospital_1
   robot: jackal
-  episodes: 5
+  episodes: 20
+  seed: 42
+  tm_robots: random
+  tm_obstacles: random
+  timeout: 200s
+  config:
+    random:
+      dynamic:
+        min: 3
+        max: 3
+      static:
+        min: 6
+        max: 6
+
+- name: hospital_stage_3_jackal
+  map: hospital_1
+  robot: jackal
+  episodes: 20
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -33,10 +51,10 @@ stages:
         min: 8
         max: 8
 
-- name: hospital_stage_3
+- name: hospital_stage_4_jackal
   map: hospital_1
   robot: jackal
-  episodes: 5
+  episodes: 20
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -50,10 +68,10 @@ stages:
         min: 12
         max: 12
 
-- name: hospital_stage_4
+- name: hospital_stage_5_jackal
   map: hospital_1
   robot: jackal
-  episodes: 5
+  episodes: 20
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -66,20 +84,3 @@ stages:
       static:
         min: 16
         max: 16
-
-- name: hospital_stage_5
-  map: hospital_1
-  robot: jackal
-  episodes: 5
-  seed: 42
-  tm_robots: random
-  tm_obstacles: random
-  timeout: 200s
-  config:
-    random:
-      dynamic:
-        min: 10
-        max: 10
-      static:
-        min: 20
-        max: 20

@@ -90,8 +90,15 @@ class PathMetricsCalculator(BaseMetricCalculator):
         turn = angle_difference(yaw[:-1], yaw[1:])
         angle_over_length = float(np.abs(np.sum(turn) / path_length)) if path_length > 0 else 0.0
         
-        # Curvature & Roughness (requires at least 3 points)
-        if N < 3:
+        # Filter out consecutive duplicate/stationary points (distance < 1mm) for curvature and roughness
+        diffs = np.linalg.norm(path_2d[1:] - path_2d[:-1], axis=1)
+        keep_mask = np.concatenate(([True], diffs > 0.001))
+        path_2d_clean = path_2d[keep_mask]
+        
+        N_clean = len(path_2d_clean)
+        
+        # Curvature & Roughness (requires at least 3 clean points)
+        if N_clean < 3:
             return {
                 "path": path_3d.tolist(),
                 "path_odom": path_odom_3d.tolist(),
@@ -105,9 +112,9 @@ class PathMetricsCalculator(BaseMetricCalculator):
                 "angle_over_length": angle_over_length,
             }
             
-        p0 = path_2d[:-2]
-        p1 = path_2d[1:-1]
-        p2 = path_2d[2:]
+        p0 = path_2d_clean[:-2]
+        p1 = path_2d_clean[1:-1]
+        p2 = path_2d_clean[2:]
         
         d01 = np.linalg.norm(p0 - p1, axis=1)
         d12 = np.linalg.norm(p1 - p2, axis=1)

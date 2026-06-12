@@ -41,9 +41,15 @@ class RadarRenderer(BasePlotRenderer):
             .agg([pl.col(m).mean().alias(m) for m in valid_metrics])
             .to_pandas()
         )
+        grouped = grouped.fillna(0.0)
 
         if grouped.empty:
             return None
+
+        normalized = grouped.copy()
+
+        # Metrics where higher values are better (should not be inverted)
+        positive_metrics = {"success", "success_rate", "path_efficiency", "velocity_mean", "velocity_max"}
 
         for m in valid_metrics:
             max_val = normalized[m].max()
@@ -52,7 +58,7 @@ class RadarRenderer(BasePlotRenderer):
             if max_val == min_val:
                 normalized[m] = 1.0
             else:
-                if m == "path_efficiency":
+                if m in positive_metrics:
                     normalized[m] = (normalized[m] - min_val) / (max_val - min_val)
                 else:
                     normalized[m] = 1.0 - ((normalized[m] - min_val) / (max_val - min_val))
@@ -67,9 +73,10 @@ class RadarRenderer(BasePlotRenderer):
             fig.add_trace(go.Scatterpolar(
                 r=values,
                 theta=labels,
-                fill="toself",
+                fill=None,
+                line=dict(width=3),
                 name=row[diff_col],
-                opacity=0.6,
+                opacity=1.0,
             ))
 
         fig.update_layout(

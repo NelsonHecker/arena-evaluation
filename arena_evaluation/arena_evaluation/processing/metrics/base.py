@@ -55,11 +55,33 @@ class BaseMetricCalculator(ABC):
             (pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans)
         """
         import numpy as np
+        import polars as pl
+        
+        # Filter out rows with null or nan in active coordinates to disregard them from calculations
+        if episode.data is not None and len(episode.data) > 0:
+            use_gt = "pos_x_gt" in episode.data.columns
+            if use_gt:
+                episode.data = episode.data.filter(
+                    pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() &
+                    pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() &
+                    pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan()
+                )
+            else:
+                episode.data = episode.data.filter(
+                    pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan() &
+                    pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan() &
+                    pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan()
+                )
         
         # 1. Extract raw odom
-        odom_x = episode.data["pos_x"].to_numpy().copy()
-        odom_y = episode.data["pos_y"].to_numpy().copy()
-        odom_yaw = episode.data["yaw"].to_numpy().copy()
+        if episode.data is not None and len(episode.data) > 0:
+            odom_x = episode.data["pos_x"].to_numpy().copy()
+            odom_y = episode.data["pos_y"].to_numpy().copy()
+            odom_yaw = episode.data["yaw"].to_numpy().copy()
+        else:
+            odom_x = np.array([], dtype=np.float64)
+            odom_y = np.array([], dtype=np.float64)
+            odom_yaw = np.array([], dtype=np.float64)
         
         # 2. Transform raw odom to map frame if start_pos is available
         if episode.start_pos and len(episode.start_pos) >= 2 and len(odom_x) > 0:
@@ -85,7 +107,7 @@ class BaseMetricCalculator(ABC):
             odom_x_trans, odom_y_trans, odom_yaw_trans = odom_x, odom_y, odom_yaw
 
         # 3. Check if we should use ground truth TF
-        use_gt = "pos_x_gt" in episode.data.columns
+        use_gt = episode.data is not None and "pos_x_gt" in episode.data.columns
         if use_gt:
             pos_x = episode.data["pos_x_gt"].to_numpy().copy()
             pos_y = episode.data["pos_y_gt"].to_numpy().copy()

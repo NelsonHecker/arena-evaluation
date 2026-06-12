@@ -5,7 +5,7 @@ from arena_evaluation.processing.metrics.performance.motion_metrics import Motio
 
 def test_motion_constant_velocity():
     odom_df = pl.DataFrame({
-        "time_ns": [1, 2, 3, 4],
+        "time_ns": [1000000000, 2000000000, 3000000000, 4000000000],
         "vel_linear": [1.0, 1.0, 1.0, 1.0],
         "vel_angular": [0.0, 0.0, 0.0, 0.0]
     })
@@ -23,7 +23,7 @@ def test_motion_constant_velocity():
 
 def test_motion_linear_acceleration():
     odom_df = pl.DataFrame({
-        "time_ns": [1, 2, 3, 4],
+        "time_ns": [1000000000, 2000000000, 3000000000, 4000000000],
         "vel_linear": [0.0, 1.0, 2.0, 3.0], # accel is 1.0 per step
         "vel_angular": [0.0, 0.0, 0.0, 0.0]
     })

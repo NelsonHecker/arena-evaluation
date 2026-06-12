@@ -53,6 +53,11 @@ class ProxemicsCalculator(BaseMetricCalculator):
         pos_x, pos_y, _, _, _, _ = self.resolve_robot_pose(episode)
         time_ns = episode.data["time_ns"].to_numpy()
         peds_positions = episode.data["peds_positions"].to_list()
+        num_pedestrians_col = (
+            episode.data["num_pedestrians"].to_numpy()
+            if "num_pedestrians" in episode.data.columns
+            else None
+        )
         
         velocity = prior_results.get("velocity", [])
         
@@ -98,10 +103,23 @@ class ProxemicsCalculator(BaseMetricCalculator):
                 continue
                 
             # If flattened list [x1,y1,z1, x2,y2,z2], reshape it
-            if peds_arr.ndim == 1 and len(peds_arr) % 3 == 0:
-                peds_arr = peds_arr.reshape(-1, 3)
-            elif peds_arr.ndim == 1 and len(peds_arr) % 2 == 0:
-                peds_arr = peds_arr.reshape(-1, 2)
+            if peds_arr.ndim == 1:
+                n_peds = num_pedestrians_col[i] if num_pedestrians_col is not None else None
+                if n_peds is not None and n_peds > 0:
+                    if n_peds * 2 == len(peds_arr):
+                        peds_arr = peds_arr.reshape(-1, 2)
+                    elif n_peds * 3 == len(peds_arr):
+                        peds_arr = peds_arr.reshape(-1, 3)
+                    else:
+                        if len(peds_arr) % 2 == 0:
+                            peds_arr = peds_arr.reshape(-1, 2)
+                        elif len(peds_arr) % 3 == 0:
+                            peds_arr = peds_arr.reshape(-1, 3)
+                else:
+                    if len(peds_arr) % 2 == 0:
+                        peds_arr = peds_arr.reshape(-1, 2)
+                    elif len(peds_arr) % 3 == 0:
+                        peds_arr = peds_arr.reshape(-1, 3)
                 
             if peds_arr.ndim != 2 or peds_arr.shape[1] < 2:
                 in_personal_space_steps.append(0)

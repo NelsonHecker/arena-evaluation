@@ -48,8 +48,19 @@ class MotionMetricsCalculator(BaseMetricCalculator):
         if episode.data is None or "vel_linear" not in episode.data.columns:
             return {k: None for k in self.output_keys()}
             
-        vel_linear = episode.data["vel_linear"].to_numpy()
-        vel_angular = episode.data["vel_angular"].to_numpy()
+        import polars as pl
+        if len(episode.data) > 0:
+            episode.data = episode.data.filter(
+                pl.col("vel_linear").is_not_null() & ~pl.col("vel_linear").is_nan() &
+                pl.col("vel_angular").is_not_null() & ~pl.col("vel_angular").is_nan()
+            )
+            
+        if len(episode.data) > 0:
+            vel_linear = episode.data["vel_linear"].to_numpy()
+            vel_angular = episode.data["vel_angular"].to_numpy()
+        else:
+            vel_linear = np.array([], dtype=np.float64)
+            vel_angular = np.array([], dtype=np.float64)
         
         vel_abs = np.abs(vel_linear)
         
@@ -65,7 +76,12 @@ class MotionMetricsCalculator(BaseMetricCalculator):
                 "jerk_mean": 0.0,
             }
             
-        acceleration = np.diff(vel_abs)
+        # Calculate time differences in seconds
+        time_ns = episode.data["time_ns"].to_numpy()
+        dt = np.diff(time_ns) / 1e9
+        dt = np.where(dt == 0.0, 1e-6, dt)
+
+        acceleration = np.diff(vel_abs) / dt
         
         if N < 3:
             return {
@@ -78,7 +94,7 @@ class MotionMetricsCalculator(BaseMetricCalculator):
                 "jerk_mean": 0.0,
             }
             
-        jerk = np.diff(acceleration)
+        jerk = np.diff(acceleration) / dt[:-1]
         
         return {
             "velocity": vel_abs.tolist(),

@@ -16,6 +16,7 @@ class SeabornRenderer:
             RadarRenderer,
             ScatterRenderer,
             HistogramRenderer,
+            HeatmapRenderer,
         )
         
         self.renderers = {
@@ -26,6 +27,7 @@ class SeabornRenderer:
             "radar": RadarRenderer,
             "scatter": ScatterRenderer,
             "histogram": HistogramRenderer,
+            "heatmap": HeatmapRenderer,
         }
         
         # Upgrade aesthetics globally for all static plots

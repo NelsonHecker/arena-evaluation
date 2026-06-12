@@ -19,14 +19,36 @@ class EpisodeSplitter:
         """
         Split the raw bundle into aligned episodes.
         """
-        if bundle.odom is None or len(bundle.odom) == 0:
+        if bundle.odom is None:
             return []
+
+        # Helper to convert LazyFrame to DataFrame
+        def _to_df(lf_or_df):
+            if isinstance(lf_or_df, pl.LazyFrame):
+                return lf_or_df.collect()
+            return lf_or_df
+
+        # Check odom empty
+        odom_is_empty = False
+        if isinstance(bundle.odom, pl.LazyFrame):
+            odom_is_empty = bundle.odom.limit(1).collect().height == 0
+        else:
+            odom_is_empty = len(bundle.odom) == 0
+
+        if odom_is_empty:
+            return []
+
+        # Collect small frames we need to query/iterate directly
+        record_df = _to_df(bundle.episode_record)
+        initialpose_df = _to_df(bundle.initialpose)
+        plan_df = _to_df(bundle.plan)
             
         episodes = []
         
         # If there are no EpisodeRecords, treat the whole file as one episode
-        if bundle.episode_record is None or len(bundle.episode_record) == 0:
+        if record_df is None or len(record_df) == 0:
             aligned_df = self.aligner.align(bundle)
+            aligned_df = _to_df(aligned_df)
             if aligned_df is not None and len(aligned_df) >= self.min_episode_frames:
                 episodes.append(
                     AlignedEpisodeBundle(
@@ -39,8 +61,6 @@ class EpisodeSplitter:
                 )
             return episodes
 
-        record_df = bundle.episode_record
-        
         # Group records by episode_id while preserving order
         # Usually, an episode has a start record and an end record.
         # We can detect this by seeing if the next record has the same episode_id.
@@ -62,10 +82,14 @@ class EpisodeSplitter:
                 if i + 1 < len(rows):
                     end_time = rows[i + 1]["time_ns"] - 1
                 else:
-                    end_time = bundle.odom.select(pl.col("time_ns").max()).item()
+                    if isinstance(bundle.odom, pl.LazyFrame):
+                        end_time = bundle.odom.select(pl.col("time_ns").max()).collect().item()
+                    else:
+                        end_time = bundle.odom.select(pl.col("time_ns").max()).item()
                 i += 1
                 
             aligned_df = self.aligner.align(bundle, start_time, end_time)
+            aligned_df = _to_df(aligned_df)
             
             if aligned_df is None or len(aligned_df) < self.min_episode_frames:
                 continue
@@ -86,19 +110,19 @@ class EpisodeSplitter:
             except Exception:
                 pass
                 
-            if not start_pos and bundle.initialpose is not None and len(bundle.initialpose) > 0:
+            if not start_pos and initialpose_df is not None and len(initialpose_df) > 0:
                 # Find initialpose closest to start_time
-                df_init = bundle.initialpose.filter(pl.col("time_ns") >= start_time)
+                df_init = initialpose_df.filter(pl.col("time_ns") >= start_time)
                 if len(df_init) > 0:
                     row_init = df_init.row(0, named=True)
                 else:
-                    row_init = bundle.initialpose.row(-1, named=True)
+                    row_init = initialpose_df.row(-1, named=True)
                 start_pos = [row_init["pos_x"], row_init["pos_y"], row_init["yaw"]]
                 
             # Fallback/Override: If initialpose yaw is inaccurate (common Flatland teleport bug),
             # check the Global Planner's first pose which contains the true physical spawn yaw!
-            if start_pos and len(start_pos) == 3 and bundle.plan is not None and len(bundle.plan) > 0:
-                df_plan = bundle.plan.filter(pl.col("time_ns") >= start_time)
+            if start_pos and len(start_pos) == 3 and plan_df is not None and len(plan_df) > 0:
+                df_plan = plan_df.filter(pl.col("time_ns") >= start_time)
                 if len(df_plan) > 0:
                     row_plan = df_plan.row(0, named=True)
                     if "poses_yaw" in row_plan and len(row_plan["poses_yaw"]) > 0:
@@ -107,6 +131,26 @@ class EpisodeSplitter:
                         # Do not trust the planner if it only publishes dummy 0.0 orientations.
                         if plan_yaw != 0.0 and abs(start_pos[2] - plan_yaw) > 1.0:
                             start_pos[2] = plan_yaw
+
+            # Fallback for start_pos: use first coordinate of aligned odometry path
+            if not start_pos and aligned_df is not None and len(aligned_df) > 0:
+                first_row = aligned_df.row(0, named=True)
+                if "pos_x" in first_row and "pos_y" in first_row:
+                    start_pos = [first_row["pos_x"], first_row["pos_y"], first_row.get("yaw", 0.0)]
+
+            # Fallback for goal_pos: check the last pose of the global planner's first plan in the episode
+            if not goal_pos and plan_df is not None and len(plan_df) > 0:
+                df_plan_ep = plan_df.filter((pl.col("time_ns") >= start_time) & (pl.col("time_ns") <= end_time))
+                if len(df_plan_ep) > 0:
+                    row_plan = df_plan_ep.row(0, named=True)
+                    if "poses_x" in row_plan and len(row_plan["poses_x"]) > 0:
+                        goal_pos = [row_plan["poses_x"][-1], row_plan["poses_y"][-1], row_plan["poses_yaw"][-1]]
+
+            # Fallback for goal_pos: use last coordinate of aligned odometry path
+            if not goal_pos and aligned_df is not None and len(aligned_df) > 0:
+                last_row = aligned_df.row(-1, named=True)
+                if "pos_x" in last_row and "pos_y" in last_row:
+                    goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
             episodes.append(
                 AlignedEpisodeBundle(
                     episode_id=row["episode_id"],

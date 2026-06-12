@@ -332,66 +332,52 @@ class DataRecorderNode(Node):
 
         self.subs = []
 
-        # ── Throttled high-frequency topics ───────────────────────────────
-        throttled_topics = [
-            (f"{ns_prefix}/cmd_vel", Twist),
-            (f"{ns_prefix}/joint_states", JointState),
-            # (f"{ns_prefix}/lidar", LaserScan),
-            ("/tf", TFMessage),
-        ]
+        from .topics import get_topics
+        topics_dict = get_topics(namespace, parent_ns.strip('/'))
 
-        if robot_name:
-            throttled_topics.append((f"{ns_prefix}/{robot_name}_velocity_controller/odom", Odometry))
+        # 1. Register and subscribe to all topics defined in topics.py
+        for key, t_def in topics_dict.items():
+            topic_name = t_def.name_template
+            msg_type = t_def.msg_type
 
-        if HAS_PEDESTRIANS:
-            throttled_topics.append((f"{parent_ns}/arena_peds", Pedestrians))
-        else:
-            self.get_logger().warn("arena_people_msgs not found — arena_peds will NOT be recorded.")
-
-        for topic_name, msg_type in throttled_topics:
-            self._register_topic(topic_name, msg_type)
-            sub = self.create_subscription(msg_type, topic_name, self._create_throttled_callback(topic_name), self.qos)
-            self.subs.append(sub)
-
-        # ── Unthrottled event-driven topics ───────────────────────────────
-        unthrottled_topics = [
-            (f"{ns_prefix}/plan", Path),
-            (f"{parent_ns}/goal_pose", PoseStamped),
-            (f"{parent_ns}/initialpose", PoseWithCovarianceStamped),
-        ]
-        if robot_name and parent_ns:
-            unthrottled_topics += [
-                (f"{parent_ns}/{robot_name}/goal_pose", PoseStamped),
-                (f"{parent_ns}/{robot_name}/initialpose", PoseWithCovarianceStamped),
-            ]
-        if HAS_COLLISION:
-            unthrottled_topics.append((f"{ns_prefix}/collision_events", CollisionEvents))
-
-        for topic_name, msg_type in unthrottled_topics:
-            if not topic_name:
+            # Skip placeholders if dependency was missing
+            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "EpisodeRecord", "RobotFleet", "CollisionEvents") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
                 continue
+
             self._register_topic(topic_name, msg_type)
-            sub = self.create_subscription(msg_type, topic_name, self._create_unthrottled_callback(topic_name), self.qos)
+
+            # Determine QoS profile
+            qos_profile = self.latched_qos if t_def.qos_transient_local else self.qos
+
+            # Determine callback
+            if key == "episode_record":
+                callback = self.episode_record_callback
+            elif t_def.throttled:
+                callback = self._create_throttled_callback(topic_name)
+            else:
+                callback = self._create_unthrottled_callback(topic_name)
+
+            sub = self.create_subscription(msg_type, topic_name, callback, qos_profile)
+            self.subs.append(sub)
+            if key == "episode_record":
+                self.get_logger().info(f"Subscribed to EpisodeRecord on {topic_name}")
+            elif key == "robots_fleet":
+                self.get_logger().info(f"Subscribed to RobotFleet on {topic_name}")
+
+        # 2. Subscribe to robot-specific odom if robot_name is known
+        if robot_name:
+            odom_topic = f"{ns_prefix}/{robot_name}_velocity_controller/odom"
+            self._register_topic(odom_topic, Odometry)
+            sub = self.create_subscription(Odometry, odom_topic, self._create_throttled_callback(odom_topic), self.qos)
             self.subs.append(sub)
 
-        # ── Episode lifecycle topics ───────────────────────────────────────
-        if HAS_TASK_GEN:
-            episode_topic = f"{parent_ns}/state/episode"
-            self._register_topic(episode_topic, EpisodeRecord)
-            sub = self.create_subscription(EpisodeRecord, episode_topic, self.episode_record_callback, self.qos)
-            self.subs.append(sub)
-            self.get_logger().info(f"Subscribed to EpisodeRecord on {episode_topic}")
-
-            robots_topic = f"{parent_ns}/state/robots"
-            self._register_topic(robots_topic, RobotFleet)
-            sub = self.create_subscription(RobotFleet, robots_topic, self._create_unthrottled_callback(robots_topic), self.latched_qos)
-            self.subs.append(sub)
-            self.get_logger().info(f"Subscribed to RobotFleet on {robots_topic}")
-
-        # Subscribe to /tf_static with latched QoS
-        self._register_topic("/tf_static", TFMessage)
-        sub_tf_static = self.create_subscription(TFMessage, "/tf_static", self._create_unthrottled_callback("/tf_static"), self.latched_qos)
-        self.subs.append(sub_tf_static)
+        # 3. Subscribe to robot-specific goal and initialpose if parent_ns and robot_name exist
+        if robot_name and parent_ns:
+            for suffix, msg_type in [("goal_pose", PoseStamped), ("initialpose", PoseWithCovarianceStamped)]:
+                topic_name = f"{parent_ns}/{robot_name}/{suffix}"
+                self._register_topic(topic_name, msg_type)
+                sub = self.create_subscription(msg_type, topic_name, self._create_unthrottled_callback(topic_name), self.qos)
+                self.subs.append(sub)
 
         # Dynamic discovery fallback (picks up odom topics with non-standard names)
         self.create_timer(1.0, self.discover_topics)

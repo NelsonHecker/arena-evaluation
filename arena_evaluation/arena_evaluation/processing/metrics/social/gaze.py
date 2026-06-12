@@ -49,6 +49,11 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         time_ns = episode.data["time_ns"].to_numpy()
         
         peds_positions = episode.data["peds_positions"].to_list()
+        num_pedestrians_col = (
+            episode.data["num_pedestrians"].to_numpy()
+            if "num_pedestrians" in episode.data.columns
+            else None
+        )
         # Ensure we have pedestrian headings if available, else skip
         if "peds_headings" in episode.data.columns:
             peds_headings = episode.data["peds_headings"].to_list()
@@ -82,20 +87,43 @@ class GazeMetricsCalculator(BaseMetricCalculator):
                 
             rx, ry, ryaw = pos_x[i], pos_y[i], yaw[i]
             
+            n_peds = num_pedestrians_col[i] if num_pedestrians_col is not None else None
+
             if isinstance(peds, str):
                 import ast
                 try:
                     peds_arr = np.array(ast.literal_eval(peds))
-                    head_arr = np.array(ast.literal_eval(headings)) if headings else np.zeros(len(peds_arr)//3)
                 except:
                     peds_arr = np.array([])
-                    head_arr = np.array([])
             else:
                 peds_arr = np.array(peds)
-                head_arr = np.array(headings) if headings is not None else np.zeros(len(peds_arr)//3)
-                
-            if peds_arr.ndim == 1 and len(peds_arr) % 3 == 0:
-                peds_arr = peds_arr.reshape(-1, 3)
+
+            if peds_arr.ndim == 1:
+                if n_peds is not None and n_peds > 0:
+                    if n_peds * 2 == len(peds_arr):
+                        peds_arr = peds_arr.reshape(-1, 2)
+                    elif n_peds * 3 == len(peds_arr):
+                        peds_arr = peds_arr.reshape(-1, 3)
+                    else:
+                        if len(peds_arr) % 2 == 0:
+                            peds_arr = peds_arr.reshape(-1, 2)
+                        elif len(peds_arr) % 3 == 0:
+                            peds_arr = peds_arr.reshape(-1, 3)
+                else:
+                    if len(peds_arr) % 2 == 0:
+                        peds_arr = peds_arr.reshape(-1, 2)
+                    elif len(peds_arr) % 3 == 0:
+                        peds_arr = peds_arr.reshape(-1, 3)
+
+            n_resolved_peds = len(peds_arr) if peds_arr.ndim == 2 else 0
+
+            if isinstance(peds, str):
+                try:
+                    head_arr = np.array(ast.literal_eval(headings)) if headings else np.zeros(n_resolved_peds)
+                except:
+                    head_arr = np.zeros(n_resolved_peds)
+            else:
+                head_arr = np.array(headings) if headings is not None else np.zeros(n_resolved_peds)
                 
             if peds_arr.ndim != 2 or peds_arr.shape[1] < 2:
                 looking_at.append(0)

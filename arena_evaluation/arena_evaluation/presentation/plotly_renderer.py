@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 import polars as pl
 from ..storage.schemas import PlotSpec
 
@@ -15,6 +16,7 @@ class PlotlyRenderer:
             RadarRenderer,
             ScatterRenderer,
             HistogramRenderer,
+            HeatmapRenderer,
         )
         
         self.renderers = {
@@ -25,6 +27,7 @@ class PlotlyRenderer:
             "radar": RadarRenderer,
             "scatter": ScatterRenderer,
             "histogram": HistogramRenderer,
+            "heatmap": HeatmapRenderer,
         }
 
     def render(self, spec: PlotSpec, df: pl.DataFrame, run_dir: pathlib.Path | None = None) -> str | list[str] | None:

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arena Evaluation Report - {{ benchmark_id }}</title>
+    <script src="plotly.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Header styling */
+        header {
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            color: #0f172a;
+            margin-bottom: 15px;
+        }
+
+        .meta-list {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px 40px;
+            font-size: 0.9rem;
+            color: #475569;
+        }
+
+        .meta-list strong {
+            color: #0f172a;
+        }
+
+        /* Sections */
+        section {
+            margin-bottom: 50px;
+        }
+
+        h2 {
+            font-size: 1.6rem;
+            color: #1e293b;
+            margin-bottom: 20px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #cbd5e1;
+        }
+
+        h3 {
+            font-size: 1.2rem;
+            color: #334155;
+            margin-bottom: 15px;
+        }
+
+        /* Table styling */
+        .table-responsive {
+            overflow-x: auto;
+            margin-bottom: 30px;
+            background-color: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+        }
+
+        table.dataframe {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        table.dataframe th {
+            background-color: #f1f5f9;
+            color: #0f172a;
+            padding: 12px 16px;
+            font-weight: 600;
+            border-bottom: 2px solid #cbd5e1;
+        }
+
+        table.dataframe td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #334155;
+        }
+
+        table.dataframe tr:last-child td {
+            border-bottom: none;
+        }
+
+        table.dataframe tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+
+        /* Plots layout */
+        .plots-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        .plot-container {
+            background-color: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 20px;
+            width: 100%;
+        }
+
+        .plot-wrapper {
+            height: 500px;
+            width: 100%;
+        }
+
+        /* Footer styling */
+        footer {
+            margin-top: 60px;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.85rem;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Arena Evaluation Report</h1>
+        <ul class="meta-list">
+            <li><strong>Benchmark ID:</strong> {{ benchmark_id }}</li>
+            <li><strong>Report Location:</strong> {{ report_dir }}</li>
+            <li><strong>Generated On:</strong> {{ generated_on }}</li>
+        </ul>
+    </header>
+
+    <!-- Summary Table Section -->
+    {% if summary_html %}
+    <section class="summary-section">
+        <h2>Performance Summary</h2>
+        <div class="table-responsive">
+            {{ summary_html }}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Overview Plots Section -->
+    {% if overview_plots %}
+    <section class="overview-section">
+        <h2>Performance Overview</h2>
+        <div class="plots-grid">
+            {% for plot_html in overview_plots %}
+            <div class="plot-container">
+                <div class="plot-wrapper" style="height: 600px;">
+                    {{ plot_html }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Categorized Plot Sections -->
+    {% for group in plot_groups %}
+    <section class="metric-group-section">
+        <h2>{{ group.title }}</h2>
+        <div class="plots-grid">
+            {% for plot in group.plots %}
+            <div class="plot-container">
+                <h3>{{ plot.title }}</h3>
+                <div class="plot-wrapper">
+                    {{ plot.html }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endfor %}
+
+    <footer>
+        <p>Generated by the Arena Evaluation Pipeline • Offline-Capable</p>
+    </footer>
+</div>
+
+</body>
+</html>

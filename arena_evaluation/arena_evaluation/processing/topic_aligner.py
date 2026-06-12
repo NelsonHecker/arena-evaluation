@@ -20,44 +20,60 @@ class TopicAligner:
         bundle: TopicBundle,
         start_time_ns: int | None = None,
         end_time_ns: int | None = None,
-    ) -> pl.DataFrame | None:
+    ) -> pl.DataFrame | pl.LazyFrame | None:
         """
         Align all available topics in the bundle onto the odom time axis.
         Optionally filter by start and end times (inclusive).
         
         Uses join_asof with strategy="backward" (match exact or previous within tolerance).
         """
-        if bundle.odom is None or len(bundle.odom) == 0:
+        if bundle.odom is None:
             return None
 
-        # Base DataFrame is odom
+        # Helper to check if a frame (Lazy or Eager) is empty
+        def is_empty(frame):
+            if isinstance(frame, pl.LazyFrame):
+                return frame.limit(1).collect().height == 0
+            return len(frame) == 0
+
+        if is_empty(bundle.odom):
+            return None
+
+        # Base DataFrame/LazyFrame is odom
         df = bundle.odom
+        should_collect = not isinstance(df, pl.LazyFrame)
         
+        if isinstance(df, pl.DataFrame):
+            df = df.lazy()
+
         # Apply time window if provided
         if start_time_ns is not None:
             df = df.filter(pl.col("time_ns") >= start_time_ns)
         if end_time_ns is not None:
             df = df.filter(pl.col("time_ns") <= end_time_ns)
             
-        if len(df) == 0:
+        if is_empty(df):
             return None
 
         # Sort just to be absolutely sure for join_asof
         df = df.sort("time_ns")
         
         # Helper to join a secondary topic
-        def join_topic(primary: pl.DataFrame, secondary: pl.DataFrame | None, prefix: str) -> pl.DataFrame:
-            if secondary is None or len(secondary) == 0:
+        def join_topic(primary: pl.LazyFrame, secondary: pl.DataFrame | pl.LazyFrame | None, prefix: str) -> pl.LazyFrame:
+            if secondary is None or is_empty(secondary):
                 return primary
                 
-            # Filter secondary to rough time bounds for performance
             sec_df = secondary
+            if isinstance(sec_df, pl.DataFrame):
+                sec_df = sec_df.lazy()
+
+            # Filter secondary to rough time bounds for performance
             if start_time_ns is not None:
                 sec_df = sec_df.filter(pl.col("time_ns") >= start_time_ns - self.tolerance_ns)
             if end_time_ns is not None:
                 sec_df = sec_df.filter(pl.col("time_ns") <= end_time_ns + self.tolerance_ns)
                 
-            if len(sec_df) == 0:
+            if is_empty(sec_df):
                 return primary
                 
             # Perform asof join
@@ -76,4 +92,6 @@ class TopicAligner:
         df = join_topic(df, bundle.collision_events, "col")
         df = join_topic(df, bundle.tf_gt, "tf_gt")
 
+        if should_collect:
+            return df.collect()
         return df

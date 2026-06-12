@@ -8,11 +8,43 @@ if TYPE_CHECKING:
 
 # Ordered priority list of identity columns.
 # The detector checks these and reports which ones carry more than one unique value.
-IDENTITY_COLS: list[str] = ["planner", "robot", "stage", "map", "benchmark_id"]
+IDENTITY_COLS: list[str] = ["local_planner", "inter_planner", "robot", "stage", "map", "benchmark_id"]
 
 # Name of the synthetic compound-label column added to the DataFrame when
 # multiple dimensions vary simultaneously.
 COMPOUND_LABEL_COL = "__label__"
+
+
+def split_planner_name(planner_name: str | None) -> tuple[str, str]:
+    """
+    Split the contestant/planner name into local_planner and inter_planner.
+    Example: 'trial-dwb-bypass' -> ('dwb', 'bypass')
+    """
+    if not planner_name:
+        return "unknown", "unknown"
+    
+    parts = str(planner_name).split("-")
+    
+    # Try to find a token that matches a known local planner
+    KNOWN_LOCAL_PLANNERS = {
+        "teb", "rosnav", "cohan", "dwa", "dragon", "applr", "lflh", "trail", "dwb", "mppi", "regulated"
+    }
+    
+    for i, part in enumerate(parts):
+        if part.lower() in KNOWN_LOCAL_PLANNERS:
+            local_planner = parts[i]
+            # Inter planner is everything after the local planner
+            inter_planner = "-".join(parts[i+1:]) if i + 1 < len(parts) else "none"
+            return local_planner, inter_planner
+            
+    # Fallback if no known local planner is found
+    if len(parts) >= 3:
+        return parts[1], "-".join(parts[2:])
+    elif len(parts) == 2:
+        return parts[0], parts[1]
+    else:
+        return parts[0], "none"
+
 
 
 def detect_varying_dims(df: pl.DataFrame) -> list[str]:
