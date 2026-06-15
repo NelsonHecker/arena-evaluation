@@ -148,16 +148,10 @@ class DataRecorderNode(Node):
             self.stage = "unknown"
 
         # ── Robot/world metadata from ROS parameters ───────────────────────
-        namespace = self.get_namespace().strip('/')
-        ns_parts = [p for p in namespace.split('/') if p]
-        robot_name_from_ns = ns_parts[-1] if ns_parts else ""
-
         for param_name, default_val in [
-            ("robot", ""),
             ("world", "unknown"),
             ("suite_name", "unknown"),
             ("contest_name", "unknown"),
-            ("model", ""),
             ("benchmark_id", ""),
             ("planner", ""),
             ("stage", ""),
@@ -178,12 +172,12 @@ class DataRecorderNode(Node):
         param_stage = self.get_parameter("stage").value
         if param_stage: self.stage = param_stage
 
-        robot_param = self.get_parameter("robot").value
-        self.robot_model = robot_param if robot_param else robot_name_from_ns if robot_name_from_ns else "unknown"
         self.world = self.get_parameter("world").value
         self.suite_name = self.get_parameter("suite_name").value
         self.contest_name = self.get_parameter("contest_name").value
-        self.model = self.get_parameter("model").value or self.robot_model
+        
+        self.robot_model = "unknown" # Will be updated dynamically by RobotFleet
+        self.known_robots = set()
 
         # ── Paths ──────────────────────────────────────────────────────────
         # The MCAP is written directly to run_dir/recording.mcap — no FolderManager
@@ -324,24 +318,24 @@ class DataRecorderNode(Node):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _setup_subscriptions(self):
-        namespace = self.get_namespace().strip('/')
-        ns_prefix = f"/{namespace}" if namespace else ""
-        parts = namespace.split('/')
-        robot_name = parts[-1] if parts else ""
-        parent_ns = "/" + "/".join(parts[:-1]) if len(parts) >= 2 else ""
+        env_namespace = self.get_namespace().strip('/')
+        env_prefix = f"/{env_namespace}" if env_namespace else ""
 
         self.subs = []
 
         from .topics import get_topics
-        topics_dict = get_topics(namespace, parent_ns.strip('/'))
+        topics_dict = get_topics(namespace="", parent_namespace=env_namespace)
 
-        # 1. Register and subscribe to all topics defined in topics.py
+        # 1. Register and subscribe to environment-level topics
         for key, t_def in topics_dict.items():
+            if key not in ("episode_record", "robots_fleet", "peds"):
+                continue
+                
             topic_name = t_def.name_template
             msg_type = t_def.msg_type
 
             # Skip placeholders if dependency was missing
-            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "EpisodeRecord", "RobotFleet", "CollisionEvents") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
+            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "EpisodeRecord", "RobotFleet") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
                 continue
 
             self._register_topic(topic_name, msg_type)
@@ -352,6 +346,8 @@ class DataRecorderNode(Node):
             # Determine callback
             if key == "episode_record":
                 callback = self.episode_record_callback
+            elif key == "robots_fleet":
+                callback = self.robots_fleet_callback
             elif t_def.throttled:
                 callback = self._create_throttled_callback(topic_name)
             else:
@@ -363,21 +359,6 @@ class DataRecorderNode(Node):
                 self.get_logger().info(f"Subscribed to EpisodeRecord on {topic_name}")
             elif key == "robots_fleet":
                 self.get_logger().info(f"Subscribed to RobotFleet on {topic_name}")
-
-        # 2. Subscribe to robot-specific odom if robot_name is known
-        if robot_name:
-            odom_topic = f"{ns_prefix}/{robot_name}_velocity_controller/odom"
-            self._register_topic(odom_topic, Odometry)
-            sub = self.create_subscription(Odometry, odom_topic, self._create_throttled_callback(odom_topic), self.qos)
-            self.subs.append(sub)
-
-        # 3. Subscribe to robot-specific goal and initialpose if parent_ns and robot_name exist
-        if robot_name and parent_ns:
-            for suffix, msg_type in [("goal_pose", PoseStamped), ("initialpose", PoseWithCovarianceStamped)]:
-                topic_name = f"{parent_ns}/{robot_name}/{suffix}"
-                self._register_topic(topic_name, msg_type)
-                sub = self.create_subscription(msg_type, topic_name, self._create_unthrottled_callback(topic_name), self.qos)
-                self.subs.append(sub)
 
         # Dynamic discovery fallback (picks up odom topics with non-standard names)
         self.create_timer(1.0, self.discover_topics)
@@ -435,13 +416,83 @@ class DataRecorderNode(Node):
         now = self.current_time
         if now is None:
             now = self.get_clock().now().nanoseconds
-        parent_ns = "/" + "/".join(self.get_namespace().strip('/').split('/')[:-1]) \
-            if "/" in self.get_namespace().strip('/') else ""
-        episode_topic = f"{parent_ns}/state/episode"
+        
+        env_namespace = self.get_namespace().strip('/')
+        episode_topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
         self._write_to_bag_at(episode_topic, msg, now)
 
         # Then update the metadata.yaml
         self._update_metadata_from_episode(msg)
+        
+    def robots_fleet_callback(self, msg):
+        env_namespace = self.get_namespace().strip('/')
+        now = self.current_time or self.get_clock().now().nanoseconds
+        topic = f"/{env_namespace}/state/robots" if env_namespace else "/state/robots"
+        self._write_to_bag_at(topic, msg, now)
+
+        from .topics import get_topics
+        from nav_msgs.msg import Odometry
+        
+        for robot in getattr(msg, 'robots', []):
+            robot_ns = robot.ns.strip('/')
+            
+            if robot_ns not in self.known_robots:
+                self.get_logger().info(f"Discovered new robot from RobotFleet: {robot_ns} (Model: {robot.model})")
+                self.known_robots.add(robot_ns)
+                
+                # Setup specific subscriptions for this robot
+                topics_dict = get_topics(namespace=robot_ns, parent_namespace=env_namespace)
+                
+                for key, t_def in topics_dict.items():
+                    # Skip environment level ones
+                    if key in ("episode_record", "robots_fleet", "peds"):
+                        continue
+                        
+                    topic_name = t_def.name_template
+                    msg_type = t_def.msg_type
+
+                    if isinstance(msg_type, type) and msg_type.__name__ in ("CollisionEvents") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
+                        continue
+
+                    self._register_topic(topic_name, msg_type)
+
+                    qos_profile = self.latched_qos if t_def.qos_transient_local else self.qos
+
+                    if t_def.throttled:
+                        callback = self._create_throttled_callback(topic_name)
+                    else:
+                        callback = self._create_unthrottled_callback(topic_name)
+
+                    sub = self.create_subscription(msg_type, topic_name, callback, qos_profile)
+                    self.subs.append(sub)
+                    self.get_logger().info(f"Subscribed to robot topic: {topic_name}")
+                    
+                # Subscribe to robot-specific odom if robot_name is known
+                robot_name = robot_ns.split('/')[-1] if robot_ns else ""
+                ns_prefix = f"/{robot_ns}" if robot_ns else ""
+                if robot_name:
+                    odom_topic = f"{ns_prefix}/{robot_name}_velocity_controller/odom"
+                    self._register_topic(odom_topic, Odometry)
+                    sub = self.create_subscription(Odometry, odom_topic, self._create_throttled_callback(odom_topic), self.qos)
+                    self.subs.append(sub)
+                    
+                # Update metadata 
+                if self.robot_model == "unknown":
+                    self.robot_model = robot.model
+                    
+                if hasattr(self, 'metadata') and self.metadata is not None:
+                    # Keep track of multiple robot models if there's a fleet
+                    if "unknown" in self.metadata.robot_model:
+                        self.metadata.robot_model = []
+                        
+                    if robot.model not in self.metadata.robot_model:
+                        self.metadata.robot_model.append(robot.model)
+                        
+                    try:
+                        from .metadata_writer import MetadataWriter
+                        MetadataWriter.write(self.metadata, self.metadata_path)
+                    except Exception as e:
+                        self.get_logger().warn(f"Failed to write metadata: {e}")
 
     def _resolve_throttle_ms(self, topic_name: str) -> float:
         topic_lower = topic_name.lower()

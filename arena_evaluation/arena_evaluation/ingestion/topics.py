@@ -44,6 +44,13 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         CollisionEvents = type("CollisionEvents", (), {})
         HAS_COLLISION = False
 
+    try:
+        from nav2_msgs.msg import CollisionMonitorState
+        HAS_NAV2_COLLISION = True
+    except ImportError:
+        CollisionMonitorState = type("CollisionMonitorState", (), {})
+        HAS_NAV2_COLLISION = False
+
     # Use default namespaces if empty
     ns = f"/{namespace}" if namespace else ""
     p_ns = f"/{parent_namespace}" if parent_namespace else ""
@@ -76,6 +83,11 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     if HAS_COLLISION:
         topics["collision_events"] = TopicDefinition(
             f"{ns}/collision_events", CollisionEvents, throttled=False,
+        )
+
+    if HAS_NAV2_COLLISION:
+        topics["collision_monitor_state"] = TopicDefinition(
+            f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False,
         )
 
     return topics

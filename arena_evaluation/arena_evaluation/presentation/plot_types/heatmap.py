@@ -15,7 +15,7 @@ class HeatmapRenderer(BasePlotRenderer):
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
-        if df_filtered.empty:
+        if df_filtered.is_empty():
             return None
 
         # Determine if this is a correlation heatmap or a pivot heatmap
@@ -104,7 +104,7 @@ class HeatmapRenderer(BasePlotRenderer):
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
-        if df_filtered.empty:
+        if df_filtered.is_empty():
             return
 
         import matplotlib.pyplot as plt

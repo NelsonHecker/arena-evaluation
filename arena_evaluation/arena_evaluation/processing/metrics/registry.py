@@ -141,6 +141,8 @@ class MetricRegistry:
                     available_topics.add("peds")
                 if "collision_event" in cols:
                     available_topics.add("collision_events")
+                if "action_type" in cols:
+                    available_topics.add("collision_monitor_state")
                 if "pos_x_gt" in cols:
                     available_topics.add("tf_gt")
         

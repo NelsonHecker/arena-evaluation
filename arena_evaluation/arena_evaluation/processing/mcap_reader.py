@@ -127,6 +127,7 @@ class MCAPReader:
             "peds": defaultdict(list),
             "episode_record": defaultdict(list),
             "collision_events": defaultdict(list),
+            "collision_monitor_state": defaultdict(list),
             "plan": defaultdict(list),
             "initialpose": defaultdict(list),
             "tf": defaultdict(list),
@@ -319,7 +320,14 @@ class MCAPReader:
                     # Collision Events
                     elif topic.endswith("/collision_events"):
                         data["collision_events"]["time_ns"].append(ts_ns)
-                        data["collision_events"]["collision_event"].append(str(ros_msg))
+                        data["collision_events"]["collision_event"].append(len(ros_msg.events))
+                        appended = True
+                        
+                    # Collision Monitor State
+                    elif topic.endswith("/collision_monitor_state"):
+                        data["collision_monitor_state"]["time_ns"].append(ts_ns)
+                        data["collision_monitor_state"]["action_type"].append(ros_msg.action_type)
+                        data["collision_monitor_state"]["polygon_name"].append(ros_msg.polygon_name)
                         appended = True
                         
                     # Initial Pose

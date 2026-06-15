@@ -22,7 +22,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     NAME = "collision_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics"]
-    REQUIRED_TOPICS = [("scan", "collision_events")]
+    REQUIRED_TOPICS = [("collision_monitor_state", "collision_events")]
     
     TIMEOUT_THRESHOLD_S = 180.0
     MAX_COLLISIONS = 3
@@ -47,48 +47,45 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         collisions = []
         result = "GOAL_REACHED"
         success = True
-        
-        # Determine collisions from scan data
-        if episode.data is not None and "scan_ranges" in episode.data.columns:
-            scan_ranges = episode.data["scan_ranges"].to_list()
-            lower_bound = self.robot_params.robot_radius
+                    
+        # Check nav2 collision_monitor_state topic
+        if episode.data is not None and "action_type" in episode.data.columns:
+            # action_type == 1 means STOP (which is triggered when inside a stop polygon)
+            action_types = episode.data["action_type"].to_numpy()
+            is_stopped = (action_types == 1)
             
-            collisions_marker = []
-            for i, scan in enumerate(scan_ranges):
-                if scan is None:
-                    collisions_marker.append(False)
-                    continue
-                    
-                # Parse string rep of list if needed, else numpy array
-                if isinstance(scan, str):
-                    try:
-                        import ast
-                        arr = np.array(ast.literal_eval(scan))
-                    except:
-                        arr = np.array([])
-                else:
-                    arr = np.array(scan)
-                    
-                is_collision = len(arr[arr <= lower_bound]) > 0
-                collisions_marker.append(is_collision)
+            nav2_collisions = 0
+            if len(is_stopped) > 0 and is_stopped[0]:
+                nav2_collisions += 1
                 
-                if is_collision:
-                    collisions.append(i)
-                    
-            # Count distinct collision events (edge-triggered)
-            for i in range(1, len(collisions_marker)):
-                if collisions_marker[i] and not collisions_marker[i-1]:
-                    collision_amount += 1
-                    
+            for i in range(1, len(is_stopped)):
+                if is_stopped[i] and not is_stopped[i-1]:
+                    nav2_collisions += 1
+            
+            if nav2_collisions > collision_amount:
+                collision_amount = nav2_collisions
+
         # Also check collision_events topic if aligned
         if episode.data is not None and "collision_event" in episode.data.columns:
-            # If there are explicit collision events in the dataset, we can use them
-            events = episode.data["collision_event"].to_numpy()
-            event_count = np.sum(events != None)
-            # Use max of laser-inferred and explicit events
-            # This handles edge cases where laser misses a collision
-            if event_count > collision_amount:
-                collision_amount = int(event_count)
+            # Count times it transitions from 0 events to > 0 events
+            events_count = episode.data["collision_event"].to_numpy()
+            
+            # Note: mcap_reader.py now stores the length of the events array, but
+            # because of join_asof, some values may be null/NaN before the first message.
+            # We treat nulls as 0.
+            valid_counts = np.nan_to_num(events_count.astype(float), nan=0.0)
+            is_collision = (valid_counts > 0)
+            
+            arena_collisions = 0
+            if len(is_collision) > 0 and is_collision[0]:
+                arena_collisions += 1
+                
+            for i in range(1, len(is_collision)):
+                if is_collision[i] and not is_collision[i-1]:
+                    arena_collisions += 1
+            
+            if arena_collisions > collision_amount:
+                collision_amount = arena_collisions
                 
         time_to_goal = prior_results.get("time_to_goal", 0.0)
         
