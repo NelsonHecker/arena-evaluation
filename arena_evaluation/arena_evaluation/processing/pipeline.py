@@ -61,68 +61,77 @@ class ProcessingPipeline:
         # 1. Read metadata
         metadata = MetadataWriter.read(metadata_path)
 
-        # For robot params, assume single robot or take first if list
-        robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
-        robot_params = RobotParams.load(robot_model)
-
-        # 2. Extract or Load Topics
-        bundle = None
+        # 2. Extract or Load Topics (now returns dict[str, TopicBundle])
+        bundles = None
         if not force_extract:
-            bundle = TopicParquetStore.read(extracted_dir)
-            if bundle:
+            bundles = TopicParquetStore.read(extracted_dir)
+            if bundles:
                 print(f"  Loading cached topics for {run.planner}/{run.stage}...")
                 
-        if bundle is None:
-            bundle = self.extract_run(run)
+        if bundles is None:
+            bundles = self.extract_run(run)
             
-        if bundle is None:
+        if bundles is None or len(bundles) == 0:
             return None
 
-        # 3. Align and Split
-        print(f"  Splitting into episodes...")
-        aligner = TopicAligner()
-        splitter = EpisodeSplitter(aligner)
-        episodes = splitter.split(bundle)
-
-        if not episodes:
-            print(f"  [skip] No valid episodes found for {run.planner}/{run.stage}")
-            return None
-
-        print(f"  Computing metrics for {len(episodes)} episodes...")
-
-        # 4. Calculate Metrics
-        registry = MetricRegistry(robot_params)
-        pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
-        if bundle.peds is not None:
-            pedsim_avail = True
-
-        available_topics = set()
-        for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
-            if getattr(bundle, field, None) is not None:
-                available_topics.add(field)
-
+        # Process each robot
         results = []
-        for ep in episodes:
-            ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
+        total_episodes_valid = 0
+        
+        for robot_name, bundle in bundles.items():
+            print(f"  [{robot_name}] Splitting into episodes...")
+            aligner = TopicAligner()
+            splitter = EpisodeSplitter(aligner)
+            episodes = splitter.split(bundle, robot_name=robot_name)
 
-            # 5. Add identity columns
-            ep_metrics["episode"] = ep.episode_id
-            ep_metrics["planner"] = run.planner
-            
-            # Extract and add local_planner and inter_planner columns
-            from ..presentation.dimension_detector import split_planner_name
-            lp, ip = split_planner_name(run.planner)
-            ep_metrics["local_planner"] = lp
-            ep_metrics["inter_planner"] = ip
-            
-            ep_metrics["robot"] = robot_model
-            ep_metrics["map"] = metadata.map
-            ep_metrics["stage"] = run.stage
-            ep_metrics["benchmark_id"] = run.benchmark_id
-            ep_metrics["start"] = ep.start_pos
-            ep_metrics["goal"] = ep.goal_pos
+            if not episodes:
+                print(f"  [{robot_name}] [skip] No valid episodes found")
+                continue
 
-            results.append(ep_metrics)
+            # Load robot params (fallback to burger if no metadata or specific model unknown)
+            # Since we now have multi-robot, we ideally know the model. 
+            # If we don't map name to model cleanly here, fallback to burger.
+            robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
+            robot_params = RobotParams.load(robot_model)
+
+            print(f"  [{robot_name}] Computing metrics for {len(episodes)} episodes...")
+            registry = MetricRegistry(robot_params)
+            pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
+            if bundle.peds is not None:
+                pedsim_avail = True
+
+            available_topics = set()
+            for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
+                if getattr(bundle, field, None) is not None:
+                    available_topics.add(field)
+
+            for ep in episodes:
+                ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
+
+                # Add identity columns
+                ep_metrics["episode"] = ep.episode_id
+                ep_metrics["planner"] = run.planner
+                
+                from ..presentation.dimension_detector import split_planner_name
+                lp, ip = split_planner_name(run.planner)
+                ep_metrics["local_planner"] = lp
+                ep_metrics["inter_planner"] = ip
+                
+                # Use the exact namespace for the robot identity
+                ep_metrics["robot"] = ep.robot_name or robot_name
+                ep_metrics["map"] = metadata.map
+                ep_metrics["stage"] = run.stage
+                ep_metrics["benchmark_id"] = run.benchmark_id
+                ep_metrics["start"] = ep.start_pos
+                ep_metrics["goal"] = ep.goal_pos
+
+                results.append(ep_metrics)
+                
+            total_episodes_valid = max(total_episodes_valid, len(episodes))
+
+        if not results:
+            print(f"  [skip] No valid episodes generated for {run.planner}/{run.stage}")
+            return None
 
         # 6. Save to Parquet
         print(f"  Saving metrics to {metrics_path}...")
@@ -130,7 +139,7 @@ class ProcessingPipeline:
 
         # Update metadata
         metadata.processing_completed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        metadata.episodes_valid = len(episodes)
+        metadata.episodes_valid = total_episodes_valid
         metadata.pipeline_version = arena_evaluation.__version__ if hasattr(arena_evaluation, "__version__") else "1.0.0"
 
         MetadataWriter.write(metadata, metadata_path)
@@ -195,66 +204,73 @@ class ProcessingPipeline:
         extracted_dir = self.folder_manager.extracted_topics_path(run_dir)
         metrics_path = run_dir / "metrics.parquet"
 
-        # Re-use the core logic
-        robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
-        robot_params = RobotParams.load(robot_model)
-
         # 2. Extract or Load Topics
-        bundle = None
+        bundles = None
         if not force_extract:
-            bundle = TopicParquetStore.read(extracted_dir)
-            if bundle:
+            bundles = TopicParquetStore.read(extracted_dir)
+            if bundles:
                 print(f"  Loading cached topics for ad-hoc run...")
                 
-        if bundle is None:
-            bundle = self.extract_run_dir(run_dir)
+        if bundles is None:
+            bundles = self.extract_run_dir(run_dir)
             
-        if bundle is None:
+        if bundles is None or len(bundles) == 0:
             return None
 
-        print(f"  Splitting into episodes...")
-        aligner = TopicAligner()
-        splitter = EpisodeSplitter(aligner)
-        episodes = splitter.split(bundle)
+        results = []
+        total_episodes_valid = 0
+        
+        for robot_name, bundle in bundles.items():
+            print(f"  [{robot_name}] Splitting into episodes...")
+            aligner = TopicAligner()
+            splitter = EpisodeSplitter(aligner)
+            episodes = splitter.split(bundle, robot_name=robot_name)
 
-        if not episodes:
+            if not episodes:
+                print(f"  [{robot_name}] [skip] No valid episodes found")
+                continue
+
+            robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
+            robot_params = RobotParams.load(robot_model)
+
+            print(f"  [{robot_name}] Computing metrics for {len(episodes)} episodes...")
+            registry = MetricRegistry(robot_params)
+            pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
+            if bundle.peds is not None:
+                pedsim_avail = True
+
+            available_topics = set()
+            for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
+                if getattr(bundle, field, None) is not None:
+                    available_topics.add(field)
+
+            for ep in episodes:
+                ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
+                ep_metrics["episode"] = ep.episode_id
+                ep_metrics["planner"] = descriptor.planner
+                
+                from ..presentation.dimension_detector import split_planner_name
+                lp, ip = split_planner_name(descriptor.planner)
+                ep_metrics["local_planner"] = lp
+                ep_metrics["inter_planner"] = ip
+                
+                ep_metrics["robot"] = ep.robot_name or robot_name
+                ep_metrics["map"] = metadata.map
+                ep_metrics["stage"] = descriptor.stage
+                ep_metrics["benchmark_id"] = descriptor.benchmark_id
+                ep_metrics["start"] = ep.start_pos
+                ep_metrics["goal"] = ep.goal_pos
+                results.append(ep_metrics)
+                
+            total_episodes_valid = max(total_episodes_valid, len(episodes))
+
+        if not results:
             print(f"  [skip] No valid episodes found")
             return None
 
-        print(f"  Computing metrics for {len(episodes)} episodes...")
-        registry = MetricRegistry(robot_params)
-        pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
-        if bundle.peds is not None:
-            pedsim_avail = True
-
-        available_topics = set()
-        for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
-            if getattr(bundle, field, None) is not None:
-                available_topics.add(field)
-
-        results = []
-        for ep in episodes:
-            ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
-            ep_metrics["episode"] = ep.episode_id
-            ep_metrics["planner"] = descriptor.planner
-            
-            # Extract and add local_planner and inter_planner columns
-            from ..presentation.dimension_detector import split_planner_name
-            lp, ip = split_planner_name(descriptor.planner)
-            ep_metrics["local_planner"] = lp
-            ep_metrics["inter_planner"] = ip
-            
-            ep_metrics["robot"] = robot_model
-            ep_metrics["map"] = metadata.map
-            ep_metrics["stage"] = descriptor.stage
-            ep_metrics["benchmark_id"] = descriptor.benchmark_id
-            ep_metrics["start"] = ep.start_pos
-            ep_metrics["goal"] = ep.goal_pos
-            results.append(ep_metrics)
-
         df = pl.DataFrame(results)
         metadata.processing_completed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        metadata.episodes_valid = len(episodes)
+        metadata.episodes_valid = total_episodes_valid
         metadata.pipeline_version = arena_evaluation.__version__ if hasattr(arena_evaluation, "__version__") else "1.0.0"
 
         MetadataWriter.write(metadata, metadata_path)

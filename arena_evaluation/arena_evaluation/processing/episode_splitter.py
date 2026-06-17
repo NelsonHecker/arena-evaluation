@@ -15,7 +15,7 @@ class EpisodeSplitter:
         self.aligner = aligner
         self.min_episode_frames = min_episode_frames
 
-    def split(self, bundle: TopicBundle) -> list[AlignedEpisodeBundle]:
+    def split(self, bundle: TopicBundle, robot_name: str | None = None) -> list[AlignedEpisodeBundle]:
         """
         Split the raw bundle into aligned episodes.
         """
@@ -56,7 +56,8 @@ class EpisodeSplitter:
                         data=aligned_df,
                         start_pos=[],
                         goal_pos=[],
-                        num_pedestrians=self._estimate_peds(aligned_df)
+                        num_pedestrians=self._estimate_peds(aligned_df),
+                        robot_name=robot_name
                     )
                 )
             return episodes
@@ -157,7 +158,8 @@ class EpisodeSplitter:
                     data=aligned_df,
                     start_pos=start_pos,
                     goal_pos=goal_pos,
-                    num_pedestrians=self._estimate_peds(aligned_df)
+                    num_pedestrians=self._estimate_peds(aligned_df),
+                    robot_name=robot_name
                 )
             )
             

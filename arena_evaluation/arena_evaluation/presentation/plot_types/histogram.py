@@ -45,7 +45,7 @@ class HistogramRenderer(BasePlotRenderer):
         edges_cut[0] -= 1e-9
         edges_cut[-1] += 1e-9
 
-        pdf[f"{x_col}_bin"] = pd.cut(pdf[x_col], bins=edges_cut, include_lowest=True, labels=bin_labels)
+        pdf[f"{x_col}_bin"] = pd.cut(pdf[x_col], bins=edges_cut, include_lowest=True, labels=bin_labels, ordered=False)
         pdf = pdf.dropna(subset=[f"{x_col}_bin"])
         
         return pdf, bin_labels

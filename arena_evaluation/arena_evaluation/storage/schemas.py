@@ -124,6 +124,7 @@ class AlignedEpisodeBundle:
     start_pos: list[float]
     goal_pos: list[float]
     num_pedestrians: int = 0
+    robot_name: str | None = None
 
 
 class PlotSpec(BaseModel):

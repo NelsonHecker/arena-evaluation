@@ -78,6 +78,41 @@ class BaseMetricCalculator(ABC):
             odom_x = episode.data["pos_x"].to_numpy().copy()
             odom_y = episode.data["pos_y"].to_numpy().copy()
             odom_yaw = episode.data["yaw"].to_numpy().copy()
+            
+            # Detect teleport jumps in the episode
+            if len(odom_x) > 1:
+                dists = np.sqrt(np.diff(odom_x)**2 + np.diff(odom_y)**2)
+                jumps = np.where(dists > 0.5)[0]
+                
+                if len(jumps) > 0:
+                    split_indices = jumps + 1
+                    segments_x = np.split(odom_x, split_indices)
+                    segments_y = np.split(odom_y, split_indices)
+                    
+                    best_seg_idx = -1
+                    best_len = -1.0
+                    
+                    for i in range(len(segments_x)):
+                        seg_x = segments_x[i]
+                        seg_y = segments_y[i]
+                        if len(seg_x) < 2:
+                            seg_len = 0.0
+                        else:
+                            seg_len = np.sum(np.sqrt(np.diff(seg_x)**2 + np.diff(seg_y)**2))
+                        
+                        if seg_len >= 0.2 and seg_len > best_len:
+                            best_len = seg_len
+                            best_seg_idx = i
+                    
+                    if best_seg_idx != -1:
+                        start_idx = 0 if best_seg_idx == 0 else int(split_indices[best_seg_idx - 1])
+                        end_idx = int(split_indices[best_seg_idx]) if best_seg_idx < len(split_indices) - 1 else len(odom_x)
+                        
+                        odom_x = odom_x[start_idx:end_idx]
+                        odom_y = odom_y[start_idx:end_idx]
+                        odom_yaw = odom_yaw[start_idx:end_idx]
+                        episode.data = episode.data.slice(start_idx, end_idx - start_idx)
+
         else:
             odom_x = np.array([], dtype=np.float64)
             odom_y = np.array([], dtype=np.float64)

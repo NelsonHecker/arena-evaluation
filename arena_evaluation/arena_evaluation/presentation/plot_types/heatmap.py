@@ -55,6 +55,9 @@ class HeatmapRenderer(BasePlotRenderer):
             )
             fig.update_layout(
                 template="plotly_white",
+                height=max(600, len(labels) * 40),
+                yaxis=dict(tickmode="linear", dtick=1),
+                xaxis=dict(tickmode="linear", dtick=1)
             )
             return fig.to_html(full_html=False, include_plotlyjs=False)
             
@@ -99,6 +102,9 @@ class HeatmapRenderer(BasePlotRenderer):
                 )
             fig.update_layout(
                 template="plotly_white",
+                height=max(500, len(pivot_df.index) * 40),
+                yaxis=dict(tickmode="linear", dtick=1),
+                xaxis=dict(tickmode="linear", dtick=1)
             )
             return fig.to_html(full_html=False, include_plotlyjs=False)
 

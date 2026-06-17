@@ -72,10 +72,11 @@ def test_mcap_reader_lazy_chunking():
             mock_reader_inst.iter_decoded_messages.return_value = mock_messages
 
             reader = MCAPReader(mcap_file)
-            bundle = reader.read()
+            bundles = reader.read()
+            bundle = bundles["env_0"]
 
             # Verify that the Parquet file was created in the inferred topics folder
-            odom_parquet = tmp_path / "topics" / "odom.parquet"
+            odom_parquet = tmp_path / "topics" / "env_0" / "odom.parquet"
             assert odom_parquet.exists()
 
             # Verify it returns a TopicBundle of LazyFrames
@@ -147,9 +148,10 @@ def test_mcap_reader_tf_gt_extraction():
             mock_reader_inst.iter_decoded_messages.return_value = mock_messages
 
             reader = MCAPReader(mcap_file)
-            bundle = reader.read()
+            bundles = reader.read()
+            bundle = bundles["env_0"]
 
-            tf_gt_parquet = tmp_path / "topics" / "tf_gt.parquet"
+            tf_gt_parquet = tmp_path / "topics" / "env_0" / "tf_gt.parquet"
             assert tf_gt_parquet.exists()
 
             assert bundle.tf_gt is not None

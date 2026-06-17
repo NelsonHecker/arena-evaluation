@@ -233,16 +233,15 @@ class DataRecorderNode(Node):
 
         self.is_shutting_down = False
         self.episodes_recorded = 0
+        self._seen_episodes = set()
         self.recorded_topics: set[str] = set()
 
         self._log_info(f"Subscribing to /clock for sim time")
         self.clock_sub = self.create_subscription(Clock, "/clock", self.clock_callback, self.qos)
 
-        self.change_directory_service = self.create_service(
-            arena_evaluation_srvs.ChangeDirectory,
-            'change_directory',
-            self.change_directory_callback,
-        )
+        env_namespace = self.get_namespace().strip('/')
+        env_ns_root = f"/{env_namespace}" if env_namespace else ""
+
 
         self._log_info(f"Setting up topic subscriptions")
         self._setup_subscriptions()
@@ -373,8 +372,9 @@ class DataRecorderNode(Node):
             if not name.startswith(ns_prefix):
                 continue
 
-            is_scan = "scan" in name or "lidar" in name
-            is_odom = "odom" in name
+            name_lower = name.lower()
+            is_scan = "scan" in name_lower or "lidar" in name_lower
+            is_odom = "odom" in name_lower
 
             # if is_scan and "sensor_msgs/msg/LaserScan" in types:
             #     self._subscribe_discovered(name, LaserScan)
@@ -410,7 +410,9 @@ class DataRecorderNode(Node):
         self.current_time = new_time
 
     def episode_record_callback(self, msg: EpisodeRecord):
-        self.episodes_recorded += 1
+        if msg.episode_id not in self._seen_episodes:
+            self._seen_episodes.add(msg.episode_id)
+            self.episodes_recorded += 1
 
         # Write the EpisodeRecord into the bag using sim time
         now = self.current_time
@@ -431,7 +433,6 @@ class DataRecorderNode(Node):
         self._write_to_bag_at(topic, msg, now)
 
         from .topics import get_topics
-        from nav_msgs.msg import Odometry
         
         for robot in getattr(msg, 'robots', []):
             robot_ns = robot.ns.strip('/')
@@ -688,95 +689,6 @@ class DataRecorderNode(Node):
     # Misc helpers
     # ──────────────────────────────────────────────────────────────────────────
 
-    def change_directory_callback(self, request, response):
-        """
-        Handle a ChangeDirectory request from the benchmark runner.
-        This cleanly finalizes the current recording and opens a new one
-        in the requested directory.
-        """
-        self._log_info(f"Changing directory to: {request.data}")
-
-        try:
-            # 1. Finalize current recording
-            with self.writer_lock:
-                if self.writer is not None:
-                    self.writer.close()
-                    self.writer = None
-
-            # 2. Switch to new directory
-            record_data_dir_path = pathlib.Path(request.data)
-            if not record_data_dir_path.is_absolute():
-                workspace_root = pathlib.Path(self.base_dir).parents[3]
-                record_data_dir_path = workspace_root / record_data_dir_path
-
-            self.run_dir = record_data_dir_path.resolve()
-            
-            bare_names = {"data", "recordings"}
-            if self.run_dir.name in bare_names or not record_data_dir_path.parts[1:]:
-                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                self.run_dir = self.run_dir / "recordings" / timestamp
-
-            self.run_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                self.run_dir.chmod(0o777)
-            except Exception:
-                pass
-
-            # 3. Re-infer benchmark/planner/stage from the new path
-            parts = self.run_dir.parts
-            try:
-                if len(parts) >= 5 and parts[-3] == "recordings":
-                    self.benchmark_id = parts[-4]
-                    self.planner = parts[-2]
-                    self.stage = parts[-1]
-                else:
-                    self.benchmark_id = "unknown"
-                    self.planner = "unknown"
-                    self.stage = "unknown"
-            except Exception:
-                self.benchmark_id = "unknown"
-                self.planner = "unknown"
-                self.stage = "unknown"
-
-            # 4. Update paths
-            self.mcap_path = self.run_dir / "recording.mcap"
-            self.metadata_path = self.run_dir / "metadata.yaml"
-            
-            # Rotate any pre-existing MCAP so rosbag2 doesn't crash on open
-            if self.mcap_path.exists():
-                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                backup = self.run_dir / f"recording_backup_{ts}.mcap"
-                try:
-                    shutil.move(str(self.mcap_path), str(backup))
-                    self._log_warn(f"Backed up existing MCAP to {backup}")
-                except Exception:
-                    shutil.rmtree(self.mcap_path, ignore_errors=True)
-
-            self._open_log_file()
-            self._log_info(f"Switched log file to {self.run_dir}")
-            
-            self.write_params()
-
-            # 6. Reset per-run counters
-            self.episodes_recorded = 0
-            self.recorded_topics = set()
-            self._write_drop_count = 0
-            self._write_success_count = 0
-
-            # 7. Open new MCAP writer
-            self._start_recording()
-
-            # 8. Write new metadata.yaml for the new directory
-            self._write_initial_metadata()
-
-            response.result = True
-        except Exception as e:
-            self._log_error(f"Failed to change directory: {e}")
-            import traceback
-            traceback.print_exc()
-            response.result = False
-
-        return response
 
     def write_params(self):
         params_path = self.run_dir / "params.yaml"
@@ -845,7 +757,10 @@ class DataRecorderNode(Node):
                 except Exception as e:
                     print(f"[DataRecorder] Failed to close MCAP writer: {e}", flush=True)
                 finally:
+                    del self.writer
                     self.writer = None
+                    import gc
+                    gc.collect()
 
         self._log_info(f"Recording finished. {self.episodes_recorded} episodes recorded to {self.mcap_path}")
 
@@ -855,35 +770,12 @@ class DataRecorderNode(Node):
 
 
 def main(args=None):
+    import os
     rclpy.init(args=args)
 
     node = None
     try:
         node = DataRecorderNode()
-
-        # Register python signal handlers to cleanly execute node.finalize() on SIGINT/SIGTERM
-        def signal_handler(sig, frame):
-            # Ignore further SIGINT/SIGTERM to prevent re-entrant interrupts during cleanup
-            try:
-                signal.signal(signal.SIGINT, signal.SIG_IGN)
-                signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            except Exception:
-                pass
-            print(f"[DataRecorder] Signal {sig} received. Shutting down ROS context...", flush=True)
-            if node:
-                try:
-                    node.finalize()
-                except Exception as e:
-                    print(f"[DataRecorder] Error during finalize in signal handler: {e}", flush=True)
-            if rclpy.ok():
-                try:
-                    rclpy.shutdown()
-                except Exception:
-                    pass
-            sys.exit(0)
-
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
 
         executor = MultiThreadedExecutor()
         executor.add_node(node)
@@ -892,12 +784,6 @@ def main(args=None):
         except KeyboardInterrupt:
             pass
         finally:
-            # Ignore further SIGINT/SIGTERM to prevent interrupts during cleanup
-            try:
-                signal.signal(signal.SIGINT, signal.SIG_IGN)
-                signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            except Exception:
-                pass
             print("[DataRecorder] Finalizing node...", flush=True)
             if node:
                 node.finalize()
@@ -908,14 +794,15 @@ def main(args=None):
                 node.destroy_node()
     except Exception as e:
         print(f"[DataRecorder] Exception in main: {e}", flush=True)
+        import traceback
         traceback.print_exc()
         if rclpy.ok():
             rclpy.shutdown()
-        sys.exit(1)
+        os._exit(1)
 
     if rclpy.ok():
         rclpy.shutdown()
-    sys.exit(0)
+    os._exit(0)
 
 
 if __name__ == '__main__':

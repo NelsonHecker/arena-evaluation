@@ -205,31 +205,77 @@ class TrajectoryRenderer(BasePlotRenderer):
                 except Exception as e:
                     print(f"Failed to overlay map {map_name} on subplot {idx}: {e}")
                     
-            for _, row in pdf.iterrows():
-                path = row["path"]
-                if path is None or len(path) == 0:
-                    continue
+            diff_col = self.spec.differentiate or "planner"
+            
+            # Extract planners available in this subplot
+            planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
+            
+            for planner in planners:
+                if diff_col in pdf.columns:
+                    planner_df = pdf[pdf[diff_col] == planner]
+                else:
+                    planner_df = pdf
                     
-                planner = row.get(diff_col, "unknown")
-                episode = row.get("episode", 0)
+                # Sort by episode chronologically
+                if "episode" in planner_df.columns:
+                    planner_df = planner_df.sort_values("episode")
+                    
+                all_x = []
+                all_y = []
                 
-                try:
-                    path_arr = np.array([list(p) for p in path])
-                except Exception:
+                for _, row in planner_df.iterrows():
+                    path = row["path"]
+                    if path is None or len(path) == 0:
+                        continue
+                        
+                    try:
+                        path_arr = np.array([list(p) for p in path])
+                    except Exception:
+                        continue
+                        
+                    if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                        continue
+                        
+                    all_x.extend(path_arr[:, 0])
+                    all_y.extend(path_arr[:, 1])
+                    
+                if not all_x:
                     continue
                     
-                if path_arr.ndim != 2 or path_arr.shape[1] < 2:
-                    continue
-                    
-                x = path_arr[:, 0]
-                y = path_arr[:, 1]
+                x_arr = np.array(all_x)
+                y_arr = np.array(all_y)
                 
+                # Split the continuous path by teleport jumps (> 0.5m)
+                dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
+                jumps = np.where(dists > 0.5)[0]
+                split_indices = jumps + 1
+                
+                segments_x = np.split(x_arr, split_indices)
+                segments_y = np.split(y_arr, split_indices)
+                
+                final_x = []
+                final_y = []
+                
+                for seg_x, seg_y in zip(segments_x, segments_y):
+                    if len(seg_x) < 2:
+                        continue
+                        
+                    seg_len = np.sum(np.sqrt(np.diff(seg_x)**2 + np.diff(seg_y)**2))
+                    if seg_len >= 0.2:
+                        final_x.extend(seg_x)
+                        final_x.append(np.nan)  # Disconnect segments to prevent lines warping across map
+                        final_y.extend(seg_y)
+                        final_y.append(np.nan)
+                        
+                if not final_x:
+                    continue
+                    
                 showlegend = planner not in seen_planners
                 seen_planners.add(planner)
                 
                 fig.add_trace(
                     go.Scatter(
-                        x=x, y=y,
+                        x=final_x, y=final_y,
                         mode='lines',
                         name=planner,
                         legendgroup=planner,
@@ -238,7 +284,6 @@ class TrajectoryRenderer(BasePlotRenderer):
                     ),
                     row=r, col=c
                 )
-                
         height = 500 * rows
         fig.update_layout(
             title=self.spec.title,
@@ -279,24 +324,67 @@ class TrajectoryRenderer(BasePlotRenderer):
                 
             ax.set_title(title)
             
-            for _, row in pdf.iterrows():
-                path = row["path"]
-                if path is None or len(path) == 0:
-                    continue
+            planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
+            
+            for planner in planners:
+                if diff_col in pdf.columns:
+                    planner_df = pdf[pdf[diff_col] == planner]
+                else:
+                    planner_df = pdf
                     
-                try:
-                    path_arr = np.array([list(p) for p in path])
-                except Exception:
-                    continue
+                if "episode" in planner_df.columns:
+                    planner_df = planner_df.sort_values("episode")
                     
-                if path_arr.ndim != 2 or path_arr.shape[1] < 2:
-                    continue
-                    
-                x = path_arr[:, 0]
-                y = path_arr[:, 1]
+                all_x = []
+                all_y = []
                 
-                planner = row.get(diff_col, "unknown")
-                ax.plot(x, y, label=planner, alpha=0.6)
+                for _, row in planner_df.iterrows():
+                    path = row["path"]
+                    if path is None or len(path) == 0:
+                        continue
+                        
+                    try:
+                        path_arr = np.array([list(p) for p in path])
+                    except Exception:
+                        continue
+                        
+                    if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                        continue
+                        
+                    all_x.extend(path_arr[:, 0])
+                    all_y.extend(path_arr[:, 1])
+                    
+                if not all_x:
+                    continue
+                    
+                x_arr = np.array(all_x)
+                y_arr = np.array(all_y)
+                
+                dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
+                jumps = np.where(dists > 0.5)[0]
+                split_indices = jumps + 1
+                
+                segments_x = np.split(x_arr, split_indices)
+                segments_y = np.split(y_arr, split_indices)
+                
+                final_x = []
+                final_y = []
+                
+                for seg_x, seg_y in zip(segments_x, segments_y):
+                    if len(seg_x) < 2:
+                        continue
+                        
+                    seg_len = np.sum(np.sqrt(np.diff(seg_x)**2 + np.diff(seg_y)**2))
+                    if seg_len >= 0.2:
+                        final_x.extend(seg_x)
+                        final_x.append(np.nan)
+                        final_y.extend(seg_y)
+                        final_y.append(np.nan)
+                        
+                if not final_x:
+                    continue
+                    
+                ax.plot(final_x, final_y, label=planner, alpha=0.6)
                 
             ax.set_xlabel("X")
             ax.set_ylabel("Y")

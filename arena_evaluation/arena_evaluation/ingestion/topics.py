@@ -73,7 +73,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     if HAS_TASK_GEN:
         topics["episode_record"] = TopicDefinition(
             f"{p_ns}/state/episode", EpisodeRecord, throttled=False,
-            qos_transient_local=True,
+            qos_transient_local=False,
         )
         topics["robots_fleet"] = TopicDefinition(
             f"{p_ns}/state/robots", RobotFleet, throttled=False,

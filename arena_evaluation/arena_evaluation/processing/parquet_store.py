@@ -91,59 +91,96 @@ class TopicParquetStore:
     Reads and writes a TopicBundle to individual Parquet files per topic.
     """
     @staticmethod
-    def write(bundle: TopicBundle, dest_dir: pathlib.Path) -> None:
+    def write(bundles: dict[str, TopicBundle], dest_dir: pathlib.Path) -> None:
         """
-        Write non-None DataFrames/LazyFrames in a TopicBundle to Parquet files using zstd compression.
+        Write non-None DataFrames/LazyFrames in a dict of TopicBundles to Parquet files using zstd compression.
         """
         dest_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Iterate through the fields of the dataclass
         import dataclasses
-        for field in dataclasses.fields(bundle):
-            df = getattr(bundle, field.name)
-            if df is not None:
-                final_path = dest_dir / f"{field.name}.parquet"
-                
-                # If it is a LazyFrame, check if the file is already written
-                if isinstance(df, pl.LazyFrame):
-                    if final_path.exists():
-                        # Already written by MCAPReader or cached
-                        continue
-                    df = df.collect()
-                
-                if not df.is_empty():
-                    # Write to a temporary file first for atomic writes
-                    temp_path = dest_dir / f"{field.name}.parquet.tmp"
-                    df.write_parquet(temp_path, compression="zstd")
-                    temp_path.rename(final_path)
+        
+        # Determine global fields that are shared among all robots to save space
+        global_fields = {"peds", "episode_record", "tf", "tf_static"}
+        global_written = set()
+        
+        for robot_name, bundle in bundles.items():
+            robot_dir = dest_dir / robot_name
+            robot_dir.mkdir(parents=True, exist_ok=True)
+            
+            for field in dataclasses.fields(bundle):
+                df = getattr(bundle, field.name)
+                if df is not None:
+                    # Write globals to the root dir
+                    if field.name in global_fields:
+                        if field.name in global_written:
+                            continue
+                        final_path = dest_dir / f"{field.name}.parquet"
+                        global_written.add(field.name)
+                    else:
+                        final_path = robot_dir / f"{field.name}.parquet"
+                    
+                    if isinstance(df, pl.LazyFrame):
+                        if final_path.exists():
+                            continue
+                        df = df.collect()
+                    
+                    if not df.is_empty():
+                        temp_path = final_path.with_suffix(".parquet.tmp")
+                        df.write_parquet(temp_path, compression="zstd")
+                        temp_path.rename(final_path)
 
     @staticmethod
-    def read(source_dir: pathlib.Path) -> TopicBundle | None:
+    def read(source_dir: pathlib.Path) -> dict[str, TopicBundle] | None:
         """
-        Read Parquet files from source_dir to reconstruct a TopicBundle.
+        Read Parquet files from source_dir to reconstruct a dict of TopicBundles.
         Returns None if no parquet files exist.
         """
         if not source_dir.exists() or not source_dir.is_dir():
             return None
             
-        parquet_files = list(source_dir.glob("*.parquet"))
-        if not parquet_files:
+        bundles = {}
+        
+        def load_parquet(path):
+            if path.exists():
+                try:
+                    lf = pl.scan_parquet(path)
+                    if "time_ns" in lf.columns:
+                        lf = lf.sort("time_ns")
+                    return lf
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to read parquet {path}: {e}")
             return None
-            
-        kwargs = {}
-        for p in parquet_files:
-            topic_name = p.stem
-            try:
-                lf = pl.scan_parquet(p)
-                if "time_ns" in lf.columns:
-                    lf = lf.sort("time_ns")
-                kwargs[topic_name] = lf
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to read extracted parquet {p}: {e}")
+
+        # Load global topics from root
+        global_bundle = TopicBundle()
+        for p in source_dir.glob("*.parquet"):
+            lf = load_parquet(p)
+            if lf is not None:
+                setattr(global_bundle, p.stem, lf)
                 
-        if not kwargs:
-            return None
+        # Load robot specific topics
+        robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
+        
+        # Fallback to 'unknown' if no subdirs but there are parquet files (legacy fallback)
+        if not robot_dirs and any(source_dir.glob("*.parquet")):
+            return {"unknown": global_bundle}
             
-        return TopicBundle(**kwargs)
+        for robot_dir in robot_dirs:
+            robot_name = robot_dir.name
+            rb = TopicBundle()
+            
+            # Copy global references
+            rb.peds = global_bundle.peds
+            rb.episode_record = global_bundle.episode_record
+            rb.tf = global_bundle.tf
+            rb.tf_static = global_bundle.tf_static
+            
+            for p in robot_dir.glob("*.parquet"):
+                lf = load_parquet(p)
+                if lf is not None:
+                    setattr(rb, p.stem, lf)
+                    
+            bundles[robot_name] = rb
+            
+        return bundles if bundles else None
 

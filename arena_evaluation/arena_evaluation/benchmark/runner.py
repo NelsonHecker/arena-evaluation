@@ -24,7 +24,7 @@ from arena_evaluation_msgs.msg import BenchmarkState
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
-from arena_evaluation_msgs.srv import ChangeDirectory
+
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from task_generator.constants import Constants
@@ -87,6 +87,7 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
     ]
     if step.record_dir is not None:
         args.append(f"record_data_dir:={step.record_dir}")
+        args.append("disable_auto_recorder:=true")
     own_keys = {a.split(":=", 1)[0] for a in args}
     for k, v in step.contestant.args.items():
         if isinstance(v, dict):
@@ -352,7 +353,7 @@ class BenchmarkRunner(ArenaMixinNode):
         self._total_groups = 0
         self._episode_action_clients: dict[int, ActionClientWrapper] = {}
         self._queue_clients: dict[int, ClientWrapper] = {}
-        self._change_dir_clients: dict[int, ClientWrapper] = {}
+
         self._episode_records: dict[int, dict[int, EpisodeRecord]] = {}
         self._env_subs: dict[int, list] = {}
 
@@ -449,12 +450,6 @@ class BenchmarkRunner(ArenaMixinNode):
         await queue_client.ensure(timeout_sec=30.0)
         self._queue_clients[env_id] = queue_client
 
-        change_dir_client = self.create_client_wrapper(
-            ChangeDirectory, f"{env_ns_root}/{robot_name}/change_directory"
-        )
-        # Don't fail if the service is not available (e.g. recording is disabled)
-        self._change_dir_clients[env_id] = change_dir_client
-
         def _on_episode_record(msg: EpisodeRecord) -> None:
             recs = self._episode_records.get(env_id)
             if recs is not None:
@@ -478,9 +473,6 @@ class BenchmarkRunner(ArenaMixinNode):
         qc = self._queue_clients.pop(env_id, None)
         if qc is not None:
             qc.client.destroy()
-        cdc = self._change_dir_clients.pop(env_id, None)
-        if cdc is not None:
-            cdc.client.destroy()
         self._episode_records.pop(env_id, None)
         self._env_visible_events.pop(env_id, None)
 
@@ -674,21 +666,20 @@ class BenchmarkRunner(ArenaMixinNode):
             await self._setup_env_clients(env_id, env_ns_root, group[0].stage.robot)
 
             for idx, step in enumerate(group):
-                if idx > 0 and step.record_dir is not None:
-                    cd_client = self._change_dir_clients.get(env_id)
-                    if cd_client is not None:
-                        is_ready = await cd_client.ensure(timeout_sec=5.0)
-                        if is_ready:
-                            req = ChangeDirectory.Request()
-                            req.data = str(step.record_dir)
-                            try:
-                                resp = await self.await_ros(cd_client.client.call_async(req))
-                                if not resp.result:
-                                    _log.warning(f"change_directory to {step.record_dir} failed")
-                            except Exception as exc:
-                                _log.warning(f"change_directory to {step.record_dir} failed: {exc}")
-                        else:
-                            _log.warning(f"change_directory service {cd_client.client.srv_name} not ready for {step.record_dir}")
+                recorder_proc = None
+                if step.record_dir is not None:
+                    recorder_proc = await asyncio.create_subprocess_exec(
+                        "ros2", "run", "arena_evaluation", "record",
+                        "--ros-args",
+                        "-p", "use_sim_time:=true",
+                        "-p", f"record_data_dir:={step.record_dir}",
+                        "-r", f"__ns:={env_ns_root}",
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    # wait a little bit for the ROS node to initialize
+                    await asyncio.sleep(2.0)
 
                 await self._push_stage_config(env_id, step)
 
@@ -708,6 +699,23 @@ class BenchmarkRunner(ArenaMixinNode):
                             episodes_total=remaining.episodes,
                         ))
                     raise
+                finally:
+                    if recorder_proc is not None:
+                        try:
+                            os.killpg(os.getpgid(recorder_proc.pid), signal.SIGINT)
+                            await asyncio.wait_for(recorder_proc.wait(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            _log.warning(f"Recorder process timed out during shutdown, killing it.")
+                            try:
+                                os.killpg(os.getpgid(recorder_proc.pid), signal.SIGKILL)
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            _log.warning(f"Failed to cleanly terminate recorder process: {e}")
+                            try:
+                                os.killpg(os.getpgid(recorder_proc.pid), signal.SIGKILL)
+                            except Exception:
+                                pass
 
                 results.append(step_result)
 

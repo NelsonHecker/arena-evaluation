@@ -58,7 +58,9 @@ def test_registry_skipping_with_all_topics():
         "scan_min": [0.0, 0.0, 0.0],
         "peds_positions": [[], [], []],
         "peds_headings": [[], [], []],
-        "num_pedestrians": [0, 0, 0]
+        "num_pedestrians": [0, 0, 0],
+        "collision_event": [0, 0, 0],
+        "collision_monitor_state_action": ["none", "none", "none"]
     })
 
     episode = AlignedEpisodeBundle(
@@ -68,7 +70,7 @@ def test_registry_skipping_with_all_topics():
         goal_pos=[2.0, 0.0, 0.0]
     )
 
-    available_topics = {"odom", "scan", "peds"}
+    available_topics = {"odom", "scan", "peds", "collision_events", "collision_monitor_state"}
     results = registry.run(episode, pedsim_available=True, available_topics=available_topics)
 
     # Verify all metrics (including scan and peds based) are calculated

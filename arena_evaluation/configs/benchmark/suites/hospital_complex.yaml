@@ -3,7 +3,7 @@ stages:
 - name: hospital_stage_1_jackal
   map: hospital_1
   robot: jackal
-  episodes: 20
+  episodes: 2
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -20,7 +20,7 @@ stages:
 - name: hospital_stage_2_jackal
   map: hospital_1
   robot: jackal
-  episodes: 20
+  episodes: 2
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -37,7 +37,7 @@ stages:
 - name: hospital_stage_3_jackal
   map: hospital_1
   robot: jackal
-  episodes: 20
+  episodes: 2
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -54,7 +54,7 @@ stages:
 - name: hospital_stage_4_jackal
   map: hospital_1
   robot: jackal
-  episodes: 20
+  episodes: 2
   seed: 42
   tm_robots: random
   tm_obstacles: random
@@ -71,7 +71,7 @@ stages:
 - name: hospital_stage_5_jackal
   map: hospital_1
   robot: jackal
-  episodes: 20
+  episodes: 2
   seed: 42
   tm_robots: random
   tm_obstacles: random
