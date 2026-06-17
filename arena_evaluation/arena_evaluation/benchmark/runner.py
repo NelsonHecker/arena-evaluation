@@ -85,6 +85,9 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
         "auto_reset:=false",
         "tm_modules:=",
     ]
+    if s.optim:
+        for k, v in s.optim.items():
+            args.append(f"optim.{k}:={v}")
     if step.record_dir is not None:
         args.append(f"record_data_dir:={step.record_dir}")
         args.append("disable_auto_recorder:=true")
