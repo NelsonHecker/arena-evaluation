@@ -327,14 +327,14 @@ class DataRecorderNode(Node):
 
         # 1. Register and subscribe to environment-level topics
         for key, t_def in topics_dict.items():
-            if key not in ("episode_record", "robots_fleet", "peds"):
+            if key not in ("episode_record", "robots_fleet", "peds", "agent_states"):
                 continue
                 
             topic_name = t_def.name_template
             msg_type = t_def.msg_type
 
             # Skip placeholders if dependency was missing
-            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "EpisodeRecord", "RobotFleet") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
+            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "AgentStates", "EpisodeRecord", "RobotFleet") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
                 continue
 
             self._register_topic(topic_name, msg_type)
@@ -446,7 +446,7 @@ class DataRecorderNode(Node):
                 
                 for key, t_def in topics_dict.items():
                     # Skip environment level ones
-                    if key in ("episode_record", "robots_fleet", "peds"):
+                    if key in ("episode_record", "robots_fleet", "peds", "agent_states"):
                         continue
                         
                     topic_name = t_def.name_template
@@ -739,7 +739,7 @@ class DataRecorderNode(Node):
         if hasattr(self, 'metadata') and self.metadata is not None:
             self.metadata.recording_ended_at = datetime.now(timezone.utc).isoformat()
             self.metadata.episodes_recorded = self.episodes_recorded
-            self.metadata.pedsim_available = any("arena_peds" in t for t in self.recorded_topics)
+            self.metadata.pedsim_available = any("arena_peds" in t or "agent_states" in t for t in self.recorded_topics)
             self.metadata.recorded_topics = sorted(self.recorded_topics)
             print(f"[DataRecorder] Writing final run-level metadata to {self.metadata_path}...", flush=True)
             try:

@@ -30,6 +30,13 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         HAS_PEDSIM = False
 
     try:
+        from arena_humansim_msgs.msg import AgentStates
+        HAS_HUMANSIM = True
+    except ImportError:
+        AgentStates = type("AgentStates", (), {})
+        HAS_HUMANSIM = False
+
+    try:
         from task_generator_msgs.msg import EpisodeRecord, RobotFleet
         HAS_TASK_GEN = True
     except ImportError:
@@ -69,6 +76,9 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
 
     if HAS_PEDSIM:
         topics["peds"] = TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True)
+
+    if HAS_HUMANSIM:
+        topics["agent_states"] = TopicDefinition(f"{p_ns}/agent_states", AgentStates, throttled=True)
 
     if HAS_TASK_GEN:
         topics["episode_record"] = TopicDefinition(

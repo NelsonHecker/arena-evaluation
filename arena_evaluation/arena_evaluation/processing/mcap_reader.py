@@ -293,31 +293,44 @@ class MCAPReader:
                         appended = True
 
                     # Pedestrians
-                    elif topic.endswith("/arena_peds") or topic.endswith("/peds"):
+                    elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
                         target = global_data["peds"]
                         target["time_ns"].append(ts_ns)
-                        target["num_pedestrians"].append(len(ros_msg.pedestrians))
+                        
+                        if hasattr(ros_msg, "pedestrians"):
+                            agents = ros_msg.pedestrians
+                            is_pose2d = False
+                        else:
+                            agents = [a for a in ros_msg.agents if getattr(a, "kind", 0) == 0]
+                            is_pose2d = True
+
+                        target["num_pedestrians"].append(len(agents))
                         
                         positions = []
                         headings = []
                         twists = []
                         
-                        for p in ros_msg.pedestrians:
-                            # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
-                            positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
-                            
-                            # Headings: calculate yaw from quaternion
-                            yaw = self._quaternion_to_yaw(
-                                p.pose.orientation.x,
-                                p.pose.orientation.y,
-                                p.pose.orientation.z,
-                                p.pose.orientation.w
-                            )
-                            headings.append(yaw)
-                            
-                            # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
-                            twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
-                            
+                        for p in agents:
+                            if is_pose2d:
+                                positions.extend([p.pose.x, p.pose.y, 0.0])
+                                headings.append(p.pose.theta)
+                                twists.extend([p.velocity.x, p.velocity.y, p.velocity.z])
+                            else:
+                                # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
+                                positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
+                                
+                                # Headings: calculate yaw from quaternion
+                                yaw = self._quaternion_to_yaw(
+                                    p.pose.orientation.x,
+                                    p.pose.orientation.y,
+                                    p.pose.orientation.z,
+                                    p.pose.orientation.w
+                                )
+                                headings.append(yaw)
+                                
+                                # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
+                                twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
+                                
                         target["peds_positions"].append(positions)
                         target["peds_headings"].append(headings)
                         target["peds_twists"].append(twists)
