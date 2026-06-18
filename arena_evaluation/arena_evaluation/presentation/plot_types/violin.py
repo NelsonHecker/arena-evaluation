@@ -37,7 +37,8 @@ class ViolinRenderer(BasePlotRenderer):
             template="plotly_white",
             color_discrete_sequence=px.colors.qualitative.Pastel,
         )
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)

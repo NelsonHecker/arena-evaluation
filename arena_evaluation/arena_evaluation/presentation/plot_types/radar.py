@@ -94,9 +94,10 @@ class RadarRenderer(BasePlotRenderer):
             title=self.spec.title,
             template="plotly_white",
             colorway=px.colors.qualitative.Pastel,
+            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         # Static radar charts are complex in seaborn/matplotlib without lots of boilerplate.

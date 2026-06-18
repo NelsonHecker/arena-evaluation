@@ -10,46 +10,6 @@ from .base import BasePlotRenderer
 class HistogramRenderer(BasePlotRenderer):
     PLOT_TYPE = "histogram"
 
-    def _prepare_binned_data(self, df_filtered: pl.DataFrame, x_col: str) -> tuple[pd.DataFrame, list[str]] | None:
-        import numpy as np
-        import pandas as pd
-
-        pdf = df_filtered.to_pandas()
-        if pdf.empty:
-            return None
-
-        # Clean/extract valid numeric values
-        vals = pdf[x_col].dropna().to_numpy()
-        if len(vals) == 0:
-            return None
-
-        num_bins = self.spec.options.get("nbins", 10)
-        if num_bins < 1:
-            num_bins = 10
-
-        edges = np.percentile(vals, np.linspace(0, 100, num_bins + 1))
-        edges = np.unique(edges)
-        if len(edges) < 2:
-            edges = np.array([edges[0] - 0.5, edges[0] + 0.5])
-
-        bin_labels = []
-        for i in range(len(edges) - 1):
-            val1, val2 = edges[i], edges[i+1]
-            if float(val1).is_integer() and float(val2).is_integer():
-                lbl = f"[{int(val1)}, {int(val2)})" if i < len(edges) - 2 else f"[{int(val1)}, {int(val2)}]"
-            else:
-                lbl = f"[{val1:.2f}, {val2:.2f})" if i < len(edges) - 2 else f"[{val1:.2f}, {val2:.2f}]"
-            bin_labels.append(lbl)
-
-        edges_cut = edges.copy()
-        edges_cut[0] -= 1e-9
-        edges_cut[-1] += 1e-9
-
-        pdf[f"{x_col}_bin"] = pd.cut(pdf[x_col], bins=edges_cut, include_lowest=True, labels=bin_labels, ordered=False)
-        pdf = pdf.dropna(subset=[f"{x_col}_bin"])
-        
-        return pdf, bin_labels
-
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
 
@@ -61,33 +21,67 @@ class HistogramRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return None
 
-        res = self._prepare_binned_data(df_filtered, x_col)
-        if res is None:
+        pdf = df_filtered.to_pandas().dropna(subset=[x_col])
+        if pdf.empty:
             return None
-        pdf, bin_labels = res
 
-        barmode = self.spec.options.get("barmode", "group")
-        opacity = self.spec.options.get("opacity", 1.0)
+        import numpy as np
+        import pandas as pd
 
-        fig = px.histogram(
-            pdf,
-            x=f"{x_col}_bin",
-            color=diff_col,
+        num_bins = self.spec.options.get("nbins", 15)
+        opacity = self.spec.options.get("opacity", 0.6)
+
+        global_min = pdf[x_col].min()
+        global_max = pdf[x_col].max()
+        
+        # Prevent zero-width bins
+        if global_min == global_max:
+            global_min -= 1
+            global_max += 1
+
+        bins = np.linspace(global_min, global_max, num_bins + 1)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+
+        if diff_col in pdf.columns:
+            binned_dfs = []
+            for name, group in pdf.groupby(diff_col, observed=False):
+                counts, _ = np.histogram(group[x_col], bins=bins)
+                df_group = pd.DataFrame({
+                    "bin_center": bin_centers,
+                    "count": counts,
+                    diff_col: name
+                })
+                binned_dfs.append(df_group)
+            counts_df = pd.concat(binned_dfs)
+            color_arg = diff_col
+        else:
+            counts, _ = np.histogram(pdf[x_col], bins=bins)
+            counts_df = pd.DataFrame({
+                "bin_center": bin_centers,
+                "count": counts
+            })
+            color_arg = None
+
+        fig = px.area(
+            counts_df,
+            x="bin_center",
+            y="count",
+            color=color_arg,
             title=self.spec.title,
-            barmode=barmode,
             template="plotly_white",
             color_discrete_sequence=px.colors.qualitative.Pastel,
-            opacity=opacity,
-            category_orders={f"{x_col}_bin": bin_labels},
         )
+        
+        # Make the lines smooth
+        fig.update_traces(opacity=opacity, line=dict(shape="spline", smoothing=0.8))
 
         fig.update_layout(
             xaxis_title=x_col.replace("_", " ").title(),
             yaxis_title="Count",
-            xaxis=dict(categoryorder="array", categoryarray=bin_labels),
+            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
@@ -100,26 +94,60 @@ class HistogramRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return
 
-        res = self._prepare_binned_data(df_filtered, x_col)
-        if res is None:
+        pdf = df_filtered.to_pandas().dropna(subset=[x_col])
+        if pdf.empty:
             return
-        pdf, bin_labels = res
 
+        import numpy as np
+        import pandas as pd
         import matplotlib.pyplot as plt
-        import seaborn as sns
+
+        num_bins = self.spec.options.get("nbins", 15)
+
+        global_min = pdf[x_col].min()
+        global_max = pdf[x_col].max()
+        
+        if global_min == global_max:
+            global_min -= 1
+            global_max += 1
+
+        bins = np.linspace(global_min, global_max, num_bins + 1)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+
+        if diff_col in pdf.columns:
+            binned_dfs = []
+            for name, group in pdf.groupby(diff_col, observed=False):
+                counts, _ = np.histogram(group[x_col], bins=bins)
+                df_group = pd.DataFrame({
+                    "bin_center": bin_centers,
+                    "count": counts,
+                    diff_col: name
+                })
+                binned_dfs.append(df_group)
+            counts_df = pd.concat(binned_dfs)
+            hue_arg = diff_col
+        else:
+            counts, _ = np.histogram(pdf[x_col], bins=bins)
+            counts_df = pd.DataFrame({
+                "bin_center": bin_centers,
+                "count": counts
+            })
+            hue_arg = None
 
         plt.figure(figsize=(10, 6))
-        sns.countplot(
-            data=pdf,
-            x=f"{x_col}_bin",
-            hue=diff_col,
-            order=bin_labels,
-            palette="pastel",
-        )
+        
+        if hue_arg:
+            for name, group in counts_df.groupby(hue_arg, observed=False):
+                plt.plot(group["bin_center"], group["count"], label=name, marker='o', linewidth=2)
+                plt.fill_between(group["bin_center"], group["count"], alpha=0.3)
+            plt.legend()
+        else:
+            plt.plot(counts_df["bin_center"], counts_df["count"], marker='o', linewidth=2)
+            plt.fill_between(counts_df["bin_center"], counts_df["count"], alpha=0.3)
+
         plt.title(self.spec.title)
         plt.xlabel(x_col.replace("_", " ").title())
         plt.ylabel("Count")
-        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)
         plt.close()

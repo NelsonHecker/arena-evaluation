@@ -47,9 +47,10 @@ class BarRenderer(BasePlotRenderer):
             yaxis_title=self.spec.data_key.replace("_", " ").title(),
             template="plotly_white",
             colorway=px.colors.qualitative.Pastel,
+            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)

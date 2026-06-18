@@ -108,10 +108,15 @@
             background-color: #f8fafc;
         }
 
-        /* Plots layout */
         .plots-grid {
             display: flex;
             flex-direction: column;
+            gap: 40px;
+        }
+
+        .plots-grid-compact {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
             gap: 40px;
         }
 
@@ -124,8 +129,11 @@
         }
 
         .plot-wrapper {
-            height: 500px;
+            min-height: 500px;
+            height: auto;
             width: 100%;
+            display: flex;
+            flex-direction: column;
         }
 
         /* Footer styling */

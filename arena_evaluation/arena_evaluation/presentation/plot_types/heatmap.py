@@ -57,9 +57,10 @@ class HeatmapRenderer(BasePlotRenderer):
                 template="plotly_white",
                 height=max(600, len(labels) * 40),
                 yaxis=dict(tickmode="linear", dtick=1),
-                xaxis=dict(tickmode="linear", dtick=1)
+                xaxis=dict(tickmode="linear", dtick=1),
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
             )
-            return fig.to_html(full_html=False, include_plotlyjs=False)
+            return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
             
         else:
             # Pivot heatmap: e.g. local_planner vs inter_planner for a given metric (spec.data_key)
@@ -104,9 +105,10 @@ class HeatmapRenderer(BasePlotRenderer):
                 template="plotly_white",
                 height=max(500, len(pivot_df.index) * 40),
                 yaxis=dict(tickmode="linear", dtick=1),
-                xaxis=dict(tickmode="linear", dtick=1)
+                xaxis=dict(tickmode="linear", dtick=1),
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
             )
-            return fig.to_html(full_html=False, include_plotlyjs=False)
+            return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
