@@ -337,4 +337,14 @@ class VizManifest(BaseModel):
                 group_by=["stage"],
                 layout_group="details",
             ),
+            PlotSpec(
+                id="pedestrian_trajectory_plot",
+                type="trajectory",
+                title="Pedestrian Trajectories",
+                data_key="pedestrian_path",
+                differentiate="local_planner",
+                auto_differentiate=False,
+                group_by=["stage"],
+                layout_group="details",
+            ),
         ])

@@ -39,69 +39,88 @@ class TrajectoryRenderer(BasePlotRenderer):
             if "episode" in planner_df.columns:
                 planner_df = planner_df.sort_values("episode")
                 
-            all_x = []
-            all_y = []
+            all_x_by_agent = []
+            all_y_by_agent = []
             
+            data_key = self.spec.data_key or "path"
             for _, row in planner_df.iterrows():
-                path = row["path"]
+                path = row.get(data_key)
                 if path is None or len(path) == 0:
                     continue
                     
+                paths_to_process = []
                 try:
-                    path_arr = np.array([list(p) for p in path])
+                    # Check if it's a list of paths or a single path
+                    first_elem = path[0]
+                    if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
+                        # It's a list of paths
+                        for sub_path in path:
+                            if sub_path is not None and len(sub_path) > 0:
+                                paths_to_process.append(np.array([list(p) for p in sub_path]))
+                    else:
+                        paths_to_process.append(np.array([list(p) for p in path]))
                 except Exception:
                     continue
                     
-                if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                for k, path_arr in enumerate(paths_to_process):
+                    if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                        continue
+                        
+                    while len(all_x_by_agent) <= k:
+                        all_x_by_agent.append([])
+                        all_y_by_agent.append([])
+                        
+                    all_x_by_agent[k].extend(path_arr[:, 0])
+                    all_y_by_agent[k].extend(path_arr[:, 1])
+                    
+            for k in range(len(all_x_by_agent)):
+                if not all_x_by_agent[k]:
                     continue
                     
-                all_x.extend(path_arr[:, 0])
-                all_y.extend(path_arr[:, 1])
+                x_arr = np.array(all_x_by_agent[k], dtype=float)
+                y_arr = np.array(all_y_by_agent[k], dtype=float)
                 
-            if not all_x:
-                continue
+                # To avoid desyncing the Javascript time slider, we DO NOT insert new elements.
+                # Instead, we replace the target of the jump with NaN to break the line.
+                dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
+                jumps = np.where((dists > 3.0) & ~np.isnan(dists))[0]
+                split_indices = jumps + 1
                 
-            x_arr = np.array(all_x)
-            y_arr = np.array(all_y)
-            
-            # Split the continuous path by teleport jumps (> 0.5m)
-            dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
-            jumps = np.where(dists > 0.5)[0]
-            split_indices = jumps + 1
-            
-            segments_x = np.split(x_arr, split_indices)
-            segments_y = np.split(y_arr, split_indices)
-            
-            final_x = []
-            final_y = []
-            
-            for seg_x, seg_y in zip(segments_x, segments_y):
-                if len(seg_x) < 2:
-                    continue
+                final_x = x_arr.copy()
+                final_y = y_arr.copy()
+                if len(split_indices) > 0:
+                    final_x[split_indices] = np.nan
+                    final_y[split_indices] = np.nan
                     
-                seg_len = np.sum(np.sqrt(np.diff(seg_x)**2 + np.diff(seg_y)**2))
-                if seg_len >= 0.2:
-                    final_x.extend(seg_x)
-                    final_x.append(np.nan)  # Disconnect segments to prevent lines warping across map
-                    final_y.extend(seg_y)
-                    final_y.append(np.nan)
-                    
-            if not final_x:
-                continue
+                final_x = final_x.tolist()
+                final_y = final_y.tolist()
                 
-            showlegend = planner not in seen_planners
-            seen_planners.add(planner)
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=final_x, y=final_y,
-                    mode='lines',
-                    name=planner,
-                    legendgroup=planner,
-                    showlegend=showlegend,
-                    opacity=0.7
+                if len(all_x_by_agent) > 1:
+                    # Multi-agent (pedestrians): Group and color by Agent ID
+                    trace_name = f"Agent {k}"
+                    legendgroup = trace_name
+                    showlegend = trace_name not in seen_planners
+                    seen_planners.add(trace_name)
+                    opacity = 0.5
+                else:
+                    # Single agent (robot): Group and color by Planner
+                    trace_name = planner
+                    legendgroup = planner
+                    showlegend = planner not in seen_planners
+                    seen_planners.add(planner)
+                    opacity = 0.8
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=final_x, y=final_y,
+                        mode='lines',
+                        name=trace_name,
+                        legendgroup=legendgroup,
+                        showlegend=showlegend,
+                        opacity=opacity,
+                        hovertemplate=f"<b>{planner}</b><br>{trace_name}<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>"
+                    )
                 )
-            )
             
         title = self.spec.title
         if title_suffix:
@@ -197,56 +216,65 @@ class TrajectoryRenderer(BasePlotRenderer):
                 if "episode" in planner_df.columns:
                     planner_df = planner_df.sort_values("episode")
                     
-                all_x = []
-                all_y = []
+                all_x_by_agent = []
+                all_y_by_agent = []
                 
+                data_key = self.spec.data_key or "path"
                 for _, row in planner_df.iterrows():
-                    path = row["path"]
+                    path = row.get(data_key)
                     if path is None or len(path) == 0:
                         continue
                         
+                    paths_to_process = []
                     try:
-                        path_arr = np.array([list(p) for p in path])
+                        first_elem = path[0]
+                        if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
+                            for sub_path in path:
+                                if sub_path is not None and len(sub_path) > 0:
+                                    paths_to_process.append(np.array([list(p) for p in sub_path]))
+                        else:
+                            paths_to_process.append(np.array([list(p) for p in path]))
                     except Exception:
                         continue
                         
-                    if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                    for k, path_arr in enumerate(paths_to_process):
+                        if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                            continue
+                            
+                        while len(all_x_by_agent) <= k:
+                            all_x_by_agent.append([])
+                            all_y_by_agent.append([])
+                            
+                        all_x_by_agent[k].extend(path_arr[:, 0])
+                        all_y_by_agent[k].extend(path_arr[:, 1])
+                        
+                for k in range(len(all_x_by_agent)):
+                    if not all_x_by_agent[k]:
                         continue
                         
-                    all_x.extend(path_arr[:, 0])
-                    all_y.extend(path_arr[:, 1])
+                    x_arr = np.array(all_x_by_agent[k], dtype=float)
+                    y_arr = np.array(all_y_by_agent[k], dtype=float)
                     
-                if not all_x:
-                    continue
+                    dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
+                    jumps = np.where((dists > 3.0) & ~np.isnan(dists))[0]
+                    split_indices = jumps + 1
                     
-                x_arr = np.array(all_x)
-                y_arr = np.array(all_y)
-                
-                dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
-                jumps = np.where(dists > 0.5)[0]
-                split_indices = jumps + 1
-                
-                segments_x = np.split(x_arr, split_indices)
-                segments_y = np.split(y_arr, split_indices)
-                
-                final_x = []
-                final_y = []
-                
-                for seg_x, seg_y in zip(segments_x, segments_y):
-                    if len(seg_x) < 2:
-                        continue
+                    final_x = x_arr.copy()
+                    final_y = y_arr.copy()
+                    if len(split_indices) > 0:
+                        final_x[split_indices] = np.nan
+                        final_y[split_indices] = np.nan
+                    
+                    if len(all_x_by_agent) > 1:
+                        # Multi-agent (pedestrians)
+                        opacity = 0.5
+                        label = f"Agent {k}" if planner == planners[0] else None
+                    else:
+                        # Single agent (robot)
+                        opacity = 0.8
+                        label = planner if k == 0 else None
                         
-                    seg_len = np.sum(np.sqrt(np.diff(seg_x)**2 + np.diff(seg_y)**2))
-                    if seg_len >= 0.2:
-                        final_x.extend(seg_x)
-                        final_x.append(np.nan)
-                        final_y.extend(seg_y)
-                        final_y.append(np.nan)
-                        
-                if not final_x:
-                    continue
-                    
-                ax.plot(final_x, final_y, label=planner, alpha=0.6)
+                    ax.plot(final_x, final_y, label=label, alpha=opacity)
                 
             ax.set_xlabel("X")
             ax.set_ylabel("Y")
@@ -338,7 +366,8 @@ class TrajectoryRenderer(BasePlotRenderer):
 
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
         df_filtered = self._apply_filters(df)
-        if "path" not in df_filtered.columns:
+        data_key = self.spec.data_key or "path"
+        if data_key not in df_filtered.columns:
             return None
             
         run_dir = getattr(self, "run_dir", None)
@@ -381,7 +410,8 @@ class TrajectoryRenderer(BasePlotRenderer):
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
-        if "path" not in df_filtered.columns:
+        data_key = self.spec.data_key or "path"
+        if data_key not in df_filtered.columns:
             return
             
         run_dir = getattr(self, "run_dir", None)
@@ -410,24 +440,68 @@ class TrajectoryRenderer(BasePlotRenderer):
         plt.figure(figsize=(10, 10))
         diff_col = self.spec.differentiate or "planner"
         
+        all_x_by_agent = {}
+        
+        data_key = self.spec.data_key or "path"
         for _, row in pdf.iterrows():
-            path = row["path"]
+            path = row.get(data_key)
             if path is None or len(path) == 0:
                 continue
                 
+            paths_to_process = []
             try:
-                path_arr = np.array([list(p) for p in path])
+                first_elem = path[0]
+                if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
+                    for sub_path in path:
+                        if sub_path is not None and len(sub_path) > 0:
+                            paths_to_process.append(np.array([list(p) for p in sub_path]))
+                else:
+                    paths_to_process.append(np.array([list(p) for p in path]))
             except Exception:
                 continue
                 
-            if path_arr.ndim != 2 or path_arr.shape[1] < 2:
-                continue
-                
-            x = path_arr[:, 0]
-            y = path_arr[:, 1]
-                
             planner = row.get(diff_col, "unknown")
-            plt.plot(x, y, label=planner, alpha=0.6)
+            if planner not in all_x_by_agent:
+                all_x_by_agent[planner] = []
+                
+            for k, path_arr in enumerate(paths_to_process):
+                if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                    continue
+                    
+                while len(all_x_by_agent[planner]) <= k:
+                    all_x_by_agent[planner].append({"x": [], "y": []})
+                    
+                all_x_by_agent[planner][k]["x"].extend(path_arr[:, 0])
+                all_x_by_agent[planner][k]["x"].append(np.nan) # Separator for seaborn
+                all_x_by_agent[planner][k]["y"].extend(path_arr[:, 1])
+                all_x_by_agent[planner][k]["y"].append(np.nan)
+                
+        for planner, agents in all_x_by_agent.items():
+            for k, agent_data in enumerate(agents):
+                if not agent_data["x"]:
+                    continue
+                    
+                x_arr = np.array(agent_data["x"], dtype=float)
+                y_arr = np.array(agent_data["y"], dtype=float)
+                
+                dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
+                jumps = np.where((dists > 3.0) & ~np.isnan(dists))[0]
+                split_indices = jumps + 1
+                
+                final_x = x_arr.copy()
+                final_y = y_arr.copy()
+                if len(split_indices) > 0:
+                    final_x[split_indices] = np.nan
+                    final_y[split_indices] = np.nan
+                
+                if len(agents) > 1:
+                    opacity = 0.5
+                    label = f"Agent {k}" if planner == list(all_x_by_agent.keys())[0] else None
+                else:
+                    opacity = 0.8
+                    label = planner if k == 0 else None
+                    
+                plt.plot(final_x, final_y, label=label, alpha=opacity)
             
         plt.title(self.spec.title)
         plt.xlabel("X")
