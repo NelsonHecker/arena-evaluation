@@ -25,6 +25,13 @@ class GazeMetricsCalculator(BaseMetricCalculator):
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["odom", "peds"]
     
+    UNITS = {
+        "time_looking_at_pedestrians": "",
+        "total_time_looking_at_pedestrians": "s",
+        "time_looked_at_by_pedestrians": "",
+        "total_time_looked_at_by_pedestrians": "s",
+    }
+    
     GAZE_CONE_DEG = 5.0
     
     @classmethod

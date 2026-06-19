@@ -7,7 +7,8 @@ from ..storage.schemas import PlotSpec
 class PlotlyRenderer:
     """Dispatches plot rendering to the correct Plotly class."""
     
-    def __init__(self):
+    def __init__(self, units: dict[str, str] | None = None):
+        self.units = units or {}
         from .color_utils import set_global_color_palette
         set_global_color_palette()
         
@@ -38,7 +39,7 @@ class PlotlyRenderer:
         if not renderer_cls:
             return None
             
-        renderer = renderer_cls(spec)
+        renderer = renderer_cls(spec, units=self.units)
         if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
             renderer.run_dir = run_dir
         return renderer.render_plotly(df)

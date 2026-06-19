@@ -38,8 +38,8 @@ class ScatterRenderer(BasePlotRenderer):
         )
 
         fig.update_layout(
-            xaxis_title=x_col.replace("_", " ").title(),
-            yaxis_title=y_col.replace("_", " ").title(),
+            xaxis_title=self.format_label(x_col.replace("_", " ").title(), x_col),
+            yaxis_title=self.format_label(y_col.replace("_", " ").title(), y_col),
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
 
@@ -74,6 +74,8 @@ class ScatterRenderer(BasePlotRenderer):
             alpha=0.7,
         )
         plt.title(self.spec.title)
+        plt.xlabel(self.format_label(x_col.replace("_", " ").title(), x_col))
+        plt.ylabel(self.format_label(y_col.replace("_", " ").title(), y_col))
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)
         plt.close()

@@ -40,6 +40,9 @@ class BaseMetricCalculator(ABC):
     # List of topics required by this calculator. Each entry can be a string
     # (strictly required topic) or a collection/tuple of strings (any of the listed topics).
     REQUIRED_TOPICS: list[str | list[str] | tuple[str, ...] | set[str]] = []
+    
+    # Dictionary mapping output keys to their SI units.
+    UNITS: dict[str, str] = {}
 
     def __init__(self, robot_params: RobotParams):
         """

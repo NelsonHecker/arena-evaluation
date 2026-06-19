@@ -156,8 +156,11 @@ class ReportBuilder:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.plots_dir.mkdir(exist_ok=True)
 
-        plotly_renderer = PlotlyRenderer()
-        seaborn_renderer = SeabornRenderer(generate_gifs=self.generate_gifs)
+        from ..processing.metrics.registry import MetricRegistry
+        units = MetricRegistry.get_all_units()
+
+        plotly_renderer = PlotlyRenderer(units=units)
+        seaborn_renderer = SeabornRenderer(generate_gifs=self.generate_gifs, units=units)
 
         html_plots = []
 

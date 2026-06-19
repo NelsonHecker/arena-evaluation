@@ -7,8 +7,9 @@ from ..storage.schemas import PlotSpec
 class SeabornRenderer:
     """Dispatches plot rendering to the correct static PNG class."""
     
-    def __init__(self, generate_gifs: bool = False):
+    def __init__(self, generate_gifs: bool = False, units: dict[str, str] | None = None):
         self.generate_gifs = generate_gifs
+        self.units = units or {}
         from .plot_types import (
             ViolinRenderer,
             BoxRenderer,
@@ -39,7 +40,7 @@ class SeabornRenderer:
         if not renderer_cls:
             return
             
-        renderer = renderer_cls(spec)
+        renderer = renderer_cls(spec, units=self.units)
         if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
             renderer.run_dir = run_dir
             if renderer_cls.__name__ == "TrajectoryRenderer":

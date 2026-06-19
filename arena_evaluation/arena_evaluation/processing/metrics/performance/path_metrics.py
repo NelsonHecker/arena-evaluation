@@ -32,6 +32,19 @@ class PathMetricsCalculator(BaseMetricCalculator):
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["odom"]
     
+    UNITS = {
+        "path": "m",
+        "path_odom": "m",
+        "path_length_values": "m",
+        "path_length": "m",
+        "curvature": "1/m",
+        "curvature_mean": "1/m",
+        "normalized_curvature": "",
+        "roughness": "m²",
+        "roughness_mean": "m²",
+        "angle_over_length": "rad/m",
+    }
+    
     @classmethod
     def output_keys(cls) -> list[str]:
         return [

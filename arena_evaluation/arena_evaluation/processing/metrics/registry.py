@@ -19,10 +19,12 @@ class MetricRegistry:
     def __init__(self, robot_params: RobotParams):
         self.robot_params = robot_params
         self.calculators: dict[str, BaseMetricCalculator] = {}
-        self._discover_calculators()
+        self.discover_calculators_cls()
+        self._register_calculators()
         self.execution_stages = self._compute_execution_order()
 
-    def _discover_calculators(self) -> None:
+    @classmethod
+    def discover_calculators_cls(cls) -> None:
         """Recursively discover all BaseMetricCalculator subclasses in the metrics package."""
         import arena_evaluation.processing.metrics as metrics_pkg
         
@@ -39,15 +41,26 @@ class MetricRegistry:
                 for _, sub_name, _ in iter_namespace(sub_pkg):
                     importlib.import_module(sub_name)
 
-        # Register all non-abstract subclasses
-        for cls in BaseMetricCalculator.__subclasses__():
+    def _register_calculators(self) -> None:
+        """Register all non-abstract subclasses"""
+        for calc_cls in BaseMetricCalculator.__subclasses__():
             # Check if it's not an abstract class (doesn't have abstract methods)
-            if not getattr(cls, "__abstractmethods__", None):
-                if not cls.NAME:
-                    raise ValueError(f"Calculator {cls.__name__} must define a NAME")
-                if cls.NAME in self.calculators:
-                    raise ValueError(f"Duplicate calculator NAME: {cls.NAME}")
-                self.calculators[cls.NAME] = cls(self.robot_params)
+            if not getattr(calc_cls, "__abstractmethods__", None):
+                if not calc_cls.NAME:
+                    raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
+                if calc_cls.NAME in self.calculators:
+                    raise ValueError(f"Duplicate calculator NAME: {calc_cls.NAME}")
+                self.calculators[calc_cls.NAME] = calc_cls(self.robot_params)
+
+    @classmethod
+    def get_all_units(cls) -> dict[str, str]:
+        """Returns a combined dictionary of all units from all metrics."""
+        cls.discover_calculators_cls()
+        units = {}
+        for calc_cls in BaseMetricCalculator.__subclasses__():
+            if not getattr(calc_cls, "__abstractmethods__", None):
+                units.update(getattr(calc_cls, "UNITS", {}))
+        return units
 
     def _compute_execution_order(self) -> list[list[str]]:
         """

@@ -27,6 +27,16 @@ class MotionMetricsCalculator(BaseMetricCalculator):
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["odom"]
     
+    UNITS = {
+        "velocity": "m/s",
+        "velocity_mean": "m/s",
+        "velocity_max": "m/s",
+        "acceleration": "m/s²",
+        "acceleration_mean": "m/s²",
+        "jerk": "m/s³",
+        "jerk_mean": "m/s³",
+    }
+    
     @classmethod
     def output_keys(cls) -> list[str]:
         return [

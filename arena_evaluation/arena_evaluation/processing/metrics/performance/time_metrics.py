@@ -22,6 +22,13 @@ class TimeMetricsCalculator(BaseMetricCalculator):
     DEPENDS_ON = ["motion_metrics"]
     REQUIRED_TOPICS = ["odom"]
     
+    UNITS = {
+        "time": "ns",
+        "time_diff": "ns",
+        "time_to_goal": "s",
+        "idling_time": "s",
+    }
+    
     @classmethod
     def output_keys(cls) -> list[str]:
         return [

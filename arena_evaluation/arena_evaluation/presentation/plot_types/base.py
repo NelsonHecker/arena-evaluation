@@ -14,8 +14,16 @@ class BasePlotRenderer(ABC):
     """
     PLOT_TYPE: str = ""
 
-    def __init__(self, spec: PlotSpec):
+    def __init__(self, spec: PlotSpec, units: dict[str, str] | None = None):
         self.spec = spec
+        self.units = units or {}
+        
+    def format_label(self, label: str, data_key: str) -> str:
+        """Format the label with the unit associated with data_key."""
+        unit = self.units.get(data_key)
+        if unit:
+            return f"{label} [{unit}]"
+        return label
 
     @abstractmethod
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:

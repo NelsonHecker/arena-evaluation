@@ -92,7 +92,7 @@ class HeatmapRenderer(BasePlotRenderer):
                 y=pivot_df.index.tolist(),
                 color_continuous_scale="Viridis",
                 title=self.spec.title,
-                labels=dict(color=metric.replace("_", " ").title(), x=x_col.replace("_", " ").title(), y=y_col.replace("_", " ").title()),
+                labels=dict(color=self.format_label(metric.replace("_", " ").title(), metric), x=x_col.replace("_", " ").title(), y=y_col.replace("_", " ").title()),
                 aspect="auto"
             )
             # Add text values inside cells for readability if there aren't too many cells
@@ -188,7 +188,7 @@ class HeatmapRenderer(BasePlotRenderer):
                 annot=True,
                 fmt=".2f",
                 cmap="viridis",
-                cbar_kws={'label': metric.replace("_", " ").title()}
+                cbar_kws={'label': self.format_label(metric.replace("_", " ").title(), metric)}
             )
             plt.title(self.spec.title)
             plt.xlabel(x_col.replace("_", " ").title())

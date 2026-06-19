@@ -24,6 +24,10 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
     REQUIRED_TOPICS = ["peds"]
     REQUIRES_PEDSIM = True
     
+    UNITS = {
+        "pedestrian_path": "m"
+    }
+    
     @classmethod
     def output_keys(cls) -> list[str]:
         return ["pedestrian_path"]

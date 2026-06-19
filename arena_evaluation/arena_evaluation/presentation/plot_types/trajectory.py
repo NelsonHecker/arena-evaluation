@@ -228,8 +228,8 @@ class TrajectoryRenderer(BasePlotRenderer):
         # Add map overlay if available
         layout_args = dict(
             title=title,
-            xaxis_title="X",
-            yaxis_title="Y",
+            xaxis_title="X [m]",
+            yaxis_title="Y [m]",
             yaxis=dict(scaleanchor="x", scaleratio=1),
             template="plotly_white",
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
@@ -675,8 +675,8 @@ class TrajectoryRenderer(BasePlotRenderer):
             title = f"{title} - {title_suffix}"
         plt.title(title)
         
-        plt.xlabel("X")
-        plt.ylabel("Y")
+        plt.xlabel("X [m]")
+        plt.ylabel("Y [m]")
         plt.axis('equal')
         
         handles, labels = plt.gca().get_legend_handles_labels()

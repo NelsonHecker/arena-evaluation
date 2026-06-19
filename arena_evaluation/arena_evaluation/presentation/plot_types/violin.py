@@ -31,7 +31,7 @@ class ViolinRenderer(BasePlotRenderer):
             points="all",
             title=self.spec.title,
             labels={
-                self.spec.data_key: self.spec.data_key.replace("_", " ").title(),
+                self.spec.data_key: self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
                 diff_col: diff_col.lstrip("_").replace("_", " ").title(),
             },
             template="plotly_white",
@@ -63,6 +63,7 @@ class ViolinRenderer(BasePlotRenderer):
             inner="box",
         )
         plt.title(self.spec.title)
+        plt.ylabel(self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key))
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)
         plt.close()

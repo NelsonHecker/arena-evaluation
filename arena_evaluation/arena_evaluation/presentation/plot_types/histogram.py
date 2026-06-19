@@ -75,7 +75,7 @@ class HistogramRenderer(BasePlotRenderer):
         fig.update_traces(opacity=opacity, line=dict(shape="spline", smoothing=0.8))
 
         fig.update_layout(
-            xaxis_title=x_col.replace("_", " ").title(),
+            xaxis_title=self.format_label(x_col.replace("_", " ").title(), x_col),
             yaxis_title="Count",
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
@@ -145,7 +145,7 @@ class HistogramRenderer(BasePlotRenderer):
             plt.fill_between(counts_df["bin_center"], counts_df["count"], alpha=0.3)
 
         plt.title(self.spec.title)
-        plt.xlabel(x_col.replace("_", " ").title())
+        plt.xlabel(self.format_label(x_col.replace("_", " ").title(), x_col))
         plt.ylabel("Count")
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)

@@ -24,6 +24,13 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     DEPENDS_ON = ["time_metrics"]
     REQUIRED_TOPICS = []
     
+    UNITS = {
+        "collision_amount": "",
+        "collisions": "",
+        "result": "",
+        "success": "",
+    }
+    
     TIMEOUT_THRESHOLD_S = 180.0
     MAX_COLLISIONS = 3
     

@@ -77,7 +77,8 @@ class RadarRenderer(BasePlotRenderer):
         for _, row in normalized.iterrows():
             values = [row[m] for m in valid_metrics]
             values.append(values[0])
-            labels = valid_metrics + [valid_metrics[0]]
+            formatted_metrics = [self.format_label(m.replace("_", " ").title(), m) for m in valid_metrics]
+            labels = formatted_metrics + [formatted_metrics[0]]
 
             fig.add_trace(go.Scatterpolar(
                 r=values,

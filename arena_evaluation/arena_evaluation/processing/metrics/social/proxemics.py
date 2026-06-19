@@ -29,6 +29,13 @@ class ProxemicsCalculator(BaseMetricCalculator):
     DEPENDS_ON = ["motion_metrics"]
     REQUIRED_TOPICS = ["odom", "peds"]
     
+    UNITS = {
+        "num_pedestrians": "",
+        "time_in_personal_space": "",
+        "total_time_in_personal_space": "s",
+        "avg_velocity_in_personal_space": "m/s",
+    }
+    
     PERSONAL_SPACE_RADIUS = 1.2
     
     @classmethod
