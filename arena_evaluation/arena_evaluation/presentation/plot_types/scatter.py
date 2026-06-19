@@ -34,7 +34,6 @@ class ScatterRenderer(BasePlotRenderer):
             color=diff_col,
             title=self.spec.title,
             template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Pastel,
             opacity=0.7,
         )
 

@@ -93,7 +93,6 @@ class RadarRenderer(BasePlotRenderer):
             showlegend=True,
             title=self.spec.title,
             template="plotly_white",
-            colorway=px.colors.qualitative.Pastel,
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
 

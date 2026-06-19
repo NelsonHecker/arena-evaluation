@@ -22,6 +22,7 @@ class ReportBuilder:
         benchmark_dir: pathlib.Path,
         *,
         output_dir: pathlib.Path | None = None,
+        generate_gifs: bool = False,
     ):
         self.benchmark_dir = pathlib.Path(benchmark_dir)
         # output_dir defaults to benchmark_dir so existing callers are unaffected
@@ -29,6 +30,7 @@ class ReportBuilder:
         self.plots_dir = self.output_dir / "plots"
         self.report_path = self.output_dir / "report.html"
         self.manifest_path = self.benchmark_dir / "viz_manifest.yaml"
+        self.generate_gifs = generate_gifs
 
     # ------------------------------------------------------------------
     # Multi-source use
@@ -41,6 +43,7 @@ class ReportBuilder:
         output_dir: pathlib.Path,
         *,
         manifest_path: pathlib.Path | None = None,
+        generate_gifs: bool = False,
     ) -> "ReportBuilder":
         """
         Build a ReportBuilder that merges data from multiple source directories.
@@ -50,6 +53,7 @@ class ReportBuilder:
         instance.output_dir = pathlib.Path(output_dir)
         instance.plots_dir = instance.output_dir / "plots"
         instance.report_path = instance.output_dir / "report.html"
+        instance.generate_gifs = generate_gifs
 
         # Find manifest: explicit → first source with one → default
         if manifest_path and pathlib.Path(manifest_path).exists():
@@ -153,7 +157,7 @@ class ReportBuilder:
         self.plots_dir.mkdir(exist_ok=True)
 
         plotly_renderer = PlotlyRenderer()
-        seaborn_renderer = SeabornRenderer()
+        seaborn_renderer = SeabornRenderer(generate_gifs=self.generate_gifs)
 
         html_plots = []
 

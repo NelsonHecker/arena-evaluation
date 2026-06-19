@@ -8,6 +8,9 @@ class PlotlyRenderer:
     """Dispatches plot rendering to the correct Plotly class."""
     
     def __init__(self):
+        from .color_utils import set_global_color_palette
+        set_global_color_palette()
+        
         from .plot_types import (
             ViolinRenderer,
             BoxRenderer,

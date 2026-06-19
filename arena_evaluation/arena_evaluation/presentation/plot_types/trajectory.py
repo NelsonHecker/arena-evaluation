@@ -8,6 +8,7 @@ import plotly.express as px
 import numpy as np
 
 from .base import BasePlotRenderer
+from ..color_utils import get_color_palette
 from ...processing.map_registry import MapRegistry
 
 
@@ -39,8 +40,21 @@ class TrajectoryRenderer(BasePlotRenderer):
             if "episode" in planner_df.columns:
                 planner_df = planner_df.sort_values("episode")
                 
+            overlay_markers = self.spec.options.get("overlay_markers", True)
+            
             all_x_by_agent = []
             all_y_by_agent = []
+            
+            if overlay_markers:
+                starts_x_by_agent = []
+                starts_y_by_agent = []
+                starts_idx_by_agent = []
+                goals_x_by_agent = []
+                goals_y_by_agent = []
+                goals_idx_by_agent = []
+                col_x_by_agent = []
+                col_y_by_agent = []
+                col_idx_by_agent = []
             
             data_key = self.spec.data_key or "path"
             for _, row in planner_df.iterrows():
@@ -48,12 +62,12 @@ class TrajectoryRenderer(BasePlotRenderer):
                 if path is None or len(path) == 0:
                     continue
                     
+                is_collision = row.get("result") == "COLLISION"
+                    
                 paths_to_process = []
                 try:
-                    # Check if it's a list of paths or a single path
                     first_elem = path[0]
                     if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
-                        # It's a list of paths
                         for sub_path in path:
                             if sub_path is not None and len(sub_path) > 0:
                                 paths_to_process.append(np.array([list(p) for p in sub_path]))
@@ -69,10 +83,60 @@ class TrajectoryRenderer(BasePlotRenderer):
                     while len(all_x_by_agent) <= k:
                         all_x_by_agent.append([])
                         all_y_by_agent.append([])
-                        
+                        if overlay_markers:
+                            starts_x_by_agent.append([])
+                            starts_y_by_agent.append([])
+                            starts_idx_by_agent.append([])
+                            goals_x_by_agent.append([])
+                            goals_y_by_agent.append([])
+                            goals_idx_by_agent.append([])
+                            col_x_by_agent.append([])
+                            col_y_by_agent.append([])
+                            col_idx_by_agent.append([])
+                            
+                    if overlay_markers:
+                        current_len = len(all_x_by_agent[k])
+                        valid_mask = ~np.isnan(path_arr[:, 0])
+                        if np.any(valid_mask):
+                            clean_indices = np.where(valid_mask)[0]
+                            
+                            # Find actual start avoiding initial spawn jumps
+                            dists = np.sqrt(np.diff(path_arr[clean_indices, 0])**2 + np.diff(path_arr[clean_indices, 1])**2)
+                            jumps = np.where(dists > 3.0)[0]
+                            segment_starts = np.concatenate([[0], jumps + 1])
+                            segment_ends = np.concatenate([jumps, [len(dists)]])
+                            
+                            first_clean_idx = segment_starts[-1] # Fallback
+                            for s_idx, e_idx in zip(segment_starts, segment_ends):
+                                if e_idx > s_idx:
+                                    segment_length = np.sum(dists[s_idx:e_idx])
+                                    if segment_length > 0.1:
+                                        first_clean_idx = s_idx
+                                        break
+                                
+                            first_idx = int(clean_indices[first_clean_idx])
+                            last_idx = int(clean_indices[-1])
+                            
+                            starts_x_by_agent[k].append(path_arr[first_idx, 0])
+                            starts_y_by_agent[k].append(path_arr[first_idx, 1])
+                            starts_idx_by_agent[k].append(current_len + first_idx)
+                            
+                            if is_collision:
+                                col_x_by_agent[k].append(path_arr[last_idx, 0])
+                                col_y_by_agent[k].append(path_arr[last_idx, 1])
+                                col_idx_by_agent[k].append(current_len + last_idx)
+                            else:
+                                goals_x_by_agent[k].append(path_arr[last_idx, 0])
+                                goals_y_by_agent[k].append(path_arr[last_idx, 1])
+                                goals_idx_by_agent[k].append(current_len + first_idx) # Draw goal at the SAME time as start
+                                
                     all_x_by_agent[k].extend(path_arr[:, 0])
                     all_y_by_agent[k].extend(path_arr[:, 1])
                     
+            palette = get_color_palette()
+            planner_idx = list(planners).index(planner) if planner in planners else 0
+            planner_color = palette[planner_idx % len(palette)]
+
             for k in range(len(all_x_by_agent)):
                 if not all_x_by_agent[k]:
                     continue
@@ -80,8 +144,6 @@ class TrajectoryRenderer(BasePlotRenderer):
                 x_arr = np.array(all_x_by_agent[k], dtype=float)
                 y_arr = np.array(all_y_by_agent[k], dtype=float)
                 
-                # To avoid desyncing the Javascript time slider, we DO NOT insert new elements.
-                # Instead, we replace the target of the jump with NaN to break the line.
                 dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
                 jumps = np.where((dists > 3.0) & ~np.isnan(dists))[0]
                 split_indices = jumps + 1
@@ -96,14 +158,12 @@ class TrajectoryRenderer(BasePlotRenderer):
                 final_y = final_y.tolist()
                 
                 if len(all_x_by_agent) > 1:
-                    # Multi-agent (pedestrians): Group and color by Agent ID
-                    trace_name = f"Agent {k}"
-                    legendgroup = trace_name
-                    showlegend = trace_name not in seen_planners
-                    seen_planners.add(trace_name)
+                    trace_name = f"{planner} - Agent {k}"
+                    legendgroup = planner
+                    showlegend = planner not in seen_planners
+                    seen_planners.add(planner)
                     opacity = 0.5
                 else:
-                    # Single agent (robot): Group and color by Planner
                     trace_name = planner
                     legendgroup = planner
                     showlegend = planner not in seen_planners
@@ -118,9 +178,48 @@ class TrajectoryRenderer(BasePlotRenderer):
                         legendgroup=legendgroup,
                         showlegend=showlegend,
                         opacity=opacity,
-                        hovertemplate=f"<b>{planner}</b><br>{trace_name}<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>"
+                        line=dict(color=planner_color),
+                        hovertemplate=f"<b>{{planner}}</b><br>{{trace_name}}<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>"
                     )
                 )
+                
+                if overlay_markers:
+                    if starts_x_by_agent[k]:
+                        fig.add_trace(go.Scatter(
+                            x=starts_x_by_agent[k], y=starts_y_by_agent[k],
+                            mode='markers',
+                            marker=dict(symbol='circle', size=8, color='#00bfb2'),
+                            name=f"{planner} Starts",
+                            legendgroup=planner,
+                            showlegend=False,
+                            opacity=0.8,
+                            hovertemplate=f"<b>{{planner}}</b><br>Start<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                            customdata=starts_idx_by_agent[k]
+                        ))
+                    if goals_x_by_agent[k]:
+                        fig.add_trace(go.Scatter(
+                            x=goals_x_by_agent[k], y=goals_y_by_agent[k],
+                            mode='markers',
+                            marker=dict(symbol='star', size=12, color='#ffc845'),
+                            name=f"{planner} Goals",
+                            legendgroup=planner,
+                            showlegend=False,
+                            opacity=0.9,
+                            hovertemplate=f"<b>{{planner}}</b><br>Goal<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                            customdata=goals_idx_by_agent[k]
+                        ))
+                    if col_x_by_agent[k]:
+                        fig.add_trace(go.Scatter(
+                            x=col_x_by_agent[k], y=col_y_by_agent[k],
+                            mode='markers',
+                            marker=dict(symbol='x', size=10, color='#d3273e', line=dict(width=2)),
+                            name=f"{planner} Collisions",
+                            legendgroup=planner,
+                            showlegend=False,
+                            opacity=1.0,
+                            hovertemplate=f"<b>{{planner}}</b><br>Collision<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                            customdata=col_idx_by_agent[k]
+                        ))
             
         title = self.spec.title
         if title_suffix:
@@ -133,7 +232,6 @@ class TrajectoryRenderer(BasePlotRenderer):
             yaxis_title="Y",
             yaxis=dict(scaleanchor="x", scaleratio=1),
             template="plotly_white",
-            colorway=px.colors.qualitative.Pastel,
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
         
@@ -176,124 +274,57 @@ class TrajectoryRenderer(BasePlotRenderer):
         fig.update_layout(**layout_args)
         return self._inject_slider_js(fig)
 
-    def _render_grid_seaborn(self, df_filtered: pl.DataFrame, valid_groups: list[str], out_path: pathlib.Path, run_dir: pathlib.Path | None) -> None:
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        grouped_data = list(df_filtered.group_by(valid_groups))
-        num_groups = len(grouped_data)
-        if num_groups == 0:
+    def _generate_gif(self, fig, lines_data, markers_info, out_path: pathlib.Path):
+        import matplotlib.animation as animation
+        
+        max_len = max([len(data[1]) for data in lines_data]) if lines_data else 0
+        if max_len == 0:
             return
             
-        cols = 2
-        rows = (num_groups + cols - 1) // cols
-        
-        fig, axes = plt.subplots(rows, cols, figsize=(7 * cols, 7 * rows), squeeze=False)
-        diff_col = self.spec.differentiate or "planner"
-        
-        for idx, (name, group_df) in enumerate(grouped_data):
-            r = idx // cols
-            c = idx % cols
-            ax = axes[r, c]
+        step = max(1, max_len // 100)
+        frames = list(range(0, max_len, step))
+        if frames[-1] != max_len:
+            frames.append(max_len)
             
-            pdf = group_df.to_pandas()
-            
-            if isinstance(name, tuple):
-                title = " | ".join(f"{col}: {n}" for col, n in zip(valid_groups, name))
-            else:
-                title = f"{valid_groups[0]}: {name}"
+        def update(frame):
+            artists = []
+            for line, x, y in lines_data:
+                line.set_data(x[:frame], y[:frame])
+                artists.append(line)
                 
-            ax.set_title(title)
-            
-            planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
-            
-            for planner in planners:
-                if diff_col in pdf.columns:
-                    planner_df = pdf[pdf[diff_col] == planner]
-                else:
-                    planner_df = pdf
-                    
-                if "episode" in planner_df.columns:
-                    planner_df = planner_df.sort_values("episode")
-                    
-                all_x_by_agent = []
-                all_y_by_agent = []
+            if markers_info:
+                data = markers_info["data"]
                 
-                data_key = self.spec.data_key or "path"
-                for _, row in planner_df.iterrows():
-                    path = row.get(data_key)
-                    if path is None or len(path) == 0:
-                        continue
-                        
-                    paths_to_process = []
-                    try:
-                        first_elem = path[0]
-                        if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
-                            for sub_path in path:
-                                if sub_path is not None and len(sub_path) > 0:
-                                    paths_to_process.append(np.array([list(p) for p in sub_path]))
-                        else:
-                            paths_to_process.append(np.array([list(p) for p in path]))
-                    except Exception:
-                        continue
-                        
-                    for k, path_arr in enumerate(paths_to_process):
-                        if path_arr.ndim != 2 or path_arr.shape[1] < 2:
-                            continue
-                            
-                        while len(all_x_by_agent) <= k:
-                            all_x_by_agent.append([])
-                            all_y_by_agent.append([])
-                            
-                        all_x_by_agent[k].extend(path_arr[:, 0])
-                        all_y_by_agent[k].extend(path_arr[:, 1])
-                        
-                for k in range(len(all_x_by_agent)):
-                    if not all_x_by_agent[k]:
-                        continue
-                        
-                    x_arr = np.array(all_x_by_agent[k], dtype=float)
-                    y_arr = np.array(all_y_by_agent[k], dtype=float)
+                s_pts = [[m["x"], m["y"]] for m in data if m["type"] == "start" and frame >= m["frame"]]
+                if markers_info.get("starts"):
+                    markers_info["starts"].set_offsets(s_pts if s_pts else np.empty((0, 2)))
+                    artists.append(markers_info["starts"])
                     
-                    dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
-                    jumps = np.where((dists > 3.0) & ~np.isnan(dists))[0]
-                    split_indices = jumps + 1
+                g_pts = [[m["x"], m["y"]] for m in data if m["type"] == "goal" and frame >= m["frame"]]
+                if markers_info.get("goals"):
+                    markers_info["goals"].set_offsets(g_pts if g_pts else np.empty((0, 2)))
+                    artists.append(markers_info["goals"])
                     
-                    final_x = x_arr.copy()
-                    final_y = y_arr.copy()
-                    if len(split_indices) > 0:
-                        final_x[split_indices] = np.nan
-                        final_y[split_indices] = np.nan
+                c_pts = [[m["x"], m["y"]] for m in data if m["type"] == "collision" and frame >= m["frame"]]
+                if markers_info.get("cols"):
+                    markers_info["cols"].set_offsets(c_pts if c_pts else np.empty((0, 2)))
+                    artists.append(markers_info["cols"])
                     
-                    if len(all_x_by_agent) > 1:
-                        # Multi-agent (pedestrians)
-                        opacity = 0.5
-                        label = f"Agent {k}" if planner == planners[0] else None
-                    else:
-                        # Single agent (robot)
-                        opacity = 0.8
-                        label = planner if k == 0 else None
-                        
-                    ax.plot(final_x, final_y, label=label, alpha=opacity)
-                
-            ax.set_xlabel("X")
-            ax.set_ylabel("Y")
-            ax.axis('equal')
+            return artists
             
-            handles, labels = ax.get_legend_handles_labels()
-            by_label = dict(zip(labels, handles))
-            if by_label:
-                ax.legend(by_label.values(), by_label.keys(), loc="upper right")
-                
-        for idx in range(num_groups, rows * cols):
-            r = idx // cols
-            c = idx % cols
-            fig.delaxes(axes[r, c])
+        for line, _, _ in lines_data:
+            line.set_data([], [])
             
-        fig.suptitle(self.spec.title, fontsize=16)
-        plt.tight_layout()
-        plt.savefig(out_path, dpi=300)
-        plt.close()
+        if markers_info:
+            if markers_info.get("starts"): markers_info["starts"].set_offsets(np.empty((0, 2)))
+            if markers_info.get("goals"): markers_info["goals"].set_offsets(np.empty((0, 2)))
+            if markers_info.get("cols"): markers_info["cols"].set_offsets(np.empty((0, 2)))
+            
+        ani = animation.FuncAnimation(fig, update, frames=frames, interval=50, blit=True)
+        try:
+            ani.save(out_path, writer='pillow', fps=20)
+        except Exception as e:
+            print(f"Failed to save GIF {out_path}: {e}")
 
     def _inject_slider_js(self, fig: go.Figure) -> str:
         import uuid
@@ -314,13 +345,19 @@ class TrajectoryRenderer(BasePlotRenderer):
                 if (!plotDiv || !plotDiv.data) return;
                 
                 plotDiv._originalData = plotDiv.data.map(t => ({{
-                    x: t.x ? Array.from(t.x) : [], 
+                    x: t.x ? Array.from(t.x) : [],
                     y: t.y ? Array.from(t.y) : []
                 }}));
                 
                 var maxLen = 0;
-                plotDiv._originalData.forEach(t => {{
-                    if (t.x.length > maxLen) maxLen = t.x.length;
+                plotDiv.data.forEach(t => {{
+                    if (t.customdata && t.customdata.length > 0) {{
+                        let cdata = Array.isArray(t.customdata[0]) ? t.customdata.map(d => d[0]) : t.customdata;
+                        let m = Math.max(...cdata);
+                        if (m > maxLen) maxLen = m;
+                    }} else if (t.x && t.x.length > maxLen) {{
+                        maxLen = t.x.length;
+                    }}
                 }});
                 
                 var slider = document.getElementById("slider_{plot_id}");
@@ -350,8 +387,22 @@ class TrajectoryRenderer(BasePlotRenderer):
                         
                         // Mutate directly and redraw for 100% reliability
                         plotDiv.data.forEach((trace, i) => {{
-                            trace.x = plotDiv._originalData[i].x.slice(0, limit);
-                            trace.y = plotDiv._originalData[i].y.slice(0, limit);
+                            if (trace.customdata && trace.customdata.length > 0) {{
+                                let new_x = [];
+                                let new_y = [];
+                                let cdata = Array.isArray(trace.customdata[0]) ? trace.customdata.map(d => d[0]) : trace.customdata;
+                                for (let j = 0; j < cdata.length; j++) {{
+                                    if (limit >= cdata[j]) {{
+                                        new_x.push(plotDiv._originalData[i].x[j]);
+                                        new_y.push(plotDiv._originalData[i].y[j]);
+                                    }}
+                                }}
+                                trace.x = new_x;
+                                trace.y = new_y;
+                            }} else {{
+                                trace.x = plotDiv._originalData[i].x.slice(0, limit);
+                                trace.y = plotDiv._originalData[i].y.slice(0, limit);
+                            }}
                         }});
                         
                         Plotly.redraw(plotDiv);
@@ -425,58 +476,161 @@ class TrajectoryRenderer(BasePlotRenderer):
             if not valid_groups:
                 pdf = df_filtered.to_pandas()
                 if not pdf.empty:
-                    self.render_seaborn_single(pdf, out_path)
+                    self.render_seaborn_single(pdf, out_path, "", None, run_dir)
                 return
                 
-            self._render_grid_seaborn(df_filtered, valid_groups, out_path, run_dir)
+            for name, group_df in df_filtered.group_by(valid_groups):
+                pdf = group_df.to_pandas()
+                if isinstance(name, tuple):
+                    suffix = " | ".join(f"{c}: {n}" for c, n in zip(valid_groups, name))
+                    file_suffix = "_".join(str(n).replace(" ", "_").replace("/", "_") for n in name)
+                else:
+                    suffix = f"{valid_groups[0]}: {name}"
+                    file_suffix = str(name).replace(" ", "_").replace("/", "_")
+                    
+                map_name = None
+                if "map" in valid_groups:
+                    map_idx = valid_groups.index("map")
+                    map_name = name[map_idx] if isinstance(name, tuple) else name
+                elif "map" in pdf.columns:
+                    map_name = pdf["map"].iloc[0] if not pdf.empty else None
+                    
+                group_out_path = out_path.with_name(f"{out_path.stem}_{file_suffix}{out_path.suffix}")
+                self.render_seaborn_single(pdf, group_out_path, suffix, map_name, run_dir)
         else:
             pdf = df_filtered.to_pandas()
             if not pdf.empty:
-                self.render_seaborn_single(pdf, out_path)
+                map_name = pdf["map"].iloc[0] if "map" in pdf.columns and not pdf.empty else None
+                self.render_seaborn_single(pdf, out_path, "", map_name, run_dir)
 
-    def render_seaborn_single(self, pdf, out_path: pathlib.Path) -> None:
+    def render_seaborn_single(self, pdf, out_path: pathlib.Path, title_suffix: str, map_name: str | None, run_dir: pathlib.Path | None) -> None:
         import matplotlib.pyplot as plt
+        import matplotlib.image as mpimg
         
         plt.figure(figsize=(10, 10))
+        
+        map_meta = None
+        if self.spec.options.get("show_map", True) and map_name:
+            map_meta = self._load_map_image(map_name, run_dir=run_dir)
+            
+        if map_meta:
+            try:
+                img = mpimg.imread(map_meta["png_path"])
+                res = map_meta["resolution"]
+                origin_x, origin_y = map_meta["origin"][:2]
+                w_m = map_meta["width"] * res
+                h_m = map_meta["height"] * res
+                plt.imshow(img, extent=[origin_x, origin_x + w_m, origin_y, origin_y + h_m], alpha=0.5, origin='upper', zorder=0)
+                plt.xlim(origin_x, origin_x + w_m)
+                plt.ylim(origin_y, origin_y + h_m)
+            except Exception as e:
+                print(f"Failed to overlay map {map_name} in seaborn: {e}")
+                
         diff_col = self.spec.differentiate or "planner"
         
+        overlay_markers = self.spec.options.get("overlay_markers", True)
+        
+        lines_data = []
+        markers_data = []
+        
         all_x_by_agent = {}
+        starts_x, starts_y = [], []
+        goals_x, goals_y = [], []
+        col_x, col_y = [], []
         
         data_key = self.spec.data_key or "path"
-        for _, row in pdf.iterrows():
-            path = row.get(data_key)
-            if path is None or len(path) == 0:
-                continue
+        
+        # Sort pdf by episode so that parsing paths matches chronologically
+        planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
+        seen_planners = set()
+        
+        for planner in planners:
+            if diff_col in pdf.columns:
+                planner_df = pdf[pdf[diff_col] == planner]
+            else:
+                planner_df = pdf
                 
-            paths_to_process = []
-            try:
-                first_elem = path[0]
-                if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
-                    for sub_path in path:
-                        if sub_path is not None and len(sub_path) > 0:
-                            paths_to_process.append(np.array([list(p) for p in sub_path]))
-                else:
-                    paths_to_process.append(np.array([list(p) for p in path]))
-            except Exception:
-                continue
+            if "episode" in planner_df.columns:
+                planner_df = planner_df.sort_values("episode")
                 
-            planner = row.get(diff_col, "unknown")
             if planner not in all_x_by_agent:
                 all_x_by_agent[planner] = []
                 
-            for k, path_arr in enumerate(paths_to_process):
-                if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+            for _, row in planner_df.iterrows():
+                path = row.get(data_key)
+                if path is None or len(path) == 0:
                     continue
                     
-                while len(all_x_by_agent[planner]) <= k:
-                    all_x_by_agent[planner].append({"x": [], "y": []})
+                is_collision = row.get("result") == "COLLISION"
                     
-                all_x_by_agent[planner][k]["x"].extend(path_arr[:, 0])
-                all_x_by_agent[planner][k]["x"].append(np.nan) # Separator for seaborn
-                all_x_by_agent[planner][k]["y"].extend(path_arr[:, 1])
-                all_x_by_agent[planner][k]["y"].append(np.nan)
-                
+                paths_to_process = []
+                try:
+                    first_elem = path[0]
+                    if isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
+                        for sub_path in path:
+                            if sub_path is not None and len(sub_path) > 0:
+                                paths_to_process.append(np.array([list(p) for p in sub_path]))
+                    else:
+                        paths_to_process.append(np.array([list(p) for p in path]))
+                except Exception:
+                    continue
+                    
+                for k, path_arr in enumerate(paths_to_process):
+                    if path_arr.ndim != 2 or path_arr.shape[1] < 2:
+                        continue
+                        
+                    while len(all_x_by_agent[planner]) <= k:
+                        all_x_by_agent[planner].append({"x": [], "y": []})
+                        
+                    current_len = len(all_x_by_agent[planner][k]["x"])
+                    
+                    if overlay_markers:
+                        valid_mask = ~np.isnan(path_arr[:, 0])
+                        if np.any(valid_mask):
+                            clean_indices = np.where(valid_mask)[0]
+                            
+                            # Find actual start avoiding initial spawn jumps
+                            dists = np.sqrt(np.diff(path_arr[clean_indices, 0])**2 + np.diff(path_arr[clean_indices, 1])**2)
+                            jumps = np.where(dists > 3.0)[0]
+                            segment_starts = np.concatenate([[0], jumps + 1])
+                            segment_ends = np.concatenate([jumps, [len(dists)]])
+                            
+                            first_clean_idx = segment_starts[-1] # Fallback
+                            for s_idx, e_idx in zip(segment_starts, segment_ends):
+                                if e_idx > s_idx:
+                                    segment_length = np.sum(dists[s_idx:e_idx])
+                                    if segment_length > 0.1:
+                                        first_clean_idx = s_idx
+                                        break
+                                
+                            first_idx = int(clean_indices[first_clean_idx])
+                            last_idx = int(clean_indices[-1])
+                            
+                            starts_x.append(path_arr[first_idx, 0])
+                            starts_y.append(path_arr[first_idx, 1])
+                            markers_data.append({"frame": current_len + first_idx, "x": path_arr[first_idx, 0], "y": path_arr[first_idx, 1], "type": "start"})
+                            
+                            if is_collision:
+                                col_x.append(path_arr[last_idx, 0])
+                                col_y.append(path_arr[last_idx, 1])
+                                markers_data.append({"frame": current_len + last_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "collision"})
+                            else:
+                                goals_x.append(path_arr[last_idx, 0])
+                                goals_y.append(path_arr[last_idx, 1])
+                                markers_data.append({"frame": current_len + first_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "goal"})
+                                
+                    all_x_by_agent[planner][k]["x"].extend(path_arr[:, 0])
+                    all_x_by_agent[planner][k]["x"].append(np.nan) # Separator for seaborn
+                    all_x_by_agent[planner][k]["y"].extend(path_arr[:, 1])
+                    all_x_by_agent[planner][k]["y"].append(np.nan)
+                    
+        palette = get_color_palette()
+        planners_list = list(planners)
+        
         for planner, agents in all_x_by_agent.items():
+            planner_idx = planners_list.index(planner) if planner in planners_list else 0
+            planner_color = palette[planner_idx % len(palette)]
+            
             for k, agent_data in enumerate(agents):
                 if not agent_data["x"]:
                     continue
@@ -496,14 +650,31 @@ class TrajectoryRenderer(BasePlotRenderer):
                 
                 if len(agents) > 1:
                     opacity = 0.5
-                    label = f"Agent {k}" if planner == list(all_x_by_agent.keys())[0] else None
+                    label = planner if k == 0 else None
                 else:
                     opacity = 0.8
                     label = planner if k == 0 else None
                     
-                plt.plot(final_x, final_y, label=label, alpha=opacity)
+                line, = plt.plot(final_x, final_y, label=label, alpha=opacity, color=planner_color)
+                lines_data.append((line, final_x, final_y))
+                
+        scat_starts = None
+        scat_goals = None
+        scat_cols = None
+        
+        if overlay_markers:
+            if starts_x:
+                scat_starts = plt.scatter(starts_x, starts_y, marker='o', color='#00bfb2', s=30, zorder=5)
+            if goals_x:
+                scat_goals = plt.scatter(goals_x, goals_y, marker='*', color='#ffc845', s=60, zorder=5)
+            if col_x:
+                scat_cols = plt.scatter(col_x, col_y, marker='x', color='#d3273e', s=50, linewidths=2, zorder=5)
             
-        plt.title(self.spec.title)
+        title = self.spec.title
+        if title_suffix:
+            title = f"{title} - {title_suffix}"
+        plt.title(title)
+        
         plt.xlabel("X")
         plt.ylabel("Y")
         plt.axis('equal')
@@ -514,4 +685,19 @@ class TrajectoryRenderer(BasePlotRenderer):
         
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)
+        
+        # Generate GIF
+        if getattr(self, "generate_gifs", False):
+            markers_info = None
+            if overlay_markers:
+                markers_info = {
+                    "data": markers_data,
+                    "starts": scat_starts,
+                    "goals": scat_goals,
+                    "cols": scat_cols
+                }
+                
+            gif_path = out_path.with_suffix(".gif")
+            self._generate_gif(plt.gcf(), lines_data, markers_info, gif_path)
+        
         plt.close()

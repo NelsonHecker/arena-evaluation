@@ -33,22 +33,20 @@ class BarRenderer(BasePlotRenderer):
         if grouped.empty:
             return None
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=grouped[diff_col],
-            y=grouped["mean"],
-            error_y=dict(type="data", array=grouped["std"]),
-            name=self.spec.title,
-        ))
-
-        fig.update_layout(
-            title=self.spec.title,
-            xaxis_title=diff_col.lstrip("_").replace("_", " ").title(),
-            yaxis_title=self.spec.data_key.replace("_", " ").title(),
+        fig = px.bar(
+            grouped,
+            x=diff_col,
+            y="mean",
+            color=diff_col,
+            error_y="std",
             template="plotly_white",
-            colorway=px.colors.qualitative.Pastel,
-            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+            title=self.spec.title,
+            labels={
+                "mean": self.spec.data_key.replace("_", " ").title(),
+                diff_col: diff_col.lstrip("_").replace("_", " ").title()
+            }
         )
+        fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
 
         return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
@@ -71,9 +69,11 @@ class BarRenderer(BasePlotRenderer):
         plt.figure(figsize=(10, 6))
         sns.barplot(
             data=pdf,
+            x=diff_col,
             y=self.spec.data_key,
             hue=diff_col,
             errorbar="sd",
+            legend=False,
         )
         plt.title(self.spec.title)
         plt.tight_layout()

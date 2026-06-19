@@ -1,0 +1,28 @@
+# ==============================================================================
+# Accessibility Color Palette
+# ==============================================================================
+# Source: University of Sussex - Technology Enhanced Learning (TEL)
+#
+# Description: This file defines a highly distinct qualitative color sequence.
+# The colors have been hand-picked and ordered for maximum visual clarity.
+# Adjacent colors differ significantly in hue and brightness to ensure plots
+# are easily readable.
+# ==============================================================================
+
+palette:
+  white: "#FFFFFF"
+  black: "#000000"
+  
+  # Hand-picked distinct sequence
+  blue_700: "#1d4289"
+  orange_600: "#dc582a"
+  teal_400: "#00bfb2"
+  pink_500: "#e56db1"
+  yellow_400: "#ffc845"
+  purple_400: "#be84a3"
+  green_400: "#94a596"
+  red_600: "#d3273e"
+  blue_300: "#41b6e6"
+  teal_900: "#003b49"
+  gray_300: "#d6d2c4"
+  purple_900: "#5d3754"

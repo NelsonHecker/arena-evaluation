@@ -120,6 +120,11 @@ Examples:
         metavar="DIR",
         help="Optional path to output directory for reports and plots. Defaults to the first input directory.",
     )
+    run_parent.add_argument(
+        "--generate-gifs",
+        action="store_true",
+        help="Generate animated GIFs for trajectories (computationally intensive).",
+    )
 
     # ── Subcommands ────────────────────────────────────────────────────────────
     subparsers.add_parser(
@@ -208,7 +213,8 @@ Examples:
             output_dir = target_dirs[0]
             
         print(f"Building report/plots from {len(target_dirs)} sources into: {output_dir}")
-        builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir)
+        generate_gifs = getattr(args, "generate_gifs", False)
+        builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir, generate_gifs=generate_gifs)
         builder.build()
         print("Report generation complete.")
 

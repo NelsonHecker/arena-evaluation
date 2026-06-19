@@ -33,7 +33,6 @@ class BoxRenderer(BasePlotRenderer):
                 diff_col: diff_col.lstrip("_").replace("_", " ").title(),
             },
             template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Pastel,
         )
         fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
         return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})

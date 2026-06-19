@@ -69,7 +69,6 @@ class HistogramRenderer(BasePlotRenderer):
             color=color_arg,
             title=self.spec.title,
             template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Pastel,
         )
         
         # Make the lines smooth

@@ -7,7 +7,8 @@ from ..storage.schemas import PlotSpec
 class SeabornRenderer:
     """Dispatches plot rendering to the correct static PNG class."""
     
-    def __init__(self):
+    def __init__(self, generate_gifs: bool = False):
+        self.generate_gifs = generate_gifs
         from .plot_types import (
             ViolinRenderer,
             BoxRenderer,
@@ -30,9 +31,8 @@ class SeabornRenderer:
             "heatmap": HeatmapRenderer,
         }
         
-        # Upgrade aesthetics globally for all static plots
-        import seaborn as sns
-        sns.set_theme(style="whitegrid", palette="husl")
+        from .color_utils import set_global_color_palette
+        set_global_color_palette()
 
     def render(self, spec: PlotSpec, df: pl.DataFrame, out_path: pathlib.Path, run_dir: pathlib.Path | None = None) -> None:
         renderer_cls = self.renderers.get(spec.type)
@@ -42,4 +42,6 @@ class SeabornRenderer:
         renderer = renderer_cls(spec)
         if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
             renderer.run_dir = run_dir
+            if renderer_cls.__name__ == "TrajectoryRenderer":
+                renderer.generate_gifs = self.generate_gifs
         renderer.render_seaborn(df, out_path)
