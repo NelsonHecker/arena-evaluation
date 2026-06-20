@@ -87,6 +87,8 @@ All topics use **simulation time** from `/clock` as timestamps. Messages are dro
 | `/{parent_ns}/arena_peds` | `arena_people_msgs/Pedestrians` | 20 ms |
 | `/{parent_ns}/state/episode` | `task_generator_msgs/EpisodeRecord` | unthrottled |
 | `/{parent_ns}/state/robots` | `task_generator_msgs/RobotFleet` | latched |
+| `/tf` | `tf2_msgs/TFMessage` | 20 ms |
+| `/tf_static` | `tf2_msgs/TFMessage` | latched |
 | `/clock` | `rosgraph_msgs/Clock` | (time tracking only) |
 
 A dynamic discovery timer fires every 1 second to detect non-standard odom and scan topic names.
@@ -124,6 +126,9 @@ Fields populated at startup:
 - `arena_git_sha` / `arena_git_dirty` — from `git rev-parse HEAD` in the workspace
 - `python_version` — from `sys.version`
 - `ros_distro` — from `$ROS_DISTRO`
+- `map` — from the world/map parameter
+- `inter_planner` — parsed from the planner/contestant name
+- `agent_name` — the agent/robot name
 
 ---
 

@@ -26,18 +26,22 @@ The package provides a complete, end-to-end evaluation pipeline that turns live 
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Layer 3 — Processing  (processing/)                                │
-│  MCAPReader → TopicAligner → EpisodeSplitter → MetricRegistry      │
+│  MCAPReader → TopicParquetStore → TopicAligner → EpisodeSplitter   │
+│  → MetricRegistry → ParquetStore                                   │
 │  Reads the MCAP offline (no live ROS required), aligns multi-rate  │
 │  topics, splits into per-episode bundles, computes all metrics.    │
+│  Includes MapRegistry for map overlay caching.                     │
 │  Output: metrics.parquet + combined_metrics.parquet                │
 └────────────────────────┬────────────────────────────────────────────┘
                          │ Parquet files
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Layer 5 — Presentation  (presentation/)                            │
-│  ReportBuilder reads the combined parquet + viz_manifest.yaml and  │
-│  generates an interactive HTML report and static PNG plots.        │
-│  Output: report.html + plots/*.png                                 │
+│  ReportBuilder reads the combined parquet + viz_manifest and        │
+│  generates an interactive HTML report (with time-slider trajectory │
+│  plots), static PNG plots, and optional animated GIFs.             │
+│  Uses a global accessibility color palette for all charts.         │
+│  Output: report.html + plots/*.png (+ plots/*.gif)                 │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,7 +59,7 @@ arena_evaluation/
 │   │   ├── metadata.py        ← Metadata helpers
 │   │   └── topics.py          ← Topic definitions and type registry
 │   ├── storage/               ← Layer 2: Shared schemas and path management
-│   │   ├── schemas.py         ← Pydantic models (RunMetadata, TopicBundle, …)
+│   │   ├── schemas.py         ← Pydantic models (RunMetadata, PlotSpec, TopicBundle, …)
 │   │   ├── folder_manager.py  ← Path resolution and run discovery
 │   │   ├── manifest.py        ← MetadataWriter (YAML read/write)
 │   │   └── exceptions.py      ← Domain-specific exceptions
@@ -65,25 +69,31 @@ arena_evaluation/
 │   │   ├── episode_splitter.py← Splits continuous stream into episodes
 │   │   ├── parquet_store.py   ← Reads/writes metrics.parquet
 │   │   ├── pipeline.py        ← ProcessingPipeline orchestrator
+│   │   ├── map_registry.py    ← Discovers and caches map images (PGM→PNG)
 │   │   └── metrics/           ← Pluggable metric calculators
-│   │       ├── base.py        ← BaseMetricCalculator ABC
+│   │       ├── base.py        ← BaseMetricCalculator ABC (with UNITS support)
 │   │       ├── registry.py    ← Auto-discovery + topological execution
-│   │       ├── performance/   ← Path, motion, time, collision, efficiency
+│   │       ├── performance/   ← Path, motion, time, collision, efficiency, pedestrian_path
 │   │       ├── social/        ← Proxemics, gaze
 │   │       ├── naturalness/   ← (Phase 2)
 │   │       └── ecological/    ← (Phase 2)
 │   ├── presentation/          ← Layer 5: Report and plot generation
-│   │   ├── report_builder.py  ← Generates report.html
-│   │   ├── viz_manifest.py    ← Loads/validates viz_manifest.yaml
+│   │   ├── report_builder.py  ← Generates report.html (with GIF support)
+│   │   ├── viz_manifest.py    ← Default plot manifest + PlotSpec loader
 │   │   ├── plotly_renderer.py ← Interactive HTML chart dispatcher
 │   │   ├── seaborn_renderer.py← Static PNG chart dispatcher
-│   │   └── plot_types/        ← violin, box, bar, trajectory, radar
+│   │   ├── color_utils.py     ← Global accessibility color palette (YAML-driven)
+│   │   ├── dimension_detector.py ← Auto-detects varying dimensions for compound labels
+│   │   ├── report_template.html.j2 ← Jinja2 HTML template
+│   │   └── plot_types/        ← violin, box, bar, histogram, scatter, trajectory, radar, heatmap
 │   ├── benchmark/             ← Benchmark runner and CLI
 │   │   ├── runner.py          ← BenchmarkRunner (orchestrates simulation)
 │   │   └── cli.py             ← Benchmark management CLI (argparse)
 │   └── cli.py                 ← Evaluation pipeline CLI (argparse)
 ├── config/
-│   └── data_recorder_config.yaml  ← Topic throttle frequencies
+│   ├── data_recorder_config.yaml  ← Topic throttle frequencies
+│   ├── mcap_writer_options.yaml   ← MCAP writer tuning
+│   └── color_palette.yaml         ← Accessibility color palette
 ├── configs/benchmark/
 │   ├── suites/                ← Benchmark suite YAML definitions
 │   └── contests/              ← Contest (planner set) YAML definitions
@@ -107,7 +117,7 @@ The benchmark runner (or manual launch) spawns the `DataRecorderNode` with the `
 
 1. Resolves the output directory and creates it.
 2. Writes an initial `metadata.yaml` with known fields (robot, world, git SHA, …).
-3. Subscribes to all configured ROS topics (cmd_vel, lidar, odom, joint_states, plan, goal_pose, collision_events, arena_peds, EpisodeRecord, RobotFleet).
+3. Subscribes to all configured ROS topics (cmd_vel, lidar, odom, joint_states, plan, goal_pose, collision_events, arena_peds, EpisodeRecord, RobotFleet, tf, tf_static).
 4. Opens a single rosbag2 MCAP writer and records continuously for the entire step (all episodes).
 5. On each `EpisodeRecord` message, updates `metadata.yaml` with episode metadata.
 6. On clean shutdown (SIGTERM / SIGINT), writes the final `metadata.yaml` fields (episodes_recorded, recorded_topics, recording_ended_at) and flushes the MCAP.
@@ -146,9 +156,11 @@ The `process` command reads these cached parquet files (or extracts them on-the-
 arena evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id>
 # Or both at once:
 arena evaluation run --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+# With animated GIFs:
+arena evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id> --generate-gifs
 ```
 
-Reads `combined_metrics.parquet` and `viz_manifest.yaml`, generates `report.html` and `plots/*.png`.
+Reads `combined_metrics.parquet` and the default visualization manifest (hardcoded in `viz_manifest.py`), generates `report.html` and `plots/*.png`. When `--generate-gifs` is passed, animated trajectory GIFs are also saved.
 
 ---
 
@@ -157,7 +169,7 @@ Reads `combined_metrics.parquet` and `viz_manifest.yaml`, generates `report.html
 The `arena evaluation` command is registered as part of the Arena feature system.
 
 ```
-usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR]
+usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR] [--output-dir DIR] [--generate-gifs]
 
 Commands:
   extract   Layer 3: Extract topics from MCAP into fast Parquet files (cache)
@@ -168,6 +180,14 @@ Commands:
 ```
 
 `extract`, `process`, and `run` accept **either** `--run-dir` (single recording) or `--benchmark-dir` (full benchmark). `report` and `plot` only accept `--benchmark-dir`.
+
+### Flags
+
+| Flag | Commands | Description |
+|---|---|---|
+| `--output-dir DIR` | all | Output directory for reports/plots (defaults to first input dir) |
+| `--generate-gifs` | report, plot, run | Generate animated trajectory GIFs (computationally intensive) |
+| `--force-extract` | process | Force re-extraction of MCAP files, overwriting cached topics |
 
 ### Extracting Topics (Cache)
 
@@ -200,6 +220,9 @@ arena evaluation run --run-dir /opt/arena_ws/data/recordings/20260528-215316
 
 # Full benchmark (metrics + HTML report + PNGs):
 arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
+
+# With GIF generation:
+arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark --generate-gifs
 ```
 
 ### Regenerate Report Only
@@ -207,7 +230,7 @@ arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
 ```bash
 # Single benchmark report
 arena evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
-# Reads combined_metrics.parquet + viz_manifest.yaml
+# Reads combined_metrics.parquet + viz_manifest
 # Writes: report.html + plots/*.png
 
 # Multi-benchmark merged report
@@ -253,23 +276,13 @@ record_frequencies:
   cmd_vel:  20.0  # ms — Twist (50 Hz)
 ```
 
-### Visualization manifest (`viz_manifest.yaml`)
+### Accessibility color palette (`config/color_palette.yaml`)
 
-Placed at the benchmark directory root. Defines which plots to generate and what data to use.
+Defines a qualitative color sequence loaded globally by `color_utils.py`. The palette is applied to both Plotly and Seaborn at startup via `set_global_color_palette()`. White and black are excluded from the drawing sequence.
 
-```yaml
-plots:
-  - id: path_length_violin
-    type: violin
-    title: "Path Length Distribution"
-    data_key: path_length
-    group_by: planner
-  - id: success_rate_bar
-    type: bar
-    title: "Success Rate"
-    data_key: success
-    group_by: planner
-```
+### Visualization manifest (`viz_manifest.py`)
+
+The default set of plots is defined in `viz_manifest.py` as Python code (not a YAML file). A `viz_manifest.yaml` placed at the benchmark root can override this. Plot types include: `violin`, `box`, `bar`, `histogram`, `scatter`, `trajectory`, `radar`, `heatmap`.
 
 ---
 
@@ -284,8 +297,10 @@ All Python dependencies are managed in `src/Arena/pyproject.toml`:
 | `pydantic` | Schema validation for RunMetadata, PlotSpec |
 | `mcap` + `mcap-ros2-support` | Decoding MCAP files offline (no live ROS) |
 | `plotly` | Interactive HTML charts |
-| `seaborn` + `matplotlib` | Static PNG fallback charts |
+| `seaborn` + `matplotlib` | Static PNG fallback charts + GIF animation |
 | `PyYAML` | YAML config and metadata file I/O |
+| `jinja2` | HTML report templating |
+| `Pillow` | Map image conversion (PGM→PNG) |
 
 ROS 2 dependencies (declared in `package.xml`): `rclpy`, `rosbag2_py`, `sensor_msgs`, `nav_msgs`, `geometry_msgs`, `task_generator_msgs`, `arena_evaluation_msgs`.
 
@@ -299,13 +314,3 @@ ROS 2 dependencies (declared in `package.xml`): `rclpy`, `rosbag2_py`, `sensor_m
 colcon build --packages-select arena_evaluation --symlink-install
 source /opt/arena_ws/install/setup.bash
 ```
-
----
-
-## Phase Roadmap
-
-| Phase | Status | Scope |
-|---|---|---|
-| **Phase 1** | ✅ In Progress | Ingestion, processing core, performance + social metrics, HTML report |
-| **Phase 2** | 🔲 Planned | LLM Orchestration Layer (Layer 4), naturalness metrics, danger metrics |
-| **Phase 3** | 🔲 Planned | Ecological metrics, ADE/FDE, topological complexity, noise contours |

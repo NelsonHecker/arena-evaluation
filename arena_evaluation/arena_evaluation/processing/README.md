@@ -19,6 +19,7 @@ MCAPReader → TopicParquetStore → TopicAligner → EpisodeSplitter → Metric
 | `topic_aligner.py` | Aligns multi-rate topics onto a common odom time axis |
 | `episode_splitter.py` | Splits continuous stream into per-episode bundles |
 | `pipeline.py` | `ProcessingPipeline` orchestrator — runs the full chain |
+| `map_registry.py` | Discovers, converts (PGM→PNG), and caches map images with resolved origins |
 | `metrics/` | Pluggable metric calculators |
 
 ---
@@ -52,6 +53,11 @@ bundle = reader.read()
 | peds | `time_ns`, `peds_positions`, `peds_headings`, `num_pedestrians` |
 | episode_record | `time_ns`, `episode_id`, `outcome_state`, `start_x`, `start_y`, `goal_x`, `goal_y`, … |
 | collision_events | `time_ns`, `collision_count` |
+| tf | `time_ns`, `frame_id`, `child_frame_id`, `trans_x`, `trans_y`, `trans_z`, `rot_*` |
+| tf_static | `time_ns`, `frame_id`, `child_frame_id`, `trans_x`, `trans_y` |
+| tf_gt | `time_ns`, ground-truth transforms for pose resolution |
+| initialpose | `time_ns`, `pos_x`, `pos_y`, `yaw` |
+| plan | `time_ns`, `plan_poses` |
 
 ---
 
@@ -94,9 +100,28 @@ episodes = splitter.split(bundle, robot_params)
 Each `AlignedEpisodeBundle` contains:
 - The episode's aligned DataFrame slice.
 - `start_pos` and `goal_pos` extracted from `EpisodeRecord.robots_params`.
-- `episode_id` and `num_pedestrians`.
+- `episode_id`, `num_pedestrians`, and `robot_name`.
 
 Episodes with fewer than `min_odom_frames` rows (default: 5) are discarded — they indicate aborted or degenerate runs.
+
+---
+
+## map_registry.py — MapRegistry
+
+Discovers map assets from the `arena_simulation_setup` package, converts PGM images to PNG, caches them, and resolves map origins with optional TF static transform offsets.
+
+```python
+from arena_evaluation.processing.map_registry import MapRegistry
+
+# Returns dict with png_path, resolution, origin, width, height — or None
+meta = MapRegistry.get_map("hospital_complex", run_dir=Path("/opt/arena_ws/data/.../recordings/dwa/stage_1"))
+```
+
+The registry:
+1. Searches for the map directory via `rospack find arena_simulation_setup` or falls back to `/opt/arena_ws/src/Arena/arena_simulation_setup/worlds/<map_name>`.
+2. Reads `map.yaml` for resolution, origin, and image filename.
+3. Converts the source image (PGM/PNG) to RGBA PNG and caches it under `/opt/arena_ws/data/maps_cache/`.
+4. If a `run_dir` is provided, checks `topics/tf_static.parquet` for map-frame offsets and adjusts the origin accordingly.
 
 ---
 
@@ -119,7 +144,7 @@ ParquetStore.combine([path1, path2, path3], combined_path)
 
 The metadata is serialized as JSON and stored under the Parquet key `arena_evaluation_metadata`. This ensures the processing context (planner, robot, stage, git SHA) stays permanently attached to the metrics data.
 
-Array columns (e.g., `path`, `scan_ranges`) are stored as Parquet `List` type rather than JSON strings.
+Array columns (e.g., `path`, `scan_ranges`, `pedestrian_path`) are stored as Parquet `List` type rather than JSON strings.
 
 ---
 
@@ -143,7 +168,7 @@ For each discovered run:
 4. `TopicAligner.align()` → aligned DataFrame
 5. `EpisodeSplitter.split()` → `list[AlignedEpisodeBundle]`
 6. `MetricRegistry.run()` → metrics DataFrame per episode
-7. Adds identity columns: `planner`, `robot_model`, `stage`, `benchmark_id`
+7. Adds identity columns: `planner`, `local_planner`, `inter_planner`, `robot_model`, `stage`, `map`, `benchmark_id`
 8. `ParquetStore.write()` → `metrics.parquet`
 9. Updates `metadata.yaml` with `processing_completed_at`, `episodes_valid`
 
@@ -158,6 +183,7 @@ After all runs: `ParquetStore.combine()` → `combined_metrics.parquet`.
 1. Create a new file under the appropriate category (`performance/`, `social/`, `naturalness/`, `ecological/`).
 2. Subclass `BaseMetricCalculator` and set the required class attributes.
 3. Implement `output_keys()` and `calculate()`.
+4. Optionally set `UNITS` to attach SI unit labels to output keys for display on plot axes.
 
 ```python
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
@@ -169,8 +195,14 @@ class MyMetricCalculator(BaseMetricCalculator):
     CATEGORY = "performance"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["path_metrics"]  # must run after path_metrics
+    REQUIRED_TOPICS = ["odom"]     # topics that must be present
+    
+    UNITS = {
+        "my_value": "m/s",  # displayed on chart axes as "My Value [m/s]"
+    }
 
-    def output_keys(self) -> list[str]:
+    @classmethod
+    def output_keys(cls) -> list[str]:
         return ["my_value", "my_mean"]
 
     def calculate(
@@ -186,17 +218,31 @@ class MyMetricCalculator(BaseMetricCalculator):
 
 The `MetricRegistry` auto-discovers all `BaseMetricCalculator` subclasses, resolves `DEPENDS_ON` via Kahn's topological sort, and runs them in dependency order. If a calculator raises an exception, its output keys are NaN-filled and processing continues.
 
+### BaseMetricCalculator Class Attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `NAME` | `str` | Unique calculator name (used as registry key and in `DEPENDS_ON`) |
+| `CATEGORY` | `str` | Metric category: `"performance"`, `"social"`, `"naturalness"`, `"ecological"` |
+| `REQUIRES_PEDSIM` | `bool` | Whether this calculator needs pedestrian simulation data |
+| `DEPENDS_ON` | `list[str]` | List of calculator NAMEs that must run first |
+| `REQUIRED_TOPICS` | `list` | Topics that must be present in the bundle |
+| `UNITS` | `dict[str, str]` | Maps output keys to SI unit strings (e.g., `{"path_length": "m"}`) |
+
+The base class also provides `resolve_robot_pose()` which handles TF ground-truth resolution with fallback to raw odom.
+
 ### Phase 1 Calculators
 
-| Calculator | NAME | Key Outputs |
-|---|---|---|
-| `PathMetricsCalculator` | `path_metrics` | `path_length`, `curvature`, `roughness` |
-| `MotionMetricsCalculator` | `motion_metrics` | `velocity_mean`, `velocity_max`, `jerk_mean` |
-| `TimeMetricsCalculator` | `time_metrics` | `time_to_goal`, `idling_time` |
-| `CollisionMetricsCalculator` | `collision_metrics` | `collision_amount`, `result`, `success` |
-| `PathEfficiencyCalculator` | `path_efficiency` | `path_efficiency` (straight-line / actual) |
-| `ProxemicsCalculator` | `proxemics` | `time_in_personal_space`, `avg_velocity_in_personal_space` |
-| `GazeMetricsCalculator` | `gaze_metrics` | `time_looking_at_peds`, `time_looked_at_by_peds` |
+| Calculator | NAME | Key Outputs | Units |
+|---|---|---|---|
+| `PathMetricsCalculator` | `path_metrics` | `path_length`, `path`, `curvature`, `roughness_mean` | m, —, rad/m, — |
+| `MotionMetricsCalculator` | `motion_metrics` | `velocity_mean`, `velocity_max`, `jerk_mean` | m/s, m/s, m/s³ |
+| `TimeMetricsCalculator` | `time_metrics` | `time_to_goal`, `idling_time` | s, s |
+| `CollisionMetricsCalculator` | `collision_metrics` | `collision_amount`, `result`, `success` | —, —, — |
+| `PathEfficiencyCalculator` | `path_efficiency` | `path_efficiency` (straight-line / actual) | — |
+| `PedestrianPathMetricsCalculator` | `pedestrian_path_metrics` | `pedestrian_path` | m |
+| `ProxemicsCalculator` | `proxemics` | `time_in_personal_space`, `avg_velocity_in_personal_space` | s, m/s |
+| `GazeMetricsCalculator` | `gaze_metrics` | `time_looking_at_peds`, `time_looked_at_by_peds` | s, s |
 
 ### Execution Order
 
