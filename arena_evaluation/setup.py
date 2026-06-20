@@ -33,7 +33,6 @@ setup(
         'console_scripts': [
         'record = arena_evaluation.ingestion.recorder:main',
         'evaluation = arena_evaluation.cli:main',
-        'metrics = arena_evaluation.scripts.metrics:main',
         'benchmark = arena_evaluation.benchmark.runner:cli_main',
         'evaluation_cli = arena_evaluation.benchmark.cli:main',
         ],

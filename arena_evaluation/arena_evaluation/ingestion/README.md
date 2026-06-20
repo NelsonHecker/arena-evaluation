@@ -101,7 +101,7 @@ The node installs `SIGTERM` and `SIGINT` handlers that trigger `finalize()`:
 2. Writes the final `metadata.yaml` with `recording_ended_at`, `episodes_recorded`, `pedsim_available`, `recorded_topics`.
 3. Calls `writer.close()` to flush rosbag2 buffers and write the MCAP index.
 
-> ⚠️ If the process is killed with `SIGKILL`, `finalize()` is not called. The MCAP may be incomplete or unindexed. rosbag2 can still read it, but the final metadata fields will be missing.
+> If the process is killed with `SIGKILL`, `finalize()` is not called. The MCAP may be incomplete or unindexed. rosbag2 can still read it, but the final metadata fields will be missing.
 
 ---
 
