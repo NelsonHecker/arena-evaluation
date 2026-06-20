@@ -1,306 +1,313 @@
-# Arena Evaluation
+# arena_evaluation
 
-![](http://img.shields.io/badge/stability-stable-orange.svg?style=flat)
-[![Linux](https://svgshare.com/i/Zhy.svg)](https://svgshare.com/i/Zhy.svg)
-[![support level: consortium / vendor](https://img.shields.io/badge/support%20level-consortium%20/%20vendor-brightgreen.svg)](http://rosindustrial.org/news/2016/10/7/better-supporting-a-growing-ros-industrial-software-platform)
+> **ROS 2 package** — Record, process, and visualise navigational evaluation metrics for Arena-Rosnav planners.
 
-> 🚧 This project is still under development
+The package provides a complete, end-to-end evaluation pipeline that turns live simulation data into structured metric reports. It is built around a layered architecture that separates recording, processing, and presentation concerns so that each layer can be used, replaced, or extended independently.
 
-The Arena Evaluation package provides tools to record, evaluate, and plot navigational metrics to evaluate ROS navigation planners. It is best suited for usage with our [arena-rosnav repository](https://github.com/Arena-Rosnav/arena-rosnav) but can also be integrated into any other ROS-based project.
+---
 
-It consists of 3 parts:
+## Architecture Overview
 
-- [Data recording](#01-data-recording)
-- [Data transformation and evaluation](#02-data-transformation-and-evaluation)
-- [Plotting](#03-plotting)
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Arena Simulation                           │
+│   Gazebo  ──  task_generator  ──  nav2  ──  planner               │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │ ROS 2 topics
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 1 — Ingestion  (ingestion/)                                  │
+│  DataRecorderNode subscribes to all relevant topics and writes a    │
+│  single continuous MCAP file per benchmark step (planner × stage). │
+│  EpisodeRecord messages are embedded in the MCAP as boundaries.    │
+│  Output: run_dir/recording/recording_0.mcap + metadata.yaml        │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │ MCAP file (one per step)
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 3 — Processing  (processing/)                                │
+│  MCAPReader → TopicParquetStore → TopicAligner → EpisodeSplitter   │
+│  → MetricRegistry → ParquetStore                                   │
+│  Reads the MCAP offline (no live ROS required), aligns multi-rate  │
+│  topics, splits into per-episode bundles, computes all metrics.    │
+│  Includes MapRegistry for map overlay caching.                     │
+│  Output: metrics.parquet + combined_metrics.parquet                │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │ Parquet files
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 5 — Presentation  (presentation/)                            │
+│  ReportBuilder reads the combined parquet + viz_manifest and        │
+│  generates an interactive HTML report (with time-slider trajectory │
+│  plots), static PNG plots, and optional animated GIFs.             │
+│  Uses a global accessibility color palette for all charts.         │
+│  Output: report.html + plots/*.png (+ plots/*.gif)                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-<img  src="overview image.png">
+> **Note:** Layers are numbered 1, 3, 5 to align with the SRD v2.0 which reserves Layer 2 (Storage/Folder Management) as a shared infrastructure module and Layer 4 (LLM Orchestration) for Phase 2.
 
-<!-- ## General
+---
 
-- To integrate arena evaluation into your project, see the guide [here](docs/integration-requirements.md)
-- To use it along side with the arena repository, install the following requirements:
+## Directory Structure
+
+```
+arena_evaluation/
+├── arena_evaluation/          ← Python package root
+│   ├── ingestion/             ← Layer 1: Live recording (ROS node)
+│   │   ├── recorder.py        ← DataRecorderNode
+│   │   ├── metadata.py        ← Metadata helpers
+│   │   └── topics.py          ← Topic definitions and type registry
+│   ├── storage/               ← Layer 2: Shared schemas and path management
+│   │   ├── schemas.py         ← Pydantic models (RunMetadata, PlotSpec, TopicBundle, …)
+│   │   ├── folder_manager.py  ← Path resolution and run discovery
+│   │   ├── manifest.py        ← MetadataWriter (YAML read/write)
+│   │   └── exceptions.py      ← Domain-specific exceptions
+│   ├── processing/            ← Layer 3: Offline metric computation
+│   │   ├── mcap_reader.py     ← Reads MCAP → TopicBundle
+│   │   ├── topic_aligner.py   ← Aligns multi-rate topics via join_asof
+│   │   ├── episode_splitter.py← Splits continuous stream into episodes
+│   │   ├── parquet_store.py   ← Reads/writes metrics.parquet
+│   │   ├── pipeline.py        ← ProcessingPipeline orchestrator
+│   │   ├── map_registry.py    ← Discovers and caches map images (PGM→PNG)
+│   │   └── metrics/           ← Pluggable metric calculators
+│   │       ├── base.py        ← BaseMetricCalculator ABC (with UNITS support)
+│   │       ├── registry.py    ← Auto-discovery + topological execution
+│   │       ├── performance/   ← Path, motion, time, collision, efficiency, pedestrian_path
+│   │       ├── social/        ← Proxemics, gaze
+│   │       ├── naturalness/   ← (Phase 2)
+│   │       └── ecological/    ← (Phase 2)
+│   ├── presentation/          ← Layer 5: Report and plot generation
+│   │   ├── report_builder.py  ← Generates report.html (with GIF support)
+│   │   ├── viz_manifest.py    ← Default plot manifest + PlotSpec loader
+│   │   ├── plotly_renderer.py ← Interactive HTML chart dispatcher
+│   │   ├── seaborn_renderer.py← Static PNG chart dispatcher
+│   │   ├── color_utils.py     ← Global accessibility color palette (YAML-driven)
+│   │   ├── dimension_detector.py ← Auto-detects varying dimensions for compound labels
+│   │   ├── report_template.html.j2 ← Jinja2 HTML template
+│   │   └── plot_types/        ← violin, box, bar, histogram, scatter, trajectory, radar, heatmap
+│   ├── benchmark/             ← Benchmark runner and CLI
+│   │   ├── runner.py          ← BenchmarkRunner (orchestrates simulation)
+│   │   └── cli.py             ← Benchmark management CLI (argparse)
+│   └── cli.py                 ← Evaluation pipeline CLI (argparse)
+├── config/
+│   ├── data_recorder_config.yaml  ← Topic throttle frequencies
+│   ├── mcap_writer_options.yaml   ← MCAP writer tuning
+│   └── color_palette.yaml         ← Accessibility color palette
+├── configs/benchmark/
+│   ├── suites/                ← Benchmark suite YAML definitions
+│   └── contests/              ← Contest (planner set) YAML definitions
+└── tests/
+    ├── unit/                  ← Pure Python unit tests (no ROS required)
+    └── integration/           ← Full-pipeline tests with fixture data
+```
+
+---
+
+## Data Flow
+
+### Recording Phase (live simulation)
+
+```
+arena launch sim:=gazebo task_mode:=random record_data_dir:=data \
+    world:=map_empty robot:=jackal
+```
+
+The benchmark runner (or manual launch) spawns the `DataRecorderNode` with the `record_data_dir` ROS parameter. The node:
+
+1. Resolves the output directory and creates it.
+2. Writes an initial `metadata.yaml` with known fields (robot, world, git SHA, …).
+3. Subscribes to all configured ROS topics (cmd_vel, lidar, odom, joint_states, plan, goal_pose, collision_events, arena_peds, EpisodeRecord, RobotFleet, tf, tf_static).
+4. Opens a single rosbag2 MCAP writer and records continuously for the entire step (all episodes).
+5. On each `EpisodeRecord` message, updates `metadata.yaml` with episode metadata.
+6. On clean shutdown (SIGTERM / SIGINT), writes the final `metadata.yaml` fields (episodes_recorded, recorded_topics, recording_ended_at) and flushes the MCAP.
+
+**Output directory structure:**
+```
+data/recordings/<timestamp>/
+├── metadata.yaml          ← Run-level metadata (start → end)
+├── params.yaml            ← ROS parameter snapshot
+└── recording/
+    └── recording_0.mcap   ← All topics, all episodes, continuous
+```
+
+For benchmark runs the structure is:
+```
+data/<benchmark_id>/recordings/<planner>/<stage>/
+├── metadata.yaml
+├── params.yaml
+└── recording/
+    └── recording_0.mcap
+```
+
+### Processing Phase (offline)
 
 ```bash
-pip install scikit-learn seaborn pandas matplotlib
-``` -->
+arena evaluation extract --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+arena evaluation process --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+```
 
-# Record Data
+The `extract` command reads each `recording_0.mcap` and saves topics into compressed Parquet files under `run_dir/topics/` (the extraction cache).
+The `process` command reads these cached parquet files (or extracts them on-the-fly if missing), temporally aligns them, splits by `EpisodeRecord` boundaries, and runs all metric calculators. Writes per-run and combined Parquet files.
 
-Record the data by setting `record_data:=true` when starting up the ros structure. Doing so will create a new folder in `/data` and fill it with multiple `.csv` files, each containing one topic.
+### Presentation Phase (offline)
 
-# Transform data and calculate metrics
+```bash
+arena evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+# Or both at once:
+arena evaluation run --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+# With animated GIFs:
+arena evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id> --generate-gifs
+```
 
-To transform the dataset for later plotting and calculate the metrics from the recorded data run `python get_metrics.py --dir <DIR>`, whereas `dir` is the directory which is created in the recording phase. The metrics which are created are shown in the following table:
+Reads `combined_metrics.parquet` and the default visualization manifest (hardcoded in `viz_manifest.py`), generates `report.html` and `plots/*.png`. When `--generate-gifs` is passed, animated trajectory GIFs are also saved.
 
-| Name                 | Datatype                             | Description                                                                                                                               |
-| -------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| curvature            | Float[]                              | The curvature of the planner for each <br>timestep calculated with the [menger curvature](https://en.wikipedia.org/wiki/Menger_curvature) |
-| normalized curvature | Float[]                              | The curvature multiplied by the length of the<br> path for this specific part.                                                            |
-| roughness            | Float[]                              | Describes how sudden and abrupt the planner changes directions.                                                                           |
-| path length          | Float                                | The complete length of the part                                                                                                           |
-| path length values   | Float[]                              | The length of each path between two continuous timestamps                                                                                 |
-| acceleration         | Float[]                              | The acceleration of the robot. Calculated as the gradient between two velocities.                                                         |
-| jerk                 | Float[]                              | Describes the change in acceleration.                                                                                                     |
-| velocity             | Float[][]                            | The real velocity of the robot.                                                                                                           |
-| cmd_vel              | Float[][]                            | The robots desired velocity denoted by the planner                                                                                        |
-| collision amount     | Int                                  | Absolute amount of collisions in an episode.                                                                                              |
-| collisions           | Int[]                                | Index of the positions in which a collision occured.                                                                                      |
-| path                 | Float[][]                            | Array of positions in which the robot was located for specific timestamps.                                                                |
-| angle over length    | Float                                | The complete angle over the complete length of the path the robot took.                                                                   |
-| time diff            | Int                                  | The complete time of the episode.                                                                                                         |
-| result               | TIMEOUT \| GOAL_REACHED \| COLLISION | The reason the episode has ended.                                                                                                         |
+---
 
-# Plot Data
+## CLI Reference
 
-In order to make plotting easy, the plots are created from a declaration file, in which the exaclt data you want to plot is described. The declaration file should have the following schema, which is also shown in `plot_declarations/sample_schema.yaml`:
+The `arena evaluation` command is registered as part of the Arena feature system.
+
+```
+usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR] [--output-dir DIR] [--generate-gifs]
+
+Commands:
+  extract   Layer 3: Extract topics from MCAP into fast Parquet files (cache)
+  process   Layer 3: Compute metrics and write metrics.parquet (uses cached extraction by default)
+  run       Full pipeline: Extract (overwrite) → process → report + plots
+  report    Layer 5: Generate report.html from existing metrics.parquet
+  plot      Layer 5: Generate static PNG plots only (no HTML)
+```
+
+`extract`, `process`, and `run` accept **either** `--run-dir` (single recording) or `--benchmark-dir` (full benchmark). `report` and `plot` only accept `--benchmark-dir`.
+
+### Flags
+
+| Flag | Commands | Description |
+|---|---|---|
+| `--output-dir DIR` | all | Output directory for reports/plots (defaults to first input dir) |
+| `--generate-gifs` | report, plot, run | Generate animated trajectory GIFs (computationally intensive) |
+| `--force-extract` | process | Force re-extraction of MCAP files, overwriting cached topics |
+
+### Extracting Topics (Cache)
+
+```bash
+# Extract MCAP data into fast, compressed Parquet files per topic:
+arena evaluation extract --benchmark-dir /opt/arena_ws/data/my_benchmark
+# Output: data/my_benchmark/recordings/<planner>/<stage>/topics/*.parquet
+```
+
+### Processing a Single Run (ad-hoc recording)
+
+```bash
+# After running: arena launch ... record_data_dir:=data
+arena evaluation process --run-dir /opt/arena_ws/data/recordings/20260528-215316
+# Output: /opt/arena_ws/data/recordings/20260528-215316/metrics.parquet
+```
+
+### Processing a Full Benchmark
+
+```bash
+arena evaluation process --benchmark-dir /opt/arena_ws/data/my_benchmark
+# Output: metrics.parquet per run + combined_metrics.parquet at root
+```
+
+### Full Pipeline (process + report)
+
+```bash
+# Single run (metrics only — no HTML report for single runs):
+arena evaluation run --run-dir /opt/arena_ws/data/recordings/20260528-215316
+
+# Full benchmark (metrics + HTML report + PNGs):
+arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
+
+# With GIF generation:
+arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark --generate-gifs
+```
+
+### Regenerate Report Only
+
+```bash
+# Single benchmark report
+arena evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
+# Reads combined_metrics.parquet + viz_manifest
+# Writes: report.html + plots/*.png
+
+# Multi-benchmark merged report
+arena evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
+```
+
+The benchmark management CLI is accessed via:
+
+```bash
+arena evaluation list
+arena evaluation status <run_id>
+arena evaluation tail <run_id>
+```
+
+---
+
+## Running Tests
+
+All unit tests are pure Python — no running ROS environment required.
+
+```bash
+# Inside the Docker container
+cd /opt/arena_ws/src/Arena/arena_evaluation/arena_evaluation
+pytest tests/unit -v
+
+# With integration tests (requires fixture data)
+pytest tests/ -v
+```
+
+---
+
+## Configuration
+
+### Topic throttle frequencies (`config/data_recorder_config.yaml`)
+
+Controls how often high-frequency topics are sampled into the MCAP. Keys are matched as substrings of the full topic name.
 
 ```yaml
-# Wether you want to show or save the plots
-show_plots: boolean
-# Name of the directory in ./path
-save_location: string
-
-# List of all datasets that should be compared
-# Name of the directory in ./data
-datasets: string[]
-
-# Wether you want to plot the result counts
-results:
-    # Should plot?
-    plot: boolean
-    # Title of the plot
-    title: string
-    # Name of the file the plot should be saved ot
-    save_name: string
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    # Additional Plot arguments
-    plot_args: {} # Optional
-
-
-# Plot values that are collected in every time step.
-# Thus, being arrays for each episode.
-# Possible values are:
-# - curvature
-# - normalized_curvature
-# - roughness
-# - path_length_values
-# - acceleration
-# - jerk
-# - velocity
-
-#  It is possible to plot
-#  - A line plot to show the course in a single episode
-#    You can list multiple value to create multiple plots
-single_episode_line:
-  # Name of the coloumn you want to plot
-  - data_key: string # Required
-    # Number of values that should be skipped to reduce datapoints
-    step_size: int # Optional -> Defaults to 5
-    # Coloumn for differentiation
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    # Index of the episode -> If none all episodes are plotted
-    episode: int # Optional -> Defaults to none
-    title: string
-    save_name: string
-    plot_args: {} # Optional
-# - A Distributional plot for a single episode
-#   You can list multiple value to create multiple plots
-single_episode_distribution:
-  - data_key: string
-    episode: int
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    plot_key: "swarm" | "violin" | "box" | "boxen" | "strip" # Optional -> Defaults to "swarm"
-    title: string
-    save_name: string
-    plot_args: {} # Optional
-# - A line plot showing aggregated values for all episodes.
-#   Like a line plot for the max value of each episode
-aggregated_distribution:
-  - data_key: string
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    # Function that should be used for aggregation. We offer: max, min, mean
-    aggregate: "max" | "min" | "mean" | "sum"
-    # Name of the dist plot you want to use. Can be strip, swarm, box, boxen, violin
-    plot_key: "swarm" | "violin" | "box" | "boxen" | "strip" # Optional -> Defaults to "swarm"
-    title: string
-    save_name: string
-    plot_args: {} # Optional
-# - A distributional plot for aggregated values for all episodes.
-aggregated_line:
-  - data_key: string
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    # Function that should be used for aggregation. We offer: max, min, mean
-    aggregate: "max" | "min" | "mean" | "sum"
-    title: string
-    save_name: string
-    plot_args: {} # Optional
-
-
-## Plot values that are collected for each episode.
-# Single values for each episode
-# Possible values are:
-# - time_diff
-# - angle_over_length
-# - path_length
-
-# It is possible to plot
-# - A categorical plot over all episodes to show the values in a line or bar plot
-all_episodes_categorical:
-  - data_key: string
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    plot_key: "line" | "bar"
-    title: string
-    save_name: string
-    plot_args: {} # Optional
-# - Plot a distribution over all episodes
-all_episodes_distribution:
-  - data_key: string
-    # Denotes which data should be shown seperately for a single planner
-    differentiate: key in Dataset
-    plot_key: "swarm" | "violin" | "box" | "boxen" | "strip" # Optional -> Defaults to "swarm"
-    title: string
-    save_name: string
-    plot_args: {} # Optional
-
-
-## Plot the path the robots took
-
-# Plot all paths of all episodes for each robot
-episode_plots_for_namespaces:
-    # list of desired results that should be plotted
-    desired_results: ("TIMEOUT" | "GOAL_REACHED" | "COLLISION")[]
-    # Wether or not to add the obstacles from the scenario file to the plot
-    should_add_obstacles: boolean # Optional -> Defaults to False
-    # Wether or not to mark where collisions happened
-    should_add_collisions: boolean # Optional -> Defaults to False
-    title: string
-    save_name: string
-
-# Plot the best path of each robot
-# Only select the paths that reached the goal and take the path that took the least amount of time
-create_best_plots:
-    # Wether or not to add the obstacles from the scenario file to the plot
-    should_add_obstacles: boolean # Optional -> Defaults to False
-    # Wether or not to mark where collisions happened
-    should_add_collisions: boolean # Optional -> Defaults to False
-    title: string
-    save_name: string
-
+record_frequencies:
+  default: 20.0   # ms — fallback for any unmatched topic
+  lidar:   100.0  # ms — LaserScan (10 Hz)
+  odom:     20.0  # ms — Odometry (50 Hz)
+  cmd_vel:  20.0  # ms — Twist (50 Hz)
 ```
 
-<!-- ## 01 Data Recording
+### Accessibility color palette (`config/color_palette.yaml`)
 
-To record data as csv file while doing evaluation runs set the flag `recorder_data:="true"` in your `roslaunch` command. For example:
+Defines a qualitative color sequence loaded globally by `color_utils.py`. The palette is applied to both Plotly and Seaborn at startup via `set_global_color_palette()`. White and black are excluded from the drawing sequence.
+
+### Visualization manifest (`viz_manifest.py`)
+
+The default set of plots is defined in `viz_manifest.py` as Python code (not a YAML file). A `viz_manifest.yaml` placed at the benchmark root can override this. Plot types include: `violin`, `box`, `bar`, `histogram`, `scatter`, `trajectory`, `radar`, `heatmap`.
+
+---
+
+## Dependencies
+
+All Python dependencies are managed in `src/Arena/pyproject.toml`:
+
+| Package | Used For |
+|---|---|
+| `polars` | Fast DataFrame operations for metric computation |
+| `pyarrow` | Parquet read/write with embedded metadata |
+| `pydantic` | Schema validation for RunMetadata, PlotSpec |
+| `mcap` + `mcap-ros2-support` | Decoding MCAP files offline (no live ROS) |
+| `plotly` | Interactive HTML charts |
+| `seaborn` + `matplotlib` | Static PNG fallback charts + GIF animation |
+| `PyYAML` | YAML config and metadata file I/O |
+| `jinja2` | HTML report templating |
+| `Pillow` | Map image conversion (PGM→PNG) |
+
+ROS 2 dependencies (declared in `package.xml`): `rclpy`, `rosbag2_py`, `sensor_msgs`, `nav_msgs`, `geometry_msgs`, `task_generator_msgs`, `arena_evaluation_msgs`.
+
+---
+
+## Rebuilding After Changes
 
 ```bash
-workon rosnav
-arena launch sim:=gazebo world:=aws_house scenario_file:=aws_house_obs05.json mobile.local_planner:=teb robot:=turtlebot3_burger use_recorder:=true
+arena build arena_evaluation
 ```
-
-The data will be recorded in `.../catkin_ws/src/forks/arena-evaluation/01_recording`.
-The script stops recording as soon as the agent finishes the scenario and stops moving or after termination criterion is met. Termination criterion as well as recording frequency can be set in `data_recorder_config.yaml`.
-
-```yaml
-max_episodes: 15 # terminates simulation upon reaching xth episode
-max_time: 1200 # terminates simulation after x seconds
-record_frequency: 0.2 # time between actions recorded
-```
-
-> **NOTE**: Leaving the simulation running for a long time after finishing the set number of repetitions does not influence the evaluation results as long as the agent stops running. Also, the last episode of every evaluation run is pruned before evaluating the recorded data.
-
-> **NOTE**: Sometimes csv files will be ignored by git so you have to use git add -f <file>. We recommend using the code below.
-
-```bash
-roscd arena-evaluation && git add -f .
-git commit -m "evaluation run"
-git pull
-git push
-```
-
-## 02 Data Transformation and Evaluation
-
-1. After finishing all the evaluation runs, recording the desired csv files and run the `get_metrics.py` script in `/02_evaluation`.
-   This script will evaluate the raw data recorded from the evaluation and store it (or them) `.ftr` file with the following naming convention: `data_<planner>_<robot>_<map>_<obstacles>.ftr`. During this process all the csv files will be moved from `/01_recording` to `/02_evaluation` into a directory with the naming convention `data_<timestamp>`. The ftr file will be stored in `/02_evaluation`.\
-    Some configurations can be set in the `get_metrics_config.yaml` file. Those are:
-
-- `robot_radius`: dictionary of robot radii, relevant for collision measurement
-- `time_out_treshold`: treshold for episode timeout in seconds
-- `collision_treshold`: treshold for allowed number of collisions until episode deemed as failed
-
-  > **NOTE**: Do NOT change the `get_metrics_config_default.yaml`!\
-  > We recommend using the code below:\
-
-  ```bash
-  workon rosnav && roscd arena-evaluation/02_evaluation && python get_metrics.py
-  ```
-
-  > **NOTE**: If you want to reuse csv files, simply move the desired csv files from the data directory to `/01_recording` and execute the `get_metrics.py` script again.
-
-  The repository can be used in two ways:
-
-  - Firstly it can be used to evaluate the robot performance within the scenario run, e.g visualizing the velocity distribution within each simulation run (this usage mode is currently still under development).
-  - Secondly, it can be used to evaluate the robot performance compare robot performance between different scenarios. For this use-case continue with the following step 2.
-
-2. The observations of the individual runs can be joined into one large dataset, using the following script:
-   ```bash
-   workon rosnav && roscd arena-evaluation/02_evaluation && python combine_into_one_dataset.py
-   ```
-   This script will combine all ftr files in the `02_evaluation/ftr_data` folder into one large ftr file, taking into account the planner, robot etc.
-
-## 03 Plotting
-
-The data prepared in the previous steps can be visualized with two different modes, the automated or the custom mode.
-
-### Custom Plotting (recommended)
-
-Open the following [notebook](03_plotting/data_visualization.ipynb) to visualize your data. It contains a step-by-step guide on how to create an accurate visual representation of your data. For examples of supported plots (and when to use which plot), refer to the documentation [here](docs/plotting_examples.md).
-
-### Automated Plotting (in development) -->
-
-<!-- The `get_plots.py` script grabs all `data.json` files located in `/02_evaluation` and moves them to `/03_plotting/data`. During the process the last in order JSON file from the grabbed files will be deemed as "most recent" file. If no file was grabbed, the last data.json used for plotting will remain the "most recent" file. Alternatively, it's possible to specify a `data.json` to be used for plotting. To specify a dataset set the following keys in the `get_plots_config.yaml`:
-
-```yaml
-specify_data: true
-specified_data_filename: <your_dataset>.json
-```
-
-For running the script recommend using the code below:
-```bash
-workon rosnav && roscd arena-evaluation/03_plotting && python get_plots.py
-```
-
-#### Mandatory fields:
-- `labels`
-- `color_scheme`
-
-Make sure for those fields **all** your local planner or planner-waypoint-generator combinations with the robot they were used on are defined. Examples:
-- labels:
-    - rlca_jackal: RLCA
-    - rlca_turtlebot3_burger: RLCA
-- color_scheme:
-    - rlca_jackal
-
-See the documentation [here](docs/fields.md) for an explanation of the possible parameters fields. -->
-
-<!-- # Mesure complexity of you map
-
-1. run: `roscd arena-evaluation`
-2. run: `python world_complexity.py --image_path {IMAGE_PATH} --yaml_path {YAML_PATH} --dest_path {DEST_PATH}`
-
-with:\
- IMAGE_PATH: path to the floor plan of your world. Usually in .pgm format\
- YAML_PATH: path to the .yaml description file of your floor plan\
- DEST_PATH: location to store the complexity data about your map
-
-Example launch:
-
-```bash
-python world_complexity.py --image_path ~/catkin_ws/src/forks/arena-tools/aws_house/map.pgm --yaml_path ~/catkin_ws/src/forks/arena-tools/aws_house/map.yaml --dest_path ~/catkin_ws/src/forks/arena-tools/aws_house
-``` -->

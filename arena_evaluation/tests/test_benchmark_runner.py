@@ -551,6 +551,33 @@ def test_build_launch_args_no_sim_when_simulator_none():
     assert "world:=map1" in args
 
 
+def test_build_launch_args_dict_cap_driver_and_kwargs():
+    """Dict-form cap emits driver as top-level and kwargs as dot-joined args."""
+    cell = _make_cell(contestant_args={"mobile": {"driver": "nav2", "local_planner": "teb", "inter_planner": "bypass"}})
+    args = build_launch_args(cell, "gazebo")
+    assert "mobile:=nav2" in args
+    assert "mobile.local_planner:=teb" in args
+    assert "mobile.inter_planner:=bypass" in args
+
+
+def test_build_launch_args_dict_cap_no_driver():
+    """Dict-form cap without driver: only sub-keys are emitted."""
+    cell = _make_cell(contestant_args={"mobile": {"local_planner": "dwa"}})
+    args = build_launch_args(cell, "gazebo")
+    assert not any(a == "mobile:=" or a == "mobile:=None" for a in args)
+    assert "mobile.local_planner:=dwa" in args
+
+
+def test_build_launch_args_dict_cap_stage_collision_dropped():
+    """Dict-form cap sub-key colliding with stage-owned key is dropped."""
+    cell = _make_cell(contestant_args={"mobile": {"driver": "nav2", "local_planner": "teb"}, "sim": "isaac"})
+    args = build_launch_args(cell, "gazebo")
+    assert "sim:=gazebo" in args
+    assert "sim:=isaac" not in args
+    assert "mobile:=nav2" in args
+    assert "mobile.local_planner:=teb" in args
+
+
 # ---------------------------------------------------------------------------
 # build_pending
 # ---------------------------------------------------------------------------
@@ -691,7 +718,7 @@ def test_build_pending_record_dir_set_from_record_root(tmp_path: pathlib.Path):
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
     assert len(steps) == 1
-    assert steps[0].record_dir == tmp_path / "pa" / "s1"
+    assert steps[0].record_dir == tmp_path / "recordings" / "pa" / "s1"
 
 
 def test_build_pending_duplicate_key_raises(tmp_path: pathlib.Path):
@@ -964,11 +991,10 @@ def test_flatten_random_nested_counts():
         tm_robots="random",
     )
     by_name = {p.name: p for p in obs}
-    assert "dynamic.min" in by_name
-    assert "dynamic.max" in by_name
-    assert by_name["dynamic.min"].value.type == ParameterType.PARAMETER_INTEGER
-    assert by_name["dynamic.min"].value.integer_value == 2
-    assert by_name["dynamic.max"].value.integer_value == 5
+    assert "dynamic.n" in by_name
+    assert by_name["dynamic.n"].value.type == ParameterType.PARAMETER_INTEGER_ARRAY
+    assert list(by_name["dynamic.n"].value.integer_array_value) == [2, 5]
+
 
 
 def test_flatten_empty_config_yields_empty():
@@ -1030,5 +1056,3 @@ def test_flatten_typed_values():
     assert by_name["a_bool"].value.bool_value is True
     assert by_name["a_float"].value.type == ParameterType.PARAMETER_DOUBLE
     assert by_name["a_float"].value.double_value == pytest.approx(3.14)
-
-

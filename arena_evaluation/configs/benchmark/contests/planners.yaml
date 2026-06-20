@@ -1,3 +1,5 @@
 name: basic
-mobile.inter_planner: bypass
-mobile.local_planner: [teb, dwa, dragon, rosnav, applr, lflh, trail, cohan]
+mobile:
+  driver: nav2
+  inter_planner: bypass
+  local_planner: [teb, dwa, dragon, rosnav, applr, lflh, trail, cohan]

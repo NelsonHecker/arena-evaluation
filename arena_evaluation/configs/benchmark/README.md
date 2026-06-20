@@ -63,31 +63,49 @@ stages:
 A contest defines the set of planner configurations (contestants) to evaluate.
 The runner iterates over all contestants at each suite stage.
 
+Contestant args use **cap-scoped dicts** — each capability (e.g. `mobile`,
+`arm`) is a dict with a `driver` key identifying the driver and any extra
+kwargs forwarded as launch args:
+
+```yaml
+mobile:
+  driver: nav2
+  local_planner: teb
+  inter_planner: polite
+```
+
+This produces launch args: `mobile:=nav2 mobile.local_planner:=teb mobile.inter_planner:=polite`
+
 There are two forms: **list** and **sweep**.
 
 ### List form
 
 Top-level YAML is a sequence. Each entry must have `name`; all other keys
-become `args` forwarded to `Robot.parse` via the `SpawnRobot` service. Use
-the cap-scoped form (see [Contestant args](#contestant-args) below).
+become `args` forwarded to `Robot.parse` via the `SpawnRobot` service.
 
 ```yaml
-- name: teb
-  mobile.local_planner: teb
-  mobile.inter_planner: navigate_w_replanning_time
+- name: teb-polite
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: polite
 - name: dwa-rl
-  mobile: rosnav_rl
-  mobile.agent: my_agent
+  mobile:
+    driver: rosnav_rl
+    agent: my_agent
 ```
 
 ### Sweep form
 
-Top-level YAML is a mapping. List values are sweep axes; non-list values are
-constants shared by all contestants. The runner takes the cartesian product.
+Top-level YAML is a mapping. Inside a cap dict, list values are sweep axes;
+non-list values are constants shared by all contestants. The runner takes the
+cartesian product of all list-valued keys.
 
 ```yaml
-mobile.local_planner: [teb, dwa, rosnav]
-mobile.inter_planner: bypass
+mobile:
+  driver: nav2
+  local_planner: [teb, dwa, rosnav]
+  inter_planner: bypass
 ```
 
 produces three contestants. `name` is auto-derived from the keys that vary
@@ -97,21 +115,40 @@ order.
 
 ```yaml
 # 4 contestants: dwa-navfn, dwa-smac, teb-navfn, teb-smac
-mobile.local_planner: [dwa, teb]
-mobile.global_planner: [navfn, smac]
+mobile:
+  driver: nav2
+  local_planner: [dwa, teb]
+  global_planner: [navfn, smac]
 ```
 
 A constant `name: <prefix>` prepends the prefix to all auto-derived names:
 
 ```yaml
 name: basic
-mobile.inter_planner: bypass
-mobile.local_planner: [teb, dwa, rosnav]
+mobile:
+  driver: nav2
+  inter_planner: bypass
+  local_planner: [teb, dwa, rosnav]
 # produces: basic-teb, basic-dwa, basic-rosnav
 ```
 
 `description` (optional) is stored in the contest manifest and is not forwarded
 to `Robot.parse`.
+
+### Backward compatibility
+
+The old flat dot-notation format is still accepted in both list and sweep forms:
+
+```yaml
+# Old flat list form — still works
+- name: teb
+  mobile.local_planner: teb
+  mobile.inter_planner: bypass
+
+# Old flat sweep form — still works
+mobile.local_planner: [teb, dwa]
+mobile.inter_planner: bypass
+```
 
 ### Inline contest (CLI)
 
@@ -119,8 +156,8 @@ Pass the YAML inline as the `--contest` value when the string starts with `[`
 or `{`:
 
 ```
-arena benchmark --suite basic --contest '[{name: teb, mobile.local_planner: teb}]'
-arena benchmark --suite basic --contest '{mobile.local_planner: [teb, dwa]}'
+arena benchmark --suite basic --contest '[{name: teb, mobile: {driver: nav2, local_planner: teb}}]'
+arena benchmark --suite basic --contest '{mobile: {driver: nav2, local_planner: [teb, dwa]}}'
 ```
 
 ### Contestant args
