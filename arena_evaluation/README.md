@@ -309,8 +309,5 @@ ROS 2 dependencies (declared in `package.xml`): `rclpy`, `rosbag2_py`, `sensor_m
 ## Rebuilding After Changes
 
 ```bash
-# Inside the container — incremental rebuild with symlink install
-# (source edits immediately reflected without rebuilding again)
-colcon build --packages-select arena_evaluation --symlink-install
-source /opt/arena_ws/install/setup.bash
+arena build arena_evaluation
 ```
