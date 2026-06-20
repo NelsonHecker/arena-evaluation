@@ -428,7 +428,6 @@ class DataRecorderNode(Node):
                     self.robot_model = robot.model
                     
                 if hasattr(self, 'metadata') and self.metadata is not None:
-                    # Keep track of multiple robot models if there's a fleet
                     if "unknown" in self.metadata.robot_model:
                         self.metadata.robot_model = []
                         

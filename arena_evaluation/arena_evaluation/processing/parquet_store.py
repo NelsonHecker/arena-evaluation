@@ -161,9 +161,8 @@ class TopicParquetStore:
         # Load robot specific topics
         robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
         
-        # Fallback to 'unknown' if no subdirs but there are parquet files (legacy fallback)
-        if not robot_dirs and any(source_dir.glob("*.parquet")):
-            return {"unknown": global_bundle}
+        # Load robot specific topics
+        robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
             
         for robot_dir in robot_dirs:
             robot_name = robot_dir.name

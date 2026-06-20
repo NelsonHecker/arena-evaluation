@@ -15,14 +15,14 @@ from ..storage.schemas import TopicBundle
 
 class MCAPReader:
     """
-    Reads an MCAP file (or legacy CSVs) and produces a TopicBundle of raw DataFrames.
+    Reads an MCAP file and produces a TopicBundle of raw DataFrames.
     """
     def __init__(self, data_path: pathlib.Path):
         self.data_path = data_path
 
     @staticmethod
     def _quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
-        """Convert quaternion to yaw angle. Matches legacy metrics implementation."""
+        """Convert quaternion to yaw angle."""
         siny_cosp = 2 * (w * z + x * y)
         cosy_cosp = 1 - 2 * (y * y + z * z)
         return math.atan2(siny_cosp, cosy_cosp)
@@ -239,9 +239,6 @@ class MCAPReader:
                         target["angular_x"].append(ros_msg.angular.x)
                         target["angular_y"].append(ros_msg.angular.y)
                         target["angular_z"].append(ros_msg.angular.z)
-                        # Keep legacy columns
-                        target["cmd_linear"].append(ros_msg.linear.x)
-                        target["cmd_angular"].append(ros_msg.angular.z)
                         appended = True
                         
                     # Joint states
