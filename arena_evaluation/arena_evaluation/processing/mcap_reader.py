@@ -240,7 +240,6 @@ class MCAPReader:
                         target["angular_y"].append(ros_msg.angular.y)
                         target["angular_z"].append(ros_msg.angular.z)
                         appended = True
-                        
                     # Joint states
                     elif topic.endswith("/joint_states"):
                         robot_name = parts[-2] if len(parts) >= 2 else "unknown"
