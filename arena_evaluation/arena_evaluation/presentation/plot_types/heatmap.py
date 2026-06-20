@@ -18,11 +18,9 @@ class HeatmapRenderer(BasePlotRenderer):
         if df_filtered.is_empty():
             return None
 
-        # Determine if this is a correlation heatmap or a pivot heatmap
         is_correlation = self.spec.data_key == "*" or self.spec.data_key.lower() == "correlation"
 
         if is_correlation:
-            # List of numeric metrics to compute correlation for
             candidates = [
                 "success", "collision_amount", "time_to_goal", "path_length", 
                 "path_efficiency", "velocity_mean", "velocity_max",
@@ -35,11 +33,9 @@ class HeatmapRenderer(BasePlotRenderer):
             if len(valid_cols) < 2:
                 return None
             
-            # Compute correlation matrix
             pdf = df_filtered.select(valid_cols).to_pandas().astype(float)
             corr_matrix = pdf.corr()
             
-            # Format titles
             labels = [c.replace("_", " ").title() for c in corr_matrix.columns]
             
             fig = px.imshow(
@@ -63,7 +59,6 @@ class HeatmapRenderer(BasePlotRenderer):
             return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
             
         else:
-            # Pivot heatmap: e.g. local_planner vs inter_planner for a given metric (spec.data_key)
             metric = self.spec.data_key
             if metric not in df_filtered.columns:
                 return None
@@ -74,7 +69,6 @@ class HeatmapRenderer(BasePlotRenderer):
             if x_col not in df_filtered.columns or y_col not in df_filtered.columns:
                 return None
                 
-            # Aggregate and pivot
             grouped = (
                 df_filtered
                 .group_by([y_col, x_col])
@@ -95,7 +89,6 @@ class HeatmapRenderer(BasePlotRenderer):
                 labels=dict(color=self.format_label(metric.replace("_", " ").title(), metric), x=x_col.replace("_", " ").title(), y=y_col.replace("_", " ").title()),
                 aspect="auto"
             )
-            # Add text values inside cells for readability if there aren't too many cells
             if pivot_df.size <= 100:
                 fig.update_traces(
                     text=np.round(pivot_df.values, 2),

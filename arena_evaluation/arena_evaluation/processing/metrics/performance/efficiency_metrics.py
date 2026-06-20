@@ -46,7 +46,6 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
         euclidean_dist = np.linalg.norm(goal - start)
         efficiency = float(euclidean_dist / path_length)
         
-        # Clamp to [0, 1] in case of numeric issues
         efficiency = min(max(efficiency, 0.0), 1.0)
         
         return {

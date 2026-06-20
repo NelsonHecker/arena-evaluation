@@ -61,36 +61,6 @@ class MCAPReader:
             curr[parts[-1]] = v
         return res
 
-    def _read_legacy_csv(self) -> TopicBundle:
-        """Fallback to reading legacy CSVs directly into Polars."""
-        bundle = TopicBundle()
-        
-        # Odom
-        odom_path = self.data_path / "odom.csv"
-        if odom_path.exists():
-            df = pl.read_csv(odom_path)
-            # Legacy CSV has pos_x, pos_y, pos_z, orientation_x/y/z/w, linear_x/y/z, angular_x/y/z
-            if "orientation_w" in df.columns:
-                # Need to compute yaw
-                yaws = [
-                    self._quaternion_to_yaw(
-                        row["orientation_x"], row["orientation_y"], row["orientation_z"], row["orientation_w"]
-                    )
-                    for row in df.iter_rows(named=True)
-                ]
-                df = df.with_columns(pl.Series("yaw", yaws))
-            bundle.odom = df
-            
-        # Scan
-        scan_path = self.data_path / "scan.csv"
-        if scan_path.exists():
-            bundle.scan = pl.read_csv(scan_path)
-            
-        # Episode record / goal (legacy didn't have episode_record as csv typically, we'll try to find it)
-        # Note: True legacy support requires parsing custom formats, simplified here
-        
-        return bundle
-
     def read(self) -> dict[str, TopicBundle]:
         """
         Reads the data source and returns raw DataFrames/LazyFrames for each topic,
@@ -101,15 +71,13 @@ class MCAPReader:
             if mcap_files:
                 actual_path = mcap_files[0]
             else:
-                # Legacy CSV mode
-                return {"unknown": self._read_legacy_csv()}
+                raise FileNotFoundError(f"No MCAP file found in directory: {self.data_path}")
         else:
             actual_path = self.data_path
             
         if not actual_path.exists():
             raise FileNotFoundError(f"MCAP file not found: {actual_path}")
 
-        # Resolve topics directory
         path = self.data_path.resolve()
         if path.is_dir():
             run_dir = path
@@ -119,7 +87,6 @@ class MCAPReader:
             run_dir = path.parent
         topics_dir = run_dir / "topics"
 
-        # Data collection buffers
         def new_robot_data():
             return {
                 "odom": defaultdict(list),
@@ -146,14 +113,12 @@ class MCAPReader:
 
         from mcap.reader import NonSeekingReader
 
-        # Ensure topics directory exists
         topics_dir.mkdir(parents=True, exist_ok=True)
 
         writers = {}
         accumulated_count = 0
 
         def flush_buffers():
-            # Flush global data
             for topic_name, topic_data in global_data.items():
                 if not topic_data or len(topic_data.get("time_ns", [])) == 0:
                     continue
@@ -169,7 +134,6 @@ class MCAPReader:
                 writers[writer_key].write_batch(batch)
                 topic_data.clear()
                 
-            # Flush robot data
             for robot_name, r_data in robot_data.items():
                 for topic_name, topic_data in r_data.items():
                     if not topic_data or len(topic_data.get("time_ns", [])) == 0:
@@ -215,7 +179,6 @@ class MCAPReader:
 
                     topic = channel.topic
                     
-                    # Dynamically detect the environment prefix (e.g. "env_0") to filter global /tf transforms
                     if env_prefix is None and ("env_" in topic or "env" in topic):
                         import re
                         match = re.search(r'env_(\d+)', topic)

@@ -6,18 +6,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..storage.schemas import PlotSpec
 
-# Ordered priority list of identity columns.
-# The detector checks these and reports which ones carry more than one unique value.
+# Ordered priority list of identity columns
 IDENTITY_COLS: list[str] = ["local_planner", "inter_planner", "robot", "stage", "map", "benchmark_id"]
 
-# Name of the synthetic compound-label column added to the DataFrame when
-# multiple dimensions vary simultaneously.
 COMPOUND_LABEL_COL = "__label__"
 
 
 def split_planner_name(planner_name: str | None) -> tuple[str, str]:
     """
     Split the contestant/planner name into local_planner and inter_planner.
+    
+    Uses a positional convention: ``<prefix>-<local_planner>-<inter_planner>``.
     Example: 'trial-dwb-bypass' -> ('dwb', 'bypass')
     """
     if not planner_name:
@@ -25,19 +24,6 @@ def split_planner_name(planner_name: str | None) -> tuple[str, str]:
     
     parts = str(planner_name).split("-")
     
-    # Try to find a token that matches a known local planner
-    KNOWN_LOCAL_PLANNERS = {
-        "teb", "rosnav", "cohan", "dwa", "dragon", "applr", "lflh", "trail", "dwb", "mppi", "regulated"
-    }
-    
-    for i, part in enumerate(parts):
-        if part.lower() in KNOWN_LOCAL_PLANNERS:
-            local_planner = parts[i]
-            # Inter planner is everything after the local planner
-            inter_planner = "-".join(parts[i+1:]) if i + 1 < len(parts) else "none"
-            return local_planner, inter_planner
-            
-    # Fallback if no known local planner is found
     if len(parts) >= 3:
         return parts[1], "-".join(parts[2:])
     elif len(parts) == 2:
@@ -70,10 +56,8 @@ def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
         return df
 
     if len(dims) == 1:
-        # Simple — just alias the single varying column
         return df.with_columns(pl.col(dims[0]).alias(COMPOUND_LABEL_COL))
 
-    # Compound — join the values of all varying dims
     parts = [pl.col(d).cast(pl.Utf8) for d in dims]
     label_expr = pl.concat_str(parts, separator=" / ")
     return df.with_columns(label_expr.alias(COMPOUND_LABEL_COL))
@@ -84,21 +68,17 @@ def resolve_differentiate(spec: "PlotSpec", df: pl.DataFrame) -> tuple[str, pl.D
     Determine the effective differentiation column for spec given df.
     """
     auto = getattr(spec, "auto_differentiate", True)
-    requested = spec.differentiate  # may be None
+    requested = spec.differentiate
 
-    # Rule 1 – explicit opt-out of auto detection
     if not auto:
         fallback = requested if (requested and requested in df.columns) else "planner"
         return fallback, df
 
     varying = detect_varying_dims(df)
 
-    # Rule 2 – single varying dim, requested col matches → no change needed
     if len(varying) <= 1:
         col = requested if (requested and requested in df.columns) else (varying[0] if varying else "planner")
         return col, df
 
-    # Multiple dims vary — we need a compound label regardless of what was requested.
-    # Rule 3 & 4
     df = build_label_column(df, varying)
     return COMPOUND_LABEL_COL, df

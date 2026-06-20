@@ -86,7 +86,6 @@ class MotionMetricsCalculator(BaseMetricCalculator):
                 "jerk_mean": 0.0,
             }
             
-        # Calculate time differences in seconds
         time_ns = episode.data["time_ns"].to_numpy()
         dt = np.diff(time_ns) / 1e9
         dt = np.where(dt == 0.0, 1e-6, dt)

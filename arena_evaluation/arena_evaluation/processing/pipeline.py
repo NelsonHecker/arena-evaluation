@@ -35,11 +35,8 @@ class ProcessingPipeline:
         
         source_path = mcap_path
         if not source_path.exists():
-            if (run_dir / "odom.csv").exists():
-                source_path = run_dir
-            else:
-                print(f"  [skip] No MCAP or legacy CSV found for {run.planner}/{run.stage}")
-                return None
+            print(f"  [skip] No MCAP found for {run.planner}/{run.stage}")
+            return None
                 
         print(f"  Extracting {run.planner}/{run.stage} to {extracted_dir}...")
         reader = MCAPReader(source_path)

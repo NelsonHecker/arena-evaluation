@@ -66,14 +66,12 @@ class PathMetricsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any]
     ) -> dict[str, typing.Any]:
         
-        # Ensure odom data exists
         if episode.data is None or "pos_x" not in episode.data.columns:
             return {k: None for k in self.output_keys()}
             
         pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans = self.resolve_robot_pose(episode)
         path_odom_3d = np.column_stack((odom_x_trans, odom_y_trans, odom_yaw_trans))
             
-        # Combine into (N, 3) and (N, 2) arrays
         path_3d = np.column_stack((pos_x, pos_y, yaw))
         path_2d = np.column_stack((pos_x, pos_y))
         
@@ -92,25 +90,21 @@ class PathMetricsCalculator(BaseMetricCalculator):
                 "angle_over_length": 0.0,
             }
             
-        # Path length
         path_length_values = np.linalg.norm(path_2d[1:] - path_2d[:-1], axis=1)
         path_length = float(np.sum(path_length_values))
         
-        # Angle difference (turn)
         def angle_difference(x1, x2):
             return np.pi - np.abs(np.abs(x1 - x2) - np.pi)
             
         turn = angle_difference(yaw[:-1], yaw[1:])
         angle_over_length = float(np.abs(np.sum(turn) / path_length)) if path_length > 0 else 0.0
         
-        # Filter out consecutive duplicate/stationary points (distance < 1mm) for curvature and roughness
         diffs = np.linalg.norm(path_2d[1:] - path_2d[:-1], axis=1)
         keep_mask = np.concatenate(([True], diffs > 0.001))
         path_2d_clean = path_2d[keep_mask]
         
         N_clean = len(path_2d_clean)
         
-        # Curvature & Roughness (requires at least 3 clean points)
         if N_clean < 3:
             return {
                 "path": path_3d.tolist(),
@@ -133,18 +127,15 @@ class PathMetricsCalculator(BaseMetricCalculator):
         d12 = np.linalg.norm(p1 - p2, axis=1)
         d20 = np.linalg.norm(p2 - p0, axis=1)
         
-        # Triangle area using cross product of 2D vectors
         v1 = p1 - p0
         v2 = p2 - p0
         triangle_area = np.abs(v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0]) / 2.0
-        
-        # Curvature
+
         divisor = d01 * d12 * d20
         with np.errstate(divide='ignore', invalid='ignore'):
             curvature = np.where(divisor == 0, 0, 4 * triangle_area / divisor)
             normalized_curvature = curvature * (d01 + d12)
-            
-            # Roughness
+
             roughness = np.where(d20 == 0, 0, 2 * triangle_area / np.square(d20))
             
         return {

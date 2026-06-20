@@ -62,8 +62,6 @@ class DataRecorderNode(Node):
 
         self.base_dir = get_package_share_directory("arena_evaluation")
 
-        # ── Resolve record_data_dir ────────────────────────────────────────
-        # Priority 1: ROS parameter (set by benchmark runner launch args)
         if not self.has_parameter("record_data_dir"):
             try:
                 self.declare_parameter("record_data_dir", "")
@@ -71,7 +69,6 @@ class DataRecorderNode(Node):
                 pass
         record_data_dir = self.get_parameter("record_data_dir").get_parameter_value().string_value
 
-        # Priority 2: --dir / -d command line argument
         if not record_data_dir:
             for idx, arg in enumerate(sys.argv):
                 if arg in ("--dir", "-d") and idx + 1 < len(sys.argv):
@@ -81,11 +78,9 @@ class DataRecorderNode(Node):
                     record_data_dir = arg[6:].strip()
                     break
 
-        # Priority 3: default to auto-timestamped folder
         if not record_data_dir:
             record_data_dir = "auto:/"
 
-        # ── Handle auto:/ prefix ───────────────────────────────────────────
         if record_data_dir.startswith("auto:/"):
             if not self.has_parameter("data_recorder_autoprefix"):
                 try:
@@ -98,47 +93,33 @@ class DataRecorderNode(Node):
                 self.set_parameters([Parameter("data_recorder_autoprefix", Parameter.Type.STRING, timestamp)])
             else:
                 timestamp = param_value
-            # Relative path: resolved below against the workspace root
             record_data_dir = os.path.join("data", "recordings", timestamp)
 
-        # ── Resolve to absolute path ───────────────────────────────────────
-        # The old recorder wrote to install/share/arena_evaluation/data/<dir>.
-        # We now write to the workspace root's data/ folder instead so files
-        # are NOT inside the install tree (where they would get clobbered on build).
         record_data_dir_path = pathlib.Path(record_data_dir)
         if not record_data_dir_path.is_absolute():
-            # Walk up from base_dir (install/arena_evaluation/share/arena_evaluation)
-            # to find the workspace root (4 levels up: share -> arena_evaluation -> install -> ws)
             workspace_root = pathlib.Path(self.base_dir).parents[3]
             record_data_dir_path = workspace_root / record_data_dir_path
 
         self.run_dir = record_data_dir_path.resolve()
 
-        # If the user passed a bare directory like 'data' (no unique subfolder),
-        # auto-append a timestamped recordings sub-path so we don't write
-        # directly into the root data dir.
         bare_names = {"data", "recordings"}
         if self.run_dir.name in bare_names or not record_data_dir_path.parts[1:]:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             self.run_dir = self.run_dir / "recordings" / timestamp
 
-        # Ensure the directory exists and is writable before doing anything else
         self.run_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.run_dir.chmod(0o777)
         except Exception:
             pass
 
-        # ── Infer benchmark/planner/stage from path ────────────────────────
         parts = self.run_dir.parts
         try:
-            # Expected benchmark structure: <root>/data/<benchmark_id>/recordings/<planner>/<stage>
             if len(parts) >= 5 and parts[-3] == "recordings":
                 self.benchmark_id = parts[-4]
                 self.planner = parts[-2]
                 self.stage = parts[-1]
             else:
-                # Simple recording: <root>/data/recordings/<timestamp>
                 self.benchmark_id = "unknown"
                 self.planner = "unknown"
                 self.stage = "unknown"
@@ -147,7 +128,6 @@ class DataRecorderNode(Node):
             self.planner = "unknown"
             self.stage = "unknown"
 
-        # ── Robot/world metadata from ROS parameters ───────────────────────
         for param_name, default_val in [
             ("world", "unknown"),
             ("suite_name", "unknown"),
@@ -162,7 +142,6 @@ class DataRecorderNode(Node):
                 except Exception:
                     pass
                     
-        # Override path-inferred values with explicit ROS parameters if provided
         param_benchmark = self.get_parameter("benchmark_id").value
         if param_benchmark: self.benchmark_id = param_benchmark
         
@@ -176,16 +155,12 @@ class DataRecorderNode(Node):
         self.suite_name = self.get_parameter("suite_name").value
         self.contest_name = self.get_parameter("contest_name").value
         
-        self.robot_model = "unknown" # Will be updated dynamically by RobotFleet
+        self.robot_model = "unknown"
         self.known_robots = set()
 
-        # ── Paths ──────────────────────────────────────────────────────────
-        # The MCAP is written directly to run_dir/recording.mcap — no FolderManager
-        # path sandboxing here; that is a processing-time concern.
         self.mcap_path = self.run_dir / "recording.mcap"
         self.metadata_path = self.run_dir / "metadata.yaml"
 
-        # Rotate any pre-existing MCAP so rosbag2 doesn't crash on open
         if self.mcap_path.exists():
             ts = datetime.now().strftime("%Y%m%d-%H%M%S")
             backup = self.run_dir / f"recording_backup_{ts}.mcap"
@@ -197,18 +172,14 @@ class DataRecorderNode(Node):
 
         self._open_log_file()
 
-        # ── Write params.yaml and initial metadata.yaml ────────────────────
         self.write_params()
         self.config = self.read_config()
         self.freqs = self.config.get("record_frequencies", {"default": 20.0})
 
-        # Write initial metadata before opening the writer so we always have a
-        # metadata.yaml even if the node crashes before the first episode.
         self._log_info(f"Writing initial metadata to {self.metadata_path}")
         self._write_initial_metadata()
         self._log_info("Initial metadata written OK")
 
-        # ── Thread-safe writer ─────────────────────────────────────────────
         self.current_time = None
         self._clock_received_count = 0
         self.last_recorded_times: dict[str, int] = {}
@@ -247,12 +218,7 @@ class DataRecorderNode(Node):
         self._setup_subscriptions()
         self._log_info(f"Topic subscriptions ready. Opening MCAP writer...")
 
-        # Open the MCAP writer last, after subscriptions are ready
         self._start_recording()
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Recording lifecycle
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _open_log_file(self):
         if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
@@ -275,7 +241,6 @@ class DataRecorderNode(Node):
         the stem (e.g. "recording"), which produces run_dir/recording/recording_0.mcap.
         """
         self._log_info(f"Opening MCAP writer in {self.run_dir}")
-        # Strip .mcap extension so rosbag2 doesn't nest as recording.mcap/recording.mcap_0.mcap
         mcap_uri = str(self.mcap_path.with_suffix(""))
         self._log_info(f"Opening MCAP writer: uri={mcap_uri}")
 
@@ -312,10 +277,6 @@ class DataRecorderNode(Node):
 
         self._log_info(f"Started continuous recording at: {self.mcap_path}")
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Subscriptions
-    # ──────────────────────────────────────────────────────────────────────────
-
     def _setup_subscriptions(self):
         env_namespace = self.get_namespace().strip('/')
         env_prefix = f"/{env_namespace}" if env_namespace else ""
@@ -325,7 +286,6 @@ class DataRecorderNode(Node):
         from .topics import get_topics
         topics_dict = get_topics(namespace="", parent_namespace=env_namespace)
 
-        # 1. Register and subscribe to environment-level topics
         for key, t_def in topics_dict.items():
             if key not in ("episode_record", "robots_fleet", "peds", "agent_states"):
                 continue
@@ -333,16 +293,13 @@ class DataRecorderNode(Node):
             topic_name = t_def.name_template
             msg_type = t_def.msg_type
 
-            # Skip placeholders if dependency was missing
             if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "AgentStates", "EpisodeRecord", "RobotFleet") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
                 continue
 
             self._register_topic(topic_name, msg_type)
 
-            # Determine QoS profile
             qos_profile = self.latched_qos if t_def.qos_transient_local else self.qos
 
-            # Determine callback
             if key == "episode_record":
                 callback = self.episode_record_callback
             elif key == "robots_fleet":
@@ -359,7 +316,6 @@ class DataRecorderNode(Node):
             elif key == "robots_fleet":
                 self.get_logger().info(f"Subscribed to RobotFleet on {topic_name}")
 
-        # Dynamic discovery fallback (picks up odom topics with non-standard names)
         self.create_timer(1.0, self.discover_topics)
 
     def discover_topics(self):
@@ -380,7 +336,6 @@ class DataRecorderNode(Node):
             #     self._subscribe_discovered(name, LaserScan)
             if is_odom and "nav_msgs/msg/Odometry" in types:
                 self._subscribe_discovered(name, Odometry)
-                # Refine robot_model from odom topic
                 if self.robot_model in ("unknown", ""):
                     for part in reversed(name.split("/")):
                         if part and part not in ("odom", "eval_sim", "task_generator_node", "arena") \
@@ -398,9 +353,6 @@ class DataRecorderNode(Node):
         self.subs.append(sub)
         self.get_logger().info(f"Dynamically subscribed to: {topic_name}")
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Callbacks
-    # ──────────────────────────────────────────────────────────────────────────
 
     def clock_callback(self, msg: Clock):
         new_time = msg.clock.sec * int(1e9) + msg.clock.nanosec
@@ -414,7 +366,6 @@ class DataRecorderNode(Node):
             self._seen_episodes.add(msg.episode_id)
             self.episodes_recorded += 1
 
-        # Write the EpisodeRecord into the bag using sim time
         now = self.current_time
         if now is None:
             now = self.get_clock().now().nanoseconds
@@ -423,7 +374,6 @@ class DataRecorderNode(Node):
         episode_topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
         self._write_to_bag_at(episode_topic, msg, now)
 
-        # Then update the metadata.yaml
         self._update_metadata_from_episode(msg)
         
     def robots_fleet_callback(self, msg):
@@ -441,11 +391,9 @@ class DataRecorderNode(Node):
                 self.get_logger().info(f"Discovered new robot from RobotFleet: {robot_ns} (Model: {robot.model})")
                 self.known_robots.add(robot_ns)
                 
-                # Setup specific subscriptions for this robot
                 topics_dict = get_topics(namespace=robot_ns, parent_namespace=env_namespace)
                 
                 for key, t_def in topics_dict.items():
-                    # Skip environment level ones
                     if key in ("episode_record", "robots_fleet", "peds", "agent_states"):
                         continue
                         
@@ -468,7 +416,6 @@ class DataRecorderNode(Node):
                     self.subs.append(sub)
                     self.get_logger().info(f"Subscribed to robot topic: {topic_name}")
                     
-                # Subscribe to robot-specific odom if robot_name is known
                 robot_name = robot_ns.split('/')[-1] if robot_ns else ""
                 ns_prefix = f"/{robot_ns}" if robot_ns else ""
                 if robot_name:
@@ -477,7 +424,6 @@ class DataRecorderNode(Node):
                     sub = self.create_subscription(Odometry, odom_topic, self._create_throttled_callback(odom_topic), self.qos)
                     self.subs.append(sub)
                     
-                # Update metadata 
                 if self.robot_model == "unknown":
                     self.robot_model = robot.model
                     
@@ -573,7 +519,6 @@ class DataRecorderNode(Node):
         try:
             serialized_msg = serialize_message(msg)
         except Exception as e:
-            # Context might be shut down, print and exit cleanly without lock acquisition
             if not self.is_shutting_down:
                 self._log_error(f"Serialization failed for {topic_name}: {e}")
             return
@@ -594,9 +539,6 @@ class DataRecorderNode(Node):
             except Exception as e:
                 self._log_error(f"WRITE ERROR topic={topic_name} ts={timestamp_ns} err={e}")
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Topic registration helpers
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _register_topic(self, topic_name: str, msg_type):
         """Pre-register a topic so we know its type string before the first message."""
@@ -622,9 +564,6 @@ class DataRecorderNode(Node):
             self.writer.create_topic(self._topic_registry[topic_name])
             self.topics_metadata[strip] = self._topic_registry[topic_name]
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Metadata helpers
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _write_initial_metadata(self):
         metadata = IngestionMetadata.create_initial_metadata(
@@ -685,11 +624,6 @@ class DataRecorderNode(Node):
             curr[parts[-1]] = v
         return res
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Misc helpers
-    # ──────────────────────────────────────────────────────────────────────────
-
-
     def write_params(self):
         params_path = self.run_dir / "params.yaml"
         for param_name, default_val in [("map_file", ""), ("scenario_file", "")]:
@@ -715,17 +649,12 @@ class DataRecorderNode(Node):
         except Exception:
             return {"record_frequencies": {"default": 20.0}}
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Shutdown
-    # ──────────────────────────────────────────────────────────────────────────
-
     def finalize(self):
         """Flush and close the writer, write final metadata."""
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
 
-        # Ignore signals to guarantee cleanup runs to completion without interruption
         try:
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             signal.signal(signal.SIGTERM, signal.SIG_IGN)

@@ -19,7 +19,6 @@ class MapRegistry:
         except Exception:
             pass
             
-        # Fallback to local workspace if rospack fails
         ws_root = pathlib.Path("/opt/arena_ws")
         map_dir = ws_root / "src/Arena/arena_simulation_setup/worlds" / map_name
         if map_dir.exists():
@@ -44,12 +43,10 @@ class MapRegistry:
             with open(meta_path, "r") as f:
                 return yaml.safe_load(f)
                 
-        # Cache miss
         ros_map_dir = MapRegistry._find_ros_map_dir(map_name)
         if not ros_map_dir:
             return None
             
-        # Try to find map.yaml (could be under map/, 0/, or root)
         yaml_path = None
         for cand in ["map/map.yaml", "0/map.yaml", "map.yaml"]:
             if (ros_map_dir / cand).exists():
@@ -70,20 +67,17 @@ class MapRegistry:
             
         try:
             img = Image.open(image_path)
-            # convert to RGBA
             img = img.convert("RGBA")
             img.save(png_path)
             
             origin = list(map_meta.get("origin", [0.0, 0.0, 0.0]))
             
-            # If run_dir is provided, look for static transforms to apply to the origin
             if run_dir:
                 tf_static_path = pathlib.Path(run_dir) / "topics" / "tf_static.parquet"
                 if tf_static_path.exists():
                     try:
                         import polars as pl
                         tf_df = pl.read_parquet(tf_static_path)
-                        # Find transform from map to env_*/map
                         map_tf = tf_df.filter(
                             (pl.col("frame_id") == "map") & 
                             (pl.col("child_frame_id").str.contains("/map"))
@@ -97,7 +91,6 @@ class MapRegistry:
                     except Exception as e:
                         print(f"Failed to extract tf_static offset: {e}")
             
-            # Store png path and parsed metadata
             cache_meta = {
                 "png_path": str(png_path),
                 "resolution": float(map_meta.get("resolution", 0.05)),

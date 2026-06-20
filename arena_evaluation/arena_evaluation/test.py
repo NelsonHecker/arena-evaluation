@@ -17,7 +17,7 @@ from nav_msgs.msg       import Odometry
 from sensor_msgs.msg    import LaserScan
 from geometry_msgs.msg  import Twist
 from rosgraph_msgs.msg  import Clock
-# for transformations
+
 from tf_transformations import euler_from_quaternion
 
 import rclpy
@@ -31,8 +31,6 @@ from rclpy.serialization         import serialize_message
 from rosgraph_msgs.msg           import Clock
 from ament_index_python.packages import get_package_share_directory
 
-# from arena_evaluation.scripts.utils import Pedestrian
-# import pedsim_msgs.msg           as pedsim_msgs
 import arena_evaluation_msgs.srv as arena_evaluation_srvs
 from rosbag2_py import SequentialWriter, StorageOptions, ConverterOptions, TopicMetadata
 
@@ -105,7 +103,7 @@ class DataCollector(Node):
             ],
         }
 
-    def action_callback(self, msg_action: Twist): # variables will be written to csv whenever an action is published
+    def action_callback(self, msg_action: Twist):
 
         self.data = [
             round(msg_action.linear.x, 3),

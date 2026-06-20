@@ -21,7 +21,6 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     from nav_msgs.msg import Path
     from tf2_msgs.msg import TFMessage
 
-    # Optional dependencies
     try:
         from arena_people_msgs.msg import Pedestrians
         HAS_PEDSIM = True
@@ -58,7 +57,6 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         CollisionMonitorState = type("CollisionMonitorState", (), {})
         HAS_NAV2_COLLISION = False
 
-    # Use default namespaces if empty
     ns = f"/{namespace}" if namespace else ""
     p_ns = f"/{parent_namespace}" if parent_namespace else ""
     if ns == "/": ns = ""

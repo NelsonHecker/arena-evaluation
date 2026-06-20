@@ -53,7 +53,6 @@ class ProxemicsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any]
     ) -> dict[str, typing.Any]:
         
-        # We need peds positions and robot positions
         if episode.data is None or "pos_x" not in episode.data.columns or "peds_positions" not in episode.data.columns:
             return {k: None for k in self.output_keys()}
             
@@ -81,11 +80,9 @@ class ProxemicsCalculator(BaseMetricCalculator):
         in_personal_space_time_s = 0.0
         vel_in_space = []
         
-        # Calculate time diffs
         dt = np.diff(time_ns) / 1e9
-        dt = np.append(dt, 0.0) # pad last element
+        dt = np.append(dt, 0.0)
         
-        # Vectorized check for each step
         for i in range(N):
             peds = peds_positions[i]
             if not peds or len(peds) == 0:
@@ -94,8 +91,6 @@ class ProxemicsCalculator(BaseMetricCalculator):
                 
             rx, ry = pos_x[i], pos_y[i]
             
-            # Assuming peds is a flattened list or list of lists: [[x1, y1, z1], [x2, y2, z2]]
-            # Convert to numpy array safely
             if isinstance(peds, str):
                 import ast
                 try:
@@ -109,7 +104,6 @@ class ProxemicsCalculator(BaseMetricCalculator):
                 in_personal_space_steps.append(0)
                 continue
                 
-            # If flattened list [x1,y1,z1, x2,y2,z2], reshape it
             if peds_arr.ndim == 1:
                 n_peds = num_pedestrians_col[i] if num_pedestrians_col is not None else None
                 if n_peds is not None and n_peds > 0:
@@ -132,13 +126,10 @@ class ProxemicsCalculator(BaseMetricCalculator):
                 in_personal_space_steps.append(0)
                 continue
                 
-            # Compute Euclidean distances to all peds
             dx = peds_arr[:, 0] - rx
             dy = peds_arr[:, 1] - ry
             distances = np.sqrt(dx**2 + dy**2)
             
-            # Count how many are in personal space
-            # Exclude intimate space if desired, but typically we just count anything < 1.2m
             in_space_count = np.sum(distances < self.PERSONAL_SPACE_RADIUS)
             
             in_personal_space_steps.append(int(in_space_count))

@@ -25,16 +25,12 @@ class ReportBuilder:
         generate_gifs: bool = False,
     ):
         self.benchmark_dir = pathlib.Path(benchmark_dir)
-        # output_dir defaults to benchmark_dir so existing callers are unaffected
         self.output_dir = pathlib.Path(output_dir) if output_dir else self.benchmark_dir
         self.plots_dir = self.output_dir / "plots"
         self.report_path = self.output_dir / "report.html"
         self.manifest_path = self.benchmark_dir / "viz_manifest.yaml"
         self.generate_gifs = generate_gifs
 
-    # ------------------------------------------------------------------
-    # Multi-source use
-    # ------------------------------------------------------------------
 
     @classmethod
     def from_dirs(
@@ -55,27 +51,21 @@ class ReportBuilder:
         instance.report_path = instance.output_dir / "report.html"
         instance.generate_gifs = generate_gifs
 
-        # Find manifest: explicit → first source with one → default
         if manifest_path and pathlib.Path(manifest_path).exists():
             instance.manifest_path = pathlib.Path(manifest_path)
         else:
-            instance.manifest_path = None  # type: ignore[assignment]
+            instance.manifest_path = None
             for src in source_dirs:
                 candidate = pathlib.Path(src) / "viz_manifest.yaml"
                 if candidate.exists():
                     instance.manifest_path = candidate
                     break
             if not instance.manifest_path:
-                # Sentinel: VizManifest.load falls back to default when file absent
                 instance.manifest_path = output_dir / "viz_manifest.yaml"
 
-        # Pre-merge the DataFrames from all source dirs
         instance._merged_df = cls._load_and_merge(source_dirs)
         return instance
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _best_parquet(directory: pathlib.Path) -> pathlib.Path | None:
@@ -107,13 +97,9 @@ class ReportBuilder:
             return dfs[0]
         return pl.concat(dfs, how="diagonal_relaxed")
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def build(self) -> None:
         """Execute the report building process."""
-        # Resolve DataFrame: use pre-merged if available (multi-source), else load from disk
         if hasattr(self, "_merged_df") and self._merged_df is not None:
             df = self._merged_df
         else:
@@ -135,11 +121,9 @@ class ReportBuilder:
 
             df, _ = ParquetStore.read(target_path)
 
-        # Ensure local_planner and inter_planner are present (for backward compatibility with older runs)
         if "planner" in df.columns:
             if "local_planner" not in df.columns or "inter_planner" not in df.columns:
                 from .dimension_detector import split_planner_name
-                # Use split_planner_name to populate the columns
                 lp_list = []
                 ip_list = []
                 for p_val in df["planner"].to_list():
@@ -165,7 +149,6 @@ class ReportBuilder:
         html_plots = []
 
         for spec in manifest.plots:
-            # Check if metric data is available for this plot
             if spec.data_key != "*":
                 if spec.data_key not in df.columns:
                     print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' not found in metrics.")
@@ -174,14 +157,12 @@ class ReportBuilder:
                     print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' has no calculated data (all values null).")
                     continue
 
-            # Generate static PNG
             png_path = self.plots_dir / f"{spec.id}.png"
             try:
                 seaborn_renderer.render(spec, df, png_path, run_dir=self.output_dir)
             except Exception as e:
                 print(f"Warning: Failed to render static plot {spec.id}: {e}")
 
-            # Generate interactive HTML chunk
             try:
                 html_chunk = plotly_renderer.render(spec, df, run_dir=self.output_dir)
                 if html_chunk:
@@ -193,18 +174,14 @@ class ReportBuilder:
             except Exception as e:
                 print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
 
-        # Generate summary table
         summary_html = self._generate_summary_table(df)
 
-        # Derive a display name for the report header
         report_title = self.output_dir.name
 
-        # Write final HTML
         html_content = self._assemble_html(summary_html, html_plots, report_title)
         with open(self.report_path, "w") as f:
             f.write(html_content)
 
-        # Write local plotly.min.js to keep html file size small but work completely offline
         import plotly.offline
         js_path = self.output_dir / "plotly.min.js"
         with open(js_path, "w") as f:
@@ -217,17 +194,14 @@ class ReportBuilder:
         if "planner" not in df.columns:
             return ""
 
-        # Determine which identity dimensions vary — group by all of them for the summary
         from .dimension_detector import detect_varying_dims, IDENTITY_COLS
         varying = detect_varying_dims(df)
         group_cols = varying if varying else ["planner"]
 
-        # Only include identity cols that actually exist
         group_cols = [c for c in group_cols if c in df.columns]
         if not group_cols:
             group_cols = ["planner"]
 
-        # Group by planner and calculate success rate, avg time, avg path length dynamically
         agg_exprs = []
         if "success" in df.columns and not df["success"].is_null().all():
             agg_exprs.append(pl.col("success").mean().alias("success_rate"))
@@ -243,7 +217,6 @@ class ReportBuilder:
 
         summary = df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
 
-        # Format columns
         import pandas as pd
         if "success_rate" in summary.columns:
             summary["success_rate"] = summary["success_rate"].map(
@@ -271,12 +244,10 @@ class ReportBuilder:
         benchmark_id: str
     ) -> str:
         """Template for the final HTML report using Jinja2."""
-        # Group plots by layout_group
         grouped_plots = {}
         ordered_groups = []
         for group, html, title in plot_htmls:
             group_id = group if group else "details"
-            # Overview plots are handled separately
             if group_id == "overview":
                 continue
             if group_id not in grouped_plots:
@@ -308,10 +279,8 @@ class ReportBuilder:
                 "plots": plots
             })
 
-        # Gather overview plots
         overview_plots = [html for group, html, title in plot_htmls if group == "overview"]
 
-        # Load Jinja2 template relative to this file
         template_dir = pathlib.Path(__file__).parent
         env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(template_dir)))
         template = env.get_template("report_template.html.j2")

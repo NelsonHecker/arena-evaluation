@@ -61,7 +61,6 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             if "num_pedestrians" in episode.data.columns
             else None
         )
-        # Ensure we have pedestrian headings if available, else skip
         if "peds_headings" in episode.data.columns:
             peds_headings = episode.data["peds_headings"].to_list()
         else:
@@ -140,7 +139,6 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             dx = peds_arr[:, 0] - rx
             dy = peds_arr[:, 1] - ry
             
-            # Angle from robot to pedestrian
             angle_to_ped = np.arctan2(dy, dx)
             diff_robot_to_ped = angle_diff(ryaw, angle_to_ped)
             
@@ -149,7 +147,6 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             if is_looking > 0:
                 looking_at_time += dt[i]
                 
-            # Angle from pedestrian to robot
             angle_to_robot = np.arctan2(-dy, -dx)
             if len(head_arr) == len(peds_arr):
                 diff_ped_to_robot = angle_diff(head_arr, angle_to_robot)

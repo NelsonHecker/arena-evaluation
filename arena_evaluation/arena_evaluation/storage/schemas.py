@@ -14,7 +14,6 @@ class RunMetadata(BaseModel):
     """
     Metadata for a benchmark run, serialized to metadata.yaml.
     """
-    # Write-on-startup fields
     benchmark_id: str
     planner: str
     robot_model: list[str] = Field(default_factory=list)
@@ -31,20 +30,17 @@ class RunMetadata(BaseModel):
     python_version: str
     ros_distro: str
 
-    # Optional detailed task fields (populated dynamically from EpisodeRecord)
     tm_obstacles: str | None = None
     tm_robots: str | None = None
     tm_modules: list[str] | None = None
     obstacles_params: dict[str, typing.Any] | None = None
     robots_params: dict[str, typing.Any] | None = None
 
-    # Write-on-shutdown fields
     recording_ended_at: str | None = None
     episodes_recorded: int | None = None
     pedsim_available: bool | None = None
     recorded_topics: list[str] | None = None
 
-    # Processing fields
     processing_completed_at: str | None = None
     episodes_valid: int | None = None
     pipeline_version: str | None = None

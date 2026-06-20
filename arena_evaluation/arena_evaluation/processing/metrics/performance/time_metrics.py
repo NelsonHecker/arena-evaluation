@@ -58,19 +58,15 @@ class TimeMetricsCalculator(BaseMetricCalculator):
                 "idling_time": 0.0,
             }
             
-        # Time to goal in seconds
         duration_s = float(time_ns[-1] - time_ns[0]) / 1e9
         
-        # Idling time
         idling_time = 0.0
         velocity = prior_results.get("velocity", [])
         if velocity and len(velocity) == N:
             vel_arr = np.array(velocity)
             idle_mask = vel_arr < 0.01
             
-            # Time diffs
             dt = np.diff(time_ns) / 1e9
-            # Assume velocity is constant over dt[i]
             idling_time = float(np.sum(dt[idle_mask[:-1]]))
             
         return {

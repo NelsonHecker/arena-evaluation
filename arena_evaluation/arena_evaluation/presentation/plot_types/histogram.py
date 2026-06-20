@@ -34,7 +34,6 @@ class HistogramRenderer(BasePlotRenderer):
         global_min = pdf[x_col].min()
         global_max = pdf[x_col].max()
         
-        # Prevent zero-width bins
         if global_min == global_max:
             global_min -= 1
             global_max += 1
@@ -71,7 +70,6 @@ class HistogramRenderer(BasePlotRenderer):
             template="plotly_white",
         )
         
-        # Make the lines smooth
         fig.update_traces(opacity=opacity, line=dict(shape="spline", smoothing=0.8))
 
         fig.update_layout(

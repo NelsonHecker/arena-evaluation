@@ -26,7 +26,6 @@ class TrajectoryRenderer(BasePlotRenderer):
         if self.spec.options.get("show_map", True) and map_name:
             map_meta = self._load_map_image(map_name, run_dir=run_dir)
             
-        # Extract planners available in this subplot
         planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
         seen_planners = set()
         
@@ -36,7 +35,6 @@ class TrajectoryRenderer(BasePlotRenderer):
             else:
                 planner_df = pdf
                 
-            # Sort by episode chronologically
             if "episode" in planner_df.columns:
                 planner_df = planner_df.sort_values("episode")
                 
@@ -100,13 +98,12 @@ class TrajectoryRenderer(BasePlotRenderer):
                         if np.any(valid_mask):
                             clean_indices = np.where(valid_mask)[0]
                             
-                            # Find actual start avoiding initial spawn jumps
                             dists = np.sqrt(np.diff(path_arr[clean_indices, 0])**2 + np.diff(path_arr[clean_indices, 1])**2)
                             jumps = np.where(dists > 3.0)[0]
                             segment_starts = np.concatenate([[0], jumps + 1])
                             segment_ends = np.concatenate([jumps, [len(dists)]])
                             
-                            first_clean_idx = segment_starts[-1] # Fallback
+                            first_clean_idx = segment_starts[-1]
                             for s_idx, e_idx in zip(segment_starts, segment_ends):
                                 if e_idx > s_idx:
                                     segment_length = np.sum(dists[s_idx:e_idx])
@@ -128,7 +125,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                             else:
                                 goals_x_by_agent[k].append(path_arr[last_idx, 0])
                                 goals_y_by_agent[k].append(path_arr[last_idx, 1])
-                                goals_idx_by_agent[k].append(current_len + first_idx) # Draw goal at the SAME time as start
+                                goals_idx_by_agent[k].append(current_len + first_idx)
                                 
                     all_x_by_agent[k].extend(path_arr[:, 0])
                     all_y_by_agent[k].extend(path_arr[:, 1])
@@ -225,7 +222,6 @@ class TrajectoryRenderer(BasePlotRenderer):
         if title_suffix:
             title = f"{title} - {title_suffix}"
             
-        # Add map overlay if available
         layout_args = dict(
             title=title,
             xaxis_title="X [m]",
@@ -236,7 +232,6 @@ class TrajectoryRenderer(BasePlotRenderer):
         )
         
         if map_meta:
-            # Read png and encode to base64
             png_path = map_meta["png_path"]
             try:
                 with open(png_path, "rb") as f:
@@ -247,14 +242,13 @@ class TrajectoryRenderer(BasePlotRenderer):
                 w_m = map_meta["width"] * res
                 h_m = map_meta["height"] * res
                 
-                # Plotly expects coordinates for the corners
                 fig.add_layout_image(
                     dict(
                         source=f"data:image/png;base64,{encoded}",
                         xref="x",
                         yref="y",
                         x=origin_x,
-                        y=origin_y + h_m, # explicitly top-left of the image bounds
+                        y=origin_y + h_m,
                         sizex=w_m,
                         sizey=h_m,
                         xanchor="left",
@@ -265,7 +259,6 @@ class TrajectoryRenderer(BasePlotRenderer):
                     )
                 )
                 
-                # Optional: fix axis ranges to map bounds
                 layout_args["xaxis"] = dict(range=[origin_x, origin_x + w_m])
                 layout_args["yaxis"] = dict(range=[origin_y, origin_y + h_m], scaleanchor="x", scaleratio=1)
             except Exception as e:
@@ -428,7 +421,6 @@ class TrajectoryRenderer(BasePlotRenderer):
             if isinstance(group_cols, str):
                 group_cols = [group_cols]
                 
-            # Filter valid group columns
             valid_groups = [c for c in group_cols if c in df_filtered.columns]
             if not valid_groups:
                 return self._render_single_plot(df_filtered.to_pandas(), "", None, run_dir=run_dir)
@@ -436,13 +428,11 @@ class TrajectoryRenderer(BasePlotRenderer):
             htmls = []
             for name, group_df in df_filtered.group_by(valid_groups):
                 pdf = group_df.to_pandas()
-                # Create a title suffix from the group names
                 if isinstance(name, tuple):
                     suffix = " | ".join(f"{c}: {n}" for c, n in zip(valid_groups, name))
                 else:
                     suffix = f"{valid_groups[0]}: {name}"
                 
-                # Extract map_name
                 map_name = None
                 if "map" in valid_groups:
                     map_idx = valid_groups.index("map")
@@ -540,7 +530,6 @@ class TrajectoryRenderer(BasePlotRenderer):
         
         data_key = self.spec.data_key or "path"
         
-        # Sort pdf by episode so that parsing paths matches chronologically
         planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
         seen_planners = set()
         
@@ -595,7 +584,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                             segment_starts = np.concatenate([[0], jumps + 1])
                             segment_ends = np.concatenate([jumps, [len(dists)]])
                             
-                            first_clean_idx = segment_starts[-1] # Fallback
+                            first_clean_idx = segment_starts[-1]
                             for s_idx, e_idx in zip(segment_starts, segment_ends):
                                 if e_idx > s_idx:
                                     segment_length = np.sum(dists[s_idx:e_idx])

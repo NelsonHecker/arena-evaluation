@@ -49,15 +49,12 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any]
     ) -> dict[str, typing.Any]:
         
-        # Defaults
         collision_amount = 0
         collisions = []
         result = "GOAL_REACHED"
         success = True
                     
-        # Check nav2 collision_monitor_state topic
         if episode.data is not None and "action_type" in episode.data.columns:
-            # action_type == 1 means STOP (which is triggered when inside a stop polygon)
             action_types = episode.data["action_type"].to_numpy()
             is_stopped = (action_types == 1)
             
@@ -72,14 +69,9 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
             if nav2_collisions > collision_amount:
                 collision_amount = nav2_collisions
 
-        # Also check collision_events topic if aligned
         if episode.data is not None and "collision_event" in episode.data.columns:
-            # Count times it transitions from 0 events to > 0 events
             events_count = episode.data["collision_event"].to_numpy()
             
-            # Note: mcap_reader.py now stores the length of the events array, but
-            # because of join_asof, some values may be null/NaN before the first message.
-            # We treat nulls as 0.
             valid_counts = np.nan_to_num(events_count.astype(float), nan=0.0)
             is_collision = (valid_counts > 0)
             

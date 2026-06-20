@@ -10,22 +10,18 @@ from arena_evaluation.storage.folder_manager import FolderManager
 def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
     search_roots = []
 
-    # Check ARENA_DATA_DIR env variable
     arena_data_dir_env = os.environ.get("ARENA_DATA_DIR")
     if arena_data_dir_env:
         search_roots.append(pathlib.Path(arena_data_dir_env))
 
-    # Check relative to CWD
     cwd = pathlib.Path.cwd()
     search_roots.append(cwd / "data")
 
-    # Walk up the CWD to find a "data" directory (e.g. if we are deep in src/Arena/...)
     for parent in cwd.parents:
         data_candidate = parent / "data"
         if data_candidate.is_dir():
             search_roots.append(data_candidate)
 
-    # Check package share directory
     try:
         from ament_index_python.packages import get_package_share_directory
         pkg_data = pathlib.Path(get_package_share_directory("arena_evaluation")) / "data"
@@ -34,7 +30,6 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
     except Exception:
         pass
 
-    # Deduplicate search roots while preserving order
     unique_search_roots = []
     seen = set()
     for root in search_roots:
@@ -43,7 +38,6 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
             seen.add(resolved_root)
             unique_search_roots.append(resolved_root)
 
-    # Helper to resolve a single path
     def _resolve_single_path(p: pathlib.Path, subdirs: tuple[str, ...]) -> pathlib.Path:
         if p.exists():
             return p.resolve()
@@ -52,9 +46,7 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
                 candidate = root / sub / p
                 if candidate.is_dir():
                     return candidate.resolve()
-        return p  # Unresolved, let it fail validation later
-
-    # Resolve benchmark_dirs or run_dirs from search roots
+        return p
     if getattr(args, "run_dir", None) is not None:
         if isinstance(args.run_dir, list):
             args.run_dir = [
@@ -96,8 +88,6 @@ Examples:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # ── Shared parent parsers ──────────────────────────────────────────────────
-    # For commands that accept either benchmark dirs or run dirs
     run_parent = argparse.ArgumentParser(add_help=False)
     run_group = run_parent.add_mutually_exclusive_group(required=True)
     run_group.add_argument(
@@ -126,7 +116,6 @@ Examples:
         help="Generate animated GIFs for trajectories (computationally intensive).",
     )
 
-    # ── Subcommands ────────────────────────────────────────────────────────────
     subparsers.add_parser(
         "extract",
         parents=[run_parent],
@@ -161,7 +150,6 @@ Examples:
     args = parser.parse_args()
     args = resolve_paths(args)
 
-    # ── Validate paths ─────────────────────────────────────────────────────────
     target_dirs = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)
     if not target_dirs:
         print("Error: No input directories provided.")
@@ -172,11 +160,10 @@ Examples:
             print(f"Error: directory does not exist: {d}")
             sys.exit(1)
 
-    # ── Dispatch Processing ────────────────────────────────────────────────────
     if args.command in ("extract", "run", "process"):
         force_extract = getattr(args, "force_extract", False)
         if args.command == "run":
-            force_extract = True  # Always overwrite cache when starting full pipeline
+            force_extract = True 
 
         if getattr(args, "run_dir", None):
             for run_dir in args.run_dir:
@@ -206,7 +193,6 @@ Examples:
                     print(f"Processing benchmark: {benchmark_dir.name}")
                     pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
 
-    # ── Dispatch Presentation ──────────────────────────────────────────────────
     if args.command in ("run", "report", "plot"):
         output_dir = getattr(args, "output_dir", None)
         if not output_dir:

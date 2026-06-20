@@ -47,7 +47,6 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
         if T == 0:
             return {"pedestrian_path": []}
             
-        # Find maximum number of pedestrians across all timesteps
         max_peds = 0
         for step_peds in peds_positions:
             if isinstance(step_peds, list):
@@ -56,7 +55,6 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
         if max_peds == 0:
             return {"pedestrian_path": []}
             
-        # Initialize paths with NaNs so they are strictly length T
         paths = [[[float('nan'), float('nan'), float('nan')] for _ in range(T)] for _ in range(max_peds)]
         
         for t, step_peds in enumerate(peds_positions):
@@ -74,7 +72,6 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
                 if t > 0:
                     paths[k][t] = paths[k][t-1]
                 
-        # Filter out paths that are completely entirely NaNs
         valid_paths = []
         for path in paths:
             if any(not np.isnan(pt[0]) for pt in path):
