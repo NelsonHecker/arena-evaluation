@@ -310,17 +310,8 @@ class DataRecorderNode(Node):
             else:
                 callback = self._create_unthrottled_callback(topic_name)
 
-            if topic_name.endswith('tf_static'):
-                def _delayed_subscribe(m=msg_type, t=topic_name, c=callback, q=qos_profile):
-                    if hasattr(self, '_tf_static_timer'):
-                        self._tf_static_timer.cancel()
-                    sub = self.create_subscription(m, t, c, q)
-                    self.subs.append(sub)
-                    self.get_logger().info(f"Delayed subscription to {t} complete")
-                self._tf_static_timer = self.create_timer(1.0, _delayed_subscribe)
-            else:
-                sub = self.create_subscription(msg_type, topic_name, callback, qos_profile)
-                self.subs.append(sub)
+            sub = self.create_subscription(msg_type, topic_name, callback, qos_profile)
+            self.subs.append(sub)
             if key == "episode_record":
                 self.get_logger().info(f"Subscribed to EpisodeRecord on {topic_name}")
             elif key == "robots_fleet":
@@ -374,9 +365,6 @@ class DataRecorderNode(Node):
         if hasattr(self, '_pre_clock_buffer') and self._pre_clock_buffer:
             self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
             for topic, buffered_msg in self._pre_clock_buffer:
-                if topic == '/tf_static':
-                    for t in getattr(buffered_msg, 'transforms', []):
-                        self._log_info(f"FLUSHING TF_STATIC: {t.header.frame_id} -> {t.child_frame_id}")
                 self._write_to_bag_at(topic, buffered_msg, self.current_time)
             self._pre_clock_buffer.clear()
             del self._pre_clock_buffer
@@ -490,15 +478,10 @@ class DataRecorderNode(Node):
             # Never write until simulation clock has been received
             if self.current_time is None:
                 if hasattr(self, '_pre_clock_buffer'):
-                    if topic_name == '/tf_static':
-                        for t in getattr(msg, 'transforms', []):
-                            self._log_info(f"BUFFERING TF_STATIC BEFORE CLOCK: {t.header.frame_id} -> {t.child_frame_id}")
                     self._pre_clock_buffer.append((topic_name, msg))
                 return
-            if topic_name == '/tf_static':
-                for t in getattr(msg, 'transforms', []):
-                    self._log_info(f"RECEIVED TF_STATIC WITH CLOCK: {t.header.frame_id} -> {t.child_frame_id}")
-            self._write_to_bag_at(topic_name, msg, self.current_time)
+            now = self.current_time
+            self._write_to_bag_at(topic_name, msg, now)
         return callback
 
     def _log_info(self, msg: str):
