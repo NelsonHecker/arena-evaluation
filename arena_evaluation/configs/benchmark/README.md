@@ -1,9 +1,9 @@
 # Benchmark configs
 
-The `arena benchmark` runner reads all benchmark configuration from
+The `ros2 run arena_evaluation benchmark` runner reads all benchmark configuration from
 `arena_evaluation/configs/benchmark/` at startup.
 
-Invocation: `arena benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env_n:=...]`
+Invocation: `ros2 run arena_evaluation benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env_n:=...]` (Arena meta-repo shortcut: `arena evaluation benchmark ...`).
 
 ## Directory layout
 
@@ -156,8 +156,8 @@ Pass the YAML inline as the `--contest` value when the string starts with `[`
 or `{`:
 
 ```
-arena benchmark --suite basic --contest '[{name: teb, mobile: {driver: nav2, local_planner: teb}}]'
-arena benchmark --suite basic --contest '{mobile: {driver: nav2, local_planner: [teb, dwa]}}'
+ros2 run arena_evaluation benchmark --suite basic --contest '[{name: teb, mobile: {driver: nav2, local_planner: teb}}]'
+ros2 run arena_evaluation benchmark --suite basic --contest '{mobile: {driver: nav2, local_planner: [teb, dwa]}}'
 ```
 
 ### Contestant args
@@ -176,8 +176,8 @@ layer, which binds it if declared or raises an error if not.
 
 ## How the runner consumes these files
 
-`arena benchmark` invokes `ros2 run arena_evaluation benchmark` directly (no
-launch file). Before first use, initialize the submodule with
+The runner is the `benchmark` console script: `ros2 run arena_evaluation benchmark`,
+no launch file. In the Arena meta-repo, install the feature first with
 `arena feature evaluation install`.
 
 Steps are grouped by `(contestant.name, stage.robot, simulator)`. Consecutive
@@ -185,6 +185,11 @@ steps with the same key share one env; suite order is preserved within and
 across groups. Robot is fixed within a group. If a contestant's stages mix
 robots, the runner splits into multiple groups per contestant. Authoring
 suggestion: keep one robot per contestant for fastest runs.
+
+`env_n` caps how many groups (parallel contestants) run at once, with the rest
+queued. Run time scales as `bringup_time × num_groups + episode_time ×
+total_episodes` spread across the `env_n` workers, not `bringup_time ×
+num_steps`, since steps within a group reuse one env.
 
 For each group the runner:
 
@@ -240,9 +245,9 @@ $ARENA_DATA_DIR/benchmarks/<run_id>/
 
 Inspection helpers:
 
-- `arena evaluation list` — table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
-- `arena evaluation status [run_id] [--watch]` — snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
-- `arena evaluation tail [run_id]` — tail -F on `progress.csv` of the most recent (or named) run.
+- `ros2 run arena_evaluation evaluation_cli list` — table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
+- `ros2 run arena_evaluation evaluation_cli status [run_id] [--watch]` — snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
+- `ros2 run arena_evaluation evaluation_cli tail [run_id]` — tail -F on `progress.csv` of the most recent (or named) run.
 
 `progress.csv` schema: `ts_iso, run_id, step_key, contestant, stage, env_id, episode_id, world, seed, tm_robots, tm_obstacles, tm_modules, robots, outcome_state, outcome_info, started_at, ended_at, runtime_s, robots_params_json, obstacles_params_json, error_kind, error_detail`
 
@@ -255,4 +260,4 @@ Step status values in `.benchmark_state.json`: `ok | partial | failed | skipped 
   aggregate-per-run metrics are still usable. Tracked separately.
 - Heartbeat-eviction may rarely mark a stalled step `ok` instead of `failed`.
   If you see suspiciously fast steps in `progress.csv`, use
-  `arena benchmark --resume <run_id> --retry-failed`.
+  `ros2 run arena_evaluation benchmark --resume <run_id> --retry-failed`.

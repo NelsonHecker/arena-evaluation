@@ -143,8 +143,8 @@ data/<benchmark_id>/recordings/<planner>/<stage>/
 ### Processing Phase (offline)
 
 ```bash
-arena evaluation extract --benchmark-dir /opt/arena_ws/data/<benchmark_id>
-arena evaluation process --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+ros2 run arena_evaluation evaluation extract --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+ros2 run arena_evaluation evaluation process --benchmark-dir /opt/arena_ws/data/<benchmark_id>
 ```
 
 The `extract` command reads each `recording_0.mcap` and saves topics into compressed Parquet files under `run_dir/topics/` (the extraction cache).
@@ -153,11 +153,11 @@ The `process` command reads these cached parquet files (or extracts them on-the-
 ### Presentation Phase (offline)
 
 ```bash
-arena evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+ros2 run arena_evaluation evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id>
 # Or both at once:
-arena evaluation run --benchmark-dir /opt/arena_ws/data/<benchmark_id>
+ros2 run arena_evaluation evaluation run --benchmark-dir /opt/arena_ws/data/<benchmark_id>
 # With animated GIFs:
-arena evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id> --generate-gifs
+ros2 run arena_evaluation evaluation report --benchmark-dir /opt/arena_ws/data/<benchmark_id> --generate-gifs
 ```
 
 Reads `combined_metrics.parquet` and the default visualization manifest (hardcoded in `viz_manifest.py`), generates `report.html` and `plots/*.png`. When `--generate-gifs` is passed, animated trajectory GIFs are also saved.
@@ -166,10 +166,16 @@ Reads `combined_metrics.parquet` and the default visualization manifest (hardcod
 
 ## CLI Reference
 
-The `arena evaluation` command is registered as part of the Arena feature system.
+`arena_evaluation` commands are ROS 2 console scripts, runnable standalone via
+`ros2 run arena_evaluation <entry>`: the `evaluation` entry for data ops
+(`extract`, `process`, `run`, `report`, `plot`), `evaluation_cli` for run
+inspection (`list`, `status`, `tail`), and `benchmark` for running a suite.
+Inside the Arena meta-repo, `arena evaluation <verb>` wraps all three (for
+example `arena evaluation extract` runs `ros2 run arena_evaluation evaluation
+extract`). The examples below use the standalone form.
 
 ```
-usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR] [--output-dir DIR] [--generate-gifs]
+usage: ros2 run arena_evaluation evaluation <command> [--run-dir DIR | --benchmark-dir DIR] [--output-dir DIR] [--generate-gifs]
 
 Commands:
   extract   Layer 3: Extract topics from MCAP into fast Parquet files (cache)
@@ -193,7 +199,7 @@ Commands:
 
 ```bash
 # Extract MCAP data into fast, compressed Parquet files per topic:
-arena evaluation extract --benchmark-dir /opt/arena_ws/data/my_benchmark
+ros2 run arena_evaluation evaluation extract --benchmark-dir /opt/arena_ws/data/my_benchmark
 # Output: data/my_benchmark/recordings/<planner>/<stage>/topics/*.parquet
 ```
 
@@ -201,14 +207,14 @@ arena evaluation extract --benchmark-dir /opt/arena_ws/data/my_benchmark
 
 ```bash
 # After running: arena launch ... record_data_dir:=data
-arena evaluation process --run-dir /opt/arena_ws/data/recordings/20260528-215316
+ros2 run arena_evaluation evaluation process --run-dir /opt/arena_ws/data/recordings/20260528-215316
 # Output: /opt/arena_ws/data/recordings/20260528-215316/metrics.parquet
 ```
 
 ### Processing a Full Benchmark
 
 ```bash
-arena evaluation process --benchmark-dir /opt/arena_ws/data/my_benchmark
+ros2 run arena_evaluation evaluation process --benchmark-dir /opt/arena_ws/data/my_benchmark
 # Output: metrics.parquet per run + combined_metrics.parquet at root
 ```
 
@@ -216,33 +222,33 @@ arena evaluation process --benchmark-dir /opt/arena_ws/data/my_benchmark
 
 ```bash
 # Single run (metrics only — no HTML report for single runs):
-arena evaluation run --run-dir /opt/arena_ws/data/recordings/20260528-215316
+ros2 run arena_evaluation evaluation run --run-dir /opt/arena_ws/data/recordings/20260528-215316
 
 # Full benchmark (metrics + HTML report + PNGs):
-arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
+ros2 run arena_evaluation evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark
 
 # With GIF generation:
-arena evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark --generate-gifs
+ros2 run arena_evaluation evaluation run --benchmark-dir /opt/arena_ws/data/my_benchmark --generate-gifs
 ```
 
 ### Regenerate Report Only
 
 ```bash
 # Single benchmark report
-arena evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
+ros2 run arena_evaluation evaluation report --benchmark-dir /opt/arena_ws/data/my_benchmark
 # Reads combined_metrics.parquet + viz_manifest
 # Writes: report.html + plots/*.png
 
 # Multi-benchmark merged report
-arena evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
+ros2 run arena_evaluation evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
 ```
 
 The benchmark management CLI is accessed via:
 
 ```bash
-arena evaluation list
-arena evaluation status <run_id>
-arena evaluation tail <run_id>
+ros2 run arena_evaluation evaluation_cli list
+ros2 run arena_evaluation evaluation_cli status <run_id>
+ros2 run arena_evaluation evaluation_cli tail <run_id>
 ```
 
 ---
