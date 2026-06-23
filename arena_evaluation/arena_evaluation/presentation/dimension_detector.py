@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import polars as pl
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..storage.schemas import PlotSpec
+
+# Ordered priority list of identity columns
+IDENTITY_COLS: list[str] = ["local_planner", "inter_planner", "robot", "stage", "map", "benchmark_id"]
+
+COMPOUND_LABEL_COL = "__label__"
+
+
+def split_planner_name(planner_name: str | None) -> tuple[str, str]:
+    """
+    Split the contestant/planner name into local_planner and inter_planner.
+    
+    Uses a positional convention: ``<prefix>-<local_planner>-<inter_planner>``.
+    Example: 'trial-dwb-bypass' -> ('dwb', 'bypass')
+    """
+    if not planner_name:
+        return "unknown", "unknown"
+    
+    parts = str(planner_name).split("-")
+    
+    if len(parts) >= 3:
+        return parts[1], "-".join(parts[2:])
+    elif len(parts) == 2:
+        return parts[0], parts[1]
+    else:
+        return parts[0], "none"
+
+
+
+def detect_varying_dims(df: pl.DataFrame) -> list[str]:
+    """
+    Return identity columns that have more than one unique value in df.
+    """
+    varying: list[str] = []
+    for col in IDENTITY_COLS:
+        if col not in df.columns:
+            continue
+        series = df[col].drop_nulls()
+        if series.n_unique() > 1:
+            varying.append(col)
+    return varying
+
+
+def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
+    """
+    Add (or replace) a __label__ column whose value is a human-readable
+    compound of the given dims.
+    """
+    if not dims:
+        return df
+
+    if len(dims) == 1:
+        return df.with_columns(pl.col(dims[0]).alias(COMPOUND_LABEL_COL))
+
+    parts = [pl.col(d).cast(pl.Utf8) for d in dims]
+    label_expr = pl.concat_str(parts, separator=" / ")
+    return df.with_columns(label_expr.alias(COMPOUND_LABEL_COL))
+
+
+def resolve_differentiate(spec: "PlotSpec", df: pl.DataFrame) -> tuple[str, pl.DataFrame]:
+    """
+    Determine the effective differentiation column for spec given df.
+    """
+    auto = getattr(spec, "auto_differentiate", True)
+    requested = spec.differentiate
+
+    if not auto:
+        fallback = requested if (requested and requested in df.columns) else "planner"
+        return fallback, df
+
+    varying = detect_varying_dims(df)
+
+    if len(varying) <= 1:
+        col = requested if (requested and requested in df.columns) else (varying[0] if varying else "planner")
+        return col, df
+
+    df = build_label_column(df, varying)
+    return COMPOUND_LABEL_COL, df

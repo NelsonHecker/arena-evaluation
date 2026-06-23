@@ -51,6 +51,7 @@ class Suite(typing.NamedTuple):
         config: dict
         seed: int
         timeout: float
+        optim: dict | None = None
 
         @classmethod
         def _make_serializable(cls, item: object) -> object:
@@ -95,8 +96,9 @@ class Suite(typing.NamedTuple):
                     raise ValueError(f"invalid tm_obstacles type: {type(v)}")
             raw_timeout = obj.pop("timeout", None)
             timeout_f = math.inf if raw_timeout is None else _parse_duration(str(raw_timeout))
+            optim = obj.pop("optim", None)
             obj.setdefault("seed", cls.hash(obj))
-            return cls(timeout=timeout_f, **obj)
+            return cls(timeout=timeout_f, optim=optim, **obj)
 
     name: str
     stages: list[Suite.Stage]
@@ -168,26 +170,48 @@ class Contest:
         description = spec.pop("description", None)
         prefix = spec.pop("name", None)
 
-        axes = [(k, v) for k, v in spec.items() if isinstance(v, list)]
-        consts = {k: v for k, v in spec.items() if not isinstance(v, list)}
+        axes: list[tuple[str, str | None, list]] = []
+        consts: dict[str, typing.Any] = {}
+        cap_templates: dict[str, dict] = {}
+
+        for k, v in spec.items():
+            if isinstance(v, list):
+                axes.append((k, None, v))
+            elif isinstance(v, dict):
+                inner_consts: dict[str, typing.Any] = {}
+                for ik, iv in v.items():
+                    if isinstance(iv, list):
+                        axes.append((k, ik, iv))
+                    else:
+                        inner_consts[ik] = iv
+                cap_templates[k] = inner_consts
+            else:
+                consts[k] = v
 
         if axes:
-            combos = list(itertools.product(*[v for _, v in axes]))
-            keys = [k for k, _ in axes]
+            combos = list(itertools.product(*[vs for _, _, vs in axes]))
         else:
             combos = [()]
-            keys = []
 
         varying_idx = [
-            i for i, (_, vs) in enumerate(axes)
+            i for i, (_, _, vs) in enumerate(axes)
             if len({_yamlable(v) for v in vs}) > 1
         ]
 
         contestants = []
         for combo in combos:
-            args = dict(consts)
-            for k, v in zip(keys, combo, strict=True):
-                args[k] = v
+            args: dict[str, typing.Any] = dict(consts)
+            cap_dicts: dict[str, dict] = {k: dict(v) for k, v in cap_templates.items()}
+
+            for (outer, inner, _), value in zip(axes, combo, strict=True):
+                if inner is None:
+                    args[outer] = value
+                else:
+                    cap_dicts.setdefault(outer, {})[inner] = value
+
+            for cap_key, cap_dict in cap_dicts.items():
+                args[cap_key] = cap_dict
+
             if varying_idx:
                 parts = [str(combo[i]) for i in varying_idx]
                 derived = "-".join(parts)

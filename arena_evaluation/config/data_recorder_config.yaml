@@ -1,3 +1,16 @@
 max_episodes: 15 # terminates simulation upon reaching xth episode
 max_time: 1200 # terminates simulation after x seconds
-record_frequency: 400 # time interval in which data is stored in ms
+
+# Throttle intervals in milliseconds. Keys are matched as substrings of the
+record_frequencies:
+  lidar: 100.0   # large LaserScan messages, keep data volume low
+  scan:  100.0   # alias for scan-named topics
+  odom:   20.0   # odometry, moderate frequency
+  peds:   20.0   # pedestrian positions
+  goal_pose: 0.0 # event-driven (recorded unthrottled)
+  initialpose: 0.0 # event-driven (recorded unthrottled)
+  robots: 0.0    # latched fleet state (recorded unthrottled)
+  reset_start: 0.0 # event-driven (recorded unthrottled)
+  reset_end: 0.0 # event-driven (recorded unthrottled)
+  tf: 20.0       # standard transform topic
+  default: 20.0  # cmd_vel, joint_states, etc.

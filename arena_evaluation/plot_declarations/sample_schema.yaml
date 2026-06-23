@@ -101,6 +101,16 @@ all_episodes_categorical:
     title: string
     save_name: string
     plot_args: {} # Optional
+  - id: "trajectory_overview"
+    type: "trajectory"
+    title: "Path Trajectories"
+    data_key: "path"
+    differentiate: "planner"
+    group_by: ["map", "stage"]
+    layout_group: "trajectory_overview"
+    options:
+      show_map: true
+    plot_args: {} # Optional
 # - Plot a distribution over all episodes
 all_episodes_distribution:
   - data_key: string

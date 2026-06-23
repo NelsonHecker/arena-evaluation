@@ -1,0 +1,12 @@
+name: trial
+mobile:
+  driver: nav2
+  local_planner: [dwb, mppi, regulated]
+  inter_planner: [
+    navigate_w_replanning_time,
+    navigate_w_replanning_distance,
+    navigate_w_replanning_speed,
+    navigate_w_replanning_only_if_path_becomes_invalid,
+    bypass,
+    navigate_to_pose
+  ]
