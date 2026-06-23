@@ -530,11 +530,16 @@ class BenchmarkRunner(ArenaMixinNode):
                     raise
                 except Exception as exc:
                     episodes_failed += 1
-                    _log.warning(
+                    _log.error(
                         f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                        f"goal rejected ({exc}); advancing"
+                        f"goal rejected ({exc}); env action server is wedged, abandoning env"
                     )
-                    continue
+                    return StepResult(
+                        step.key, "failed", env_id, started, time.time(),
+                        StepErrorKind.ENV_SETUP, f"run_episode goal rejected: {exc}",
+                        episodes_run=episodes_run, episodes_failed=episodes_failed,
+                        episodes_total=step.episodes,
+                    )
 
                 try:
                     result_obj = await asyncio.wait_for(
@@ -547,11 +552,29 @@ class BenchmarkRunner(ArenaMixinNode):
                         f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
                         f"TIMEOUT after {step.stage.timeout}s; cancelling and advancing"
                     )
-                    with contextlib.suppress(Exception):
+                    try:
                         await self.await_ros(goal_handle.cancel_goal_async())
                         await asyncio.wait_for(
                             self._await_or_env_died(env_id, ac.await_result(goal_handle)),
                             timeout=_CANCEL_SETTLE_S,
+                        )
+                    except _EnvDied:
+                        raise
+                    except TimeoutError:
+                        _log.error(
+                            f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
+                            f"cancel did not settle in {_CANCEL_SETTLE_S}s; env is wedged, abandoning env"
+                        )
+                        return StepResult(
+                            step.key, "failed", env_id, started, time.time(),
+                            StepErrorKind.ENV_SETUP, "run_episode cancel did not settle; env wedged",
+                            episodes_run=episodes_run, episodes_failed=episodes_failed,
+                            episodes_total=step.episodes,
+                        )
+                    except Exception as exc:
+                        _log.warning(
+                            f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
+                            f"error awaiting cancel ({exc}); advancing"
                         )
                     continue
                 ep_ended_sim = self.sim_time.to_seconds()
@@ -652,23 +675,45 @@ class BenchmarkRunner(ArenaMixinNode):
             episodes_total=step.episodes,
         )
 
+    async def _spawn_and_setup_env(self, launch_step: Step) -> tuple[int, str] | None:
+        """Spawn one env booting launch_step's world and set up its clients. None on failure."""
+        req = SpawnEnv.Request()
+        req.ns = ""
+        req.headless = self._headless
+        req.launch_args = self._build_launch_args(launch_step)
+        resp = await self.await_ros(self._spawn.client.call_async(req))
+        if resp is None or not resp.success:
+            msg = resp.error_msg if resp is not None else "no response"
+            _log.error(f"spawn_env failed for {launch_step.key}: {msg}")
+            return None
+        env_id = resp.env_id
+        await self._await_env_visible(env_id)
+        env_ns_root = self._env_records[env_id].fqn
+        await self._setup_env_clients(env_id, env_ns_root, launch_step.stage.robot)
+        return env_id, env_ns_root
+
+    async def _despawn_env(self, env_id: int) -> None:
+        """Tear down clients and despawn an env, waiting for it to disappear from the registry."""
+        self._teardown_env_clients(env_id)
+        if env_id in self._env_records:
+            with contextlib.suppress(Exception):
+                dreq = DespawnEnv.Request()
+                dreq.env_id = env_id
+                await self._despawn.call_timeout(dreq, timeout_sec=30.0)
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await self._wait_env_gone(env_id, timeout=30.0)
+
     async def _run_group(self, group: list[Step], slot_index: int) -> list[StepResult]:
         env_id: int | None = None
         results: list[StepResult] = []
         try:
-            req = SpawnEnv.Request()
-            req.ns = ""
-            req.headless = self._headless
-            req.launch_args = self._build_launch_args(group[0])
-            resp = await self.await_ros(self._spawn.client.call_async(req))
-            if resp is None or not resp.success:
-                msg = resp.error_msg if resp is not None else "no response"
-                failed = StepResult(
+            spawned = await self._spawn_and_setup_env(group[0])
+            if spawned is None:
+                results.append(StepResult(
                     group[0].key, "failed", None, time.time(), time.time(),
-                    StepErrorKind.ENV_SETUP, f"spawn_env failed: {msg}",
+                    StepErrorKind.ENV_SETUP, "spawn_env failed",
                     episodes_total=group[0].episodes,
-                )
-                results.append(failed)
+                ))
                 for step in group[1:]:
                     results.append(StepResult(
                         step.key, "skipped", None, time.time(), time.time(),
@@ -677,12 +722,7 @@ class BenchmarkRunner(ArenaMixinNode):
                         episodes_total=step.episodes,
                     ))
                 return results
-            env_id = resp.env_id
-
-            await self._await_env_visible(env_id)
-            env_ns_root = self._env_records[env_id].fqn
-
-            await self._setup_env_clients(env_id, env_ns_root, group[0].stage.robot)
+            env_id, env_ns_root = spawned
 
             for idx, step in enumerate(group):
                 recorder_proc = None
@@ -739,14 +779,26 @@ class BenchmarkRunner(ArenaMixinNode):
                 results.append(step_result)
 
                 if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
-                    for remaining in group[idx + 1:]:
-                        results.append(StepResult(
-                            remaining.key, "skipped", env_id, time.time(), time.time(),
-                            StepErrorKind.CANCELLED,
-                            "aborted by upstream step setup failure",
-                            episodes_total=remaining.episodes,
-                        ))
-                    break
+                    if idx + 1 >= len(group):
+                        break
+                    _log.warning(
+                        f"env {env_id} unusable after {step.key} "
+                        f"({step_result.error_kind}); respawning a fresh env for "
+                        f"{len(group) - idx - 1} remaining step(s)"
+                    )
+                    await self._despawn_env(env_id)
+                    spawned = await self._spawn_and_setup_env(group[idx + 1])
+                    if spawned is None:
+                        env_id = None
+                        for remaining in group[idx + 1:]:
+                            results.append(StepResult(
+                                remaining.key, "skipped", None, time.time(), time.time(),
+                                StepErrorKind.ENV_SETUP,
+                                "env respawn failed after a wedged env",
+                                episodes_total=remaining.episodes,
+                            ))
+                        break
+                    env_id, env_ns_root = spawned
 
         except _EnvDied as exc:
             if not results:
@@ -1039,6 +1091,36 @@ def _load_suite_contest(
     return suite, contest, suite_dict, contest_dict
 
 
+def _warn_config_drift(manifest: Manifest) -> None:
+    """Non-fatal: note when the on-disk suite/contest for this run's names has drifted
+    from the config the run was created with. Resume always replays the stored config."""
+    try:
+        _, _, suite_dict, contest_dict = _load_suite_contest(
+            manifest.suite_name, manifest.contest_name
+        )
+    except FileNotFoundError:
+        return
+    if compute_config_hash(suite_dict, contest_dict) != manifest.config_hash:
+        _log.warning(
+            f"on-disk config for suite={manifest.suite_name!r} "
+            f"contest={manifest.contest_name!r} differs from this run's stored config, "
+            f"resuming with the stored config"
+        )
+
+
+def _resolve_resume_config(
+    manifest: Manifest,
+) -> tuple[Suite, Contest, float, str | None]:
+    """Rebuild a resumed run's config from its manifest, not from CLI args or argparse
+    defaults. Resume continues the same experiment, so the manifest is authoritative."""
+    return (
+        Suite.parse(manifest.suite_name, manifest.suite),
+        Contest.parse(manifest.contest_name, manifest.contest),
+        manifest.scale_episodes,
+        manifest.simulator,
+    )
+
+
 def _default_run_id(suite_name: str, contest_name: str) -> str:
     ts = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
     if _is_inline_suite(suite_name):
@@ -1080,7 +1162,6 @@ def cli_main(argv: list[str] | None = None) -> int:
              "--resume <run_id> opens that run explicitly.",
     )
     p.add_argument("--retry-failed", action="store_true")
-    p.add_argument("--force", action="store_true")
     p.add_argument(
         "--noexit",
         action="store_true",
@@ -1103,9 +1184,6 @@ def cli_main(argv: list[str] | None = None) -> int:
     simulator = arena_passthrough.get("sim", None)
 
     try:
-        suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
-        cfg_hash = compute_config_hash(suite_dict, contest_dict)
-
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
 
         if args.data_root:
@@ -1117,21 +1195,6 @@ def cli_main(argv: list[str] | None = None) -> int:
         else:
             data_root = share / "data"
             print(f"benchmark: data_root from default: {data_root}", file=sys.stderr)
-
-        steps = _all_steps(contest, suite, args.scale_episodes)
-        if not steps:
-            print(
-                f"benchmark: empty grid (suite={args.suite!r} contest={args.contest!r} "
-                "produced no steps)",
-                file=sys.stderr,
-            )
-            return 2
-        seen: set[str] = set()
-        for c in steps:
-            if c.key in seen:
-                print(f"benchmark: duplicate step key {c.key!r}", file=sys.stderr)
-                return 2
-            seen.add(c.key)
 
         if args.resume:
             resume_id = args.resume
@@ -1149,17 +1212,35 @@ def cli_main(argv: list[str] | None = None) -> int:
                 )
                 resume_id = resolved
             run_dir = RunDir.open(data_root, resume_id)
-            if run_dir.manifest.config_hash != cfg_hash and not args.force:
-                print(
-                    f"config_hash mismatch: run has {run_dir.manifest.config_hash!r}, "
-                    f"current is {cfg_hash!r}. Pass --force to proceed anyway.",
-                    file=sys.stderr,
-                )
-                return 2
+            man = run_dir.manifest
+            suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
+            if simulator is not None:
+                arena_passthrough["sim"] = simulator
+            _warn_config_drift(man)
             run_dir.progress.write_comment(
                 f"resumed at {datetime.datetime.now(tz=datetime.UTC).isoformat()}"
             )
         else:
+            suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
+            scale_episodes = args.scale_episodes
+            cfg_hash = compute_config_hash(suite_dict, contest_dict)
+
+        steps = _all_steps(contest, suite, scale_episodes)
+        if not steps:
+            print(
+                f"benchmark: empty grid (suite={suite.name!r} contest={contest.name!r} "
+                "produced no steps)",
+                file=sys.stderr,
+            )
+            return 2
+        seen: set[str] = set()
+        for c in steps:
+            if c.key in seen:
+                print(f"benchmark: duplicate step key {c.key!r}", file=sys.stderr)
+                return 2
+            seen.add(c.key)
+
+        if not args.resume:
             run_id = args.run_id or _default_run_id(args.suite, args.contest)
             sha, dirty = capture_git_sha(share.parent.parent.parent)
             steps_list = [
@@ -1184,7 +1265,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 headless=headless,
                 config_hash=cfg_hash,
                 simulator=simulator,
-                scale_episodes=args.scale_episodes,
+                scale_episodes=scale_episodes,
                 suite_name=suite.name,
                 contest_name=contest.name,
                 suite=suite_dict,
@@ -1214,7 +1295,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             suite=suite,
             contest=contest,
             simulator=simulator,
-            scale_episodes=args.scale_episodes,
+            scale_episodes=scale_episodes,
             env_n=env_n,
             run_id=run_dir.manifest.run_id,
             headless=headless,

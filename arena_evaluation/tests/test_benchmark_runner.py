@@ -13,10 +13,16 @@ import pytest
 from arena_evaluation.benchmark.config import Contest, Suite, _parse_duration
 from arena_evaluation.benchmark.runner import (
     _default_run_id,
+    _resolve_resume_config,
     build_launch_args,
     build_pending,
 )
-from arena_evaluation.benchmark.state import ProgressLog, StateFile, compute_config_hash
+from arena_evaluation.benchmark.state import (
+    Manifest,
+    ProgressLog,
+    StateFile,
+    compute_config_hash,
+)
 from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult
 from task_generator.constants import Constants
 
@@ -348,6 +354,67 @@ def test_compute_config_hash_is_string():
     h = compute_config_hash({"a": 1}, [{"b": 2}])
     assert isinstance(h, str)
     assert len(h) > 0
+
+
+# ---------------------------------------------------------------------------
+# resume config resolution (regression: resume must use the manifest, not argv)
+# ---------------------------------------------------------------------------
+
+def _make_resume_manifest() -> Manifest:
+    suite_dict = {
+        "stages": [
+            {
+                "name": "ladder_01", "map": "ladder_01", "robot": "jackal",
+                "tm_robots": "scenario", "tm_obstacles": "random", "episodes": 3,
+                "config": {"scenario": {"file": "ladder.json"}},
+            },
+            {
+                "name": "ladder_05", "map": "ladder_05", "robot": "jackal",
+                "tm_robots": "scenario", "tm_obstacles": "random", "episodes": 3,
+                "config": {"scenario": {"file": "ladder.json"}},
+            },
+        ]
+    }
+    contest_dict = [{"name": "dwb", "mobile": {"driver": "nav2", "local_planner": "dwb"}}]
+    return Manifest(
+        run_id="20260623-202509-ladder-basic",
+        created_at="2026-06-23T20:25:09+00:00",
+        arena_git_sha=None,
+        arena_git_dirty=False,
+        cli_args=["--suite", "ladder", "--contest", "basic"],
+        env_n=1,
+        headless=False,
+        config_hash=compute_config_hash(suite_dict, contest_dict),
+        simulator="gazebo",
+        scale_episodes=2.0,
+        suite_name="ladder",
+        contest_name="basic",
+        suite=suite_dict,
+        contest=contest_dict,
+        steps=[],
+    )
+
+
+def test_resume_reconstructs_config_from_manifest():
+    man = _make_resume_manifest()
+    # Round-trip through YAML exactly as RunDir.open reads it back from disk.
+    man = Manifest.from_yaml(man.to_yaml())
+
+    suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
+
+    # The reported bug: resume fell back to the argparse default suite ("basic").
+    assert suite.name == "ladder"
+    assert [s.name for s in suite.stages] == ["ladder_01", "ladder_05"]
+    assert [c.name for c in contest.contestants] == ["dwb"]
+    # scale_episodes and simulator also come from the run, not from CLI defaults.
+    assert scale_episodes == 2.0
+    assert simulator == "gazebo"
+
+
+def test_resume_replays_stored_config_hash():
+    man = Manifest.from_yaml(_make_resume_manifest().to_yaml())
+    # Resuming hashes the stored dicts, which must reproduce the run's stored hash.
+    assert compute_config_hash(man.suite, man.contest) == man.config_hash
 
 
 # ---------------------------------------------------------------------------
