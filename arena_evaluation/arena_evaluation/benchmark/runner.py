@@ -1048,6 +1048,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     )
     logging.getLogger().setLevel(logging.DEBUG)
     _log.setLevel(logging.INFO)
+    _log.propagate = True
     p = argparse.ArgumentParser(prog="benchmark")
     p.add_argument("--suite", default="basic")
     p.add_argument("--contest", default="basic")
