@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
-import math
 import re
 import typing
 
@@ -11,6 +10,8 @@ import attrs
 from task_generator.constants import Constants
 
 _DUR_RE = re.compile(r'(\d+(?:\.\d+)?)\s*(ms|s|m|h)?')
+
+_DEFAULT_TIMEOUT_S = 60.0
 
 
 def _parse_duration(s: str) -> float:
@@ -95,7 +96,7 @@ class Suite(typing.NamedTuple):
                 else:
                     raise ValueError(f"invalid tm_obstacles type: {type(v)}")
             raw_timeout = obj.pop("timeout", None)
-            timeout_f = math.inf if raw_timeout is None else _parse_duration(str(raw_timeout))
+            timeout_f = _DEFAULT_TIMEOUT_S if raw_timeout is None else _parse_duration(str(raw_timeout))
             optim = obj.pop("optim", None)
             obj.setdefault("seed", cls.hash(obj))
             return cls(timeout=timeout_f, optim=optim, **obj)
