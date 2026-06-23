@@ -73,7 +73,13 @@ class MapRegistry:
             origin = list(map_meta.get("origin", [0.0, 0.0, 0.0]))
             
             if run_dir:
-                tf_static_path = pathlib.Path(run_dir) / "topics" / "tf_static.parquet"
+                run_path = pathlib.Path(run_dir)
+                tf_static_path = run_path / "topics" / "tf_static.parquet"
+                if not tf_static_path.exists():
+                    candidates = list(run_path.rglob("tf_static.parquet"))
+                    if candidates:
+                        tf_static_path = candidates[0]
+                        
                 if tf_static_path.exists():
                     try:
                         import polars as pl

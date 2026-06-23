@@ -181,6 +181,7 @@ class DataRecorderNode(Node):
         self._log_info("Initial metadata written OK")
 
         self.current_time = None
+        self._pre_clock_buffer = []
         self._clock_received_count = 0
         self.last_recorded_times: dict[str, int] = {}
         self.writer_lock = threading.Lock()
@@ -199,7 +200,7 @@ class DataRecorderNode(Node):
         self.latched_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-            depth=1,
+            depth=100,
         )
 
         self.is_shutting_down = False
@@ -360,6 +361,13 @@ class DataRecorderNode(Node):
         if self._clock_received_count <= 5:
             self._log_info(f"/clock tick #{self._clock_received_count}: sim_time_ns={new_time} ({new_time/1e9:.3f}s)")
         self.current_time = new_time
+        
+        if hasattr(self, '_pre_clock_buffer') and self._pre_clock_buffer:
+            self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
+            for topic, buffered_msg in self._pre_clock_buffer:
+                self._write_to_bag_at(topic, buffered_msg, self.current_time)
+            self._pre_clock_buffer.clear()
+            del self._pre_clock_buffer
 
     def episode_record_callback(self, msg: EpisodeRecord):
         if msg.episode_id not in self._seen_episodes:
@@ -455,10 +463,8 @@ class DataRecorderNode(Node):
         def callback(msg):
             # Never write until simulation clock has been received
             if self.current_time is None:
-                if not hasattr(self, '_no_clock_warned'):
-                    self._no_clock_warned = set()
-                if topic_name not in self._no_clock_warned:
-                    self._no_clock_warned.add(topic_name)
+                if hasattr(self, '_pre_clock_buffer'):
+                    self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
             last_time = self.last_recorded_times.get(topic_name, 0)
@@ -471,8 +477,11 @@ class DataRecorderNode(Node):
         def callback(msg):
             # Never write until simulation clock has been received
             if self.current_time is None:
+                if hasattr(self, '_pre_clock_buffer'):
+                    self._pre_clock_buffer.append((topic_name, msg))
                 return
-            self._write_to_bag_at(topic_name, msg, self.current_time)
+            now = self.current_time
+            self._write_to_bag_at(topic_name, msg, now)
         return callback
 
     def _log_info(self, msg: str):
