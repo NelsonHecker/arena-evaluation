@@ -34,6 +34,8 @@ from task_generator_msgs.srv import QueueEpisode
 
 STATE_TOPIC = "/arena/benchmark/state"
 
+_CANCEL_SETTLE_S = 30.0
+
 from .config import Contest, Suite
 from .state import (
     Manifest,
@@ -520,9 +522,19 @@ class BenchmarkRunner(ArenaMixinNode):
                 ep_started_sim = self.sim_time.to_seconds()
                 ep_started_wall = time.time()
 
-                goal_handle = await self._await_or_env_died(
-                    env_id, ac.send_goal(goal)
-                )
+                try:
+                    goal_handle = await self._await_or_env_died(
+                        env_id, ac.send_goal(goal)
+                    )
+                except (_EnvDied, asyncio.CancelledError):
+                    raise
+                except Exception as exc:
+                    episodes_failed += 1
+                    _log.warning(
+                        f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
+                        f"goal rejected ({exc}); advancing"
+                    )
+                    continue
 
                 try:
                     result_obj = await asyncio.wait_for(
@@ -537,6 +549,10 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                     with contextlib.suppress(Exception):
                         await self.await_ros(goal_handle.cancel_goal_async())
+                        await asyncio.wait_for(
+                            self._await_or_env_died(env_id, ac.await_result(goal_handle)),
+                            timeout=_CANCEL_SETTLE_S,
+                        )
                     continue
                 ep_ended_sim = self.sim_time.to_seconds()
                 ep_ended_wall = time.time()
