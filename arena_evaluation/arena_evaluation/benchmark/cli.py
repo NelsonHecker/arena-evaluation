@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import pathlib
 import subprocess
 import sys
@@ -9,12 +8,9 @@ import time
 
 
 def _data_root() -> pathlib.Path:
-    env = os.environ.get("ARENA_DATA_DIR")
-    if env:
-        return pathlib.Path(env) / "benchmarks"
-    from ament_index_python.packages import get_package_share_directory
+    from ..storage.data_root import benchmarks_root
 
-    return pathlib.Path(get_package_share_directory("arena_evaluation")) / "data"
+    return benchmarks_root()
 
 
 def _resolve_run(data_root: pathlib.Path, run_id: str | None) -> pathlib.Path:

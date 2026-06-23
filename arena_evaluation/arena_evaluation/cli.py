@@ -5,6 +5,7 @@ import sys
 
 from arena_evaluation.processing.pipeline import ProcessingPipeline
 from arena_evaluation.presentation.report_builder import ReportBuilder
+from arena_evaluation.storage.data_root import latest_benchmark
 from arena_evaluation.storage.folder_manager import FolderManager
 
 def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
@@ -84,12 +85,15 @@ Examples:
 
   # Generate report from multiple already-processed benchmarks:
   evaluation report --benchmark-dir /opt/arena_ws/data/bench1 /opt/arena_ws/data/bench2 --output-dir ./merged_report
+
+  # With no input dir, operate on the most recent benchmark under $ARENA_DATA_DIR/benchmarks:
+  evaluation run
 """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parent = argparse.ArgumentParser(add_help=False)
-    run_group = run_parent.add_mutually_exclusive_group(required=True)
+    run_group = run_parent.add_mutually_exclusive_group(required=False)
     run_group.add_argument(
         "--benchmark-dir",
         type=pathlib.Path,
@@ -150,10 +154,15 @@ Examples:
     args = parser.parse_args()
     args = resolve_paths(args)
 
-    target_dirs = getattr(args, "benchmark_dir", None) or getattr(args, "run_dir", None)
-    if not target_dirs:
-        print("Error: No input directories provided.")
-        sys.exit(1)
+    if args.benchmark_dir is None and args.run_dir is None:
+        latest = latest_benchmark()
+        if latest is None:
+            print("Error: No input directory given and no benchmark runs found.")
+            sys.exit(1)
+        print(f"Using latest benchmark: {latest}")
+        args.benchmark_dir = [latest]
+
+    target_dirs = args.benchmark_dir or args.run_dir
 
     for d in target_dirs:
         if not d.exists() or not d.is_dir():
