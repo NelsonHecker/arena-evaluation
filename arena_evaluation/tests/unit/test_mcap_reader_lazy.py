@@ -8,12 +8,22 @@ from arena_evaluation.storage.schemas import TopicBundle
 
 # Helper mock classes to simulate ROS2 decoders
 class MockChannel:
-    def __init__(self, topic):
+    def __init__(self, topic, message_encoding="cdr"):
         self.topic = topic
+        self.message_encoding = message_encoding
 
 class MockMessage:
-    def __init__(self, log_time):
+    def __init__(self, log_time, channel_id=0, data=None):
         self.log_time = log_time
+        self.channel_id = channel_id
+        self.data = data
+
+
+def _identity_decoder_factory():
+    """A decoder factory whose decoder returns message.data unchanged."""
+    factory = mock.Mock()
+    factory.decoder_for.return_value = lambda data: data
+    return factory
 
 class MockVector3:
     def __init__(self, x=0.0, y=0.0, z=0.0):
@@ -63,13 +73,14 @@ def test_mcap_reader_lazy_chunking():
         mock_messages = []
         for i in range(10005):
             channel = MockChannel("/env_0/odom")
-            message = MockMessage(i * 1000)
             ros_msg = MockOdomMsg(px=float(i), py=float(i * 2), lx=1.0, az=0.5)
-            mock_messages.append((None, channel, message, ros_msg))
+            message = MockMessage(i * 1000, channel_id=0, data=ros_msg)
+            mock_messages.append((None, channel, message))
 
         with mock.patch("mcap.reader.NonSeekingReader") as mock_reader_cls:
             mock_reader_inst = mock_reader_cls.return_value
-            mock_reader_inst.iter_decoded_messages.return_value = mock_messages
+            mock_reader_inst.iter_messages.return_value = mock_messages
+            mock_reader_inst._decoder_factories = [_identity_decoder_factory()]
 
             reader = MCAPReader(mcap_file)
             bundles = reader.read()
@@ -138,14 +149,14 @@ def test_mcap_reader_tf_gt_extraction():
             (
                 None,
                 MockChannel("/tf"),
-                MockMessage(999999),
-                MockTFMsg(transforms)
+                MockMessage(999999, channel_id=0, data=MockTFMsg(transforms))
             )
         ]
 
         with mock.patch("mcap.reader.NonSeekingReader") as mock_reader_cls:
             mock_reader_inst = mock_reader_cls.return_value
-            mock_reader_inst.iter_decoded_messages.return_value = mock_messages
+            mock_reader_inst.iter_messages.return_value = mock_messages
+            mock_reader_inst._decoder_factories = [_identity_decoder_factory()]
 
             reader = MCAPReader(mcap_file)
             bundles = reader.read()

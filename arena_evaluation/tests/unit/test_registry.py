@@ -27,8 +27,9 @@ class Calc3(BaseMetricCalculator):
     def calculate(self, ep, prior): return {"o3": prior["o2"] + 1}
 
 def test_registry_ordering(monkeypatch):
-    # Mock discovery to only find our mocks
-    monkeypatch.setattr(MetricRegistry, "_discover_calculators", lambda self: setattr(self, "calculators", {
+    # Mock discovery/registration to only find our mocks
+    monkeypatch.setattr(MetricRegistry, "discover_calculators_cls", classmethod(lambda cls: None))
+    monkeypatch.setattr(MetricRegistry, "_register_calculators", lambda self: setattr(self, "calculators", {
         "calc3": Calc3(self.robot_params),
         "calc1": Calc1(self.robot_params),
         "calc2": Calc2(self.robot_params),

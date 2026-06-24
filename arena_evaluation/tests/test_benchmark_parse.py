@@ -81,16 +81,14 @@ def test_stage_parse_happy_path():
     assert result.timeout == 60.0
 
 
-def test_stage_parse_missing_timeout_defaults_to_inf():
-    import math
-
+def test_stage_parse_missing_timeout_defaults_to_60():
     from arena_evaluation.benchmark.config import Suite
 
     obj = _make_stage_dict()
     obj.pop("timeout", None)
     result = Suite.Stage.parse(obj)
 
-    assert result.timeout == math.inf
+    assert result.timeout == 60.0
 
 
 def test_stage_parse_seed_defaults_to_hash():

@@ -22,7 +22,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     NAME = "collision_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics"]
-    REQUIRED_TOPICS = []
+    REQUIRED_TOPICS = [("collision_monitor_state", "collision_events")]
     
     UNITS = {
         "collision_amount": "",
