@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import math
 import typing
+import re
 import polars as pl
 from collections import defaultdict
 from mcap.reader import make_reader
@@ -100,9 +101,15 @@ class MCAPReader:
                 "tf_gt": defaultdict(list),
             }
             
+        def new_env_data():
+            return {
+                "peds": defaultdict(list),
+                "episode_record": defaultdict(list)
+            }
+        
+        env_data = defaultdict(new_env_data)
+        
         global_data = {
-            "peds": defaultdict(list),
-            "episode_record": defaultdict(list),
             "tf": defaultdict(list),
             "tf_static": defaultdict(list),
         }
@@ -133,6 +140,24 @@ class MCAPReader:
                     )
                 writers[writer_key].write_batch(batch)
                 topic_data.clear()
+                
+            for env_name, e_data in env_data.items():
+                for topic_name, topic_data in e_data.items():
+                    if not topic_data or len(topic_data.get("time_ns", [])) == 0:
+                        continue
+                        
+                    batch = pa.RecordBatch.from_pydict(dict(topic_data))
+                    writer_key = (env_name, topic_name)
+                    
+                    if writer_key not in writers:
+                        env_dir = topics_dir / env_name
+                        env_dir.mkdir(parents=True, exist_ok=True)
+                        final_path = env_dir / f"{topic_name}.parquet"
+                        writers[writer_key] = pq.ParquetWriter(
+                            final_path, schema=batch.schema, compression="zstd"
+                        )
+                    writers[writer_key].write_batch(batch)
+                    topic_data.clear()
                 
             for robot_name, r_data in robot_data.items():
                 for topic_name, topic_data in r_data.items():
@@ -178,30 +203,27 @@ class MCAPReader:
                         continue
 
                     topic = channel.topic
-                    
-                    if env_prefix is None and ("env_" in topic or "env" in topic):
-                        import re
-                        match = re.search(r'env_(\d+)', topic)
-                        if match:
-                            env_prefix = f"env_{match.group(1)}"
-                    
-                    # Filter other namespaced topics to ensure we only read data for the active environment
-                    if env_prefix and topic not in ("/tf", "tf", "/tf_static", "tf_static", "/state/robots", "state/robots", "/state/episode", "state/episode", "/arena_peds", "arena_peds"):
-                        if env_prefix not in topic:
-                            continue
-                            
                     ts_ns = message.log_time
                     appended = False
                     
-                    # Determine robot name for non-global topics
                     parts = [p for p in topic.strip('/').split('/') if p]
+                    
+                    env_key = "env_0"
+                    match = re.search(r'(env_\d+)', topic)
+                    if match:
+                        env_key = match.group(1)
+                        
+                    def get_robot_name(parts, env_key):
+                        if len(parts) < 2: return f"{env_key}_unknown"
+                        base = parts[-2]
+                        if base.endswith("_velocity_controller"):
+                            base = parts[-3] if len(parts) >= 3 else base.replace("_velocity_controller", "")
+                        return f"{env_key}_{base}"
                     
                     # Odom
                     if topic.endswith("/odom") and "velocity_controller" not in topic:
                         # e.g. /arena/env_0/jackal1/odom -> parts = ['arena', 'env_0', 'jackal1', 'odom']
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
-                        if robot_name.endswith("_velocity_controller"):
-                            robot_name = robot_name.replace("_velocity_controller", "")
+                        robot_name = get_robot_name(parts, env_key)
                             
                         target = robot_data[robot_name]["odom"]
                         target["time_ns"].append(ts_ns)
@@ -221,7 +243,7 @@ class MCAPReader:
                     
                     # Scan
                     elif topic.endswith("/scan") or topic.endswith("/lidar"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["scan"]
                         target["time_ns"].append(ts_ns)
                         target["scan_ranges"].append(list(ros_msg.ranges))
@@ -230,7 +252,7 @@ class MCAPReader:
                     
                     # Cmd_vel
                     elif topic.endswith("/cmd_vel"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["cmd_vel"]
                         target["time_ns"].append(ts_ns)
                         target["linear_x"].append(ros_msg.linear.x)
@@ -242,7 +264,7 @@ class MCAPReader:
                         appended = True
                     # Joint states
                     elif topic.endswith("/joint_states"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["joint_states"]
                         target["time_ns"].append(ts_ns)
                         target["name"].append(list(ros_msg.name))
@@ -253,7 +275,7 @@ class MCAPReader:
 
                     # Pedestrians
                     elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
-                        target = global_data["peds"]
+                        target = env_data[env_key]["peds"]
                         target["time_ns"].append(ts_ns)
                         
                         if hasattr(ros_msg, "pedestrians"):
@@ -298,7 +320,7 @@ class MCAPReader:
 
                     # Episode records
                     elif topic.endswith("/state/episode"):
-                        target = global_data["episode_record"]
+                        target = env_data[env_key]["episode_record"]
                         target["time_ns"].append(ts_ns)
                         target["episode_id"].append(ros_msg.episode_id)
                         target["outcome_state"].append(ros_msg.outcome_state)
@@ -320,7 +342,7 @@ class MCAPReader:
 
                     # Collision Events (Taskgen simulation)
                     elif topic.endswith("/collision_events"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["collision_events"]
                         target["time_ns"].append(ts_ns)
                         target["collision_event"].append(len(ros_msg.events))
@@ -328,7 +350,7 @@ class MCAPReader:
                         
                     # Collision Monitor State (Nav2)
                     elif topic.endswith("/collision_monitor_state"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["collision_monitor_state"]
                         target["time_ns"].append(ts_ns)
                         target["action_type"].append(ros_msg.action_type)
@@ -337,7 +359,7 @@ class MCAPReader:
 
                     # Global plan
                     elif topic.endswith("/plan") or topic.endswith("/global_plan"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["plan"]
                         target["time_ns"].append(ts_ns)
                         poses_x = []
@@ -359,7 +381,7 @@ class MCAPReader:
                         
                     # Initialpose
                     elif topic.endswith("/initialpose"):
-                        robot_name = parts[-2] if len(parts) >= 2 else "unknown"
+                        robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["initialpose"]
                         target["time_ns"].append(ts_ns)
                         target["pos_x"].append(ros_msg.pose.pose.position.x)
@@ -413,7 +435,7 @@ class MCAPReader:
                                 
                             if is_world_frame and is_base_frame:
                                 child_parts = child.split('/')
-                                robot_name = child_parts[-2] if len(child_parts) >= 2 else "unknown"
+                                robot_name = get_robot_name(child_parts, env_key)
                                                                
                                 yaw_val = self._quaternion_to_yaw(
                                     t.transform.rotation.x,
@@ -457,22 +479,66 @@ class MCAPReader:
                 setattr(global_bundle, t_name, lf)
 
         # Build each robot's bundle
-        robot_dirs = [d for d in topics_dir.iterdir() if d.is_dir()]
+        robot_dirs = [d for d in topics_dir.iterdir() if d.is_dir() and re.match(r'^env_\d+$', d.name) is None]
+        
+        # Calculate env offsets
+        env_offsets = {}
+        if hasattr(global_bundle, "tf_static") and global_bundle.tf_static is not None:
+            tf_df = global_bundle.tf_static.collect()
+            for row in tf_df.iter_rows(named=True):
+                parent = row["frame_id"].strip('/').lower()
+                child = row["child_frame_id"].strip('/').lower()
+                if parent == "map" and child.startswith("env_") and child.endswith("/map"):
+                    match = re.search(r'(env_\d+)', child)
+                    if match:
+                        env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
         
         # If no explicit robot dirs but we have data, maybe it was named "unknown"
         for robot_dir in robot_dirs:
             robot_name = robot_dir.name
             rb = TopicBundle()
             
+            match = re.search(r'(env_\d+)', robot_name)
+            env_key = match.group(1) if match else "env_0"
+            ox, oy = env_offsets.get(env_key, (0.0, 0.0))
+            
             # Copy global references
-            rb.peds = global_bundle.peds
-            rb.episode_record = global_bundle.episode_record
             rb.tf = global_bundle.tf
             rb.tf_static = global_bundle.tf_static
+            
+            # Load env references
+            env_dir = topics_dir / env_key
+            rb.peds = load_parquet(env_dir / "peds.parquet")
+            rb.episode_record = load_parquet(env_dir / "episode_record.parquet")
+            
+            if rb.peds is not None and (ox != 0.0 or oy != 0.0):
+                rb.peds = rb.peds.with_columns([
+                    pl.col("peds_positions").list.eval(
+                        pl.when(pl.int_range(0, pl.element().len()) % 3 == 0).then(pl.element() - ox)
+                        .when(pl.int_range(0, pl.element().len()) % 3 == 1).then(pl.element() - oy)
+                        .otherwise(pl.element())
+                    )
+                ])
             
             for t_name in new_robot_data().keys():
                 lf = load_parquet(robot_dir / f"{t_name}.parquet")
                 if lf is not None:
+                    if ox != 0.0 or oy != 0.0:
+                        if t_name in ("odom", "initialpose"):
+                            lf = lf.with_columns([
+                                (pl.col("pos_x") - ox).alias("pos_x"),
+                                (pl.col("pos_y") - oy).alias("pos_y")
+                            ])
+                        elif t_name == "plan":
+                            lf = lf.with_columns([
+                                pl.col("poses_x").list.eval(pl.element() - ox),
+                                pl.col("poses_y").list.eval(pl.element() - oy)
+                            ])
+                        elif t_name == "tf_gt":
+                            lf = lf.with_columns([
+                                (pl.col("pos_x_gt") - ox).alias("pos_x_gt"),
+                                (pl.col("pos_y_gt") - oy).alias("pos_y_gt")
+                            ])
                     setattr(rb, t_name, lf)
                     
             bundles[robot_name] = rb
