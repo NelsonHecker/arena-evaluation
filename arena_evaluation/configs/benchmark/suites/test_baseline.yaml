@@ -1,0 +1,10 @@
+stages:
+  - name: baseline_1ep
+    map: map_empty
+    robot: jackal
+    tm_robots: scenario
+    tm_obstacles: scenario
+    episodes: 1
+    config:
+      scenario:
+        file: "1"
