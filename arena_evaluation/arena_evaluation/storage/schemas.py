@@ -105,6 +105,8 @@ class TopicBundle:
     episode_record: pl.DataFrame | None = None
     collision_events: pl.DataFrame | None = None
     collision_monitor_state: pl.DataFrame | None = None
+    power: pl.DataFrame | None = None
+    energy: pl.DataFrame | None = None
     plan: pl.DataFrame | None = None
     initialpose: pl.DataFrame | None = None
     tf: pl.DataFrame | None = None

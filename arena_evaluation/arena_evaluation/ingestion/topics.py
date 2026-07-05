@@ -51,6 +51,14 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         HAS_COLLISION = False
 
     try:
+        from arena_robots_msgs.msg import Power, Energy
+        HAS_POWER = True
+    except ImportError:
+        Power = type("Power", (), {})
+        Energy = type("Energy", (), {})
+        HAS_POWER = False
+
+    try:
         from nav2_msgs.msg import CollisionMonitorState
         HAS_NAV2_COLLISION = True
     except ImportError:
@@ -91,6 +99,14 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     if HAS_COLLISION:
         topics["collision_events"] = TopicDefinition(
             f"{ns}/collision_events", CollisionEvents, throttled=False,
+        )
+
+    if HAS_POWER:
+        topics["power"] = TopicDefinition(
+            f"{ns}/power_publisher/power", Power, throttled=True,
+        )
+        topics["energy"] = TopicDefinition(
+            f"{ns}/power_publisher/energy", Energy, throttled=True,
         )
 
     if HAS_NAV2_COLLISION:

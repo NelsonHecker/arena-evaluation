@@ -6,6 +6,7 @@ from .radar import RadarRenderer
 from .scatter import ScatterRenderer
 from .histogram import HistogramRenderer
 from .heatmap import HeatmapRenderer
+from .timeseries import TimeseriesRenderer
 
 __all__ = [
     "ViolinRenderer",
@@ -16,4 +17,5 @@ __all__ = [
     "ScatterRenderer",
     "HistogramRenderer",
     "HeatmapRenderer",
+    "TimeseriesRenderer",
 ]

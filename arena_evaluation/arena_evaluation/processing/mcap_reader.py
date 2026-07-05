@@ -96,6 +96,8 @@ class MCAPReader:
                 "joint_states": defaultdict(list),
                 "collision_events": defaultdict(list),
                 "collision_monitor_state": defaultdict(list),
+                "power": defaultdict(list),
+                "energy": defaultdict(list),
                 "plan": defaultdict(list),
                 "initialpose": defaultdict(list),
                 "tf_gt": defaultdict(list),
@@ -218,11 +220,12 @@ class MCAPReader:
                         base = parts[-2]
                         if base.endswith("_velocity_controller"):
                             base = parts[-3] if len(parts) >= 3 else base.replace("_velocity_controller", "")
+                        elif base == "power_publisher":
+                            base = parts[-3] if len(parts) >= 3 else base
                         return f"{env_key}_{base}"
                     
                     # Odom
                     if topic.endswith("/odom") and "velocity_controller" not in topic:
-                        # e.g. /arena/env_0/jackal1/odom -> parts = ['arena', 'env_0', 'jackal1', 'odom']
                         robot_name = get_robot_name(parts, env_key)
                             
                         target = robot_data[robot_name]["odom"]
@@ -355,6 +358,31 @@ class MCAPReader:
                         target["time_ns"].append(ts_ns)
                         target["action_type"].append(ros_msg.action_type)
                         target["polygon_name"].append(ros_msg.polygon_name)
+                        appended = True
+
+                    # Power
+                    elif topic.endswith("/power_publisher/power"):
+                        robot_name = get_robot_name(parts, env_key)
+                        target = robot_data[robot_name]["power"]
+                        target["time_ns"].append(ts_ns)
+                        target["total_power_w"].append(ros_msg.total_power_w)
+                        target["static_power_w"].append(ros_msg.static_power_w)
+                        target["total_mechanical_power_w"].append(ros_msg.total_mechanical_power_w)
+                        target["total_thermal_power_w"].append(ros_msg.total_thermal_power_w)
+                        target["joint_names"].append(list(ros_msg.joint_names))
+                        target["joint_mechanical_power_w"].append(list(ros_msg.joint_mechanical_power_w))
+                        target["joint_thermal_power_w"].append(list(ros_msg.joint_thermal_power_w))
+                        target["joint_total_power_w"].append(list(ros_msg.joint_total_power_w))
+                        appended = True
+
+                    # Energy
+                    elif topic.endswith("/power_publisher/energy"):
+                        robot_name = get_robot_name(parts, env_key)
+                        target = robot_data[robot_name]["energy"]
+                        target["time_ns"].append(ts_ns)
+                        target["total_energy_consumed_j"].append(ros_msg.total_energy_consumed_j)
+                        target["total_energy_consumed_wh"].append(ros_msg.total_energy_consumed_wh)
+                        target["battery_soc_percent"].append(ros_msg.battery_soc_percent)
                         appended = True
 
                     # Global plan

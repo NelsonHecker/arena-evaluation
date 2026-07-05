@@ -98,7 +98,7 @@ class ProcessingPipeline:
                 pedsim_avail = True
 
             available_topics = set()
-            for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
+            for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "power", "energy", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
                 if getattr(bundle, field, None) is not None:
                     available_topics.add(field)
 
@@ -237,7 +237,7 @@ class ProcessingPipeline:
                 pedsim_avail = True
 
             available_topics = set()
-            for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
+            for field in ("odom", "scan", "cmd_vel", "joint_states", "peds", "collision_events", "collision_monitor_state", "power", "energy", "plan", "initialpose", "tf", "tf_static", "tf_gt"):
                 if getattr(bundle, field, None) is not None:
                     available_topics.add(field)
 

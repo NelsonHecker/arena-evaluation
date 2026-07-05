@@ -41,6 +41,16 @@ except ImportError:
     HAS_COLLISION = False
 
 try:
+    from arena_robots_msgs.msg import Power, Energy
+    HAS_POWER = True
+except ImportError:
+    class Power:
+        pass
+    class Energy:
+        pass
+    HAS_POWER = False
+
+try:
     from task_generator_msgs.msg import EpisodeRecord, RobotFleet
     HAS_TASK_GEN = True
 except ImportError:
@@ -443,7 +453,7 @@ class DataRecorderNode(Node):
                         self.metadata.robot_model.append(robot.model)
                         
                     try:
-                        from .metadata_writer import MetadataWriter
+                        from ..storage.manifest import MetadataWriter
                         MetadataWriter.write(self.metadata, self.metadata_path)
                     except Exception as e:
                         self.get_logger().warn(f"Failed to write metadata: {e}")

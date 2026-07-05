@@ -348,4 +348,56 @@ class VizManifest(BaseModel):
                 layout_group="details",
                 options={"overlay_markers": False},
             ),
+
+            # ── Ecological & Energy ──────────────────────────────────────────────
+            PlotSpec(
+                id="scatter_velocity_energy",
+                type="scatter",
+                title="Velocity vs Power Consumption (Scatter Cloud)",
+                data_key="timeseries_velocity_linear",
+                differentiate="local_planner",
+                layout_group="ecological",
+                options={"y": "timeseries_power_total_w"}
+            ),
+            PlotSpec(
+                id="bar_energy_breakdown",
+                type="bar",
+                title="Energy Breakdown (%)",
+                data_key="energy_total_j",
+                differentiate="local_planner",
+                layout_group="ecological",
+                options={
+                    "stacked": True, 
+                    "metrics": ["energy_static_j", "energy_mechanical_j", "energy_thermal_j"]
+                }
+            ),
+            PlotSpec(
+                id="timeseries_power",
+                type="timeseries",
+                title="Power & Battery Over Time",
+                data_key="timeseries_power_total_w",
+                differentiate="local_planner",
+                layout_group="ecological",
+                group_by=["stage"],
+                options={
+                    "x": "timeseries_time_s",
+                    "metrics": [
+                        "timeseries_power_total_w", 
+                        "timeseries_power_static_w", 
+                        "timeseries_power_mechanical_w", 
+                        "timeseries_power_thermal_w",
+                        "timeseries_battery_soc"
+                    ]
+                }
+            ),
+            PlotSpec(
+                id="timeseries_velocity",
+                type="timeseries",
+                title="Velocity Over Time",
+                data_key="timeseries_velocity_linear",
+                differentiate="local_planner",
+                layout_group="ecological",
+                group_by=["stage"],
+                options={"x": "timeseries_time_s"}
+            ),
         ])

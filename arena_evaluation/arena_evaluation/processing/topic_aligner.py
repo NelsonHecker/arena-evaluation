@@ -82,6 +82,8 @@ class TopicAligner:
         df = join_topic(df, bundle.peds, "peds")
         df = join_topic(df, bundle.collision_events, "col")
         df = join_topic(df, bundle.collision_monitor_state, "cms")
+        df = join_topic(df, bundle.power, "power")
+        df = join_topic(df, bundle.energy, "energy")
         df = join_topic(df, bundle.tf_gt, "tf_gt")
 
         if should_collect:
