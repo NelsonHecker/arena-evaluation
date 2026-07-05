@@ -392,7 +392,8 @@ class DataRecorderNode(Node):
 
         from .topics import get_topics
         
-        for robot in getattr(msg, 'robots', []):
+        for state in getattr(msg, 'robots', []):
+            robot = state.descriptor
             robot_ns = robot.ns.strip('/')
             
             if robot_ns not in self.known_robots:
