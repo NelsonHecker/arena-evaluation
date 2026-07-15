@@ -1,0 +1,10 @@
+stages:
+  - name: quicktest_map_empty
+    map: map_empty
+    robot: auto
+    tm_robots: scenario
+    tm_obstacles: scenario
+    episodes: 5
+    config:
+      scenario:
+        file: quicktest
