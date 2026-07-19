@@ -1,0 +1,48 @@
+stages:
+- name: hospital_1_compliance
+  map: hospital_1
+  robot: jackal
+  episodes: 10
+  tm_robots: random
+  tm_obstacles: random
+  timeout: 200s
+  config:
+    random:
+      dynamic:
+        min: 3
+        max: 6
+      static:
+        min: 4
+        max: 8
+
+- name: reception_compliance
+  map: reception
+  robot: jackal
+  episodes: 10
+  tm_robots: random
+  tm_obstacles: random
+  timeout: 200s
+  config:
+    random:
+      dynamic:
+        min: 2
+        max: 4
+      static:
+        min: 2
+        max: 4
+
+- name: three_storied_residential_compliance
+  map: three_storied_residential
+  robot: jackal
+  episodes: 10
+  tm_robots: random
+  tm_obstacles: random
+  timeout: 200s
+  config:
+    random:
+      dynamic:
+        min: 2
+        max: 4
+      static:
+        min: 2
+        max: 4

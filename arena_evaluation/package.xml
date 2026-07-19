@@ -18,6 +18,7 @@
   <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>arena_evaluation_msgs</depend>
+  <depend>arena_simulation_setup</depend>
   <depend>hunav_msgs</depend>
 
   <exec_depend>arena_runtime_msgs</exec_depend>

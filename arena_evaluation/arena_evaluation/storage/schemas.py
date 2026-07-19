@@ -124,6 +124,7 @@ class AlignedEpisodeBundle:
     num_pedestrians: int = 0
     robot_name: str | None = None
     semantic_events: pl.DataFrame | None = None
+    env_offset: tuple[float, float] | None = (0.0, 0.0)
 
 
 class PlotSpec(BaseModel):

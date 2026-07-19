@@ -92,7 +92,7 @@ class ProcessingPipeline:
             robot_params = RobotParams.load(robot_model)
 
             print(f"  [{robot_name}] Computing metrics for {len(episodes)} episodes...")
-            registry = MetricRegistry(robot_params)
+            registry = MetricRegistry(robot_params, world=metadata.map)
             pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
             if bundle.peds is not None:
                 pedsim_avail = True
@@ -231,7 +231,7 @@ class ProcessingPipeline:
             robot_params = RobotParams.load(robot_model)
 
             print(f"  [{robot_name}] Computing metrics for {len(episodes)} episodes...")
-            registry = MetricRegistry(robot_params)
+            registry = MetricRegistry(robot_params, world=metadata.map)
             pedsim_avail = metadata.pedsim_available if metadata.pedsim_available is not None else False
             if bundle.peds is not None:
                 pedsim_avail = True

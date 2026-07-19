@@ -77,11 +77,13 @@ class BaseMetricCalculator(ABC):
                 )
         
         # 1. Extract raw odom
+        anchor_x = anchor_y = anchor_yaw = None
         if episode.data is not None and len(episode.data) > 0:
             odom_x = episode.data["pos_x"].to_numpy().copy()
             odom_y = episode.data["pos_y"].to_numpy().copy()
             odom_yaw = episode.data["yaw"].to_numpy().copy()
-            
+            anchor_x, anchor_y, anchor_yaw = odom_x[0], odom_y[0], odom_yaw[0]
+
             # Detect teleport jumps in the episode
             if len(odom_x) > 1:
                 dists = np.sqrt(np.diff(odom_x)**2 + np.diff(odom_y)**2)
@@ -125,10 +127,10 @@ class BaseMetricCalculator(ABC):
         if episode.start_pos and len(episode.start_pos) >= 2 and len(odom_x) > 0:
             start_x, start_y = episode.start_pos[0], episode.start_pos[1]
             start_yaw = episode.start_pos[2] if len(episode.start_pos) >= 3 else 0.0
-            
-            odom_x0 = odom_x[0]
-            odom_y0 = odom_y[0]
-            odom_yaw0 = odom_yaw[0]
+
+            odom_x0 = anchor_x if anchor_x is not None else odom_x[0]
+            odom_y0 = anchor_y if anchor_y is not None else odom_y[0]
+            odom_yaw0 = anchor_yaw if anchor_yaw is not None else odom_yaw[0]
             
             theta = start_yaw - odom_yaw0
             cos_t = np.cos(theta)

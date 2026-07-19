@@ -15,6 +15,7 @@ configs/benchmark/
 │   ├── all_maps_random.yaml
 │   ├── arena_corridor.yaml
 │   ├── arena_hospital_small.yaml
+│   ├── compliance.yaml
 │   └── map_empty.yaml
 └── contests/         — planner lineups
     ├── basic.yaml
@@ -57,6 +58,13 @@ stages:
 | `config` | dict | Per-mode params; top-level keys must match `tm_robots`/`tm_obstacles` (e.g. `scenario`, `random`). Inner leaves map to `task.<mode>.<leaf>` via QueueEpisode (see [task_generator/tasks/obstacles/README.md](../../../../task_generator/task_generator/tasks/obstacles/README.md)) |
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
 | `timeout` | string | Per-episode timeout; defaults to `Constants.Robot.TIMEOUT` if absent |
+
+`suites/compliance.yaml` targets the worlds annotated with zone/door semantics
+(`hospital_1`, `reception`, `three_storied_residential`), so the compliance
+metric columns (`speed_zone_violations`, `speed_zone_violation_seconds`,
+`quiet_zone_dwell_seconds`, `restricted_zone_entries`,
+`doorway_blocking_time`) land in reports. Run it against any existing contest,
+e.g. `ros2 run arena_evaluation benchmark --suite compliance --contest basic`.
 
 ## Contest files
 

@@ -364,6 +364,90 @@ class VizManifest(BaseModel):
                 layout_group="ecological",
             ),
 
+            # ── Compliance ────────────────────────────────────────────────────────
+            PlotSpec(
+                id="bar_speed_zone_violations",
+                type="bar",
+                title="Speed Zone Violations",
+                data_key="speed_zone_violations",
+                differentiate="local_planner",
+                layout_group="compliance",
+            ),
+            PlotSpec(
+                id="bar_speed_zone_violation_seconds",
+                type="bar",
+                title="Speed Zone Violation Seconds",
+                data_key="speed_zone_violation_seconds",
+                differentiate="local_planner",
+                layout_group="compliance",
+            ),
+            PlotSpec(
+                id="bar_quiet_zone_dwell",
+                type="bar",
+                title="Quiet Zone Dwell (s)",
+                data_key="quiet_zone_dwell_seconds",
+                differentiate="local_planner",
+                layout_group="compliance",
+            ),
+            PlotSpec(
+                id="bar_restricted_entries",
+                type="bar",
+                title="Restricted Zone Entries",
+                data_key="restricted_zone_entries",
+                differentiate="local_planner",
+                layout_group="compliance",
+            ),
+            PlotSpec(
+                id="bar_doorway_blocking",
+                type="bar",
+                title="Doorway Blocking Time (s)",
+                data_key="doorway_blocking_time",
+                differentiate="local_planner",
+                layout_group="compliance",
+            ),
+
+            # ── Regime Change ────────────────────────────────────────────────────
+            PlotSpec(
+                id="bar_used_elevator_during_alarm",
+                type="bar",
+                title="Used Elevator During Alarm",
+                data_key="used_elevator_during_alarm",
+                differentiate="local_planner",
+                layout_group="regime",
+            ),
+            PlotSpec(
+                id="bar_ran_red_signal",
+                type="bar",
+                title="Ran Red Signal",
+                data_key="ran_red_signal",
+                differentiate="local_planner",
+                layout_group="regime",
+            ),
+            PlotSpec(
+                id="bar_entered_over_cap_zone",
+                type="bar",
+                title="Entered Over-Cap Zone",
+                data_key="entered_over_cap_zone",
+                differentiate="local_planner",
+                layout_group="regime",
+            ),
+            PlotSpec(
+                id="box_replan_latency_median",
+                type="box",
+                title="Replan Latency After State Change, Median (s)",
+                data_key="replan_latency_after_state_change_median",
+                differentiate="local_planner",
+                layout_group="regime",
+            ),
+            PlotSpec(
+                id="box_replan_latency_p95",
+                type="box",
+                title="Replan Latency After State Change, p95 (s)",
+                data_key="replan_latency_after_state_change_p95",
+                differentiate="local_planner",
+                layout_group="regime",
+            ),
+
             # ── Detailed Traces ──────────────────────────────────────────────────
             PlotSpec(
                 id="trajectory_plot",

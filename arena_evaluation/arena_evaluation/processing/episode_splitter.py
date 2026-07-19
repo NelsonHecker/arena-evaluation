@@ -7,6 +7,21 @@ import polars as pl
 from ..storage.schemas import TopicBundle, AlignedEpisodeBundle
 from .topic_aligner import TopicAligner
 
+
+def _env_offset(tf_static: pl.DataFrame | None) -> tuple[float, float] | None:
+    """Env packing translation from the `map -> env_<n>/map` transform, None if multi-env ambiguous."""
+    if tf_static is None or len(tf_static) == 0:
+        return (0.0, 0.0)
+    rows = tf_static.filter(
+        (pl.col("frame_id") == "map") & pl.col("child_frame_id").str.contains(r"^env_\d+/map$")
+    ).select("trans_x", "trans_y").unique()
+    if len(rows) == 0:
+        return (0.0, 0.0)
+    if len(rows) > 1:
+        return None
+    return (float(rows["trans_x"][0]), float(rows["trans_y"][0]))
+
+
 class EpisodeSplitter:
     """
     Splits continuous topic data into discrete episodes using EpisodeRecord messages.
@@ -40,6 +55,7 @@ class EpisodeSplitter:
         initialpose_df = _to_df(bundle.initialpose)
         plan_df = _to_df(bundle.plan)
         semantic_events_df = _to_df(bundle.semantic_events)
+        env_offset = _env_offset(_to_df(bundle.tf_static))
 
         episodes = []
 
@@ -56,6 +72,7 @@ class EpisodeSplitter:
                         num_pedestrians=self._estimate_peds(aligned_df),
                         robot_name=robot_name,
                         semantic_events=semantic_events_df,
+                        env_offset=env_offset,
                     )
                 )
             return episodes
@@ -152,6 +169,7 @@ class EpisodeSplitter:
                     num_pedestrians=self._estimate_peds(aligned_df),
                     robot_name=robot_name,
                     semantic_events=episode_semantic_events,
+                    env_offset=env_offset,
                 )
             )
             

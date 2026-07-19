@@ -16,8 +16,9 @@ class MetricRegistry:
     """
     Discovers, validates, and executes metric calculators in topological order.
     """
-    def __init__(self, robot_params: RobotParams):
+    def __init__(self, robot_params: RobotParams, world: str | None = None):
         self.robot_params = robot_params
+        self.world = world
         self.calculators: dict[str, BaseMetricCalculator] = {}
         self.discover_calculators_cls()
         self._register_calculators()
@@ -50,7 +51,9 @@ class MetricRegistry:
                     raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
                 if calc_cls.NAME in self.calculators:
                     raise ValueError(f"Duplicate calculator NAME: {calc_cls.NAME}")
-                self.calculators[calc_cls.NAME] = calc_cls(self.robot_params)
+                calc = calc_cls(self.robot_params)
+                calc.world = self.world
+                self.calculators[calc_cls.NAME] = calc
 
     @classmethod
     def get_all_units(cls) -> dict[str, str]:

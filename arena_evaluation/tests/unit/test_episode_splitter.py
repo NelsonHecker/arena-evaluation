@@ -33,3 +33,25 @@ def test_split_episodes():
     assert ep2.episode_id == 2
     # ep2 should be >= 45
     assert len(ep2.data) == 4 # times 50, 60, 70, 80
+
+
+def test_env_offset_from_tf_static():
+    from arena_evaluation.processing.episode_splitter import _env_offset
+
+    tf_static = pl.DataFrame({
+        "frame_id": ["map", "env_0/jackal/base_link"],
+        "child_frame_id": ["env_0/map", "env_0/jackal/chassis_link"],
+        "trans_x": [5.0, 0.0],
+        "trans_y": [5.0, 0.0],
+    })
+    assert _env_offset(tf_static) == (5.0, 5.0)
+    assert _env_offset(None) == (0.0, 0.0)
+    assert _env_offset(tf_static.head(0)) == (0.0, 0.0)
+
+    two_envs = pl.DataFrame({
+        "frame_id": ["map", "map"],
+        "child_frame_id": ["env_0/map", "env_1/map"],
+        "trans_x": [5.0, 45.0],
+        "trans_y": [5.0, 5.0],
+    })
+    assert _env_offset(two_envs) is None

@@ -62,6 +62,22 @@ class MCAPReader:
         return str(val)
 
     @staticmethod
+    def _append_semantic_entity(target: dict, ts_ns: int, env_id: int, world: str, ent) -> None:
+        """Append one SemanticEntityState row, including the M2 `members` column."""
+        target["time_ns"].append(ts_ns)
+        target["env_id"].append(env_id)
+        target["world"].append(world)
+        target["entity"].append(ent.entity)
+        target["kind"].append(ent.kind)
+        target["discrete_names"].append(list(ent.discrete_names))
+        target["discrete_values"].append(list(ent.discrete_values))
+        target["continuous_names"].append(list(ent.continuous_names))
+        target["continuous_values"].append(list(ent.continuous_values))
+        target["predicate_names"].append(list(ent.predicate_names))
+        target["predicate_values"].append(list(ent.predicate_values))
+        target["members"].append(list(ent.members))
+
+    @staticmethod
     def _unflatten_dict(d: dict) -> dict:
         res: dict = {}
         for k, v in d.items():
@@ -335,17 +351,7 @@ class MCAPReader:
                     elif topic.endswith("/state/semantics"):
                         target = global_data["semantic_snapshot"]
                         for ent in ros_msg.entities:
-                            target["time_ns"].append(ts_ns)
-                            target["env_id"].append(ros_msg.env_id)
-                            target["world"].append(ros_msg.world)
-                            target["entity"].append(ent.entity)
-                            target["kind"].append(ent.kind)
-                            target["discrete_names"].append(list(ent.discrete_names))
-                            target["discrete_values"].append(list(ent.discrete_values))
-                            target["continuous_names"].append(list(ent.continuous_names))
-                            target["continuous_values"].append(list(ent.continuous_values))
-                            target["predicate_names"].append(list(ent.predicate_names))
-                            target["predicate_values"].append(list(ent.predicate_values))
+                            self._append_semantic_entity(target, ts_ns, ros_msg.env_id, ros_msg.world, ent)
                             appended = True
 
                     # Semantic events (one row per changed field)
