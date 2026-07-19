@@ -262,6 +262,24 @@ def test_extract_zone_geometry_skips_unannotated_zones():
     assert _extract_zone_geometry(level) == []
 
 
+def test_extract_zone_geometry_keeps_unannotated_when_not_required():
+    from arena_simulation_setup.tree.World.World import LevelDescription
+    from arena_simulation_setup.utils.geometry import Position
+
+    zone = LevelDescription.Zone(
+        name="plain_room",
+        corners=[Position(0.0, 0.0), Position(0.0, 2.0), Position(2.0, 2.0), Position(2.0, 0.0)],
+    )
+    level = LevelDescription(zones=[zone])
+
+    zones = _extract_zone_geometry(level, require_annotation=False)
+
+    assert [z.name for z in zones] == ["plain_room"]
+    assert zones[0].max_speed is None
+    assert zones[0].quiet is False
+    assert zones[0].restricted is False
+
+
 def test_calculate_end_to_end_with_cached_world():
     from arena_simulation_setup.shared.semantics import SemanticCfg
     from arena_simulation_setup.tree.World.World import LevelDescription

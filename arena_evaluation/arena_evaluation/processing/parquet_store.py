@@ -154,9 +154,13 @@ class TopicParquetStore:
         # Load global topics from root
         global_bundle = TopicBundle()
         for p in source_dir.glob("*.parquet"):
+            if p.stem == "peds_fallback":
+                continue
             lf = load_parquet(p)
             if lf is not None:
                 setattr(global_bundle, p.stem, lf)
+        if global_bundle.peds is None:
+            global_bundle.peds = load_parquet(source_dir / "peds_fallback.parquet")
                 
         # Load robot specific topics
         robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]

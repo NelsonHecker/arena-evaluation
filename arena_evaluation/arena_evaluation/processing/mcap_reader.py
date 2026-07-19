@@ -129,6 +129,7 @@ class MCAPReader:
             
         global_data = {
             "peds": defaultdict(list),
+            "peds_fallback": defaultdict(list),
             "episode_record": defaultdict(list),
             "tf": defaultdict(list),
             "tf_static": defaultdict(list),
@@ -280,49 +281,64 @@ class MCAPReader:
                         target["effort"].append(list(ros_msg.effort))
                         appended = True
 
-                    # Pedestrians
-                    elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
+                    # Pedestrians, named stream preferred over numeric agent_states
+                    elif topic.endswith("/arena_peds") or topic.endswith("/peds"):
                         target = global_data["peds"]
                         target["time_ns"].append(ts_ns)
-                        
-                        if hasattr(ros_msg, "pedestrians"):
-                            agents = ros_msg.pedestrians
-                            is_pose2d = False
-                        else:
-                            agents = [a for a in ros_msg.agents if getattr(a, "kind", 0) == 0]
-                            is_pose2d = True
-
+                        agents = ros_msg.pedestrians
                         target["num_pedestrians"].append(len(agents))
-                        
+
                         positions = []
                         headings = []
                         twists = []
-                        
+                        names = []
+
                         for p in agents:
-                            if is_pose2d:
-                                positions.extend([p.pose.x, p.pose.y, 0.0])
-                                headings.append(p.pose.theta)
-                                twists.extend([p.velocity.x, p.velocity.y, p.velocity.z])
-                            else:
-                                # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
-                                positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
-                                
-                                # Headings: calculate yaw from quaternion
-                                yaw = self._quaternion_to_yaw(
-                                    p.pose.orientation.x,
-                                    p.pose.orientation.y,
-                                    p.pose.orientation.z,
-                                    p.pose.orientation.w
-                                )
-                                headings.append(yaw)
-                                
-                                # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
-                                twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
-                                
+                            # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
+                            positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
+
+                            # Headings: calculate yaw from quaternion
+                            yaw = self._quaternion_to_yaw(
+                                p.pose.orientation.x,
+                                p.pose.orientation.y,
+                                p.pose.orientation.z,
+                                p.pose.orientation.w
+                            )
+                            headings.append(yaw)
+
+                            # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
+                            twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
+                            names.append(p.name)
+
                         target["peds_positions"].append(positions)
                         target["peds_headings"].append(headings)
                         target["peds_twists"].append(twists)
-                        
+                        target["peds_names"].append(names)
+
+                        appended = True
+
+                    elif topic.endswith("/agent_states"):
+                        target = global_data["peds_fallback"]
+                        target["time_ns"].append(ts_ns)
+                        agents = [a for a in ros_msg.agents if a.kind == 0]
+                        target["num_pedestrians"].append(len(agents))
+
+                        positions = []
+                        headings = []
+                        twists = []
+                        names = []
+
+                        for p in agents:
+                            positions.extend([p.pose.x, p.pose.y, 0.0])
+                            headings.append(p.pose.theta)
+                            twists.extend([p.velocity.x, p.velocity.y, p.velocity.z])
+                            names.append(str(p.agent_id))
+
+                        target["peds_positions"].append(positions)
+                        target["peds_headings"].append(headings)
+                        target["peds_twists"].append(twists)
+                        target["peds_names"].append(names)
+
                         appended = True
 
                     # Episode records
@@ -345,6 +361,12 @@ class MCAPReader:
                         except Exception:
                             pass
                         target["robots_params"].append(robots_yaml)
+
+                        try:
+                            conditions_json = ros_msg.conditions
+                        except AttributeError:
+                            conditions_json = ""
+                        target["conditions"].append(conditions_json)
                         appended = True
 
                     # Semantic snapshot (latched, one row per annotated entity)
@@ -501,9 +523,13 @@ class MCAPReader:
         # Load global data
         global_bundle = TopicBundle()
         for t_name in global_data.keys():
+            if t_name == "peds_fallback":
+                continue
             lf = load_parquet(topics_dir / f"{t_name}.parquet")
             if lf is not None:
                 setattr(global_bundle, t_name, lf)
+        if global_bundle.peds is None:
+            global_bundle.peds = load_parquet(topics_dir / "peds_fallback.parquet")
 
         # Build each robot's bundle
         robot_dirs = [d for d in topics_dir.iterdir() if d.is_dir()]

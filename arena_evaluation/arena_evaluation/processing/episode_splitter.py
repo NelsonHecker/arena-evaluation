@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import json
 import typing
 import yaml
 import polars as pl
 
 from ..storage.schemas import TopicBundle, AlignedEpisodeBundle
 from .topic_aligner import TopicAligner
+
+
+def _parse_conditions(raw: str | None) -> list[dict] | None:
+    """Parse the recorded episode_record `conditions` JSON string into a list of dicts."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, list) else None
 
 
 def _env_offset(tf_static: pl.DataFrame | None) -> tuple[float, float] | None:
@@ -20,7 +32,6 @@ def _env_offset(tf_static: pl.DataFrame | None) -> tuple[float, float] | None:
     if len(rows) > 1:
         return None
     return (float(rows["trans_x"][0]), float(rows["trans_y"][0]))
-
 
 class EpisodeSplitter:
     """
@@ -169,6 +180,7 @@ class EpisodeSplitter:
                     num_pedestrians=self._estimate_peds(aligned_df),
                     robot_name=robot_name,
                     semantic_events=episode_semantic_events,
+                    conditions=_parse_conditions(row.get("conditions")),
                     env_offset=env_offset,
                 )
             )

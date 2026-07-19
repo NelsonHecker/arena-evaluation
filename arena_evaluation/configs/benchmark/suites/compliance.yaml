@@ -1,4 +1,15 @@
 stages:
+- name: hospital_1_conditions
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  tm_robots: scenario
+  tm_obstacles: scenario
+  timeout: 200s
+  config:
+    scenario:
+      file: "conditions"
+
 - name: hospital_1_compliance
   map: hospital_1
   robot: jackal

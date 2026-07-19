@@ -448,6 +448,24 @@ class VizManifest(BaseModel):
                 layout_group="regime",
             ),
 
+            # ── Conditions ───────────────────────────────────────────────────────
+            PlotSpec(
+                id="bar_condition_success",
+                type="bar",
+                title="Condition Success",
+                data_key="condition_success",
+                differentiate="local_planner",
+                layout_group="conditions",
+            ),
+            PlotSpec(
+                id="bar_clauses_unknown",
+                type="bar",
+                title="Unknown Clauses",
+                data_key="clauses_unknown",
+                differentiate="local_planner",
+                layout_group="conditions",
+            ),
+
             # ── Detailed Traces ──────────────────────────────────────────────────
             PlotSpec(
                 id="trajectory_plot",

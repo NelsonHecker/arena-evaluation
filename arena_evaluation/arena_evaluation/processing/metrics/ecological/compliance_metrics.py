@@ -32,7 +32,7 @@ class _DoorGeometry:
     radius: float
 
 
-def _extract_zone_geometry(flattened: typing.Any) -> list[_ZoneGeometry]:
+def _extract_zone_geometry(flattened: typing.Any, require_annotation: bool = True) -> list[_ZoneGeometry]:
     import shapely
 
     zones: list[_ZoneGeometry] = []
@@ -56,7 +56,7 @@ def _extract_zone_geometry(flattened: typing.Any) -> list[_ZoneGeometry]:
                 has_annotation = True
                 restricted = bool(cfg.value)
 
-        if not has_annotation:
+        if require_annotation and not has_annotation:
             continue
 
         polygon = shapely.Polygon([(corner.x, corner.y) for corner in zone.corners])
