@@ -326,6 +326,44 @@ class VizManifest(BaseModel):
                 layout_group="social",
             ),
 
+            # ── Environment Interaction ──────────────────────────────────────────
+            PlotSpec(
+                id="box_time_waiting_doors_local",
+                type="box",
+                title="Time Waiting at Doors by Local Planner",
+                data_key="time_waiting_at_doors",
+                differentiate="local_planner",
+                auto_differentiate=False,
+                layout_group="ecological",
+            ),
+            PlotSpec(
+                id="box_time_waiting_doors_inter",
+                type="box",
+                title="Time Waiting at Doors by Inter-Planner",
+                data_key="time_waiting_at_doors",
+                differentiate="inter_planner",
+                auto_differentiate=False,
+                layout_group="ecological",
+            ),
+            PlotSpec(
+                id="box_elevator_rides_local",
+                type="box",
+                title="Elevator Rides by Local Planner",
+                data_key="elevator_rides",
+                differentiate="local_planner",
+                auto_differentiate=False,
+                layout_group="ecological",
+            ),
+            PlotSpec(
+                id="box_elevator_rides_inter",
+                type="box",
+                title="Elevator Rides by Inter-Planner",
+                data_key="elevator_rides",
+                differentiate="inter_planner",
+                auto_differentiate=False,
+                layout_group="ecological",
+            ),
+
             # ── Detailed Traces ──────────────────────────────────────────────────
             PlotSpec(
                 id="trajectory_plot",

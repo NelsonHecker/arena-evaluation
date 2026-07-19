@@ -39,9 +39,10 @@ class EpisodeSplitter:
         record_df = _to_df(bundle.episode_record)
         initialpose_df = _to_df(bundle.initialpose)
         plan_df = _to_df(bundle.plan)
-            
+        semantic_events_df = _to_df(bundle.semantic_events)
+
         episodes = []
-        
+
         if record_df is None or len(record_df) == 0:
             aligned_df = self.aligner.align(bundle)
             aligned_df = _to_df(aligned_df)
@@ -53,7 +54,8 @@ class EpisodeSplitter:
                         start_pos=[],
                         goal_pos=[],
                         num_pedestrians=self._estimate_peds(aligned_df),
-                        robot_name=robot_name
+                        robot_name=robot_name,
+                        semantic_events=semantic_events_df,
                     )
                 )
             return episodes
@@ -134,6 +136,13 @@ class EpisodeSplitter:
                 last_row = aligned_df.row(-1, named=True)
                 if "pos_x" in last_row and "pos_y" in last_row:
                     goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
+
+            episode_semantic_events = None
+            if semantic_events_df is not None and len(semantic_events_df) > 0:
+                episode_semantic_events = semantic_events_df.filter(
+                    (pl.col("time_ns") >= start_time) & (pl.col("time_ns") <= end_time)
+                )
+
             episodes.append(
                 AlignedEpisodeBundle(
                     episode_id=row["episode_id"],
@@ -141,7 +150,8 @@ class EpisodeSplitter:
                     start_pos=start_pos,
                     goal_pos=goal_pos,
                     num_pedestrians=self._estimate_peds(aligned_df),
-                    robot_name=robot_name
+                    robot_name=robot_name,
+                    semantic_events=episode_semantic_events,
                 )
             )
             

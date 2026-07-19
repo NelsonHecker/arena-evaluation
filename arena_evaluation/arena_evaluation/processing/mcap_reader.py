@@ -13,6 +13,17 @@ import pyarrow.parquet as pq
 from ..storage.schemas import TopicBundle
 
 
+def _iter_messages_tolerant(reader):
+    """Yield decoded messages, stopping cleanly at a truncated tail (unfinalized recording)."""
+    from mcap.exceptions import EndOfFile
+
+    try:
+        yield from reader.iter_messages(log_time_order=False)
+    except EndOfFile:
+        import logging
+        logging.getLogger(__name__).warning("MCAP truncated, keeping messages read so far")
+
+
 class MCAPReader:
     """
     Reads an MCAP file and produces a TopicBundle of raw DataFrames.
@@ -105,6 +116,8 @@ class MCAPReader:
             "episode_record": defaultdict(list),
             "tf": defaultdict(list),
             "tf_static": defaultdict(list),
+            "semantic_snapshot": defaultdict(list),
+            "semantic_events": defaultdict(list),
         }
         
         robot_data = defaultdict(new_robot_data)
@@ -159,7 +172,7 @@ class MCAPReader:
                 msg_count = 0
                 decoders = {}
                 
-                for schema, channel, message in reader.iter_messages(log_time_order=False):
+                for schema, channel, message in _iter_messages_tolerant(reader):
                     try:
                         decoder = decoders.get(message.channel_id)
                         if decoder is None:
@@ -318,6 +331,36 @@ class MCAPReader:
                         target["robots_params"].append(robots_yaml)
                         appended = True
 
+                    # Semantic snapshot (latched, one row per annotated entity)
+                    elif topic.endswith("/state/semantics"):
+                        target = global_data["semantic_snapshot"]
+                        for ent in ros_msg.entities:
+                            target["time_ns"].append(ts_ns)
+                            target["env_id"].append(ros_msg.env_id)
+                            target["world"].append(ros_msg.world)
+                            target["entity"].append(ent.entity)
+                            target["kind"].append(ent.kind)
+                            target["discrete_names"].append(list(ent.discrete_names))
+                            target["discrete_values"].append(list(ent.discrete_values))
+                            target["continuous_names"].append(list(ent.continuous_names))
+                            target["continuous_values"].append(list(ent.continuous_values))
+                            target["predicate_names"].append(list(ent.predicate_names))
+                            target["predicate_values"].append(list(ent.predicate_values))
+                            appended = True
+
+                    # Semantic events (one row per changed field)
+                    elif topic.endswith("/state/semantic_events"):
+                        target = global_data["semantic_events"]
+                        target["time_ns"].append(ts_ns)
+                        target["env_id"].append(ros_msg.env_id)
+                        target["entity"].append(ros_msg.entity)
+                        target["kind"].append(ros_msg.kind)
+                        target["field_kind"].append("predicate" if ros_msg.field_kind == 1 else "state")
+                        target["field"].append(ros_msg.field)
+                        target["previous"].append(ros_msg.previous)
+                        target["current"].append(ros_msg.current)
+                        appended = True
+
                     # Collision Events (Taskgen simulation)
                     elif topic.endswith("/collision_events"):
                         robot_name = parts[-2] if len(parts) >= 2 else "unknown"
@@ -469,7 +512,9 @@ class MCAPReader:
             rb.episode_record = global_bundle.episode_record
             rb.tf = global_bundle.tf
             rb.tf_static = global_bundle.tf_static
-            
+            rb.semantic_snapshot = global_bundle.semantic_snapshot
+            rb.semantic_events = global_bundle.semantic_events
+
             for t_name in new_robot_data().keys():
                 lf = load_parquet(robot_dir / f"{t_name}.parquet")
                 if lf is not None:

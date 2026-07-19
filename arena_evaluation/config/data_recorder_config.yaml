@@ -10,6 +10,8 @@ record_frequencies:
   goal_pose: 0.0 # event-driven (recorded unthrottled)
   initialpose: 0.0 # event-driven (recorded unthrottled)
   robots: 0.0    # latched fleet state (recorded unthrottled)
+  semantics: 0.0 # latched semantic snapshot (recorded unthrottled)
+  semantic_events: 0.0 # semantic change events (recorded unthrottled)
   reset_start: 0.0 # event-driven (recorded unthrottled)
   reset_end: 0.0 # event-driven (recorded unthrottled)
   tf: 20.0       # standard transform topic

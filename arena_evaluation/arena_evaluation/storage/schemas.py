@@ -110,6 +110,8 @@ class TopicBundle:
     tf: pl.DataFrame | None = None
     tf_static: pl.DataFrame | None = None
     tf_gt: pl.DataFrame | None = None
+    semantic_snapshot: pl.DataFrame | None = None
+    semantic_events: pl.DataFrame | None = None
 
 
 @dataclass
@@ -121,6 +123,7 @@ class AlignedEpisodeBundle:
     goal_pos: list[float]
     num_pedestrians: int = 0
     robot_name: str | None = None
+    semantic_events: pl.DataFrame | None = None
 
 
 class PlotSpec(BaseModel):

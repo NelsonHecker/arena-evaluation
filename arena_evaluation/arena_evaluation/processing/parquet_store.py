@@ -99,7 +99,7 @@ class TopicParquetStore:
         import dataclasses
         
         # Determine global fields that are shared among all robots to save space
-        global_fields = {"peds", "episode_record", "tf", "tf_static"}
+        global_fields = {"peds", "episode_record", "tf", "tf_static", "semantic_snapshot", "semantic_events"}
         global_written = set()
         
         for robot_name, bundle in bundles.items():
@@ -173,7 +173,9 @@ class TopicParquetStore:
             rb.episode_record = global_bundle.episode_record
             rb.tf = global_bundle.tf
             rb.tf_static = global_bundle.tf_static
-            
+            rb.semantic_snapshot = global_bundle.semantic_snapshot
+            rb.semantic_events = global_bundle.semantic_events
+
             for p in robot_dir.glob("*.parquet"):
                 lf = load_parquet(p)
                 if lf is not None:
