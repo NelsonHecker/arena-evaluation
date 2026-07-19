@@ -490,7 +490,6 @@ class BenchmarkRunner(ArenaMixinNode):
         req.tm_obstacles = step.stage.tm_obstacles.value
         req.tm_modules = []
         req.keep_modules = False
-        req.robots = []
         obs_params, rob_params = _flatten_per_mode_params(
             step.stage.config,
             tm_obstacles=step.stage.tm_obstacles.value,
@@ -553,7 +552,10 @@ class BenchmarkRunner(ArenaMixinNode):
                         f"TIMEOUT after {step.stage.timeout}s; cancelling and advancing"
                     )
                     try:
-                        await self.await_ros(goal_handle.cancel_goal_async())
+                        await asyncio.wait_for(
+                            self._await_or_env_died(env_id, self.await_ros(goal_handle.cancel_goal_async())),
+                            timeout=_CANCEL_SETTLE_S,
+                        )
                         await asyncio.wait_for(
                             self._await_or_env_died(env_id, ac.await_result(goal_handle)),
                             timeout=_CANCEL_SETTLE_S,
