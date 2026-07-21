@@ -490,7 +490,6 @@ class BenchmarkRunner(ArenaMixinNode):
         req.tm_obstacles = step.stage.tm_obstacles.value
         req.tm_modules = []
         req.keep_modules = False
-        req.robots = []
         obs_params, rob_params = _flatten_per_mode_params(
             step.stage.config,
             tm_obstacles=step.stage.tm_obstacles.value,
