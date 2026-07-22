@@ -717,8 +717,30 @@ class DataRecorderNode(Node):
         super().destroy_node()
 
 
+def _bind_to_parent():
+    """SIGTERM the recorder when its parent dies instead of orphaning to init."""
+    try:
+        import ctypes
+
+        PR_SET_PDEATHSIG = 1
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+    except Exception:
+        pass
+
+    if os.getppid() == 1:
+        os._exit(0)
+
+
 def main(args=None):
     import os
+
+    _bind_to_parent()
+
+    def _on_term(signum, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _on_term)
+
     rclpy.init(args=args)
 
     node = None
