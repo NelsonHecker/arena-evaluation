@@ -380,7 +380,6 @@ class MCAPReader:
                         robot_name = get_robot_name(parts, env_key)
                         target = robot_data[robot_name]["energy"]
                         target["time_ns"].append(ts_ns)
-                        target["total_energy_consumed_j"].append(ros_msg.total_energy_consumed_j)
                         target["total_energy_consumed_wh"].append(ros_msg.total_energy_consumed_wh)
                         target["battery_soc_percent"].append(ros_msg.battery_soc_percent)
                         appended = True

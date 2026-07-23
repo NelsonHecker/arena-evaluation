@@ -17,20 +17,20 @@ class EnergyMetricCalculator(BaseMetricCalculator):
     REQUIRED_TOPICS = ["power", "energy"]
     
     UNITS = {
-        "energy_static_j": "J",
-        "energy_mechanical_j": "J",
-        "energy_thermal_j": "J",
-        "energy_total_j": "J",
+        "energy_static_wh": "Wh",
+        "energy_mechanical_wh": "Wh",
+        "energy_thermal_wh": "Wh",
+        "energy_total_wh": "Wh",
         "battery_soc_final": "%",
     }
 
     def output_keys(self) -> list[str]:
         return [
             # Scalars (aggregates for the episode)
-            "energy_static_j",
-            "energy_mechanical_j",
-            "energy_thermal_j",
-            "energy_total_j",
+            "energy_static_wh",
+            "energy_mechanical_wh",
+            "energy_thermal_wh",
+            "energy_total_wh",
             "battery_soc_final",
             # Timeseries (arrays)
             "timeseries_power_total_w",
@@ -97,29 +97,29 @@ class EnergyMetricCalculator(BaseMetricCalculator):
         # Integration for total energy consumption over the episode
         # Energy = integral of Power dt
         dt = np.diff(t_s, prepend=0.0)
-        e_static = np.sum(p_static * dt)
-        e_mech = np.sum(p_mech * dt)
-        e_therm = np.sum(p_therm * dt)
+        e_static = np.sum(p_static * dt) / 3600.0
+        e_mech = np.sum(p_mech * dt) / 3600.0
+        e_therm = np.sum(p_therm * dt) / 3600.0
         
         # Alternative: use the final value from the /energy topic
         # The /energy topic publishes cumulative energy since node start. 
         # The energy used in THIS episode is the final value minus the initial value.
-        if "total_energy_consumed_j" in df.columns:
-            energy_arr = fill_nulls(df["total_energy_consumed_j"].to_numpy())
+        if "total_energy_consumed_wh" in df.columns:
+            energy_arr = fill_nulls(df["total_energy_consumed_wh"].to_numpy())
             if len(energy_arr) > 0:
                 e_total = energy_arr[-1] - energy_arr[0]
             else:
-                e_total = np.sum(p_total * dt)
+                e_total = np.sum(p_total * dt) / 3600.0
         else:
-            e_total = np.sum(p_total * dt)
+            e_total = np.sum(p_total * dt) / 3600.0
             
         batt_final = batt[-1] if len(batt) > 0 else 0.0
 
         return {
-            "energy_static_j": float(e_static),
-            "energy_mechanical_j": float(e_mech),
-            "energy_thermal_j": float(e_therm),
-            "energy_total_j": float(e_total),
+            "energy_static_wh": float(e_static),
+            "energy_mechanical_wh": float(e_mech),
+            "energy_thermal_wh": float(e_therm),
+            "energy_total_wh": float(e_total),
             "battery_soc_final": float(batt_final),
             "timeseries_power_total_w": p_total.tolist(),
             "timeseries_power_static_w": p_static.tolist(),
