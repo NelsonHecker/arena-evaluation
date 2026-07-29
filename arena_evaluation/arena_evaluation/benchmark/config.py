@@ -37,7 +37,11 @@ def _yamlable(v: object) -> object:
 class Suite(typing.NamedTuple):
     @classmethod
     def parse(cls, name: str, obj: dict) -> Suite:
-        return cls(name=name, stages=[cls.Stage.parse(stage) for stage in obj["stages"]])
+        return cls(
+            name=name,
+            stages=[cls.Stage.parse(stage) for stage in obj["stages"]],
+            launch_args={str(k): str(v) for k, v in obj.get("launch", {}).items()},
+        )
 
     class Index(int):
         pass
@@ -103,6 +107,7 @@ class Suite(typing.NamedTuple):
 
     name: str
     stages: list[Suite.Stage]
+    launch_args: dict[str, str] = {}
 
     @property
     def min_index(self) -> Suite.Index:

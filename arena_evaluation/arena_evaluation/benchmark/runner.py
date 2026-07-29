@@ -1196,7 +1196,7 @@ def _default_run_id(suite_name: str, contest_name: str) -> str:
     return f"{ts}-{suite_stem}-{contest_stem}"
 
 
-_KV_RE = re.compile(r"^\w+:=.*$")
+_KV_RE = re.compile(r"^[\w.]+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
@@ -1239,10 +1239,6 @@ def cli_main(argv: list[str] | None = None) -> int:
         k, v = arg.split(":=", 1)
         arena_passthrough[k] = v
 
-    env_n = int(arena_passthrough.get("env_n", "1"))
-    headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
-    simulator = arena_passthrough.get("sim", None)
-
     try:
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
 
@@ -1274,6 +1270,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
+            arena_passthrough = {**suite.launch_args, **man.launch_args, **arena_passthrough}
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
@@ -1282,6 +1279,11 @@ def cli_main(argv: list[str] | None = None) -> int:
             suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
+            arena_passthrough = {**suite.launch_args, **arena_passthrough}
+            simulator = arena_passthrough.get("sim", None)
+
+        env_n = int(arena_passthrough.get("env_n", "1"))
+        headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
 
         steps = _all_steps(contest, suite, scale_episodes)
         if not steps:
@@ -1325,6 +1327,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
+                launch_args=dict(arena_passthrough),
             )
             run_dir = RunDir.create(data_root, run_id, manifest)
     except FileNotFoundError as exc:

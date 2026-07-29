@@ -417,6 +417,20 @@ def test_resume_replays_stored_config_hash():
     assert compute_config_hash(man.suite, man.contest) == man.config_hash
 
 
+def test_manifest_round_trips_launch_args():
+    man = _make_resume_manifest()
+    man.launch_args = {"isaac.physics": "newton", "headless": "true"}
+    assert Manifest.from_yaml(man.to_yaml()).launch_args == {"isaac.physics": "newton", "headless": "true"}
+
+
+def test_manifest_without_launch_args_defaults_empty():
+    import yaml
+
+    data = yaml.safe_load(_make_resume_manifest().to_yaml())
+    del data["launch_args"]
+    assert Manifest.from_yaml(yaml.dump(data)).launch_args == {}
+
+
 # ---------------------------------------------------------------------------
 # _parse_duration
 # ---------------------------------------------------------------------------
