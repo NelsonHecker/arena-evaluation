@@ -1270,7 +1270,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
-            arena_passthrough = {**suite.launch_args, **arena_passthrough}
+            arena_passthrough = {**suite.launch_args, **man.launch_args, **arena_passthrough}
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
@@ -1327,6 +1327,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
+                launch_args=dict(arena_passthrough),
             )
             run_dir = RunDir.create(data_root, run_id, manifest)
     except FileNotFoundError as exc:
