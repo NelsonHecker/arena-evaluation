@@ -23,7 +23,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     from arena_people_msgs.msg import Pedestrians
     from arena_humansim_msgs.msg import AgentStates
     from task_generator_msgs.msg import EpisodeRecord, RobotFleet
-    from arena_robots_msgs.msg import CollisionEvents, Power, Energy
+    from arena_robots_msgs.msg import CollisionEvents, Power, Energy, Acoustics
     from nav2_msgs.msg import CollisionMonitorState
 
     ns = f"/{namespace}" if namespace else ""
@@ -46,6 +46,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "collision_events": TopicDefinition(f"{ns}/collision_events", CollisionEvents, throttled=False),
         "power": TopicDefinition(f"{ns}/power_publisher/power", Power, throttled=True),
         "energy": TopicDefinition(f"{ns}/power_publisher/energy", Energy, throttled=True),
+        "acoustics": TopicDefinition(f"{ns}/acoustics", Acoustics, throttled=True),
         "collision_monitor_state": TopicDefinition(f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False),
     }
 
