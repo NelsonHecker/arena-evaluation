@@ -174,6 +174,12 @@ The runner drops keys that collide with stage-owned launch args (`sim`,
 controlled by the suite stage. Anything else is passed through to the launch
 layer, which binds it if declared or raises an error if not.
 
+A useful passthrough example: `fail_on_collision: true` makes the env abort
+an episode as FAILED (`outcome_info='collision'`) the moment the robot
+footprint contacts a wall, static obstacle, or pedestrian, instead of the
+default run-to-goal-or-timeout. See
+[BRINGUP.md → Common options](../../../../arena_bringup/BRINGUP.md#common-options).
+
 ## How the runner consumes these files
 
 The runner is the `benchmark` console script: `ros2 run arena_evaluation benchmark`,
