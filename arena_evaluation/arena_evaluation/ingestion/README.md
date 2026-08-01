@@ -38,7 +38,7 @@ arena launch sim:=gazebo task_mode:=random record_data_dir:=data \
     world:=map_empty robot:=jackal
 
 # The recorder is started internally with something equivalent to:
-ros2 run arena_evaluation record \
+arena evaluation record \
     --ros-args -p record_data_dir:=/opt/arena_ws/data/recordings/20260528-210000
 ```
 

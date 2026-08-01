@@ -1225,7 +1225,7 @@ def _default_run_id(suite_name: str, contest_name: str) -> str:
     return f"{ts}-{suite_stem}-{contest_stem}"
 
 
-_KV_RE = re.compile(r"^\w+:=.*$")
+_KV_RE = re.compile(r"^[\w\.\-]+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
@@ -1252,6 +1252,11 @@ def cli_main(argv: list[str] | None = None) -> int:
         help="Resume a prior run. Bare --resume picks the most recent resumable; --resume <run_id> opens that run explicitly.",
     )
     p.add_argument("--retry-failed", action="store_true")
+    p.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable system resource profiling. Writes simulation_profile.yaml with peak/mean CPU, GPU, RAM, and disk I/O stats.",
+    )
     p.add_argument(
         "--noexit",
         action="store_true",
@@ -1374,6 +1379,13 @@ def cli_main(argv: list[str] | None = None) -> int:
 
     run_dir.attach_log_handler(logging.getLogger())
 
+    profiler = None
+    if args.profile:
+        from .profiler import SimulationProfiler
+
+        profiler = SimulationProfiler(output_dir=run_dir.path, sample_hz=2.0)
+        profiler.start()
+
     try:
         BenchmarkRunner.run_main(
             suite=suite,
@@ -1390,6 +1402,9 @@ def cli_main(argv: list[str] | None = None) -> int:
         )
     except KeyboardInterrupt:
         return 130
+    finally:
+        if profiler is not None:
+            profiler.stop()
     return BenchmarkRunner.exit_code
 
 

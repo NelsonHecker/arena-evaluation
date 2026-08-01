@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import os
 import pathlib
 import sys
@@ -119,6 +120,11 @@ Examples:
         action="store_true",
         help="Generate animated GIFs for trajectories (computationally intensive).",
     )
+    run_parent.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable resource profiling. Writes pipeline_profile.yaml with per-phase CPU, GPU, RAM, and duration stats.",
+    )
 
     subparsers.add_parser(
         "extract",
@@ -169,6 +175,13 @@ Examples:
             print(f"Error: directory does not exist: {d}")
             sys.exit(1)
 
+    profiler = None
+    if getattr(args, "profile", False):
+        from arena_evaluation.benchmark.profiler import PipelineProfiler as _PP
+
+        output_dir = getattr(args, "output_dir", None) or target_dirs[0]
+        profiler = _PP(output_dir=output_dir, sample_hz=2.0)
+
     if args.command in ("extract", "run", "process"):
         force_extract = getattr(args, "force_extract", False)
         if args.command == "run":
@@ -177,7 +190,7 @@ Examples:
         if getattr(args, "run_dir", None):
             for run_dir in args.run_dir:
                 fm = FolderManager(data_root=run_dir.parent)
-                pipeline = ProcessingPipeline(fm)
+                pipeline = ProcessingPipeline(fm, profiler=profiler)
                 
                 if args.command == "extract":
                     print(f"Extracting single run: {run_dir}")
@@ -193,7 +206,7 @@ Examples:
         else:
             for benchmark_dir in args.benchmark_dir:
                 fm = FolderManager(data_root=benchmark_dir.parent)
-                pipeline = ProcessingPipeline(fm)
+                pipeline = ProcessingPipeline(fm, profiler=profiler)
                 
                 if args.command == "extract":
                     print(f"Extracting benchmark: {benchmark_dir.name}")
@@ -209,9 +222,14 @@ Examples:
             
         print(f"Building report/plots from {len(target_dirs)} sources into: {output_dir}")
         generate_gifs = getattr(args, "generate_gifs", False)
-        builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir, generate_gifs=generate_gifs)
-        builder.build()
+        _ctx = profiler.phase("report") if profiler else contextlib.nullcontext()
+        with _ctx:
+            builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir, generate_gifs=generate_gifs)
+            builder.build()
         print("Report generation complete.")
+
+    if profiler is not None:
+        profiler.write_summary()
 
 if __name__ == "__main__":
     main()

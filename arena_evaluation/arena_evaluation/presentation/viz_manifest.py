@@ -351,15 +351,6 @@ class VizManifest(BaseModel):
 
             # ── Ecological & Energy ──────────────────────────────────────────────
             PlotSpec(
-                id="scatter_velocity_energy",
-                type="scatter",
-                title="Velocity vs Power Consumption (Scatter Cloud)",
-                data_key="timeseries_velocity_linear",
-                differentiate="local_planner",
-                layout_group="ecological",
-                options={"y": "timeseries_power_total_w"}
-            ),
-            PlotSpec(
                 id="bar_energy_breakdown",
                 type="bar",
                 title="Energy Breakdown (%)",
