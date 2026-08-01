@@ -99,6 +99,7 @@ class Suite(typing.NamedTuple):
                     pass
                 else:
                     raise ValueError(f"invalid tm_obstacles type: {type(v)}")
+            obj.setdefault("config", {})
             raw_timeout = obj.pop("timeout", None)
             timeout_f = _DEFAULT_TIMEOUT_S if raw_timeout is None else _parse_duration(str(raw_timeout))
             optim = obj.pop("optim", None)
