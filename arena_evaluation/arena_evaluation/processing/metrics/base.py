@@ -78,9 +78,19 @@ class BaseMetricCalculator(ABC):
         
         # 1. Extract raw odom
         if episode.data is not None and len(episode.data) > 0:
-            odom_x = episode.data["pos_x"].to_numpy().copy()
-            odom_y = episode.data["pos_y"].to_numpy().copy()
-            odom_yaw = episode.data["yaw"].to_numpy().copy()
+            if "pos_x" in episode.data.columns:
+                odom_x = episode.data["pos_x"].to_numpy().copy()
+                odom_y = episode.data["pos_y"].to_numpy().copy()
+                odom_yaw = episode.data["yaw"].to_numpy().copy()
+            elif "pos_x_gt" in episode.data.columns:
+                odom_x = episode.data["pos_x_gt"].to_numpy().copy()
+                odom_y = episode.data["pos_y_gt"].to_numpy().copy()
+                odom_yaw = episode.data["yaw_gt"].to_numpy().copy()
+            else:
+                odom_x = np.array([], dtype=np.float64)
+                odom_y = np.array([], dtype=np.float64)
+                odom_yaw = np.array([], dtype=np.float64)
+
             
             # Detect teleport jumps in the episode
             if len(odom_x) > 1:

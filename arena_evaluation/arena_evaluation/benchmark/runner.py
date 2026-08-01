@@ -161,25 +161,45 @@ def build_pending(
     seen: set[str] = set()
     for contestant in contest.contestants:
         for stage in suite.stages:
-            step = Step(
+            main_step = Step(
                 contestant=contestant,
                 stage=stage,
                 episodes=int(round(stage.episodes * scale_episodes)),
                 record_dir=record_root / "recordings" / contestant.name / stage.name,
             )
-            if step.key in seen:
-                raise ValueError(f"duplicate step key: {step.key!r}")
-            seen.add(step.key)
-            existing = state_steps.get(step.key)
-            if existing is None:
+            
+            ref_robot_step = Step(
+                contestant=contestant,
+                stage=stage,
+                episodes=int(round(stage.episodes * scale_episodes)),
+                record_dir=record_root / "recordings" / f"{contestant.name}_unobstructed_robot" / stage.name,
+                is_reference=True,
+                reference_type="unobstructed_robot"
+            )
+            
+            ref_peds_step = Step(
+                contestant=contestant,
+                stage=stage,
+                episodes=int(round(stage.episodes * scale_episodes)),
+                record_dir=record_root / "recordings" / f"{contestant.name}_unhindered_peds" / stage.name,
+                is_reference=True,
+                reference_type="unhindered_peds"
+            )
+
+            for step in [main_step, ref_robot_step, ref_peds_step]:
+                if step.key in seen:
+                    raise ValueError(f"duplicate step key: {step.key!r}")
+                seen.add(step.key)
+                existing = state_steps.get(step.key)
+                if existing is None:
+                    steps.append(step)
+                    continue
+                if existing.status == "ok":
+                    continue
+                if existing.status == "failed" and not retry_failed:
+                    continue
+                # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
                 steps.append(step)
-                continue
-            if existing.status == "ok":
-                continue
-            if existing.status == "failed" and not retry_failed:
-                continue
-            # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
-            steps.append(step)
     return steps
 
 
@@ -508,6 +528,15 @@ class BenchmarkRunner(ArenaMixinNode):
             tm_obstacles=step.stage.tm_obstacles.value,
             tm_robots=step.stage.tm_robots.value,
         )
+        if step.is_reference:
+            if step.reference_type == "unobstructed_robot":
+                req.tm_obstacles = "random"
+                obs_params = _walk_dict({"n": 0})
+                req.tm_robots = "random"
+                rob_params = _walk_dict({"n": 0})
+            elif step.reference_type == "unhindered_peds":
+                req.tm_robots = "random"
+                rob_params = _walk_dict({"n": 0})
         req.obstacles_params = obs_params
         req.robots_params = rob_params
         resp = await self.await_ros(queue.client.call_async(req))
@@ -1196,7 +1225,7 @@ def _default_run_id(suite_name: str, contest_name: str) -> str:
     return f"{ts}-{suite_stem}-{contest_stem}"
 
 
-_KV_RE = re.compile(r"^[\w.]+:=.*$")
+_KV_RE = re.compile(r"^\w+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
@@ -1239,6 +1268,10 @@ def cli_main(argv: list[str] | None = None) -> int:
         k, v = arg.split(":=", 1)
         arena_passthrough[k] = v
 
+    env_n = int(arena_passthrough.get("env_n", "1"))
+    headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
+    simulator = arena_passthrough.get("sim", None)
+
     try:
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
 
@@ -1270,7 +1303,6 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
-            arena_passthrough = {**suite.launch_args, **man.launch_args, **arena_passthrough}
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
@@ -1279,11 +1311,6 @@ def cli_main(argv: list[str] | None = None) -> int:
             suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
-            arena_passthrough = {**suite.launch_args, **arena_passthrough}
-            simulator = arena_passthrough.get("sim", None)
-
-        env_n = int(arena_passthrough.get("env_n", "1"))
-        headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
 
         steps = _all_steps(contest, suite, scale_episodes)
         if not steps:
@@ -1308,6 +1335,8 @@ def cli_main(argv: list[str] | None = None) -> int:
                     "contestant": attrs.asdict(c.contestant),
                     "stage": {k: v.value if isinstance(v, (Constants.TaskMode.TM_Robots, Constants.TaskMode.TM_Obstacles)) else v for k, v in c.stage._asdict().items()},
                     "episodes_planned": c.episodes,
+                    "is_reference": getattr(c, "is_reference", False),
+                    "reference_type": getattr(c, "reference_type", None),
                 }
                 for c in steps
             ]
@@ -1327,7 +1356,6 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
-                launch_args=dict(arena_passthrough),
             )
             run_dir = RunDir.create(data_root, run_id, manifest)
     except FileNotFoundError as exc:

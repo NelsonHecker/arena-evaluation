@@ -103,6 +103,8 @@ class ProcessingPipeline:
                     available_topics.add(field)
 
             for ep in episodes:
+                ep.run = run
+                ep.folder_manager = self.folder_manager
                 ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
 
                 # Add identity columns
@@ -242,6 +244,8 @@ class ProcessingPipeline:
                     available_topics.add(field)
 
             for ep in episodes:
+                ep.run = descriptor
+                ep.folder_manager = self.folder_manager
                 ep_metrics = registry.run(ep, pedsim_available=pedsim_avail, available_topics=available_topics)
                 ep_metrics["episode"] = ep.episode_id
                 ep_metrics["planner"] = descriptor.planner

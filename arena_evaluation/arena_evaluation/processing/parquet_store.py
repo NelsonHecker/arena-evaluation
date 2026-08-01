@@ -143,7 +143,7 @@ class TopicParquetStore:
             if path.exists():
                 try:
                     lf = pl.scan_parquet(path)
-                    if "time_ns" in lf.columns:
+                    if "time_ns" in lf.collect_schema().names():
                         lf = lf.sort("time_ns")
                     return lf
                 except Exception as e:

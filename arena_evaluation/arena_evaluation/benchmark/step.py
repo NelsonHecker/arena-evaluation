@@ -15,10 +15,14 @@ class Step:
     stage: Suite.Stage
     episodes: int
     record_dir: pathlib.Path | None
+    is_reference: bool = False
+    reference_type: str | None = None
 
     @property
     def key(self) -> str:
-        return f"{self.contestant.name}/{self.stage.name}"
+        ref_suffix = f"_{self.reference_type}" if (self.is_reference and self.reference_type) else ""
+        return f"{self.contestant.name}{ref_suffix}/{self.stage.name}"
+
 
 
 class StepErrorKind(enum.StrEnum):

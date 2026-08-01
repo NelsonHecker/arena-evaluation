@@ -123,6 +123,9 @@ class AlignedEpisodeBundle:
     goal_pos: list[float]
     num_pedestrians: int = 0
     robot_name: str | None = None
+    run: typing.Any = None # RunDescriptor
+    folder_manager: typing.Any = None # FolderManager
+    peds: pl.DataFrame | None = None # Raw pedestrian dataframe
 
 
 class PlotSpec(BaseModel):
