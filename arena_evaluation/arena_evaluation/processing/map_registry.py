@@ -70,32 +70,7 @@ class MapRegistry:
             img = img.convert("RGBA")
             img.save(png_path)
             
-            origin = list(map_meta.get("origin", [0.0, 0.0, 0.0]))
-            
-            if run_dir:
-                run_path = pathlib.Path(run_dir)
-                tf_static_path = run_path / "topics" / "tf_static.parquet"
-                if not tf_static_path.exists():
-                    candidates = list(run_path.rglob("tf_static.parquet"))
-                    if candidates:
-                        tf_static_path = candidates[0]
-                        
-                if tf_static_path.exists():
-                    try:
-                        import polars as pl
-                        tf_df = pl.read_parquet(tf_static_path)
-                        map_tf = tf_df.filter(
-                            (pl.col("frame_id") == "map") & 
-                            (pl.col("child_frame_id").str.contains("/map"))
-                        )
-                        if not map_tf.is_empty():
-                            trans_x = float(map_tf["trans_x"][0])
-                            trans_y = float(map_tf["trans_y"][0])
-                            if len(origin) >= 2:
-                                origin[0] = float(origin[0]) + trans_x
-                                origin[1] = float(origin[1]) + trans_y
-                    except Exception as e:
-                        print(f"Failed to extract tf_static offset: {e}")
+            origin = [float(x) for x in map_meta.get("origin", [0.0, 0.0, 0.0])]
             
             cache_meta = {
                 "png_path": str(png_path),

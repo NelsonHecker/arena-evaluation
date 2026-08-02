@@ -41,32 +41,34 @@ class IngestionMetadata:
             return False
             
     @staticmethod
-    def create_initial_metadata(
+    def create_episode_metadata(
         benchmark_id: str,
         planner: str,
         stage: str,
         map_name: str,
-        episodes_requested: int,
+        episode_id: int,
         robot_model: str,
-        suite_name: str,
-        contest_name: str,
-        workspace_dir: str = "/opt/arena_ws"
+        workspace_dir: str = "/opt/arena_ws",
+        env_ns_root: str | None = None,
+        is_reference: bool = False,
+        reference_type: str | None = None,
     ) -> RunMetadata:
-        
+        """Create metadata for a single episode (new flat structure)."""
         return RunMetadata(
             benchmark_id=benchmark_id,
             planner=planner,
             robot_model=[robot_model],
             map=map_name,
             stage=stage,
-            episodes_requested=episodes_requested,
-            suite_name=suite_name,
-            contest_name=contest_name,
-            inter_planner="", # Add if known
-            agent_name="", # Add if known
+            episode_id=episode_id,
             recording_started_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
             arena_git_sha=IngestionMetadata.get_git_sha(workspace_dir),
             arena_git_dirty=IngestionMetadata.is_git_dirty(workspace_dir),
             python_version=sys.version.split()[0],
-            ros_distro=os.environ.get("ROS_DISTRO", "unknown")
+            ros_distro=os.environ.get("ROS_DISTRO", "unknown"),
+            env_ns_root=env_ns_root,
+            is_reference=is_reference,
+            reference_type=reference_type,
         )
+
+

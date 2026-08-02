@@ -108,6 +108,7 @@ class HeatmapRenderer(BasePlotRenderer):
         if df_filtered.is_empty():
             return
 
+        import matplotlib as mpl
         import matplotlib.pyplot as plt
         import seaborn as sns
 
@@ -133,13 +134,14 @@ class HeatmapRenderer(BasePlotRenderer):
             corr_matrix = pdf.corr()
             labels = [c.replace("_", " ").title() for c in corr_matrix.columns]
 
+            cmap = mpl.colormaps["RdBu_r"].with_extremes(bad=(0, 0, 0, 0))
             sns.heatmap(
                 corr_matrix,
                 xticklabels=labels,
                 yticklabels=labels,
                 annot=True,
                 fmt=".2f",
-                cmap="RdBu_r",
+                cmap=cmap,
                 vmin=-1,
                 vmax=1,
                 center=0,
@@ -176,11 +178,12 @@ class HeatmapRenderer(BasePlotRenderer):
                 
             pivot_df = grouped.pivot(index=y_col, columns=x_col, values="val")
             
+            cmap = mpl.colormaps["viridis"].with_extremes(bad=(0, 0, 0, 0))
             sns.heatmap(
                 pivot_df,
                 annot=True,
                 fmt=".2f",
-                cmap="viridis",
+                cmap=cmap,
                 cbar_kws={'label': self.format_label(metric.replace("_", " ").title(), metric)}
             )
             plt.title(self.spec.title)

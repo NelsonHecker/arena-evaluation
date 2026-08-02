@@ -57,6 +57,7 @@ class Suite(typing.NamedTuple):
         seed: int
         timeout: float
         optim: dict | None = None
+        timeout_peds: float | None = None
 
         @classmethod
         def _make_serializable(cls, item: object) -> object:
@@ -101,9 +102,11 @@ class Suite(typing.NamedTuple):
                     raise ValueError(f"invalid tm_obstacles type: {type(v)}")
             raw_timeout = obj.pop("timeout", None)
             timeout_f = _DEFAULT_TIMEOUT_S if raw_timeout is None else _parse_duration(str(raw_timeout))
+            raw_timeout_peds = obj.pop("timeout_peds", None)
+            timeout_peds_f = _parse_duration(str(raw_timeout_peds)) if raw_timeout_peds is not None else None
             optim = obj.pop("optim", None)
             obj.setdefault("seed", cls.hash(obj))
-            return cls(timeout=timeout_f, optim=optim, **obj)
+            return cls(timeout=timeout_f, optim=optim, timeout_peds=timeout_peds_f, **obj)
 
     name: str
     stages: list[Suite.Stage]

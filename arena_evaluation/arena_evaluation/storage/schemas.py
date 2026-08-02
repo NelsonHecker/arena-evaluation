@@ -12,18 +12,19 @@ import typing
 
 class RunMetadata(BaseModel):
     """
-    Metadata for a benchmark run, serialized to metadata.yaml.
+    Metadata for a single episode, serialized to episode_XXX.yaml.
     """
     benchmark_id: str
     planner: str
     robot_model: list[str] = Field(default_factory=list)
     map: str
     stage: str
-    episodes_requested: int
-    suite_name: str
-    contest_name: str
-    inter_planner: str
-    agent_name: str
+    episode_id: int | None = None
+    episodes_requested: int = 0
+    suite_name: str = ""
+    contest_name: str = ""
+    inter_planner: str = ""
+    agent_name: str = ""
     recording_started_at: str
     arena_git_sha: str | None = None
     arena_git_dirty: bool = False
@@ -44,6 +45,11 @@ class RunMetadata(BaseModel):
     processing_completed_at: str | None = None
     episodes_valid: int | None = None
     pipeline_version: str | None = None
+
+    env_ns_root: str | None = None
+    is_reference: bool = False
+    reference_type: str | None = None
+    parent_episode_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -87,11 +93,24 @@ class RobotParams:
 
 @dataclass(frozen=True)
 class RunDescriptor:
-    """Describes a single run discovered by FolderManager."""
+    """Describes a single run (step) discovered by FolderManager. Legacy."""
     run_dir: str
     benchmark_id: str
     planner: str
     stage: str
+
+
+@dataclass(frozen=True)
+class EpisodeDescriptor:
+    """Describes a single episode discovered in the flat episodes/ folder structure."""
+    episode_dir: str
+    benchmark_id: str
+    episode_id: int
+    planner: str
+    stage: str
+    map: str = "unknown"
+    is_reference: bool = False
+    reference_type: str | None = None
 
 
 @dataclass

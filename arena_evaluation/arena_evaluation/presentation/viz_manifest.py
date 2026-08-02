@@ -336,6 +336,7 @@ class VizManifest(BaseModel):
                 auto_differentiate=False,
                 group_by=["stage"],
                 layout_group="details",
+                filter={"is_reference": False},
             ),
             PlotSpec(
                 id="pedestrian_trajectory_plot",

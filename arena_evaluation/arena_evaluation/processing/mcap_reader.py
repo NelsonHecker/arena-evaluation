@@ -6,7 +6,7 @@ import typing
 import re
 import polars as pl
 from collections import defaultdict
-from mcap.reader import make_reader
+from mcap.reader import make_reader, NonSeekingReader
 from mcap_ros2.decoder import DecoderFactory
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -68,22 +68,19 @@ class MCAPReader:
         organized by robot namespace.
         """
         if self.data_path.is_dir():
-            mcap_files = list(self.data_path.glob("*.mcap"))
-            if mcap_files:
-                actual_path = mcap_files[0]
-            else:
+            mcap_files = sorted(list(self.data_path.glob("*.mcap")))
+            if not mcap_files:
                 raise FileNotFoundError(f"No MCAP file found in directory: {self.data_path}")
         else:
-            actual_path = self.data_path
+            mcap_files = [self.data_path]
             
-        if not actual_path.exists():
-            raise FileNotFoundError(f"MCAP file not found: {actual_path}")
+        for path_item in mcap_files:
+            if not path_item.exists():
+                raise FileNotFoundError(f"MCAP file not found: {path_item}")
 
         path = self.data_path.resolve()
         if path.is_dir():
             run_dir = path
-        elif path.parent.name == "recording":
-            run_dir = path.parent.parent
         else:
             run_dir = path.parent
         topics_dir = run_dir / "topics"
@@ -118,9 +115,9 @@ class MCAPReader:
         
         robot_data = defaultdict(new_robot_data)
 
-        env_prefix = None
-
         from mcap.reader import NonSeekingReader
+
+        env_prefix = None
 
         topics_dir.mkdir(parents=True, exist_ok=True)
 
@@ -180,308 +177,311 @@ class MCAPReader:
                     topic_data.clear()
 
         try:
-            with open(actual_path, "rb") as f:
-                reader = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
-                
-                msg_count = 0
-                decoders = {}
-                
-                for schema, channel, message in reader.iter_messages(log_time_order=False):
-                    try:
-                        decoder = decoders.get(message.channel_id)
-                        if decoder is None:
-                            for factory in reader._decoder_factories:
-                                decoder = factory.decoder_for(channel.message_encoding, schema)
-                                if decoder is not None:
-                                    decoders[message.channel_id] = decoder
-                                    break
-                        if decoder is None:
-                            continue
-                        ros_msg = decoder(message.data)
-                        msg_count += 1
-                    except Exception as e:
-                        import logging
-                        logging.getLogger(__name__).warning(f"Error reading MCAP message on {channel.topic} at index {msg_count}: {e}")
-                        continue
-
-                    topic = channel.topic
-                    ts_ns = message.log_time
-                    appended = False
+            for mfile in mcap_files:
+                with open(mfile, "rb") as f:
+                    reader = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
                     
-                    parts = [p for p in topic.strip('/').split('/') if p]
+                    msg_count = 0
+                    decoders = {}
                     
-                    env_key = "env_0"
-                    match = re.search(r'(env_\d+)', topic)
-                    if match:
-                        env_key = match.group(1)
-                        
-                    def get_robot_name(parts, env_key):
-                        if len(parts) < 2: return f"{env_key}_unknown"
-                        base = parts[-2]
-                        if base.endswith("_velocity_controller"):
-                            base = parts[-3] if len(parts) >= 3 else base.replace("_velocity_controller", "")
-                        elif base == "power_publisher":
-                            base = parts[-3] if len(parts) >= 3 else base
-                        return f"{env_key}_{base}"
-                    
-                    # Odom
-                    if topic.endswith("/odom") and "velocity_controller" not in topic:
-                        robot_name = get_robot_name(parts, env_key)
-                            
-                        target = robot_data[robot_name]["odom"]
-                        target["time_ns"].append(ts_ns)
-                        target["pos_x"].append(ros_msg.pose.pose.position.x)
-                        target["pos_y"].append(ros_msg.pose.pose.position.y)
-                        
-                        yaw = self._quaternion_to_yaw(
-                            ros_msg.pose.pose.orientation.x,
-                            ros_msg.pose.pose.orientation.y,
-                            ros_msg.pose.pose.orientation.z,
-                            ros_msg.pose.pose.orientation.w
-                        )
-                        target["yaw"].append(yaw)
-                        target["vel_linear"].append(ros_msg.twist.twist.linear.x)
-                        target["vel_angular"].append(ros_msg.twist.twist.angular.z)
-                        appended = True
-                    
-                    # Scan
-                    elif topic.endswith("/scan") or topic.endswith("/lidar"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["scan"]
-                        target["time_ns"].append(ts_ns)
-                        target["scan_ranges"].append(list(ros_msg.ranges))
-                        target["scan_min"].append(ros_msg.range_min)
-                        appended = True
-                    
-                    # Cmd_vel
-                    elif topic.endswith("/cmd_vel"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["cmd_vel"]
-                        target["time_ns"].append(ts_ns)
-                        target["linear_x"].append(ros_msg.linear.x)
-                        target["linear_y"].append(ros_msg.linear.y)
-                        target["linear_z"].append(ros_msg.linear.z)
-                        target["angular_x"].append(ros_msg.angular.x)
-                        target["angular_y"].append(ros_msg.angular.y)
-                        target["angular_z"].append(ros_msg.angular.z)
-                        appended = True
-                    # Joint states
-                    elif topic.endswith("/joint_states"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["joint_states"]
-                        target["time_ns"].append(ts_ns)
-                        target["name"].append(list(ros_msg.name))
-                        target["position"].append(list(ros_msg.position))
-                        target["velocity"].append(list(ros_msg.velocity))
-                        target["effort"].append(list(ros_msg.effort))
-                        appended = True
-
-                    # Pedestrians
-                    elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
-                        target = env_data[env_key]["peds"]
-                        target["time_ns"].append(ts_ns)
-                        
-                        if hasattr(ros_msg, "pedestrians"):
-                            agents = ros_msg.pedestrians
-                            is_pose2d = False
-                        else:
-                            agents = [a for a in ros_msg.agents if getattr(a, "kind", 0) == 0]
-                            is_pose2d = True
-
-                        target["num_pedestrians"].append(len(agents))
-                        
-                        positions = []
-                        headings = []
-                        twists = []
-                        
-                        for p in agents:
-                            if is_pose2d:
-                                positions.extend([p.pose.x, p.pose.y, 0.0])
-                                headings.append(p.pose.theta)
-                                twists.extend([p.velocity.x, p.velocity.y, p.velocity.z])
-                            else:
-                                # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
-                                positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
-                                
-                                # Headings: calculate yaw from quaternion
-                                yaw = self._quaternion_to_yaw(
-                                    p.pose.orientation.x,
-                                    p.pose.orientation.y,
-                                    p.pose.orientation.z,
-                                    p.pose.orientation.w
-                                )
-                                headings.append(yaw)
-                                
-                                # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
-                                twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
-                                
-                        target["peds_positions"].append(positions)
-                        target["peds_headings"].append(headings)
-                        target["peds_twists"].append(twists)
-                        
-                        appended = True
-
-                    # Episode records
-                    elif topic.endswith("/state/episode"):
-                        target = env_data[env_key]["episode_record"]
-                        target["time_ns"].append(ts_ns)
-                        target["episode_id"].append(ros_msg.episode_id)
-                        target["outcome_state"].append(ros_msg.outcome_state)
-                        target["outcome_info"].append(ros_msg.outcome_info)
-                        target["goal_uuid"].append(ros_msg.goal_uuid)
-                        
-                        robots_yaml = ""
+                    for schema, channel, message in reader.iter_messages(log_time_order=False):
                         try:
-                            import yaml
-                            robots_dict = {}
-                            for p in ros_msg.robots_params:
-                                robots_dict[p.name] = self._param_value_to_py(p.value)
-                            robots_dict = self._unflatten_dict(robots_dict)
-                            robots_yaml = yaml.dump(robots_dict)
-                        except Exception:
-                            pass
-                        target["robots_params"].append(robots_yaml)
-                        appended = True
-
-                    # Collision Events (Taskgen simulation)
-                    elif topic.endswith("/collision_events"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["collision_events"]
-                        target["time_ns"].append(ts_ns)
-                        target["collision_event"].append(len(ros_msg.events))
-                        appended = True
-                        
-                    # Collision Monitor State (Nav2)
-                    elif topic.endswith("/collision_monitor_state"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["collision_monitor_state"]
-                        target["time_ns"].append(ts_ns)
-                        target["action_type"].append(ros_msg.action_type)
-                        target["polygon_name"].append(ros_msg.polygon_name)
-                        appended = True
-
-                    # Power
-                    elif topic.endswith("/power_publisher/power"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["power"]
-                        target["time_ns"].append(ts_ns)
-                        target["total_power_w"].append(ros_msg.total_power_w)
-                        target["static_power_w"].append(ros_msg.static_power_w)
-                        target["total_mechanical_power_w"].append(ros_msg.total_mechanical_power_w)
-                        target["total_thermal_power_w"].append(ros_msg.total_thermal_power_w)
-                        target["joint_names"].append(list(ros_msg.joint_names))
-                        target["joint_mechanical_power_w"].append(list(ros_msg.joint_mechanical_power_w))
-                        target["joint_thermal_power_w"].append(list(ros_msg.joint_thermal_power_w))
-                        target["joint_total_power_w"].append(list(ros_msg.joint_total_power_w))
-                        appended = True
-
-                    # Energy
-                    elif topic.endswith("/power_publisher/energy"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["energy"]
-                        target["time_ns"].append(ts_ns)
-                        target["total_energy_consumed_wh"].append(ros_msg.total_energy_consumed_wh)
-                        target["battery_soc_percent"].append(ros_msg.battery_soc_percent)
-                        appended = True
-
-                    # Global plan
-                    elif topic.endswith("/plan") or topic.endswith("/global_plan"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["plan"]
-                        target["time_ns"].append(ts_ns)
-                        poses_x = []
-                        poses_y = []
-                        poses_yaw = []
-                        for pose_stamped in ros_msg.poses:
-                            poses_x.append(pose_stamped.pose.position.x)
-                            poses_y.append(pose_stamped.pose.position.y)
-                            poses_yaw.append(self._quaternion_to_yaw(
-                                pose_stamped.pose.orientation.x,
-                                pose_stamped.pose.orientation.y,
-                                pose_stamped.pose.orientation.z,
-                                pose_stamped.pose.orientation.w
-                            ))
-                        target["poses_x"].append(poses_x)
-                        target["poses_y"].append(poses_y)
-                        target["poses_yaw"].append(poses_yaw)
-                        appended = True
-                        
-                    # Initialpose
-                    elif topic.endswith("/initialpose"):
-                        robot_name = get_robot_name(parts, env_key)
-                        target = robot_data[robot_name]["initialpose"]
-                        target["time_ns"].append(ts_ns)
-                        target["pos_x"].append(ros_msg.pose.pose.position.x)
-                        target["pos_y"].append(ros_msg.pose.pose.position.y)
-                        target["yaw"].append(self._quaternion_to_yaw(
-                            ros_msg.pose.pose.orientation.x,
-                            ros_msg.pose.pose.orientation.y,
-                            ros_msg.pose.pose.orientation.z,
-                            ros_msg.pose.pose.orientation.w
-                        ))
-                        appended = True
-                        
-                    # TF processing
-                    elif topic in ("/tf", "tf", "/tf_static", "tf_static"):
-                        target_dict = global_data["tf_static"] if "static" in topic else global_data["tf"]
-                        for t in ros_msg.transforms:
-                            target_dict["time_ns"].append(ts_ns)
-                            target_dict["frame_id"].append(t.header.frame_id)
-                            target_dict["child_frame_id"].append(t.child_frame_id)
-                            target_dict["trans_x"].append(t.transform.translation.x)
-                            target_dict["trans_y"].append(t.transform.translation.y)
-                            target_dict["trans_z"].append(t.transform.translation.z)
-                            target_dict["rot_x"].append(t.transform.rotation.x)
-                            target_dict["rot_y"].append(t.transform.rotation.y)
-                            target_dict["rot_z"].append(t.transform.rotation.z)
-                            target_dict["rot_w"].append(t.transform.rotation.w)
-                            appended = True
-
-                            # Detect ground-truth map/world/odom -> base_link transform if available
-                            parent = t.header.frame_id.strip('/')
-                            child = t.child_frame_id.strip('/')
-                            parent_lower = parent.lower()
-                            child_lower = child.lower()
-                            
-                            is_world_frame = (
-                                parent_lower in ("map", "world", "odom") or
-                                parent_lower.endswith("/map") or
-                                parent_lower.endswith("/world") or
-                                parent_lower.endswith("/odom")
-                            )
-                            is_base_frame = (
-                                child_lower.endswith("base_link") or
-                                child_lower.endswith("base_footprint") or
-                                "base_link" in child_lower or
-                                "base_footprint" in child_lower
-                            )
-                            
-                            # Filter by env_prefix if detected
-                            if env_prefix and env_prefix not in child_lower:
+                            decoder = decoders.get(message.channel_id)
+                            if decoder is None:
+                                for factory in reader._decoder_factories:
+                                    decoder = factory.decoder_for(channel.message_encoding, schema)
+                                    if decoder is not None:
+                                        decoders[message.channel_id] = decoder
+                                        break
+                            if decoder is None:
                                 continue
-                                
-                            if is_world_frame and is_base_frame:
-                                child_parts = child.split('/')
-                                robot_name = get_robot_name(child_parts, env_key)
-                                                               
-                                yaw_val = self._quaternion_to_yaw(
-                                    t.transform.rotation.x,
-                                    t.transform.rotation.y,
-                                    t.transform.rotation.z,
-                                    t.transform.rotation.w
-                                )
-                                target = robot_data[robot_name]["tf_gt"]
-                                target["time_ns"].append(ts_ns)
-                                target["pos_x_gt"].append(t.transform.translation.x)
-                                target["pos_y_gt"].append(t.transform.translation.y)
-                                target["yaw_gt"].append(yaw_val)
-                                appended = True
+                            ros_msg = decoder(message.data)
+                            msg_count += 1
+                        except Exception as e:
+                            import logging
+                            logging.getLogger(__name__).warning(f"Error reading MCAP message on {channel.topic} at index {msg_count}: {e}")
+                            continue
 
-                    if appended:
-                        accumulated_count += 1
-                        if accumulated_count >= 10000:
-                            flush_buffers()
-                            accumulated_count = 0
+                        topic = channel.topic
+                        ts_ns = message.log_time
+                        appended = False
+                        
+                        parts = [p for p in topic.strip('/').split('/') if p]
+                    
+                        env_key = "env_0"
+                        match = re.search(r'(env_\d+)', topic)
+                        if match:
+                            env_key = match.group(1)
+                        
+                        def get_robot_name(parts, env_key):
+                            if len(parts) < 2: return f"{env_key}_unknown"
+                            base = parts[-2]
+                            if base == env_key:
+                                return env_key
+                            if base.endswith("_velocity_controller"):
+                                base = parts[-3] if len(parts) >= 3 else base.replace("_velocity_controller", "")
+                            elif base == "power_publisher":
+                                base = parts[-3] if len(parts) >= 3 else base
+                            return f"{env_key}_{base}"
+                        
+                        # Odom
+                        if topic.endswith("/odom") and "velocity_controller" not in topic:
+                            robot_name = get_robot_name(parts, env_key)
+                                
+                            target = robot_data[robot_name]["odom"]
+                            target["time_ns"].append(ts_ns)
+                            target["pos_x"].append(ros_msg.pose.pose.position.x)
+                            target["pos_y"].append(ros_msg.pose.pose.position.y)
+                        
+                            yaw = self._quaternion_to_yaw(
+                                ros_msg.pose.pose.orientation.x,
+                                ros_msg.pose.pose.orientation.y,
+                                ros_msg.pose.pose.orientation.z,
+                                ros_msg.pose.pose.orientation.w
+                            )
+                            target["yaw"].append(yaw)
+                            target["vel_linear"].append(ros_msg.twist.twist.linear.x)
+                            target["vel_angular"].append(ros_msg.twist.twist.angular.z)
+                            appended = True
+                    
+                        # Scan
+                        elif topic.endswith("/scan") or topic.endswith("/lidar"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["scan"]
+                            target["time_ns"].append(ts_ns)
+                            target["scan_ranges"].append(list(ros_msg.ranges))
+                            target["scan_min"].append(ros_msg.range_min)
+                            appended = True
+                        
+                        # Cmd_vel
+                        elif topic.endswith("/cmd_vel"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["cmd_vel"]
+                            target["time_ns"].append(ts_ns)
+                            target["linear_x"].append(ros_msg.linear.x)
+                            target["linear_y"].append(ros_msg.linear.y)
+                            target["linear_z"].append(ros_msg.linear.z)
+                            target["angular_x"].append(ros_msg.angular.x)
+                            target["angular_y"].append(ros_msg.angular.y)
+                            target["angular_z"].append(ros_msg.angular.z)
+                            appended = True
+                        # Joint states
+                        elif topic.endswith("/joint_states"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["joint_states"]
+                            target["time_ns"].append(ts_ns)
+                            target["name"].append(list(ros_msg.name))
+                            target["position"].append(list(ros_msg.position))
+                            target["velocity"].append(list(ros_msg.velocity))
+                            target["effort"].append(list(ros_msg.effort))
+                            appended = True
+    
+                        # Pedestrians
+                        elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
+                            target = env_data[env_key]["peds"]
+                            target["time_ns"].append(ts_ns)
+                            
+                            if hasattr(ros_msg, "pedestrians"):
+                                agents = ros_msg.pedestrians
+                                is_pose2d = False
+                            else:
+                                agents = [a for a in ros_msg.agents if getattr(a, "kind", 0) == 0]
+                                is_pose2d = True
+    
+                            target["num_pedestrians"].append(len(agents))
+                            
+                            positions = []
+                            headings = []
+                            twists = []
+                            
+                            for p in agents:
+                                if is_pose2d:
+                                    positions.extend([p.pose.x, p.pose.y, 0.0])
+                                    headings.append(p.pose.theta)
+                                    twists.extend([p.velocity.x, p.velocity.y, p.velocity.z])
+                                else:
+                                    # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
+                                    positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
+                                    
+                                    # Headings: calculate yaw from quaternion
+                                    yaw = self._quaternion_to_yaw(
+                                        p.pose.orientation.x,
+                                        p.pose.orientation.y,
+                                        p.pose.orientation.z,
+                                        p.pose.orientation.w
+                                    )
+                                    headings.append(yaw)
+                                    
+                                    # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
+                                    twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
+                                    
+                            target["peds_positions"].append(positions)
+                            target["peds_headings"].append(headings)
+                            target["peds_twists"].append(twists)
+                            
+                            appended = True
+    
+                        # Episode records
+                        elif topic.endswith("/state/episode"):
+                            target = env_data[env_key]["episode_record"]
+                            target["time_ns"].append(ts_ns)
+                            target["episode_id"].append(ros_msg.episode_id)
+                            target["outcome_state"].append(ros_msg.outcome_state)
+                            target["outcome_info"].append(ros_msg.outcome_info)
+                            target["goal_uuid"].append(ros_msg.goal_uuid)
+                            
+                            robots_yaml = ""
+                            try:
+                                import yaml
+                                robots_dict = {}
+                                for p in ros_msg.robots_params:
+                                    robots_dict[p.name] = self._param_value_to_py(p.value)
+                                robots_dict = self._unflatten_dict(robots_dict)
+                                robots_yaml = yaml.dump(robots_dict)
+                            except Exception:
+                                pass
+                            target["robots_params"].append(robots_yaml)
+                            appended = True
+    
+                        # Collision Events (Taskgen simulation)
+                        elif topic.endswith("/collision_events"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["collision_events"]
+                            target["time_ns"].append(ts_ns)
+                            target["collision_event"].append(len(ros_msg.events))
+                            appended = True
+                            
+                        # Collision Monitor State (Nav2)
+                        elif topic.endswith("/collision_monitor_state"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["collision_monitor_state"]
+                            target["time_ns"].append(ts_ns)
+                            target["action_type"].append(ros_msg.action_type)
+                            target["polygon_name"].append(ros_msg.polygon_name)
+                            appended = True
+    
+                        # Power
+                        elif topic.endswith("/power_publisher/power"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["power"]
+                            target["time_ns"].append(ts_ns)
+                            target["total_power_w"].append(ros_msg.total_power_w)
+                            target["static_power_w"].append(ros_msg.static_power_w)
+                            target["total_mechanical_power_w"].append(ros_msg.total_mechanical_power_w)
+                            target["total_thermal_power_w"].append(ros_msg.total_thermal_power_w)
+                            target["joint_names"].append(list(ros_msg.joint_names))
+                            target["joint_mechanical_power_w"].append(list(ros_msg.joint_mechanical_power_w))
+                            target["joint_thermal_power_w"].append(list(ros_msg.joint_thermal_power_w))
+                            target["joint_total_power_w"].append(list(ros_msg.joint_total_power_w))
+                            appended = True
+    
+                        # Energy
+                        elif topic.endswith("/power_publisher/energy"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["energy"]
+                            target["time_ns"].append(ts_ns)
+                            target["total_energy_consumed_wh"].append(ros_msg.total_energy_consumed_wh)
+                            target["battery_soc_percent"].append(ros_msg.battery_soc_percent)
+                            appended = True
+    
+                        # Global plan
+                        elif topic.endswith("/plan") or topic.endswith("/global_plan"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["plan"]
+                            target["time_ns"].append(ts_ns)
+                            poses_x = []
+                            poses_y = []
+                            poses_yaw = []
+                            for pose_stamped in ros_msg.poses:
+                                poses_x.append(pose_stamped.pose.position.x)
+                                poses_y.append(pose_stamped.pose.position.y)
+                                poses_yaw.append(self._quaternion_to_yaw(
+                                    pose_stamped.pose.orientation.x,
+                                    pose_stamped.pose.orientation.y,
+                                    pose_stamped.pose.orientation.z,
+                                    pose_stamped.pose.orientation.w
+                                ))
+                            target["poses_x"].append(poses_x)
+                            target["poses_y"].append(poses_y)
+                            target["poses_yaw"].append(poses_yaw)
+                            appended = True
+                            
+                        # Initialpose
+                        elif topic.endswith("/initialpose"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["initialpose"]
+                            target["time_ns"].append(ts_ns)
+                            target["pos_x"].append(ros_msg.pose.pose.position.x)
+                            target["pos_y"].append(ros_msg.pose.pose.position.y)
+                            target["yaw"].append(self._quaternion_to_yaw(
+                                ros_msg.pose.pose.orientation.x,
+                                ros_msg.pose.pose.orientation.y,
+                                ros_msg.pose.pose.orientation.z,
+                                ros_msg.pose.pose.orientation.w
+                            ))
+                            appended = True
+                            
+                        # TF processing
+                        elif topic in ("/tf", "tf", "/tf_static", "tf_static"):
+                            target_dict = global_data["tf_static"] if "static" in topic else global_data["tf"]
+                            for t in ros_msg.transforms:
+                                target_dict["time_ns"].append(ts_ns)
+                                target_dict["frame_id"].append(t.header.frame_id)
+                                target_dict["child_frame_id"].append(t.child_frame_id)
+                                target_dict["trans_x"].append(t.transform.translation.x)
+                                target_dict["trans_y"].append(t.transform.translation.y)
+                                target_dict["trans_z"].append(t.transform.translation.z)
+                                target_dict["rot_x"].append(t.transform.rotation.x)
+                                target_dict["rot_y"].append(t.transform.rotation.y)
+                                target_dict["rot_z"].append(t.transform.rotation.z)
+                                target_dict["rot_w"].append(t.transform.rotation.w)
+                                appended = True
+    
+                                # Detect ground-truth map/world/odom -> base_link transform if available
+                                parent = t.header.frame_id.strip('/')
+                                child = t.child_frame_id.strip('/')
+                                parent_lower = parent.lower()
+                                child_lower = child.lower()
+                                
+                                is_world_frame = (
+                                    parent_lower in ("map", "world", "odom") or
+                                    parent_lower.endswith("/map") or
+                                    parent_lower.endswith("/world") or
+                                    parent_lower.endswith("/odom")
+                                )
+                                is_base_frame = (
+                                    child_lower.endswith("base_link") or
+                                    child_lower.endswith("base_footprint") or
+                                    "base_link" in child_lower or
+                                    "base_footprint" in child_lower
+                                )
+                                
+                                # Filter by env_prefix if detected
+                                if env_prefix and env_prefix not in child_lower:
+                                    continue
+                                    
+                                if is_world_frame and is_base_frame:
+                                    child_parts = child.split('/')
+                                    robot_name = get_robot_name(child_parts, env_key)
+                                                                   
+                                    yaw_val = self._quaternion_to_yaw(
+                                        t.transform.rotation.x,
+                                        t.transform.rotation.y,
+                                        t.transform.rotation.z,
+                                        t.transform.rotation.w
+                                    )
+                                    target = robot_data[robot_name]["tf_gt"]
+                                    target["time_ns"].append(ts_ns)
+                                    target["pos_x_gt"].append(t.transform.translation.x)
+                                    target["pos_y_gt"].append(t.transform.translation.y)
+                                    target["yaw_gt"].append(yaw_val)
+                                    appended = True
+    
+                        if appended:
+                            accumulated_count += 1
+                            if accumulated_count >= 10000:
+                                flush_buffers()
+                                accumulated_count = 0
         finally:
             flush_buffers()
             for writer in writers.values():
@@ -506,7 +506,7 @@ class MCAPReader:
                 setattr(global_bundle, t_name, lf)
 
         # Build each robot's bundle
-        robot_dirs = [d for d in topics_dir.iterdir() if d.is_dir() and re.match(r'^env_\d+$', d.name) is None]
+        robot_dirs = [d for d in topics_dir.iterdir() if d.is_dir()]
         
         # Calculate env offsets
         env_offsets = {}

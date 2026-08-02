@@ -20,8 +20,11 @@ class Step:
 
     @property
     def key(self) -> str:
-        ref_suffix = f"_{self.reference_type}" if (self.is_reference and self.reference_type) else ""
-        return f"{self.contestant.name}{ref_suffix}/{self.stage.name}"
+        if self.is_reference and self.reference_type:
+            if self.contestant.name.endswith(self.reference_type):
+                return f"{self.contestant.name}/{self.stage.name}"
+            return f"{self.contestant.name}_{self.reference_type}/{self.stage.name}"
+        return f"{self.contestant.name}/{self.stage.name}"
 
 
 

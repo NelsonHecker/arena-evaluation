@@ -103,92 +103,73 @@ class DataRecorderNode(Node):
                 self.set_parameters([Parameter("data_recorder_autoprefix", Parameter.Type.STRING, timestamp)])
             else:
                 timestamp = param_value
-            record_data_dir = os.path.join("data", "recordings", timestamp)
-
-        record_data_dir_path = pathlib.Path(record_data_dir)
-        if not record_data_dir_path.is_absolute():
+            # Auto mode: create a flat episodes/ directory under data/
             workspace_root = pathlib.Path(self.base_dir).parents[3]
-            record_data_dir_path = workspace_root / record_data_dir_path
+            record_data_dir_path = workspace_root / "data" / timestamp / "episodes"
+        else:
+            record_data_dir_path = pathlib.Path(record_data_dir)
+            if not record_data_dir_path.is_absolute():
+                workspace_root = pathlib.Path(self.base_dir).parents[3]
+                record_data_dir_path = workspace_root / record_data_dir_path
 
-        self.run_dir = record_data_dir_path.resolve()
-
-        bare_names = {"data", "recordings"}
-        if self.run_dir.name in bare_names or not record_data_dir_path.parts[1:]:
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            self.run_dir = self.run_dir / "recordings" / timestamp
-
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        # episodes_root is the episodes/ directory — episode_XXX/ dirs go inside it
+        self.episodes_root = record_data_dir_path.resolve()
+        self.episodes_root.mkdir(parents=True, exist_ok=True)
         try:
-            self.run_dir.chmod(0o777)
+            self.episodes_root.chmod(0o777)
         except Exception:
             pass
 
-        parts = self.run_dir.parts
-        try:
-            if len(parts) >= 5 and parts[-3] == "recordings":
-                self.benchmark_id = parts[-4]
-                self.planner = parts[-2]
-                self.stage = parts[-1]
-            else:
-                self.benchmark_id = "unknown"
-                self.planner = "unknown"
-                self.stage = "unknown"
-        except Exception:
-            self.benchmark_id = "unknown"
-            self.planner = "unknown"
-            self.stage = "unknown"
-
+        # Declare and read all ROS params — contestant/stage/map are passed explicitly by runner
         for param_name, default_val in [
             ("world", "unknown"),
             ("suite_name", "unknown"),
             ("contest_name", "unknown"),
             ("benchmark_id", ""),
-            ("planner", ""),
+            ("contestant", ""),
             ("stage", ""),
+            ("map", ""),
+            ("is_reference", False),
+            ("reference_type", ""),
+            ("episode_id_offset", 0),
         ]:
             if not self.has_parameter(param_name):
                 try:
                     self.declare_parameter(param_name, default_val)
                 except Exception:
                     pass
-                    
-        param_benchmark = self.get_parameter("benchmark_id").value
-        if param_benchmark: self.benchmark_id = param_benchmark
-        
-        param_planner = self.get_parameter("planner").value
-        if param_planner: self.planner = param_planner
-        
-        param_stage = self.get_parameter("stage").value
-        if param_stage: self.stage = param_stage
 
-        self.world = self.get_parameter("world").value
-        self.suite_name = self.get_parameter("suite_name").value
-        self.contest_name = self.get_parameter("contest_name").value
-        
+        self.benchmark_id = self.get_parameter("benchmark_id").value or "unknown"
+        self.planner = self.get_parameter("contestant").value or "unknown"
+        self.stage = self.get_parameter("stage").value or "unknown"
+        self.map_name = self.get_parameter("map").value or "unknown"
+        self.world = self.get_parameter("world").value or "unknown"
+        self.suite_name = self.get_parameter("suite_name").value or ""
+        self.contest_name = self.get_parameter("contest_name").value or ""
+        self.is_reference = bool(self.get_parameter("is_reference").value)
+        self.reference_type = self.get_parameter("reference_type").value or None
+        self._episode_id_offset = int(self.get_parameter("episode_id_offset").value or 0)
+        self._counter_file = self.episodes_root / ".episode_counter"
+
+        env_namespace = self.get_namespace().strip('/')
+        self.env_ns_root = f"/{env_namespace}" if env_namespace else ""
+
         self.robot_model = "unknown"
         self.known_robots = set()
 
-        self.mcap_path = self.run_dir / "recording.mcap"
-        self.metadata_path = self.run_dir / "metadata.yaml"
+        self.current_episode_id: int | None = None
+        self.current_episode_dir: pathlib.Path | None = None
+        self.current_metadata_path: pathlib.Path | None = None
+        self.current_metadata = None
 
-        if self.mcap_path.exists():
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            backup = self.run_dir / f"recording_backup_{ts}.mcap"
-            try:
-                shutil.move(str(self.mcap_path), str(backup))
-                self.get_logger().warn(f"Backed up existing MCAP to {backup}")
-            except Exception:
-                shutil.rmtree(self.mcap_path, ignore_errors=True)
 
         self._open_log_file()
 
-        self.write_params()
         self.config = self.read_config()
         self.freqs = self.config.get("record_frequencies", {"default": 20.0})
 
-        self._log_info(f"Writing initial metadata to {self.metadata_path}")
-        self._write_initial_metadata()
-        self._log_info("Initial metadata written OK")
+        self._log_info(f"Recorder ready. Episodes root: {self.episodes_root}")
+        self._log_info(f"planner={self.planner!r} stage={self.stage!r} map={self.map_name!r} benchmark_id={self.benchmark_id!r}")
 
         self.current_time = None
         self._pre_clock_buffer = []
@@ -221,15 +202,9 @@ class DataRecorderNode(Node):
         self._log_info(f"Subscribing to /clock for sim time")
         self.clock_sub = self.create_subscription(Clock, "/clock", self.clock_callback, self.qos)
 
-        env_namespace = self.get_namespace().strip('/')
-        env_ns_root = f"/{env_namespace}" if env_namespace else ""
-
-
         self._log_info(f"Setting up topic subscriptions")
         self._setup_subscriptions()
-        self._log_info(f"Topic subscriptions ready. Opening MCAP writer...")
-
-        self._start_recording()
+        self._log_info(f"Topic subscriptions ready. Waiting for first episode to open MCAP writer...")
 
     def _open_log_file(self):
         if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
@@ -237,27 +212,45 @@ class DataRecorderNode(Node):
                 self.log_file.close()
             except Exception:
                 pass
-        self.log_file_path = self.run_dir / "recorder.log"
+        self.log_file_path = self.episodes_root / "recorder.log"
         try:
-            self.log_file = open(self.log_file_path, "a", buffering=1) # Line buffered
+            self.log_file = open(self.log_file_path, "a", buffering=1)  # Line buffered
         except Exception as e:
             print(f"[DataRecorder] Failed to open log file at {self.log_file_path}: {e}", flush=True)
             self.log_file = None
 
-    def _start_recording(self):
-        """Open the rosbag2 SequentialWriter on the continuous MCAP file.
+    def _start_episode_recording(self, episode_id: int):
+        """Close any current writer and open a fresh one for this episode."""
 
-        rosbag2 treats the `uri` as a directory prefix: it creates a folder
-        named `uri` and puts `<uri>_0.mcap` inside.  We therefore pass only
-        the stem (e.g. "recording"), which produces run_dir/recording/recording_0.mcap.
-        """
-        self._log_info(f"Opening MCAP writer in {self.run_dir}")
-        mcap_uri = str(self.mcap_path.with_suffix(""))
-        self._log_info(f"Opening MCAP writer: uri={mcap_uri}")
+        global_episode_id = self._episode_id_offset + episode_id
+
+        self._close_current_writer()
+
+        ep_name = f"episode_{global_episode_id:03d}"
+        ep_dir = self.episodes_root / ep_name
+        ep_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            ep_dir.chmod(0o777)
+        except Exception:
+            pass
+
+        self.current_episode_id = global_episode_id
+        self.current_episode_dir = ep_dir
+        self.current_metadata_path = ep_dir / f"{ep_name}.yaml"
+
+        try:
+            self._counter_file.write_text(str(global_episode_id + 1))
+        except Exception as e:
+            self._log_warn(f"Failed to update .episode_counter: {e}")
+
+        self._write_episode_metadata(global_episode_id)
+
+        mcap_uri = str(ep_dir / ep_name)
+        self._log_info(f"Opening MCAP writer for {ep_name}: uri={mcap_uri}")
 
         mcap_config_path = os.path.join(self.base_dir, "config", "mcap_writer_options.yaml")
         if not os.path.exists(mcap_config_path):
-            self._log_warn(f"mcap_writer_options.yaml not found at {mcap_config_path} — recording WITHOUT compression")
+            self._log_warn(f"mcap_writer_options.yaml not found — recording WITHOUT compression")
             mcap_config_path = ""
 
         storage_options = rosbag2_py.StorageOptions(
@@ -275,18 +268,48 @@ class DataRecorderNode(Node):
         try:
             with self.writer_lock:
                 self.writer = rosbag2_py.SequentialWriter()
-                self._log_info("Calling writer.open() now...")
                 self.writer.open(storage_options, converter_options)
                 self.topics_metadata = {}
                 self.last_recorded_times = {}
-            self._log_info(f"MCAP writer opened successfully at {mcap_uri} (config: {mcap_config_path or 'none'})")
+            self._log_info(f"MCAP writer opened for {ep_name}")
         except Exception as e:
-            self._log_error(f"FATAL: Failed to open MCAP writer: {e}")
-            import traceback as tb
-            self._log_error(tb.format_exc())
+            self._log_error(f"Failed to open MCAP writer for {ep_name}: {e}")
             self.writer = None
 
-        self._log_info(f"Started continuous recording at: {self.mcap_path}")
+    def _close_current_writer(self):
+        """Flush, close the current writer, and flatten the rosbag2 subdirectory."""
+        with self.writer_lock:
+            if self.writer is None:
+                return
+            try:
+                self.writer.close()
+            except Exception as e:
+                self._log_error(f"Error closing MCAP writer: {e}")
+            finally:
+                self.writer = None
+
+        # rosbag2 creates: ep_dir/ep_name/ep_name_0.mcap
+        # Flatten to:      ep_dir/ep_name.mcap
+        if self.current_episode_dir is not None:
+            ep_name = self.current_episode_dir.name
+            inner_dir = self.current_episode_dir / ep_name
+            if inner_dir.is_dir():
+                for mcap_file in sorted(inner_dir.glob("*.mcap")):
+                    dest = self.current_episode_dir / f"{ep_name}.mcap"
+                    if dest.exists():
+                        dest = self.current_episode_dir / f"{ep_name}_{mcap_file.stem}.mcap"
+                    try:
+                        shutil.move(str(mcap_file), str(dest))
+                        self._log_info(f"Flattened {mcap_file.name} → {dest.name}")
+                    except Exception as e:
+                        self._log_error(f"Failed to flatten {mcap_file}: {e}")
+                try:
+                    inner_dir.rmdir()
+                except Exception:
+                    pass
+
+        # Write final episode metadata
+        self._finalize_episode_metadata()
 
     def _setup_subscriptions(self):
         env_namespace = self.get_namespace().strip('/')
@@ -353,9 +376,9 @@ class DataRecorderNode(Node):
                                 and "velocity_controller" not in part \
                                 and not part.startswith("env_"):
                             self.robot_model = part
-                            if hasattr(self, 'metadata') and self.metadata is not None:
-                                self.metadata.robot_model = [part]
-                                MetadataWriter.write(self.metadata, self.metadata_path)
+                            if hasattr(self, 'current_metadata') and self.current_metadata is not None:
+                                self.current_metadata.robot_model = [part]
+                                MetadataWriter.write(self.current_metadata, self.current_metadata_path)
                             break
 
     def _subscribe_discovered(self, topic_name: str, msg_type):
@@ -380,14 +403,17 @@ class DataRecorderNode(Node):
             del self._pre_clock_buffer
 
     def episode_record_callback(self, msg: EpisodeRecord):
+        # Rotate writer when a new episode begins
         if msg.episode_id not in self._seen_episodes:
             self._seen_episodes.add(msg.episode_id)
             self.episodes_recorded += 1
+            self._log_info(f"New episode detected: episode_id={msg.episode_id}")
+            self._start_episode_recording(msg.episode_id)
 
         now = self.current_time
         if now is None:
             now = self.get_clock().now().nanoseconds
-        
+
         env_namespace = self.get_namespace().strip('/')
         episode_topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
         self._write_to_bag_at(episode_topic, msg, now)
@@ -446,18 +472,18 @@ class DataRecorderNode(Node):
                 if self.robot_model == "unknown":
                     self.robot_model = robot.model
                     
-                if hasattr(self, 'metadata') and self.metadata is not None:
-                    if "unknown" in self.metadata.robot_model:
-                        self.metadata.robot_model = []
-                        
-                    if robot.model not in self.metadata.robot_model:
-                        self.metadata.robot_model.append(robot.model)
-                        
+                if hasattr(self, 'current_metadata') and self.current_metadata is not None:
+                    if "unknown" in self.current_metadata.robot_model:
+                        self.current_metadata.robot_model = []
+
+                    if robot.model not in self.current_metadata.robot_model:
+                        self.current_metadata.robot_model.append(robot.model)
+
                     try:
                         from ..storage.manifest import MetadataWriter
-                        MetadataWriter.write(self.metadata, self.metadata_path)
+                        MetadataWriter.write(self.current_metadata, self.current_metadata_path)
                     except Exception as e:
-                        self.get_logger().warn(f"Failed to write metadata: {e}")
+                        self.get_logger().warn(f"Failed to write episode metadata: {e}")
 
     def _resolve_throttle_ms(self, topic_name: str) -> float:
         topic_lower = topic_name.lower()
@@ -584,39 +610,60 @@ class DataRecorderNode(Node):
             self.topics_metadata[strip] = self._topic_registry[topic_name]
 
 
-    def _write_initial_metadata(self):
-        metadata = IngestionMetadata.create_initial_metadata(
+    def _write_episode_metadata(self, episode_id: int):
+        """Write initial episode_XXX.yaml for this episode."""
+        metadata = IngestionMetadata.create_episode_metadata(
             benchmark_id=self.benchmark_id,
             planner=self.planner,
             stage=self.stage,
-            map_name=self.world,
-            episodes_requested=0,
+            map_name=self.map_name,
+            episode_id=episode_id,
             robot_model=self.robot_model,
-            suite_name=self.suite_name,
-            contest_name=self.contest_name,
+            env_ns_root=self.env_ns_root,
+            is_reference=self.is_reference,
+            reference_type=self.reference_type,
         )
-        MetadataWriter.write(metadata, self.metadata_path)
-        self.metadata = metadata
+        MetadataWriter.write(metadata, self.current_metadata_path)
+        self.current_metadata = metadata
+        self._log_info(f"Wrote episode metadata: {self.current_metadata_path}")
+
+    def _finalize_episode_metadata(self):
+        """Update episode yaml with final recording stats after writer is closed."""
+        if self.current_metadata is None or self.current_metadata_path is None:
+            return
+        try:
+            self.current_metadata.recording_ended_at = datetime.now(timezone.utc).isoformat()
+            self.current_metadata.pedsim_available = any(
+                "arena_peds" in t or "agent_states" in t for t in self.recorded_topics
+            )
+            self.current_metadata.recorded_topics = sorted(self.recorded_topics)
+            MetadataWriter.write(self.current_metadata, self.current_metadata_path)
+            self._log_info(f"Finalized episode metadata: {self.current_metadata_path}")
+        except Exception as e:
+            self._log_error(f"Failed to finalize episode metadata: {e}")
 
     def _update_metadata_from_episode(self, msg: EpisodeRecord):
+        """Update the current episode's metadata with live EpisodeRecord data."""
+        if self.current_metadata is None:
+            return
         try:
-            if not self.metadata.robot_model or self.metadata.robot_model == ["unknown"]:
-                self.metadata.robot_model = list(msg.robots)
-            if not self.metadata.map or self.metadata.map == "unknown":
-                self.metadata.map = msg.world
+            if not self.current_metadata.robot_model or self.current_metadata.robot_model == ["unknown"]:
+                self.current_metadata.robot_model = list(msg.robots)
+            if not self.current_metadata.map or self.current_metadata.map == "unknown":
+                self.current_metadata.map = msg.world
 
-            self.metadata.tm_obstacles = msg.tm_obstacles
-            self.metadata.tm_robots = msg.tm_robots
-            self.metadata.tm_modules = list(msg.tm_modules)
+            self.current_metadata.tm_obstacles = msg.tm_obstacles
+            self.current_metadata.tm_robots = msg.tm_robots
+            self.current_metadata.tm_modules = list(msg.tm_modules)
 
             obstacles_params = {p.name: self._param_value_to_py(p.value) for p in msg.obstacles_params}
             robots_params = {p.name: self._param_value_to_py(p.value) for p in msg.robots_params}
-            self.metadata.obstacles_params = self._unflatten_dict(obstacles_params)
-            self.metadata.robots_params = self._unflatten_dict(robots_params)
+            self.current_metadata.obstacles_params = self._unflatten_dict(obstacles_params)
+            self.current_metadata.robots_params = self._unflatten_dict(robots_params)
 
-            MetadataWriter.write(self.metadata, self.metadata_path)
+            MetadataWriter.write(self.current_metadata, self.current_metadata_path)
         except Exception as e:
-            self._log_error(f"Failed to update metadata from episode: {e}")
+            self._log_error(f"Failed to update episode metadata: {e}")
 
     def _param_value_to_py(self, val):
         from rcl_interfaces.msg import ParameterType
@@ -643,22 +690,7 @@ class DataRecorderNode(Node):
             curr[parts[-1]] = v
         return res
 
-    def write_params(self):
-        params_path = self.run_dir / "params.yaml"
-        for param_name, default_val in [("map_file", ""), ("scenario_file", "")]:
-            if not self.has_parameter(param_name):
-                try:
-                    self.declare_parameter(param_name, default_val)
-                except Exception:
-                    pass
 
-        with open(params_path, "w") as f:
-            yaml.dump({
-                "model": self.model if hasattr(self, 'model') else "",
-                "map_file": self.get_parameter("map_file").value,
-                "scenario_file": self.get_parameter("scenario_file").value,
-                "namespace": self.get_namespace().strip('/'),
-            }, f)
 
     def read_config(self):
         config_path = os.path.join(self.base_dir, "config", "data_recorder_config.yaml")
@@ -669,7 +701,7 @@ class DataRecorderNode(Node):
             return {"record_frequencies": {"default": 20.0}}
 
     def finalize(self):
-        """Flush and close the writer, write final metadata."""
+        """Close the current episode writer and write final metadata."""
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
@@ -680,37 +712,22 @@ class DataRecorderNode(Node):
         except Exception:
             pass
 
-        print(f"[DataRecorder] finalize() called. clock_ticks={self._clock_received_count} writes_ok={self._write_success_count} writes_dropped={self._write_drop_count} episodes={self.episodes_recorded}", flush=True)
+        print(
+            f"[DataRecorder] finalize() called. "
+            f"clock_ticks={self._clock_received_count} "
+            f"writes_ok={self._write_success_count} "
+            f"writes_dropped={self._write_drop_count} "
+            f"episodes={self.episodes_recorded}",
+            flush=True,
+        )
+        self._log_info("Finalizing recording — closing last episode writer...")
 
-        self._log_info("Finalizing recording...")
+        # Close current episode writer (also flattens rosbag2 subdir + finalizes yaml)
+        self._close_current_writer()
 
-        if hasattr(self, 'metadata') and self.metadata is not None:
-            self.metadata.recording_ended_at = datetime.now(timezone.utc).isoformat()
-            self.metadata.episodes_recorded = self.episodes_recorded
-            self.metadata.pedsim_available = any("arena_peds" in t or "agent_states" in t for t in self.recorded_topics)
-            self.metadata.recorded_topics = sorted(self.recorded_topics)
-            print(f"[DataRecorder] Writing final run-level metadata to {self.metadata_path}...", flush=True)
-            try:
-                MetadataWriter.write(self.metadata, self.metadata_path)
-                print("[DataRecorder] Run-level metadata written successfully.", flush=True)
-            except Exception as e:
-                print(f"[DataRecorder] Failed to write final metadata: {e}", flush=True)
-
-        with self.writer_lock:
-            if self.writer is not None:
-                print("[DataRecorder] Closing MCAP writer...", flush=True)
-                try:
-                    self.writer.close()
-                    print("[DataRecorder] MCAP writer closed successfully.", flush=True)
-                except Exception as e:
-                    print(f"[DataRecorder] Failed to close MCAP writer: {e}", flush=True)
-                finally:
-                    del self.writer
-                    self.writer = None
-                    import gc
-                    gc.collect()
-
-        self._log_info(f"Recording finished. {self.episodes_recorded} episodes recorded to {self.mcap_path}")
+        self._log_info(
+            f"Recording finished. {self.episodes_recorded} episodes recorded to {self.episodes_root}"
+        )
 
     def destroy_node(self):
         self.finalize()

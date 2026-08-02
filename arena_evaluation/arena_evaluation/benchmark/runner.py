@@ -136,6 +136,65 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
     return args
 
 
+def _all_steps_grid(
+    suite: Suite,
+    contest: Contest,
+    scale_episodes: float,
+    record_root: pathlib.Path | None = None,
+) -> list[Step]:
+    """Generate all steps for a benchmark suite and contest.
+
+    Deduplicates unhindered_peds steps to run once per stage.
+    All steps share the same episodes/ root directory; the recorder is responsible
+    for creating episode_XXX/ subdirectories as episodes arrive.
+    """
+    steps: list[Step] = []
+    seen: set[str] = set()
+
+    # Flat episodes/ directory shared by all steps in the benchmark
+    episodes_dir = (record_root / "episodes") if record_root is not None else None
+
+    for contestant in contest.contestants:
+        for stage in suite.stages:
+            main_step = Step(
+                contestant=contestant,
+                stage=stage,
+                episodes=int(round(stage.episodes * scale_episodes)),
+                record_dir=episodes_dir,
+            )
+            ref_robot_step = Step(
+                contestant=contestant,
+                stage=stage,
+                episodes=int(round(stage.episodes * scale_episodes)),
+                record_dir=episodes_dir,
+                is_reference=True,
+                reference_type="unobstructed_robot",
+            )
+            for step in (main_step, ref_robot_step):
+                if step.key in seen:
+                    raise ValueError(f"duplicate step key: {step.key!r}")
+                seen.add(step.key)
+                steps.append(step)
+
+    # Shared unhindered_peds reference step per stage
+    dummy_peds_contestant = Contest.Contestant(name="unhindered_peds", args={})
+    for stage in suite.stages:
+        ref_peds_step = Step(
+            contestant=dummy_peds_contestant,
+            stage=stage,
+            episodes=int(round(stage.episodes * scale_episodes)),
+            record_dir=episodes_dir,
+            is_reference=True,
+            reference_type="unhindered_peds",
+        )
+        if ref_peds_step.key in seen:
+            raise ValueError(f"duplicate step key: {ref_peds_step.key!r}")
+        seen.add(ref_peds_step.key)
+        steps.append(ref_peds_step)
+
+    return steps
+
+
 def build_pending(
     suite: Suite,
     contest: Contest,
@@ -144,63 +203,21 @@ def build_pending(
     retry_failed: bool,
     record_root: pathlib.Path,
 ) -> list[Step]:
-    """Return the list of steps that still need to be run.
-
-    Retry policy:
-      - Not in state file   -> run.
-      - status: ok          -> skip (done).
-      - status: failed      -> skip unless retry_failed=True.
-      - status: partial     -> always retry; partial steps are definitionally
-                               incomplete (some episodes failed or the run was
-                               interrupted), so they need a full re-run.
-      - status: skipped     -> run again (skipped = cancelled, deserves a fresh try).
-      - status: in_progress -> run again (interrupted mid-flight).
-    """
+    """Return the list of steps that still need to be run."""
     state_steps = run_dir.state.steps
-    steps: list[Step] = []
-    seen: set[str] = set()
-    for contestant in contest.contestants:
-        for stage in suite.stages:
-            main_step = Step(
-                contestant=contestant,
-                stage=stage,
-                episodes=int(round(stage.episodes * scale_episodes)),
-                record_dir=record_root / "recordings" / contestant.name / stage.name,
-            )
-            
-            ref_robot_step = Step(
-                contestant=contestant,
-                stage=stage,
-                episodes=int(round(stage.episodes * scale_episodes)),
-                record_dir=record_root / "recordings" / f"{contestant.name}_unobstructed_robot" / stage.name,
-                is_reference=True,
-                reference_type="unobstructed_robot"
-            )
-            
-            ref_peds_step = Step(
-                contestant=contestant,
-                stage=stage,
-                episodes=int(round(stage.episodes * scale_episodes)),
-                record_dir=record_root / "recordings" / f"{contestant.name}_unhindered_peds" / stage.name,
-                is_reference=True,
-                reference_type="unhindered_peds"
-            )
-
-            for step in [main_step, ref_robot_step, ref_peds_step]:
-                if step.key in seen:
-                    raise ValueError(f"duplicate step key: {step.key!r}")
-                seen.add(step.key)
-                existing = state_steps.get(step.key)
-                if existing is None:
-                    steps.append(step)
-                    continue
-                if existing.status == "ok":
-                    continue
-                if existing.status == "failed" and not retry_failed:
-                    continue
-                # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
-                steps.append(step)
-    return steps
+    pending: list[Step] = []
+    for step in _all_steps_grid(suite, contest, scale_episodes, record_root):
+        existing = state_steps.get(step.key)
+        if existing is None:
+            pending.append(step)
+            continue
+        if existing.status == "ok":
+            continue
+        if existing.status == "failed" and not retry_failed:
+            continue
+        # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
+        pending.append(step)
+    return pending
 
 
 def env_key(step: Step, simulator: str | None) -> tuple:
@@ -390,6 +407,7 @@ class BenchmarkRunner(ArenaMixinNode):
         self._state_pub = self.create_publisher(BenchmarkState, STATE_TOPIC, _LATCHED)
 
         self._arena_proc: subprocess.Popen | None = None
+        self._parent_episode_map: dict[tuple[str, str, int], int] = {}
 
     def _build_pending(self) -> list[Step]:
         return build_pending(
@@ -558,7 +576,7 @@ class BenchmarkRunner(ArenaMixinNode):
             for ep_idx in range(step.episodes):
                 goal = RunEpisode.Goal()
                 goal.world = step.stage.map
-                goal.seed = step.stage.seed
+                goal.seed = (step.stage.seed + ep_idx) if step.stage.seed is not None else ep_idx
 
                 ep_started_sim = self.sim_time.to_seconds()
                 ep_started_wall = time.time()
@@ -583,14 +601,18 @@ class BenchmarkRunner(ArenaMixinNode):
                         episodes_total=step.episodes,
                     )
 
+                timeout_s = step.stage.timeout
+                if step.is_reference and step.reference_type == "unhindered_peds" and step.stage.timeout_peds is not None:
+                    timeout_s = step.stage.timeout_peds
+
                 try:
                     result_obj = await asyncio.wait_for(
                         self._await_or_env_died(env_id, ac.await_result(goal_handle)),
-                        timeout=step.stage.timeout,
+                        timeout=timeout_s,
                     )
                 except TimeoutError:
                     episodes_failed += 1
-                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {step.stage.timeout}s; cancelling and advancing")
+                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {timeout_s}s; cancelling and advancing")
                     try:
                         await self.await_ros(goal_handle.cancel_goal_async())
                         await asyncio.wait_for(
@@ -655,6 +677,16 @@ class BenchmarkRunner(ArenaMixinNode):
                 }.get(rec.outcome_state, str(rec.outcome_state))
                 _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s")
 
+                parent_ep_id = None
+                if not step.is_reference:
+                    self._parent_episode_map[(step.contestant.name, step.stage.name, ep_idx)] = episode_id
+                    self._parent_episode_map[("__stage__", step.stage.name, ep_idx)] = episode_id
+                else:
+                    if step.reference_type == "unobstructed_robot":
+                        parent_ep_id = self._parent_episode_map.get((step.contestant.name, step.stage.name, ep_idx))
+                    else:
+                        parent_ep_id = self._parent_episode_map.get(("__stage__", step.stage.name, ep_idx))
+
                 ts_iso = datetime.datetime.now(tz=datetime.UTC).isoformat()
                 self._run_dir.progress.append(
                     ts_iso=ts_iso,
@@ -667,6 +699,9 @@ class BenchmarkRunner(ArenaMixinNode):
                     episode_record=rec,
                     started_at=ep_started_sim,
                     ended_at=ep_ended_sim,
+                    parent_episode_id=parent_ep_id,
+                    is_reference=step.is_reference,
+                    reference_type=step.reference_type,
                 )
         except _EnvDied as exc:
             _log.warning(f"{step.key} env={env_id} env died mid-step after run={episodes_run}, failed={episodes_failed}: {exc}")
@@ -786,6 +821,12 @@ class BenchmarkRunner(ArenaMixinNode):
             for idx, step in enumerate(group):
                 recorder_proc = None
                 if step.record_dir is not None:
+                    counter_file = step.record_dir / ".episode_counter"
+                    try:
+                        episode_id_offset = int(counter_file.read_text().strip()) if counter_file.exists() else 0
+                    except Exception:
+                        episode_id_offset = 0
+
                     recorder_proc = await asyncio.create_subprocess_exec(
                         "ros2",
                         "run",
@@ -796,6 +837,20 @@ class BenchmarkRunner(ArenaMixinNode):
                         "use_sim_time:=true",
                         "-p",
                         f"record_data_dir:={step.record_dir}",
+                        "-p",
+                        f"benchmark_id:={self._run_id}",
+                        "-p",
+                        f"contestant:={step.contestant.name}",
+                        "-p",
+                        f"stage:={step.stage.name}",
+                        "-p",
+                        f"map:={step.stage.map}",
+                        "-p",
+                        f"is_reference:={str(step.is_reference).lower()}",
+                        "-p",
+                        f"reference_type:={step.reference_type or ''}",
+                        "-p",
+                        f"episode_id_offset:={episode_id_offset}",
                         "-r",
                         f"__ns:={env_ns_root}",
                         stdout=subprocess.DEVNULL,
@@ -1139,18 +1194,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
 
 def _all_steps(contest: Contest, suite: Suite, scale_episodes: float) -> list[Step]:
-    steps: list[Step] = []
-    for contestant in contest.contestants:
-        for stage in suite.stages:
-            steps.append(
-                Step(
-                    contestant=contestant,
-                    stage=stage,
-                    episodes=int(round(stage.episodes * scale_episodes)),
-                    record_dir=None,
-                )
-            )
-    return steps
+    return _all_steps_grid(suite, contest, scale_episodes, record_root=None)
 
 
 def _is_inline_contest(contest_name: str) -> bool:
