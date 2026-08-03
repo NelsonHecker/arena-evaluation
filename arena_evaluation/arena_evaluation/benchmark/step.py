@@ -13,8 +13,8 @@ from .config import Contest, Suite
 class Step:
     contestant: Contest.Contestant
     stage: Suite.Stage
-    episodes: int
-    record_dir: pathlib.Path | None
+    episodes: int = 1
+    record_dir: pathlib.Path | None = None
     is_reference: bool = False
     reference_type: str | None = None
 

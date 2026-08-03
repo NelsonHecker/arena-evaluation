@@ -222,9 +222,14 @@ class DataRecorderNode(Node):
     def _start_episode_recording(self, episode_id: int):
         """Close any current writer and open a fresh one for this episode."""
 
-        global_episode_id = self._episode_id_offset + episode_id
+        global_episode_id = self._episode_id_offset
+        self._episode_id_offset += 1
 
         self._close_current_writer()
+        
+        self._write_success_count = 0
+        self._write_drop_count = 0
+        self.recorded_topics = set()
 
         ep_name = f"episode_{global_episode_id:03d}"
         ep_dir = self.episodes_root / ep_name
@@ -303,10 +308,29 @@ class DataRecorderNode(Node):
                         self._log_info(f"Flattened {mcap_file.name} → {dest.name}")
                     except Exception as e:
                         self._log_error(f"Failed to flatten {mcap_file}: {e}")
+                
+                # Merge rosbag2 metadata if present
+                rosbag_meta = inner_dir / "metadata.yaml"
+                if rosbag_meta.exists():
+                    try:
+                        import yaml
+                        with open(rosbag_meta, 'r') as f:
+                            bag_info = yaml.safe_load(f).get("rosbag2_bagfile_information", {})
+                        
+                        if self.current_metadata is not None:
+                            self.current_metadata.rosbag2_message_count = bag_info.get("message_count")
+                            self.current_metadata.rosbag2_topics = bag_info.get("topics_with_message_count")
+                            self._log_info(f"Merged rosbag2 metadata into episode metadata.")
+                        
+                        # Remove it so that we don't have duplicate information and rmdir succeeds
+                        rosbag_meta.unlink()
+                    except Exception as e:
+                        self._log_error(f"Failed to merge rosbag metadata: {e}")
+
                 try:
                     inner_dir.rmdir()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log_warn(f"Failed to remove inner dir {inner_dir.name}: {e}")
 
         # Write final episode metadata
         self._finalize_episode_metadata()
@@ -393,6 +417,12 @@ class DataRecorderNode(Node):
         self._clock_received_count += 1
         if self._clock_received_count <= 5:
             self._log_info(f"/clock tick #{self._clock_received_count}: sim_time_ns={new_time} ({new_time/1e9:.3f}s)")
+            
+        if self.current_time is not None and new_time < self.current_time:
+            self._log_warn(f"Backward time jump detected: {self.current_time} -> {new_time}")
+            # Time went backward (sim reset). Reset last_recorded_times so we don't drop messages.
+            self.last_recorded_times.clear()
+            
         self.current_time = new_time
         
         if hasattr(self, '_pre_clock_buffer') and self._pre_clock_buffer:
@@ -623,9 +653,13 @@ class DataRecorderNode(Node):
             is_reference=self.is_reference,
             reference_type=self.reference_type,
         )
-        MetadataWriter.write(metadata, self.current_metadata_path)
-        self.current_metadata = metadata
-        self._log_info(f"Wrote episode metadata: {self.current_metadata_path}")
+        try:
+            MetadataWriter.write(metadata, self.current_metadata_path)
+            self.current_metadata = metadata
+            self._log_info(f"Wrote episode metadata: {self.current_metadata_path}")
+        except Exception as e:
+            self._log_error(f"Failed to write initial episode metadata: {e}")
+            self.current_metadata = metadata
 
     def _finalize_episode_metadata(self):
         """Update episode yaml with final recording stats after writer is closed."""

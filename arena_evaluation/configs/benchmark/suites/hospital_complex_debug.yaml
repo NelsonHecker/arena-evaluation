@@ -1,0 +1,17 @@
+stages:
+- name: hospital_stage_1_jackal
+  map: hospital_1
+  robot: jackal
+  episodes: 1
+  seed: 43
+  tm_robots: random
+  tm_obstacles: random
+  timeout: 200s
+  config:
+    random:
+      dynamic:
+        min: 0
+        max: 0
+      static:
+        min: 0
+        max: 0

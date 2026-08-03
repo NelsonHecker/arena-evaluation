@@ -600,6 +600,15 @@ def test_build_launch_args_arm_cap_forwarded():
     assert "arm.controller:=ompl" in args
 
 
+def test_build_launch_args_passthrough_cli_args_forwarded():
+    cell = _make_cell()
+    passthrough = {"optim.obstacles": "bbox", "headless": "true", "env_n": "1"}
+    args = build_launch_args(cell, "gazebo", passthrough=passthrough)
+    assert "optim.obstacles:=bbox" in args
+    assert not any(a.startswith("headless:=") for a in args)
+    assert not any(a.startswith("env_n:=") for a in args)
+
+
 def test_build_launch_args_multiple_cap_keys_all_pass():
     cell = _make_cell(contestant_args={
         "mobile.local_planner": "teb",
@@ -1056,6 +1065,21 @@ def test_group_pending_empty():
     assert group_pending([], "gazebo") == []
 
 
+def test_group_pending_unhindered_peds_reuses_env():
+    from arena_evaluation.benchmark.runner import Step, Contest, group_pending
+    step_main = _make_step_for("alpha", "s1", robot="jackal")
+    dummy_contestant = Contest.Contestant(name="unhindered_peds", args={})
+    step_peds = Step(
+        contestant=dummy_contestant,
+        stage=step_main.stage,
+        is_reference=True,
+        reference_type="unhindered_peds",
+    )
+    groups = group_pending([step_main, step_peds], "gazebo")
+    assert len(groups) == 1
+    assert len(groups[0]) == 2
+
+
 def test_env_key_components():
     from arena_evaluation.benchmark.runner import env_key
     step = _make_step_for("planner_a", "indoor", robot="jackal")
@@ -1163,3 +1187,33 @@ def test_flatten_typed_values():
     assert by_name["a_bool"].value.bool_value is True
     assert by_name["a_float"].value.type == ParameterType.PARAMETER_DOUBLE
     assert by_name["a_float"].value.double_value == pytest.approx(3.14)
+
+
+def test_unobstructed_robot_clears_dynamic_preserves_static():
+    import copy
+    from rcl_interfaces.msg import ParameterType
+    from arena_evaluation.benchmark.runner import _flatten_per_mode_params
+
+    stage_config = {
+        "random": {
+            "static": {"min": 4, "max": 4, "models": ["shelf"]},
+            "dynamic": {"min": 2, "max": 2, "models": ["arenian"]},
+        }
+    }
+
+    # Simulate logic in _push_stage_config for reference_type="unobstructed_robot"
+    patched_config = copy.deepcopy(stage_config)
+    mode_block = patched_config.setdefault("random", {})
+    mode_block["dynamic"] = {"min": 0, "max": 0}
+
+    obs_params, _ = _flatten_per_mode_params(
+        patched_config, tm_obstacles="random", tm_robots="random"
+    )
+
+    by_name = {p.name: p for p in obs_params}
+    assert "dynamic.n" in by_name
+    assert by_name["dynamic.n"].value.type == ParameterType.PARAMETER_INTEGER_ARRAY
+    assert list(by_name["dynamic.n"].value.integer_array_value) == [0, 0]
+    assert "static.n" in by_name
+    assert list(by_name["static.n"].value.integer_array_value) == [4, 4]
+

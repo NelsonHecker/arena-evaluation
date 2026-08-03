@@ -58,8 +58,11 @@ class MCAPReader:
             parts = k.split('.')
             curr = res
             for part in parts[:-1]:
-                curr = curr.setdefault(part, {})
-            curr[parts[-1]] = v
+                if part not in curr or not isinstance(curr[part], dict):
+                    curr[part] = {}
+                curr = curr[part]
+            if isinstance(curr, dict):
+                curr[parts[-1]] = v
         return res
 
     def read(self) -> dict[str, TopicBundle]:

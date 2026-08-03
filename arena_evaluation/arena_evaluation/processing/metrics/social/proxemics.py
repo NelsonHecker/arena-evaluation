@@ -139,8 +139,12 @@ class ProxemicsCalculator(BaseMetricCalculator):
                 if velocity and i < len(velocity):
                     vel_in_space.append(velocity[i])
                     
-        avg_vel = float(np.mean(vel_in_space)) if vel_in_space else 0.0
-        
+        if vel_in_space:
+            avg_vel = float(np.nanmean(vel_in_space))
+            if np.isnan(avg_vel) or np.isinf(avg_vel):
+                avg_vel = 0.0
+        else:
+            avg_vel = 0.0        
         return {
             "num_pedestrians": episode.num_pedestrians,
             "time_in_personal_space": in_personal_space_steps,

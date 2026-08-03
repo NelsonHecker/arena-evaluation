@@ -132,7 +132,7 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
                     v,
                 )
                 continue
-            args.append(f"{k}:={v}")
+                args.append(f"{k}:={v}")
     return args
 
 
@@ -229,6 +229,8 @@ def group_pending(pending: list[Step], simulator: str | None) -> list[list[Step]
     """Group consecutive steps with the same env_key, preserving suite order.
 
     Splitting only happens when env_key changes between adjacent steps.
+    Reference steps (like unhindered_peds) reuse the active group's env if the
+    robot and simulator match.
     """
     if not pending:
         return []
@@ -237,7 +239,11 @@ def group_pending(pending: list[Step], simulator: str | None) -> list[list[Step]
     current_key = env_key(pending[0], simulator)
     for step in pending[1:]:
         k = env_key(step, simulator)
-        if k == current_key:
+        if step.is_reference and step.reference_type == "unhindered_peds":
+            same_env = (step.stage.robot == current[0].stage.robot)
+        else:
+            same_env = (k == current_key)
+        if same_env:
             current.append(step)
         else:
             groups.append(current)
@@ -541,20 +547,25 @@ class BenchmarkRunner(ArenaMixinNode):
         req.tm_obstacles = step.stage.tm_obstacles.value
         req.tm_modules = []
         req.keep_modules = False
+        stage_config = step.stage.config or {}
+        if step.is_reference and step.reference_type == "unobstructed_robot":
+            import copy
+            stage_config = copy.deepcopy(stage_config)
+            mode_block = stage_config.setdefault(step.stage.tm_obstacles.value, {})
+            if isinstance(mode_block, dict):
+                mode_block["dynamic"] = {"min": 0, "max": 0}
+
         obs_params, rob_params = _flatten_per_mode_params(
-            step.stage.config,
+            stage_config,
             tm_obstacles=step.stage.tm_obstacles.value,
             tm_robots=step.stage.tm_robots.value,
         )
         if step.is_reference:
             if step.reference_type == "unobstructed_robot":
-                req.tm_obstacles = "random"
-                obs_params = _walk_dict({"n": 0})
-                req.tm_robots = "random"
-                rob_params = _walk_dict({"n": 0})
+                pass
             elif step.reference_type == "unhindered_peds":
-                req.tm_robots = "random"
-                rob_params = _walk_dict({"n": 0})
+                req.tm_robots = "stationary"
+                rob_params = []
         req.obstacles_params = obs_params
         req.robots_params = rob_params
         resp = await self.await_ros(queue.client.call_async(req))
@@ -783,6 +794,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 await self._await_hb(self._despawn.call_forever(dreq), f"despawn of env {env_id}")
             with contextlib.suppress(asyncio.TimeoutError, Exception):
                 await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
+        await asyncio.sleep(2.0)
 
     async def _run_group(self, group: list[Step], slot_index: int) -> list[StepResult]:
         env_id: int | None = None
@@ -827,32 +839,30 @@ class BenchmarkRunner(ArenaMixinNode):
                     except Exception:
                         episode_id_offset = 0
 
-                    recorder_proc = await asyncio.create_subprocess_exec(
-                        "ros2",
+                    recorder_args = [
                         "run",
                         "arena_evaluation",
                         "record",
                         "--ros-args",
-                        "-p",
-                        "use_sim_time:=true",
-                        "-p",
-                        f"record_data_dir:={step.record_dir}",
-                        "-p",
-                        f"benchmark_id:={self._run_id}",
-                        "-p",
-                        f"contestant:={step.contestant.name}",
-                        "-p",
-                        f"stage:={step.stage.name}",
-                        "-p",
-                        f"map:={step.stage.map}",
-                        "-p",
-                        f"is_reference:={str(step.is_reference).lower()}",
-                        "-p",
-                        f"reference_type:={step.reference_type or ''}",
-                        "-p",
-                        f"episode_id_offset:={episode_id_offset}",
-                        "-r",
-                        f"__ns:={env_ns_root}",
+                        "-p", "use_sim_time:=true",
+                        "-p", f"record_data_dir:={step.record_dir}",
+                        "-p", f"benchmark_id:={self._run_id}",
+                        "-p", f"contestant:={step.contestant.name}",
+                        "-p", f"stage:={step.stage.name}",
+                        "-p", f"map:={step.stage.map}",
+                        "-p", f"is_reference:={str(step.is_reference).lower()}",
+                    ]
+                    if step.reference_type:
+                        recorder_args.extend(["-p", f"reference_type:={step.reference_type}"])
+                    
+                    recorder_args.extend([
+                        "-p", f"episode_id_offset:={episode_id_offset}",
+                        "-r", f"__ns:={env_ns_root}",
+                    ])
+
+                    recorder_proc = await asyncio.create_subprocess_exec(
+                        "ros2",
+                        *recorder_args,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         start_new_session=True,

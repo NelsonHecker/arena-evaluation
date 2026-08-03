@@ -46,6 +46,9 @@ class RunMetadata(BaseModel):
     episodes_valid: int | None = None
     pipeline_version: str | None = None
 
+    rosbag2_message_count: int | None = None
+    rosbag2_topics: list[typing.Any] | None = None
+
     env_ns_root: str | None = None
     is_reference: bool = False
     reference_type: str | None = None

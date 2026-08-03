@@ -37,16 +37,26 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
         
         path_length = prior_results.get("path_length", 0.0)
         
-        if path_length <= 0.0 or not episode.start_pos or not episode.goal_pos:
+        if path_length <= 1e-9 or not episode.start_pos or not episode.goal_pos:
             return {"path_efficiency": 0.0}
             
         start = np.array(episode.start_pos[:2])
         goal = np.array(episode.goal_pos[:2])
         
         euclidean_dist = np.linalg.norm(goal - start)
-        efficiency = float(euclidean_dist / path_length)
         
-        efficiency = min(max(efficiency, 0.0), 1.0)
+        if np.isnan(euclidean_dist) or np.isinf(euclidean_dist) or np.isnan(path_length):
+            return {"path_efficiency": 0.0}
+            
+        try:
+            efficiency = float(euclidean_dist / path_length)
+            if np.isnan(efficiency):
+                efficiency = 0.0
+            else:
+                efficiency = min(max(efficiency, 0.0), 1.0)
+        except ZeroDivisionError:
+            efficiency = 0.0
+
         
         return {
             "path_efficiency": efficiency,

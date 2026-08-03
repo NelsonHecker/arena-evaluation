@@ -45,13 +45,23 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
     ) -> float:
         """
         Compute mean distance between actual trajectory points and nearest reference trajectory points.
-        actual_coords: (N, 2)
-        reference_coords: (M, 2)
+        actual_coords: (N, 2) or (N, 3)
+        reference_coords: (M, 2) or (M, 3)
         """
         if len(actual_coords) == 0 or len(reference_coords) == 0:
             return 0.0
-        
-        diffs = actual_coords[:, np.newaxis, :] - reference_coords[np.newaxis, :, :]  # (N, M, 2)
+
+        # Filter out rows containing NaN values
+        valid_act = actual_coords[~np.isnan(actual_coords).any(axis=1)]
+        valid_ref = reference_coords[~np.isnan(reference_coords).any(axis=1)]
+        if len(valid_act) == 0 or len(valid_ref) == 0:
+            return 0.0
+
+        # Extract 2D (x, y) coordinates
+        valid_act = valid_act[:, :2]
+        valid_ref = valid_ref[:, :2]
+
+        diffs = valid_act[:, np.newaxis, :] - valid_ref[np.newaxis, :, :]  # (N, M, 2)
         dists = np.sqrt(np.sum(diffs ** 2, axis=-1))  # (N, M)
         min_dists = np.min(dists, axis=1)  # (N,)
         return float(np.mean(min_dists))
@@ -92,15 +102,18 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
 
             dx = np.diff(arr[:, 0])
             dy = np.diff(arr[:, 1])
-            step_dists = np.sqrt(dx**2 + dy**2)
+            step_dists = np.hypot(dx, dy)
             total_dist = float(np.sum(step_dists))
             
-            dists_from_start = np.sqrt(np.sum((arr - arr[0])**2, axis=1))
+            diffs = arr - arr[0]
+            dists_from_start = np.hypot(diffs[:, 0], diffs[:, 1])
             max_disp = float(np.max(dists_from_start))
             
-            if max_disp > 0.5:
-                trips = total_dist / (2.0 * max_disp)
-                round_trips += max(0, int(np.round(trips)))
+            if not np.isnan(max_disp) and not np.isinf(max_disp) and max_disp > 0.5:
+                # Avoid 2.0 * max_disp which can overflow if max_disp is near max float64
+                trips = (total_dist / 2.0) / max_disp
+                if not np.isnan(trips) and not np.isinf(trips):
+                    round_trips += max(0, int(np.round(trips)))
 
         # Velocity delay: compare actual mean speed to baseline desired speed (~1.2 m/s)
         time_ns = episode.data["time_ns"].to_numpy() if "time_ns" in episode.data.columns else None
@@ -108,11 +121,11 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         if time_ns is not None and len(time_ns) > 1:
             dt_s = (time_ns[-1] - time_ns[0]) / 1e9
             if dt_s > 0:
-                all_dists = [
-                    np.sum(np.sqrt(np.sum(np.diff(np.array(pts), axis=0)**2, axis=1)))
-                    for pts in agent_paths.values()
-                    if len(pts) > 1
-                ]
+                all_dists = []
+                for pts in agent_paths.values():
+                    if len(pts) > 1:
+                        p_arr = np.array(pts)
+                        all_dists.append(np.sum(np.hypot(np.diff(p_arr[:, 0]), np.diff(p_arr[:, 1]))))
                 if all_dists:
                     avg_dist = float(np.mean(all_dists))
                     avg_speed = avg_dist / dt_s
