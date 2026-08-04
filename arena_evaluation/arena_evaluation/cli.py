@@ -125,6 +125,12 @@ Examples:
         action="store_true",
         help="Enable resource profiling. Writes pipeline_profile.yaml with per-phase CPU, GPU, RAM, and duration stats.",
     )
+    run_parent.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of worker processes for parallel extraction and processing (defaults to CPU count).",
+    )
 
     subparsers.add_parser(
         "extract",
@@ -190,7 +196,7 @@ Examples:
         if getattr(args, "run_dir", None):
             for run_dir in args.run_dir:
                 fm = FolderManager(data_root=run_dir.parent)
-                pipeline = ProcessingPipeline(fm, profiler=profiler)
+                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=getattr(args, "workers", None))
                 
                 if args.command == "extract":
                     print(f"Extracting single run: {run_dir}")
@@ -206,7 +212,7 @@ Examples:
         else:
             for benchmark_dir in args.benchmark_dir:
                 fm = FolderManager(data_root=benchmark_dir.parent)
-                pipeline = ProcessingPipeline(fm, profiler=profiler)
+                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=getattr(args, "workers", None))
                 
                 if args.command == "extract":
                     print(f"Extracting benchmark: {benchmark_dir.name}")

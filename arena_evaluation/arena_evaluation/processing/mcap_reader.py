@@ -526,6 +526,12 @@ class MCAPReader:
         # If no explicit robot dirs but we have data, maybe it was named "unknown"
         for robot_dir in robot_dirs:
             robot_name = robot_dir.name
+            
+            # Skip pure environment directories (e.g. env_0) if odom.parquet is absent and other robot directories exist
+            if not (robot_dir / "odom.parquet").exists():
+                if any((d / "odom.parquet").exists() for d in robot_dirs if d != robot_dir):
+                    continue
+
             rb = TopicBundle()
             
             match = re.search(r'(env_\d+)', robot_name)

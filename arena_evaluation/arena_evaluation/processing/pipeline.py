@@ -5,9 +5,33 @@ import datetime
 import contextlib
 import typing
 import polars as pl
+import os
+import concurrent.futures
 
 from ..storage.schemas import RobotParams, RunDescriptor, EpisodeDescriptor, TopicBundle
 from ..storage.folder_manager import FolderManager
+
+def _worker_init():
+    import os
+    os.environ["POLARS_MAX_THREADS"] = "1"
+
+def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool) -> int:
+    from arena_evaluation.processing.pipeline import ProcessingPipeline
+    from arena_evaluation.storage.folder_manager import FolderManager
+    import pathlib
+    fm = FolderManager(data_root=pathlib.Path(data_root_str))
+    pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
+    pipeline.extract_episode(ep, force_extract=force_extract)
+    return ep.episode_id
+
+def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool) -> typing.Tuple[int, typing.Any]:
+    from arena_evaluation.processing.pipeline import ProcessingPipeline
+    from arena_evaluation.storage.folder_manager import FolderManager
+    import pathlib
+    fm = FolderManager(data_root=pathlib.Path(data_root_str))
+    pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
+    result = pipeline.process_episode(ep, force_extract=force_extract)
+    return ep.episode_id, result
 from ..storage.manifest import MetadataWriter
 from ..benchmark.profiler import PipelineProfiler
 
@@ -24,9 +48,10 @@ class ProcessingPipeline:
     Orchestrates the data processing pipeline:
     MCAP -> Extract -> Align -> Split -> Metrics -> Parquet
     """
-    def __init__(self, folder_manager: FolderManager, profiler: PipelineProfiler | None = None):
+    def __init__(self, folder_manager: FolderManager, profiler: PipelineProfiler | None = None, workers: int | None = None):
         self.folder_manager = folder_manager
         self.profiler = profiler
+        self.workers = workers if workers is not None else (os.cpu_count() or 1)
 
     # ── New flat-episode API ───────────────────────────────────────────────────
 
@@ -130,6 +155,13 @@ class ProcessingPipeline:
                     ep_metrics["reference_type"] = ep.reference_type
                     all_results.append(ep_metrics)
 
+            if all_results:
+                try:
+                    df_ep = pl.DataFrame(all_results)
+                    ParquetStore.write(df_ep, episode_dir / "metrics.parquet")
+                except Exception:
+                    pass
+
             return all_results[0] if len(all_results) == 1 else (all_results if all_results else None)
 
     def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
@@ -148,10 +180,19 @@ class ProcessingPipeline:
                 print(f"No episodes or runs found for benchmark '{benchmark_id}'")
             return
 
-        print(f"Extracting benchmark {benchmark_id} ({len(episodes)} episodes)...")
-        for i, ep in enumerate(episodes):
-            print(f"[{i+1}/{len(episodes)}] episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage})")
-            self.extract_episode(ep, force_extract=force_extract)
+        print(f"Extracting benchmark {benchmark_id} ({len(episodes)} episodes) with {self.workers} workers...")
+        data_root_str = str(self.folder_manager.data_root)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init) as executor:
+            futures = [
+                executor.submit(_extract_worker, data_root_str, ep, force_extract)
+                for ep in episodes
+            ]
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                try:
+                    ep_id = future.result()
+                    print(f"[{i+1}/{len(episodes)}] Extracted episode_{ep_id:03d}")
+                except Exception as e:
+                    print(f"Error extracting episode: {e}")
         print("Done.")
 
     def process_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
@@ -182,7 +223,9 @@ class ProcessingPipeline:
 
         # ── Phase 1: Extract All Episodes ─────────────────────────────────────
         print(f"Phase 1: Extracting all episodes for benchmark {benchmark_id} ({len(episodes)} episodes)...")
-        self.extract_benchmark(benchmark_id, force_extract=force_extract)
+        _ctx_extract = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
+        with _ctx_extract:
+            self.extract_benchmark(benchmark_id, force_extract=force_extract)
 
         # ── Phase 2: Calculate All Metrics (with cross-episode lookups) ────────
         print(f"Phase 2: Calculating metrics across {len(episodes)} episodes...")
@@ -190,18 +233,32 @@ class ProcessingPipeline:
         episode_bundles: dict[int, dict[str, TopicBundle]] = {}
 
         # 1. Load bundles and process per-episode metrics
-        for i, ep in enumerate(episodes):
-            result = self.process_episode(ep, force_extract=False)
-            if result is not None:
-                if isinstance(result, list):
-                    all_metrics.extend(result)
-                else:
-                    all_metrics.append(result)
+        data_root_str = str(self.folder_manager.data_root)
+        _ctx_process = self.profiler.phase("process") if self.profiler else contextlib.nullcontext()
+        with _ctx_process:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init) as executor:
+                futures = {
+                    executor.submit(_process_worker, data_root_str, ep, False): ep
+                    for ep in episodes
+                }
                 
-                # Cache topic bundle for cross-episode reference lookups
-                b = self.extract_episode(ep, force_extract=False)
-                if b:
-                    episode_bundles[ep.episode_id] = b
+                completed_count = 0
+                for future in concurrent.futures.as_completed(futures):
+                    ep = futures[future]
+                    completed_count += 1
+                    try:
+                        ep_id, result = future.result()
+                        if result is not None:
+                            if isinstance(result, list):
+                                all_metrics.extend(result)
+                            else:
+                                all_metrics.append(result)
+                        
+                        print(f"[{completed_count}/{len(episodes)}] Processed metrics for episode_{ep_id:03d}")
+                    except Exception as e:
+                        import traceback
+                        traceback.print_exc()
+                        print(f"Error processing episode {ep.episode_id}: {e}")
 
         if not all_metrics:
             print("No valid results were generated.")

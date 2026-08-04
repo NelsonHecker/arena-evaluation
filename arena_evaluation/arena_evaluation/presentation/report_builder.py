@@ -135,6 +135,14 @@ class ReportBuilder:
                     pl.Series("inter_planner", ip_list)
                 ])
 
+        # Separate contestant evaluation runs from reference runs
+        if "is_reference" in df.columns:
+            df_contestants = df.filter(pl.col("is_reference").is_null() | (pl.col("is_reference") == False))
+            if len(df_contestants) == 0:
+                df_contestants = df
+        else:
+            df_contestants = df
+
         manifest = VizManifest.load(self.manifest_path)
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -149,22 +157,24 @@ class ReportBuilder:
         html_plots = []
 
         for spec in manifest.plots:
+            plot_df = df if spec.type in ("trajectory", "timeseries") else df_contestants
+
             if spec.data_key != "*":
-                if spec.data_key not in df.columns:
+                if spec.data_key not in plot_df.columns:
                     print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' not found in metrics.")
                     continue
-                if df[spec.data_key].null_count() == len(df):
+                if plot_df[spec.data_key].null_count() == len(plot_df):
                     print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' has no calculated data (all values null).")
                     continue
 
             png_path = self.plots_dir / f"{spec.id}.png"
             try:
-                seaborn_renderer.render(spec, df, png_path, run_dir=self.output_dir)
+                seaborn_renderer.render(spec, plot_df, png_path, run_dir=self.output_dir)
             except Exception as e:
                 print(f"Warning: Failed to render static plot {spec.id}: {e}")
 
             try:
-                html_chunk = plotly_renderer.render(spec, df, run_dir=self.output_dir)
+                html_chunk = plotly_renderer.render(spec, plot_df, run_dir=self.output_dir)
                 if html_chunk:
                     if isinstance(html_chunk, list):
                         for chunk in html_chunk:
@@ -174,7 +184,7 @@ class ReportBuilder:
             except Exception as e:
                 print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
 
-        summary_html = self._generate_summary_table(df)
+        summary_html = self._generate_summary_table(df_contestants)
 
         report_title = self.output_dir.name
 

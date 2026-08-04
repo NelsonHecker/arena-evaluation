@@ -41,7 +41,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "tf_static": TopicDefinition("/tf_static", TFMessage, throttled=False, qos_transient_local=True),
         "peds": TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True),
         "agent_states": TopicDefinition(f"{p_ns}/agent_states", AgentStates, throttled=True),
-        "episode_record": TopicDefinition(f"{p_ns}/state/episode", EpisodeRecord, throttled=False, qos_transient_local=False),
+        "episode_record": TopicDefinition(f"{p_ns}/state/episode", EpisodeRecord, throttled=False, qos_transient_local=True),
         "robots_fleet": TopicDefinition(f"{p_ns}/state/robots", RobotFleet, throttled=False, qos_transient_local=True),
         "collision_events": TopicDefinition(f"{ns}/collision_events", CollisionEvents, throttled=False),
         "power": TopicDefinition(f"{ns}/power_publisher/power", Power, throttled=True),

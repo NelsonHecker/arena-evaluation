@@ -144,7 +144,30 @@ class EpisodeSplitter:
                     robot_name=robot_name
                 )
             )
-            
+        if not episodes:
+            aligned_df = self.aligner.align(bundle)
+            aligned_df = _to_df(aligned_df)
+            if aligned_df is not None and len(aligned_df) >= self.min_episode_frames:
+                start_pos = []
+                goal_pos = []
+                if initialpose_df is not None and len(initialpose_df) > 0:
+                    row_init = initialpose_df.row(0, named=True)
+                    start_pos = [row_init["pos_x"], row_init["pos_y"], row_init.get("yaw", 0.0)]
+                if aligned_df is not None and len(aligned_df) > 0:
+                    last_row = aligned_df.row(-1, named=True)
+                    if "pos_x" in last_row and "pos_y" in last_row:
+                        goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
+                episodes.append(
+                    AlignedEpisodeBundle(
+                        episode_id=0,
+                        data=aligned_df,
+                        start_pos=start_pos,
+                        goal_pos=goal_pos,
+                        num_pedestrians=self._estimate_peds(aligned_df),
+                        robot_name=robot_name
+                    )
+                )
+
         return episodes
 
     def _estimate_peds(self, df: pl.DataFrame) -> int:

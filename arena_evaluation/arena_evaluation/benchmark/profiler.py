@@ -556,15 +556,21 @@ class PipelineProfiler:
         self._sample_hz = sample_hz
         self._sample_interval = 1.0 / max(0.1, sample_hz)
         self._phases: dict[str, _PhaseStats] = {}
+        self._active_phases: set[str] = set()
         self._total_start: float = time.monotonic()
 
     @contextlib.contextmanager
     def phase(self, name: str) -> typing.Generator[None, None, None]:
         """Context manager that samples resources during a named phase."""
+        if name in self._active_phases:
+            yield
+            return
+
         if name not in self._phases:
             self._phases[name] = _PhaseStats()
         stats = self._phases[name]
         
+        self._active_phases.add(name)
         sampler = SystemSampler()
         stop_event = threading.Event()
 
@@ -614,6 +620,7 @@ class PipelineProfiler:
         finally:
             stop_event.set()
             thread.join(timeout=3.0)
+            self._active_phases.discard(name)
             stats.duration_s += time.monotonic() - t0
             _log.info(
                 "PipelineProfiler: phase '%s' ended (%.1fs)",
