@@ -238,7 +238,6 @@ class TrajectoryRenderer(BasePlotRenderer):
                     encoded = base64.b64encode(f.read()).decode("utf-8")
                 
                 res = map_meta["resolution"]
-                origin_x, origin_y = map_meta["origin"][:2]
                 w_m = map_meta["width"] * res
                 h_m = map_meta["height"] * res
                 
@@ -247,8 +246,8 @@ class TrajectoryRenderer(BasePlotRenderer):
                         source=f"data:image/png;base64,{encoded}",
                         xref="x",
                         yref="y",
-                        x=origin_x,
-                        y=origin_y + h_m,
+                        x=0,
+                        y=h_m,
                         sizex=w_m,
                         sizey=h_m,
                         xanchor="left",
@@ -259,8 +258,8 @@ class TrajectoryRenderer(BasePlotRenderer):
                     )
                 )
                 
-                layout_args["xaxis"] = dict(range=[origin_x, origin_x + w_m])
-                layout_args["yaxis"] = dict(range=[origin_y, origin_y + h_m], scaleanchor="x", scaleratio=1)
+                layout_args["xaxis"] = dict(range=[0, w_m])
+                layout_args["yaxis"] = dict(range=[0, h_m], scaleanchor="x", scaleratio=1)
             except Exception as e:
                 print(f"Failed to overlay map {map_name}: {e}")
                 
@@ -507,12 +506,11 @@ class TrajectoryRenderer(BasePlotRenderer):
             try:
                 img = mpimg.imread(map_meta["png_path"])
                 res = map_meta["resolution"]
-                origin_x, origin_y = map_meta["origin"][:2]
                 w_m = map_meta["width"] * res
                 h_m = map_meta["height"] * res
-                plt.imshow(img, extent=[origin_x, origin_x + w_m, origin_y, origin_y + h_m], alpha=0.5, origin='upper', zorder=0)
-                plt.xlim(origin_x, origin_x + w_m)
-                plt.ylim(origin_y, origin_y + h_m)
+                plt.imshow(img, extent=[0, w_m, 0, h_m], alpha=0.5, origin='upper', zorder=0)
+                plt.xlim(0, w_m)
+                plt.ylim(0, h_m)
             except Exception as e:
                 print(f"Failed to overlay map {map_name} in seaborn: {e}")
                 

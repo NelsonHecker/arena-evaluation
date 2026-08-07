@@ -128,8 +128,8 @@ Examples:
     run_parent.add_argument(
         "--workers",
         type=int,
-        default=None,
-        help="Number of worker processes for parallel extraction and processing (defaults to CPU count).",
+        default=-1,
+        help="Number of worker processes for parallel extraction and processing (-1 = auto-detect CPU count).",
     )
 
     subparsers.add_parser(

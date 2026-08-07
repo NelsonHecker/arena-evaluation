@@ -175,3 +175,59 @@ def test_mcap_reader_tf_gt_extraction():
             assert tf_gt_df["pos_y_gt"][0] == 10.0
             assert tf_gt_df["yaw_gt"][0] == 0.0
 
+
+def test_mcap_reader_env_offset_auto_detection():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+        topics_dir = tmp_path / "topics"
+        env_1_dir = topics_dir / "env_1"
+        env_1_dir.mkdir(parents=True)
+
+        # Create global static TF defining env_1 offset at (100.0, 50.0)
+        tf_static_df = pl.DataFrame({
+            "time_ns": [1000],
+            "frame_id": ["map"],
+            "child_frame_id": ["env_1/map"],
+            "trans_x": [100.0],
+            "trans_y": [50.0],
+            "trans_z": [0.0],
+            "rot_x": [0.0],
+            "rot_y": [0.0],
+            "rot_z": [0.0],
+            "rot_w": [1.0],
+        })
+        tf_static_df.write_parquet(topics_dir / "tf_static.parquet")
+
+        # tf_gt in global coordinates (105.0, 52.0) -> should be offset to (5.0, 2.0)
+        tf_gt_df = pl.DataFrame({
+            "time_ns": [1000],
+            "pos_x_gt": [105.0],
+            "pos_y_gt": [52.0],
+            "yaw_gt": [0.0],
+        })
+        tf_gt_df.write_parquet(env_1_dir / "tf_gt.parquet")
+
+        # odom in local coordinates (5.0, 2.0) -> should remain local at (5.0, 2.0)
+        odom_df = pl.DataFrame({
+            "time_ns": [1000],
+            "pos_x": [5.0],
+            "pos_y": [2.0],
+            "yaw": [0.0],
+        })
+        odom_df.write_parquet(env_1_dir / "odom.parquet")
+
+        reader = MCAPReader(tmp_path / "dummy.mcap")
+        bundles = reader.load_bundles(topics_dir)
+        bundle = bundles["env_1"]
+
+        assert bundle.tf_gt is not None
+        gt_res = bundle.tf_gt.collect()
+        assert abs(gt_res["pos_x_gt"][0] - 5.0) < 1e-5
+        assert abs(gt_res["pos_y_gt"][0] - 2.0) < 1e-5
+
+        assert bundle.odom is not None
+        odom_res = bundle.odom.collect()
+        assert abs(odom_res["pos_x"][0] - 5.0) < 1e-5
+        assert abs(odom_res["pos_y"][0] - 2.0) < 1e-5
+
+

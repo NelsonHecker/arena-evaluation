@@ -478,6 +478,7 @@ class MCAPReader:
                                     target["pos_x_gt"].append(t.transform.translation.x)
                                     target["pos_y_gt"].append(t.transform.translation.y)
                                     target["yaw_gt"].append(yaw_val)
+                                    target["frame_id"].append(parent)
                                     appended = True
     
                         if appended:
@@ -490,6 +491,10 @@ class MCAPReader:
             for writer in writers.values():
                 writer.close()
 
+        return self.load_bundles(topics_dir)
+
+    @staticmethod
+    def load_bundles(topics_dir: pathlib.Path) -> dict[str, TopicBundle]:
         # Reconstruct dict[str, TopicBundle]
         bundles = {}
         
@@ -503,7 +508,7 @@ class MCAPReader:
 
         # Load global data
         global_bundle = TopicBundle()
-        for t_name in global_data.keys():
+        for t_name in ("tf", "tf_static"):
             lf = load_parquet(topics_dir / f"{t_name}.parquet")
             if lf is not None:
                 setattr(global_bundle, t_name, lf)
@@ -514,14 +519,34 @@ class MCAPReader:
         # Calculate env offsets
         env_offsets = {}
         if hasattr(global_bundle, "tf_static") and global_bundle.tf_static is not None:
-            tf_df = global_bundle.tf_static.collect()
-            for row in tf_df.iter_rows(named=True):
-                parent = row["frame_id"].strip('/').lower()
-                child = row["child_frame_id"].strip('/').lower()
-                if parent == "map" and child.startswith("env_") and child.endswith("/map"):
-                    match = re.search(r'(env_\d+)', child)
-                    if match:
-                        env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
+            try:
+                tf_df = global_bundle.tf_static.collect()
+                for row in tf_df.iter_rows(named=True):
+                    parent = row["frame_id"].strip('/').lower()
+                    child = row["child_frame_id"].strip('/').lower()
+                    parent_is_world = parent in ("map", "world", "odom", "") or parent.endswith("/map") or parent.endswith("/world") or parent.endswith("/odom")
+                    is_robot_base = child.endswith("base_link") or child.endswith("base_footprint") or "base_link" in child or "base_footprint" in child
+                    if parent_is_world and not is_robot_base:
+                        match = re.search(r'(env_\d+)', child)
+                        if match and match.group(1) not in env_offsets:
+                            env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
+            except Exception:
+                pass
+                
+        if hasattr(global_bundle, "tf") and global_bundle.tf is not None:
+            try:
+                tf_df = global_bundle.tf.collect()
+                for row in tf_df.iter_rows(named=True):
+                    parent = row["frame_id"].strip('/').lower()
+                    child = row["child_frame_id"].strip('/').lower()
+                    parent_is_world = parent in ("map", "world", "odom", "") or parent.endswith("/map") or parent.endswith("/world") or parent.endswith("/odom")
+                    is_robot_base = child.endswith("base_link") or child.endswith("base_footprint") or "base_link" in child or "base_footprint" in child
+                    if parent_is_world and not is_robot_base:
+                        match = re.search(r'(env_\d+)', child)
+                        if match and match.group(1) not in env_offsets:
+                            env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
+            except Exception:
+                pass
         
         # If no explicit robot dirs but we have data, maybe it was named "unknown"
         for robot_dir in robot_dirs:
@@ -547,34 +572,46 @@ class MCAPReader:
             rb.peds = load_parquet(env_dir / "peds.parquet")
             rb.episode_record = load_parquet(env_dir / "episode_record.parquet")
             
-            if rb.peds is not None and (ox != 0.0 or oy != 0.0):
-                rb.peds = rb.peds.with_columns([
-                    pl.col("peds_positions").list.eval(
-                        pl.when(pl.int_range(0, pl.element().len()) % 3 == 0).then(pl.element() - ox)
-                        .when(pl.int_range(0, pl.element().len()) % 3 == 1).then(pl.element() - oy)
-                        .otherwise(pl.element())
-                    )
-                ])
+            mx, my = 0.0, 0.0
+            if rb.episode_record is not None:
+                try:
+                    ep_df = rb.episode_record.collect() if isinstance(rb.episode_record, pl.LazyFrame) else rb.episode_record
+                    if "map" in ep_df.columns and len(ep_df) > 0:
+                        map_name = str(ep_df["map"][0])
+                        from arena_evaluation.processing.map_registry import MapRegistry
+                        map_meta = MapRegistry.get_map_metadata(map_name, run_dir=topics_dir.parent)
+                        if map_meta and "origin" in map_meta and map_meta["origin"]:
+                            mx, my = float(map_meta["origin"][0]), float(map_meta["origin"][1])
+                except Exception:
+                    pass
             
-            for t_name in new_robot_data().keys():
+            total_ox = ox + mx
+            total_oy = oy + my
+            
+            if rb.peds is not None and (total_ox != 0.0 or total_oy != 0.0):
+                try:
+                    rb.peds = rb.peds.with_columns([
+                        pl.col("peds_positions").list.eval(
+                            pl.when(pl.int_range(0, pl.element().len()) % 3 == 0).then(pl.element() - total_ox)
+                            .when(pl.int_range(0, pl.element().len()) % 3 == 1).then(pl.element() - total_oy)
+                            .otherwise(pl.element())
+                        )
+                    ])
+                except Exception:
+                    pass
+            
+            ROBOT_TOPIC_NAMES = ("odom", "scan", "cmd_vel", "joint_states", "collision_events", "collision_monitor_state", "power", "energy", "plan", "initialpose", "tf_gt")
+            for t_name in ROBOT_TOPIC_NAMES:
                 lf = load_parquet(robot_dir / f"{t_name}.parquet")
                 if lf is not None:
-                    if ox != 0.0 or oy != 0.0:
-                        if t_name in ("odom", "initialpose"):
+                    if (total_ox != 0.0 or total_oy != 0.0) and t_name == "tf_gt":
+                        try:
                             lf = lf.with_columns([
-                                (pl.col("pos_x") - ox).alias("pos_x"),
-                                (pl.col("pos_y") - oy).alias("pos_y")
+                                (pl.col("pos_x_gt") - total_ox).alias("pos_x_gt"),
+                                (pl.col("pos_y_gt") - total_oy).alias("pos_y_gt")
                             ])
-                        elif t_name == "plan":
-                            lf = lf.with_columns([
-                                pl.col("poses_x").list.eval(pl.element() - ox),
-                                pl.col("poses_y").list.eval(pl.element() - oy)
-                            ])
-                        elif t_name == "tf_gt":
-                            lf = lf.with_columns([
-                                (pl.col("pos_x_gt") - ox).alias("pos_x_gt"),
-                                (pl.col("pos_y_gt") - oy).alias("pos_y_gt")
-                            ])
+                        except Exception:
+                            pass
                     setattr(rb, t_name, lf)
                     
             bundles[robot_name] = rb

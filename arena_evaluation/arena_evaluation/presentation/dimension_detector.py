@@ -3,6 +3,8 @@ from __future__ import annotations
 import polars as pl
 from typing import TYPE_CHECKING
 
+from ..storage.planner_names import split_planner_name
+
 if TYPE_CHECKING:
     from ..storage.schemas import PlotSpec
 
@@ -10,26 +12,6 @@ if TYPE_CHECKING:
 IDENTITY_COLS: list[str] = ["local_planner", "inter_planner", "robot", "stage", "map", "benchmark_id"]
 
 COMPOUND_LABEL_COL = "__label__"
-
-
-def split_planner_name(planner_name: str | None) -> tuple[str, str]:
-    """
-    Split the contestant/planner name into local_planner and inter_planner.
-    
-    Uses a positional convention: ``<prefix>-<local_planner>-<inter_planner>``.
-    Example: 'trial-dwb-bypass' -> ('dwb', 'bypass')
-    """
-    if not planner_name:
-        return "unknown", "unknown"
-    
-    parts = str(planner_name).split("-")
-    
-    if len(parts) >= 3:
-        return parts[1], "-".join(parts[2:])
-    elif len(parts) == 2:
-        return parts[0], parts[1]
-    else:
-        return parts[0], "none"
 
 
 

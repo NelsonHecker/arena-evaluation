@@ -1,4 +1,5 @@
 import argparse
+from typing import Any
 import os
 import shutil
 import threading
@@ -60,6 +61,14 @@ except ImportError:
         pass
     HAS_TASK_GEN = False
 
+_OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
+_TERMINAL_OUTCOMES = {
+    getattr(EpisodeRecord, "SUCCESS", 2),
+    getattr(EpisodeRecord, "FAILED", 3),
+    getattr(EpisodeRecord, "SKIPPED", 4),
+    getattr(EpisodeRecord, "FATAL", 5),
+}
+
 import arena_evaluation_msgs.srv as arena_evaluation_srvs
 
 from .metadata import IngestionMetadata
@@ -68,16 +77,34 @@ from ..storage.manifest import MetadataWriter
 
 class DataRecorderNode(Node):
     def __init__(self):
-        super().__init__('arena_evaluation_data_recorder')
+        super().__init__('arena_evaluation_data_recorder', automatically_declare_parameters_from_overrides=True)
 
         self.base_dir = get_package_share_directory("arena_evaluation")
 
-        if not self.has_parameter("record_data_dir"):
-            try:
-                self.declare_parameter("record_data_dir", "")
-            except Exception:
-                pass
-        record_data_dir = self.get_parameter("record_data_dir").get_parameter_value().string_value
+        for name, default in [
+            ("record_data_dir", ""),
+            ("benchmark_id", "unknown"),
+            ("contestant", "unknown"),
+            ("stage", "unknown"),
+            ("map", "unknown"),
+            ("world", "unknown"),
+            ("suite_name", ""),
+            ("contest_name", ""),
+            ("local_planner", ""),
+            ("inter_planner", ""),
+            ("robot", ""),
+            ("episodes_requested", 0),
+            ("is_reference", False),
+            ("reference_type", ""),
+            ("episode_id_offset", 0),
+        ]:
+            if not self.has_parameter(name):
+                try:
+                    self.declare_parameter(name, default)
+                except Exception:
+                    pass
+
+        record_data_dir = str(self.get_parameter("record_data_dir").value or "")
 
         if not record_data_dir:
             for idx, arg in enumerate(sys.argv):
@@ -120,41 +147,27 @@ class DataRecorderNode(Node):
         except Exception:
             pass
 
-        # Declare and read all ROS params — contestant/stage/map are passed explicitly by runner
-        for param_name, default_val in [
-            ("world", "unknown"),
-            ("suite_name", "unknown"),
-            ("contest_name", "unknown"),
-            ("benchmark_id", ""),
-            ("contestant", ""),
-            ("stage", ""),
-            ("map", ""),
-            ("is_reference", False),
-            ("reference_type", ""),
-            ("episode_id_offset", 0),
-        ]:
-            if not self.has_parameter(param_name):
-                try:
-                    self.declare_parameter(param_name, default_val)
-                except Exception:
-                    pass
-
-        self.benchmark_id = self.get_parameter("benchmark_id").value or "unknown"
-        self.planner = self.get_parameter("contestant").value or "unknown"
-        self.stage = self.get_parameter("stage").value or "unknown"
-        self.map_name = self.get_parameter("map").value or "unknown"
-        self.world = self.get_parameter("world").value or "unknown"
-        self.suite_name = self.get_parameter("suite_name").value or ""
-        self.contest_name = self.get_parameter("contest_name").value or ""
+        self.benchmark_id = str(self.get_parameter("benchmark_id").value or "unknown")
+        self.planner = str(self.get_parameter("contestant").value or "unknown")
+        self.stage = str(self.get_parameter("stage").value or "unknown")
+        self.map_name = str(self.get_parameter("map").value or "unknown")
+        self.world = str(self.get_parameter("world").value or "unknown")
+        self.suite_name = str(self.get_parameter("suite_name").value or "")
+        self.contest_name = str(self.get_parameter("contest_name").value or "")
+        self.local_planner = str(self.get_parameter("local_planner").value or "")
+        self.inter_planner = str(self.get_parameter("inter_planner").value or "")
+        self.episodes_requested = int(self.get_parameter("episodes_requested").value or 0)
         self.is_reference = bool(self.get_parameter("is_reference").value)
-        self.reference_type = self.get_parameter("reference_type").value or None
+        ref_type = self.get_parameter("reference_type").value
+        self.reference_type = ref_type if ref_type else None
         self._episode_id_offset = int(self.get_parameter("episode_id_offset").value or 0)
         self._counter_file = self.episodes_root / ".episode_counter"
 
         env_namespace = self.get_namespace().strip('/')
         self.env_ns_root = f"/{env_namespace}" if env_namespace else ""
 
-        self.robot_model = "unknown"
+        self.robot_model = str(self.get_parameter("robot").value or "unknown")
+        self.current_sim_episode_id: int | None = None
         self.known_robots = set()
 
         self.current_episode_id: int | None = None
@@ -193,6 +206,11 @@ class DataRecorderNode(Node):
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
             depth=100,
         )
+        self.reliable_volatile_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=10,
+        )
 
         self.is_shutting_down = False
         self.episodes_recorded = 0
@@ -204,6 +222,18 @@ class DataRecorderNode(Node):
 
         self._log_info(f"Setting up topic subscriptions")
         self._setup_subscriptions()
+
+        try:
+            from arena_evaluation_msgs.srv import RecordEpisode
+        except ImportError:
+            RecordEpisode = None
+        if RecordEpisode is not None:
+            self._start_service = self.create_service(
+                RecordEpisode, "start_episode", self._start_episode_service_callback
+            )
+            self._log_info("start_episode service ready")
+        else:
+            self._start_service = None
         self._log_info(f"Topic subscriptions ready. Waiting for first episode to open MCAP writer...")
 
     def _open_log_file(self):
@@ -224,6 +254,7 @@ class DataRecorderNode(Node):
 
         global_episode_id = self._episode_id_offset
         self._episode_id_offset += 1
+        self.current_sim_episode_id = episode_id
 
         self._close_current_writer()
         
@@ -357,6 +388,8 @@ class DataRecorderNode(Node):
             self._register_topic(topic_name, msg_type)
 
             qos_profile = self.latched_qos if t_def.qos_transient_local else self.qos
+            if key == "episode_record":
+                qos_profile = self.reliable_volatile_qos
 
             if key == "episode_record":
                 callback = self.episode_record_callback
@@ -390,8 +423,6 @@ class DataRecorderNode(Node):
             is_scan = "scan" in name_lower or "lidar" in name_lower
             is_odom = "odom" in name_lower
 
-            # if is_scan and "sensor_msgs/msg/LaserScan" in types:
-            #     self._subscribe_discovered(name, LaserScan)
             if is_odom and "nav_msgs/msg/Odometry" in types:
                 self._subscribe_discovered(name, Odometry)
                 if self.robot_model in ("unknown", ""):
@@ -432,21 +463,76 @@ class DataRecorderNode(Node):
             self._pre_clock_buffer.clear()
             del self._pre_clock_buffer
 
+    def _begin_episode(self, episode_id: int, source: str = "episode_record") -> bool:
+        """Open a writer for a new episode unless one was already started for it.
+
+        Deduplicates the two start triggers: the runner's start_episode service
+        call (authoritative) and the passive EpisodeRecord observation (fallback
+        for manual runs without a runner).
+
+        Returns True if this call actually started the episode (the caller then
+        writes the start marker), False if it was a no-op.
+        """
+        if episode_id in self._seen_episodes:
+            return False
+        self._seen_episodes.add(episode_id)
+        self.episodes_recorded += 1
+        self._log_info(f"New episode detected ({source}): episode_id={episode_id}")
+        self._start_episode_recording(episode_id)
+        return True
+
+    def _stop_episode(self, episode_id: int, outcome_state: int = 0, outcome_info: str = "") -> None:
+        """Close the current episode writer and record its outcome.
+
+        Service-driven (the runner's authoritative stop signal). Ignored when it
+        does not match the episode currently being recorded (stale/duplicate).
+        """
+        if self.current_sim_episode_id != episode_id:
+            self._log_info(f"stop_episode ignored for episode_id={episode_id} (current is {self.current_sim_episode_id})")
+            return
+        if self.current_metadata is not None:
+            try:
+                self.current_metadata.outcome_state = outcome_state
+                self.current_metadata.outcome_info = outcome_info
+                MetadataWriter.write(self.current_metadata, self.current_metadata_path)
+            except Exception as e:
+                self._log_error(f"Failed to write outcome metadata: {e}")
+        self._close_current_writer()
+
+    def _start_episode_service_callback(self, request, response):
+        """Authoritative episode lifecycle: START opens the writer, STOP closes it."""
+        episode_id = int(request.episode_id)
+        command = int(getattr(request, "command", 1))
+        if command == int(getattr(request, "COMMAND_START", 1)):
+            self._log_info(f"start_episode service called: episode_id={episode_id}")
+            self._begin_episode(episode_id, source="runner")
+            response.success = True
+            response.message = f"recording episode {self.current_episode_id}"
+        elif command == int(getattr(request, "COMMAND_STOP", 2)):
+            self._log_info(f"stop_episode service called: episode_id={episode_id} outcome={request.outcome_state}")
+            self._stop_episode(episode_id, outcome_state=int(request.outcome_state), outcome_info=str(request.outcome_info))
+            response.success = True
+            response.message = "stopped"
+        else:
+            response.success = False
+            response.message = f"unknown command {command}"
+        return response
+
     def episode_record_callback(self, msg: EpisodeRecord):
-        # Rotate writer when a new episode begins
-        if msg.episode_id not in self._seen_episodes:
-            self._seen_episodes.add(msg.episode_id)
-            self.episodes_recorded += 1
-            self._log_info(f"New episode detected: episode_id={msg.episode_id}")
-            self._start_episode_recording(msg.episode_id)
+        # The EpisodeRecord topic is NOT the recording lifecycle anymore — the
+        # runner drives start/stop via the start_episode service, so a missed
+        # or late topic message can never corrupt recording. This callback only
+        # enriches episode metadata (map, robot model, task params) and serves
+        # as a start fallback for manual runs without a runner.
+        outcome_state = getattr(msg, 'outcome_state', 0)
+        outcome_label = _OUTCOME_LABELS.get(outcome_state, f"UNKNOWN({outcome_state})")
+        self._log_info(
+            f"EpisodeRecord received: episode_id={msg.episode_id} "
+            f"outcome={outcome_state} ({outcome_label}) info={getattr(msg, 'outcome_info', '')!r}"
+        )
 
-        now = self.current_time
-        if now is None:
-            now = self.get_clock().now().nanoseconds
-
-        env_namespace = self.get_namespace().strip('/')
-        episode_topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
-        self._write_to_bag_at(episode_topic, msg, now)
+        if msg.episode_id not in self._seen_episodes and outcome_state in (0, 1):
+            self._begin_episode(msg.episode_id, source="episode_record")
 
         self._update_metadata_from_episode(msg)
         
@@ -652,6 +738,13 @@ class DataRecorderNode(Node):
             env_ns_root=self.env_ns_root,
             is_reference=self.is_reference,
             reference_type=self.reference_type,
+            suite_name=self.suite_name,
+            contest_name=self.contest_name,
+            episodes_requested=self.episodes_requested,
+            local_planner=self.local_planner,
+            inter_planner=self.inter_planner,
+            task_generator_episode_id=self.current_sim_episode_id,
+            agent_name=self.robot_model,
         )
         try:
             MetadataWriter.write(metadata, self.current_metadata_path)

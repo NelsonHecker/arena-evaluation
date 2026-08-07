@@ -21,6 +21,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from arena_evaluation_msgs.msg import BenchmarkState
+from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
@@ -37,6 +38,10 @@ STATE_TOPIC = "/arena/benchmark/state"
 _CANCEL_SETTLE_S = 30.0
 _HEARTBEAT_S = 30.0
 
+# EpisodeRecord.outcome_state labels (task_generator_msgs/msg/EpisodeRecord.msg)
+_EPISODE_OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
+
+from ..storage.planner_names import split_planner_name
 from .config import Contest, Suite
 from .state import (
     Manifest,
@@ -218,6 +223,23 @@ def build_pending(
         # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
         pending.append(step)
     return pending
+
+
+def resolve_planner_identity(contestant: Contest.Contestant) -> tuple[str, str]:
+    """Return (local_planner, inter_planner) for a contestant.
+
+    Prefers the explicit ``mobile.local_planner`` / ``mobile.inter_planner``
+    contest config (both list-form and sweep-form contests carry it in
+    ``args["mobile"]``); falls back to the ``<prefix>-<local>-<inter>`` name
+    convention via ``split_planner_name``.
+    """
+    mobile = (contestant.args or {}).get("mobile")
+    if isinstance(mobile, dict):
+        lp = mobile.get("local_planner")
+        if lp:
+            ip = mobile.get("inter_planner")
+            return str(lp), str(ip) if ip else "none"
+    return split_planner_name(contestant.name)
 
 
 def env_key(step: Step, simulator: str | None) -> tuple:
@@ -408,6 +430,8 @@ class BenchmarkRunner(ArenaMixinNode):
 
         self._episode_records: dict[int, dict[int, EpisodeRecord]] = {}
         self._env_subs: dict[int, list] = {}
+        self._recorder_clients: dict[int, ClientWrapper] = {}
+        self._triggered_episodes: dict[int, set[int]] = {}
 
         self.create_subscription(EnvRegistry, "/arena/state/envs", self._on_envs, _LATCHED)
         self._state_pub = self.create_publisher(BenchmarkState, STATE_TOPIC, _LATCHED)
@@ -512,10 +536,45 @@ class BenchmarkRunner(ArenaMixinNode):
         await self._await_hb(queue_client.ensure(timeout_sec=None), f"queue_episode service on env {env_id}")
         self._queue_clients[env_id] = queue_client
 
+        # Recorder start_episode client: the recorder process is spawned per
+        # step (after this setup), so the client waits for it to appear — the
+        # first call happens when the first episode record arrives, by which
+        # time the recorder is up.
+        self._recorder_clients[env_id] = self.create_client_wrapper(
+            RecordEpisode, f"{env_ns_root}/start_episode"
+        )
+        self._triggered_episodes[env_id] = set()
+
         def _on_episode_record(msg: EpisodeRecord) -> None:
             recs = self._episode_records.get(env_id)
             if recs is not None:
                 recs[msg.episode_id] = msg
+            label = _EPISODE_OUTCOME_LABELS.get(msg.outcome_state, f"UNKNOWN({msg.outcome_state})")
+            _log.info(
+                f"[env {env_id}] episode record: id={msg.episode_id} "
+                f"outcome={msg.outcome_state} ({label}) info={msg.outcome_info!r}"
+            )
+            # QUEUED/RUNNING = episode is starting: explicitly signal the
+            # recorder instead of relying on its own topic match (which can
+            # race with DDS discovery when the env is reused across steps).
+            if msg.outcome_state in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING):
+                triggered = self._triggered_episodes.get(env_id)
+                if triggered is not None and msg.episode_id not in triggered:
+                    triggered.add(msg.episode_id)
+                    rc = self._recorder_clients.get(env_id)
+                    if rc is not None:
+                        _log.info(f"[env {env_id}] signalling recorder to start episode {msg.episode_id}")
+                        req = RecordEpisode.Request()
+                        req.command = RecordEpisode.Request.COMMAND_START
+                        req.episode_id = msg.episode_id
+                        fut = rc.client.call_async(req)
+                        fut.add_done_callback(
+                            lambda f, eid=msg.episode_id: _log.warning(
+                                f"[env {env_id}] recorder start_episode({eid}) failed: {f.exception()}"
+                            ) if f.exception() else _log.info(
+                                f"[env {env_id}] recorder confirmed start of episode {eid}"
+                            )
+                        )
 
         sub_ep = self.create_subscription(
             EpisodeRecord,
@@ -535,6 +594,10 @@ class BenchmarkRunner(ArenaMixinNode):
         qc = self._queue_clients.pop(env_id, None)
         if qc is not None:
             qc.client.destroy()
+        rc = self._recorder_clients.pop(env_id, None)
+        if rc is not None:
+            rc.client.destroy()
+        self._triggered_episodes.pop(env_id, None)
         self._episode_records.pop(env_id, None)
         self._env_visible_events.pop(env_id, None)
 
@@ -688,6 +751,32 @@ class BenchmarkRunner(ArenaMixinNode):
                 }.get(rec.outcome_state, str(rec.outcome_state))
                 _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s")
 
+                # Authoritative stop: close the recorder's MCAP writer for this
+                # episode and record its outcome before advancing or killing
+                # the recorder process. The topic messages are NOT used for the
+                # lifecycle — the service is the single reliable system.
+                if rec.outcome_state in (
+                    EpisodeRecord.SUCCESS,
+                    EpisodeRecord.FAILED,
+                    EpisodeRecord.SKIPPED,
+                    EpisodeRecord.FATAL,
+                ):
+                    rc = self._recorder_clients.get(env_id)
+                    if rc is not None:
+                        req = RecordEpisode.Request()
+                        req.command = RecordEpisode.Request.COMMAND_STOP
+                        req.episode_id = episode_id
+                        req.outcome_state = rec.outcome_state
+                        req.outcome_info = rec.outcome_info
+                        try:
+                            resp = await rc.call_timeout(req, timeout_sec=5.0)
+                            if resp is None:
+                                _log.warning(f"[env {env_id}] recorder stop_episode({episode_id}) timed out")
+                            else:
+                                _log.info(f"[env {env_id}] recorder stopped episode {episode_id} ({state_label})")
+                        except Exception as exc:
+                            _log.warning(f"[env {env_id}] recorder stop_episode({episode_id}) failed: {exc}")
+
                 parent_ep_id = None
                 if not step.is_reference:
                     self._parent_episode_map[(step.contestant.name, step.stage.name, ep_idx)] = episode_id
@@ -839,6 +928,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     except Exception:
                         episode_id_offset = 0
 
+                    lp, ip = resolve_planner_identity(step.contestant)
                     recorder_args = [
                         "run",
                         "arena_evaluation",
@@ -850,11 +940,17 @@ class BenchmarkRunner(ArenaMixinNode):
                         "-p", f"contestant:={step.contestant.name}",
                         "-p", f"stage:={step.stage.name}",
                         "-p", f"map:={step.stage.map}",
+                        "-p", f"suite_name:={self._suite.name}",
+                        "-p", f"contest_name:={self._contest.name}",
+                        "-p", f"local_planner:={lp}",
+                        "-p", f"inter_planner:={ip}",
+                        "-p", f"robot:={step.stage.robot}",
+                        "-p", f"episodes_requested:={step.episodes}",
                         "-p", f"is_reference:={str(step.is_reference).lower()}",
                     ]
                     if step.reference_type:
                         recorder_args.extend(["-p", f"reference_type:={step.reference_type}"])
-                    
+
                     recorder_args.extend([
                         "-p", f"episode_id_offset:={episode_id_offset}",
                         "-r", f"__ns:={env_ns_root}",

@@ -23,8 +23,16 @@ class RunMetadata(BaseModel):
     episodes_requested: int = 0
     suite_name: str = ""
     contest_name: str = ""
+    local_planner: str = ""
     inter_planner: str = ""
     agent_name: str = ""
+    # Sim-side episode id (task_generator counter) for correlating with
+    # progress.csv / the runner's episode records.
+    task_generator_episode_id: int | None = None
+    # Terminal outcome written by the runner's stop_episode service call
+    # (QUEUED=0, RUNNING=1, SUCCESS=2, FAILED=3, SKIPPED=4, FATAL=5).
+    outcome_state: int | None = None
+    outcome_info: str = ""
     recording_started_at: str
     arena_git_sha: str | None = None
     arena_git_dirty: bool = False

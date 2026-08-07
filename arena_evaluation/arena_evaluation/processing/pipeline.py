@@ -51,7 +51,8 @@ class ProcessingPipeline:
     def __init__(self, folder_manager: FolderManager, profiler: PipelineProfiler | None = None, workers: int | None = None):
         self.folder_manager = folder_manager
         self.profiler = profiler
-        self.workers = workers if workers is not None else (os.cpu_count() or 1)
+        # -1 (or None) = auto-detect the CPU count; any value < 1 falls back to it.
+        self.workers = (os.cpu_count() or 1) if (workers is None or workers < 1) else workers
 
     # ── New flat-episode API ───────────────────────────────────────────────────
 
@@ -141,10 +142,18 @@ class ProcessingPipeline:
                     ep_metrics = registry.run(aligned_ep, pedsim_available=pedsim_avail, available_topics=available_topics)
                     ep_metrics["episode"] = ep.episode_id
                     ep_metrics["planner"] = ep.planner
-                    from ..presentation.dimension_detector import split_planner_name
-                    lp, ip = split_planner_name(ep.planner)
-                    ep_metrics["local_planner"] = lp
-                    ep_metrics["inter_planner"] = ip
+                    # Prefer the explicit planner identity written into the
+                    # episode yaml at recording time (from the contestant's
+                    # mobile.local_planner / mobile.inter_planner config);
+                    # fall back to name parsing for legacy recordings.
+                    if metadata is not None and metadata.local_planner:
+                        ep_metrics["local_planner"] = metadata.local_planner
+                        ep_metrics["inter_planner"] = metadata.inter_planner or ""
+                    else:
+                        from ..presentation.dimension_detector import split_planner_name
+                        lp, ip = split_planner_name(ep.planner)
+                        ep_metrics["local_planner"] = lp
+                        ep_metrics["inter_planner"] = ip
                     ep_metrics["robot"] = aligned_ep.robot_name or robot_name
                     ep_metrics["map"] = ep.map
                     ep_metrics["stage"] = ep.stage
@@ -385,10 +394,16 @@ class ProcessingPipeline:
                     ep_metrics["episode"] = ep.episode_id
                     ep_metrics["planner"] = run.planner
 
-                    from ..presentation.dimension_detector import split_planner_name
-                    lp, ip = split_planner_name(run.planner)
-                    ep_metrics["local_planner"] = lp
-                    ep_metrics["inter_planner"] = ip
+                    # Prefer explicit planner identity from metadata.yaml;
+                    # fall back to name parsing for legacy recordings.
+                    if metadata.local_planner:
+                        ep_metrics["local_planner"] = metadata.local_planner
+                        ep_metrics["inter_planner"] = metadata.inter_planner or ""
+                    else:
+                        from ..presentation.dimension_detector import split_planner_name
+                        lp, ip = split_planner_name(run.planner)
+                        ep_metrics["local_planner"] = lp
+                        ep_metrics["inter_planner"] = ip
 
                     ep_metrics["robot"] = ep.robot_name or robot_name
                     ep_metrics["map"] = metadata.map
