@@ -21,7 +21,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from arena_evaluation_msgs.msg import BenchmarkState
-from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
+from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper, param_value_to_launch_str
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
 
@@ -66,11 +66,34 @@ class _HasStateSteps(typing.Protocol):
 _log = logging.getLogger(__name__)
 
 
+def _per_mode_launch_args(step: Step) -> list[str]:
+    """Stage per-mode config as `task.<mode>.<leaf>` launch args, so the first
+    configure() sees them before QueueEpisode can run."""
+    s = step.stage
+    obs_params, rob_params = _flatten_per_mode_params(
+        s.config,
+        tm_obstacles=s.tm_obstacles.value,
+        tm_robots=s.tm_robots.value,
+    )
+    seen: dict[str, str] = {}
+    for mode, params in ((s.tm_obstacles.value, obs_params), (s.tm_robots.value, rob_params)):
+        for param in params:
+            value = param_value_to_launch_str(param.value)
+            if value is None:
+                continue
+            seen[f"task.{mode}.{param.name}"] = value
+    return [f"{k}:={v}" for k, v in seen.items()]
+
+
 def build_launch_args(step: Step, simulator: str | None) -> list[str]:
     """Return the arena launch argument list for a step, given the simulator name.
 
-    Per-mode params (task.scenario.file, task.random.*, ...) are not passed here;
-    the runner sets them via QueueEpisode before each RunEpisode goal.
+    Per-mode params (task.scenario.file, task.random.*, ...) are passed at spawn as
+    `task.<mode>.<leaf>` launch args: a task mode resolves its params in __init__, so
+    a mode whose default is unresolvable for this world (e.g. scenario `default` on a
+    world that has no such scenario) would fail configure() and never reach ACTIVE,
+    which is a prerequisite for QueueEpisode. QueueEpisode still drives per-step
+    changes within a group, where the env is already up.
 
     Contestant args are forwarded verbatim, except keys that collide with
     stage-owned launch args (sim, robot, world, tm_robots, tm_obstacles,
@@ -88,6 +111,7 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
         "auto_reset:=false",
         "tm_modules:=",
     ]
+    args.extend(_per_mode_launch_args(step))
     if s.optim:
         for k, v in s.optim.items():
             args.append(f"optim.{k}:={v}")
