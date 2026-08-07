@@ -137,7 +137,9 @@ class TopicBundle:
     collision_monitor_state: pl.DataFrame | None = None
     power: pl.DataFrame | None = None
     energy: pl.DataFrame | None = None
+    acoustics: pl.DataFrame | None = None
     plan: pl.DataFrame | None = None
+    characterization_phase: pl.DataFrame | None = None
     initialpose: pl.DataFrame | None = None
     tf: pl.DataFrame | None = None
     tf_static: pl.DataFrame | None = None
@@ -170,3 +172,6 @@ class PlotSpec(BaseModel):
     filter: dict[str, typing.Any] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
+    # Per-plot data source override (e.g. "characterization_summary" when the
+    # manifest default is "characterization_samples"). None = manifest default.
+    data_source: str | None = None

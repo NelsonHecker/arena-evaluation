@@ -19,6 +19,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
     from sensor_msgs.msg import JointState
     from nav_msgs.msg import Path
+    from std_msgs.msg import String
     from tf2_msgs.msg import TFMessage
     from arena_people_msgs.msg import Pedestrians
     from arena_humansim_msgs.msg import AgentStates
@@ -47,6 +48,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "power": TopicDefinition(f"{ns}/power_publisher/power", Power, throttled=True),
         "energy": TopicDefinition(f"{ns}/power_publisher/energy", Energy, throttled=True),
         "acoustics": TopicDefinition(f"{ns}/acoustics", Acoustics, throttled=True),
+        "characterization_phase": TopicDefinition(f"{ns}/characterization_phase", String, throttled=False),
         "collision_monitor_state": TopicDefinition(f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False),
     }
 

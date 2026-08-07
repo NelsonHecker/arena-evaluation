@@ -113,6 +113,14 @@ class FolderManager:
         target = self.data_root / benchmark_id / "combined_metrics.parquet"
         return self._safe_resolve(target)
 
+    def characterization_summary_path(self, benchmark_id: str) -> pathlib.Path:
+        """Get the path for the open-loop characterization summary (per working point)."""
+        return self._safe_resolve(self.data_root / benchmark_id / "characterization_summary.parquet")
+
+    def characterization_samples_path(self, benchmark_id: str) -> pathlib.Path:
+        """Get the path for the per-sample characterization data (Layer 5 plotting)."""
+        return self._safe_resolve(self.data_root / benchmark_id / "characterization_samples.parquet")
+
     # ── Legacy API (kept for backward-compatibility) ───────────────────────────
 
     def run_dir(self, benchmark_id: str, planner: str, stage: str) -> pathlib.Path:

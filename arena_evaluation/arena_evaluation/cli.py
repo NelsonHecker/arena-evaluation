@@ -157,6 +157,16 @@ Examples:
         parents=[run_parent],
         help="Layer 5: Generate an interactive HTML report from existing metrics.parquet.",
     )
+    characterize_parser = subparsers.add_parser(
+        "characterize",
+        parents=[run_parent],
+        help="Open-loop characterization: energy/acoustic profile per maneuver working point.",
+    )
+    characterize_parser.add_argument(
+        "--force-extract",
+        action="store_true",
+        help="Force re-extraction of MCAP files, overwriting the topic cache.",
+    )
     subparsers.add_parser(
         "plot",
         parents=[run_parent],
@@ -220,6 +230,14 @@ Examples:
                 else:
                     print(f"Processing benchmark: {benchmark_dir.name}")
                     pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
+
+    if args.command == "characterize":
+        from arena_evaluation.characterization.ecological_characterization_calculator import run_characterization
+
+        for benchmark_dir in args.benchmark_dir:
+            print(f"Characterizing benchmark: {benchmark_dir.name}")
+            run_characterization(benchmark_dir, output_dir=getattr(args, "output_dir", None))
+        return 0
 
     if args.command in ("run", "report", "plot"):
         output_dir = getattr(args, "output_dir", None)

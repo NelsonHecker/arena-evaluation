@@ -101,6 +101,7 @@ class MCAPReader:
                 "plan": defaultdict(list),
                 "initialpose": defaultdict(list),
                 "tf_gt": defaultdict(list),
+                "characterization_phase": defaultdict(list),
             }
             
         def new_env_data():
@@ -324,6 +325,14 @@ class MCAPReader:
                             
                             appended = True
     
+                        # Characterization phase markers (open-loop sweeps)
+                        elif topic.endswith("/characterization_phase"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["characterization_phase"]
+                            target["time_ns"].append(ts_ns)
+                            target["label"].append(str(getattr(ros_msg, "data", "")))
+                            appended = True
+
                         # Episode records
                         elif topic.endswith("/state/episode"):
                             target = env_data[env_key]["episode_record"]
@@ -527,7 +536,7 @@ class MCAPReader:
                     parent_is_world = parent in ("map", "world", "odom", "") or parent.endswith("/map") or parent.endswith("/world") or parent.endswith("/odom")
                     is_robot_base = child.endswith("base_link") or child.endswith("base_footprint") or "base_link" in child or "base_footprint" in child
                     if parent_is_world and not is_robot_base:
-                        match = re.search(r'(env_\d+)', child)
+                        match = re.match(r'^(env_\d+)(?:/|$)', child)
                         if match and match.group(1) not in env_offsets:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
@@ -542,7 +551,7 @@ class MCAPReader:
                     parent_is_world = parent in ("map", "world", "odom", "") or parent.endswith("/map") or parent.endswith("/world") or parent.endswith("/odom")
                     is_robot_base = child.endswith("base_link") or child.endswith("base_footprint") or "base_link" in child or "base_footprint" in child
                     if parent_is_world and not is_robot_base:
-                        match = re.search(r'(env_\d+)', child)
+                        match = re.match(r'^(env_\d+)(?:/|$)', child)
                         if match and match.group(1) not in env_offsets:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
