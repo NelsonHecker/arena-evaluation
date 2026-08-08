@@ -29,6 +29,14 @@ summary:
   - {metric: timeseries_char_energy_intensity, label: Energy Intensity, format: "{:.2f}"}
 summary_group_by: [timeseries_char_phase_kind]
 plots:
+  # ── Overview ────────────────────────────────────────────────────────────────
+  - id: notes_table
+    type: table
+    title: Analysis Notes
+    data_key: "*"
+    layout_group: overview
+    options:
+      notes: notes.yaml
   # ── Power vs. Velocity (aggregated per working point, mean ± std) ──────────
   - id: line_power_vs_vx_linear
     type: line

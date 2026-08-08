@@ -47,7 +47,7 @@ def test_renderers_empty_df():
     plotly_renderer = PlotlyRenderer()
     seaborn_renderer = SeabornRenderer()
     
-    plot_types = ["violin", "box", "bar", "trajectory", "radar", "scatter", "histogram", "heatmap", "timeseries", "line"]
+    plot_types = ["violin", "box", "bar", "trajectory", "radar", "scatter", "histogram", "heatmap", "timeseries", "line", "table"]
     for ptype in plot_types:
         spec = PlotSpec(id=f"test_{ptype}", type=ptype, title="T", data_key="k")
         try:

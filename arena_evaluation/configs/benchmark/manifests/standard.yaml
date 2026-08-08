@@ -36,6 +36,18 @@ units:
   timeseries_velocity_linear: m/s
 plots:
   # ── Overview ────────────────────────────────────────────────────────────────
+  - id: overview_table
+    type: table
+    title: Benchmark Overview
+    data_key: "*"
+    layout_group: overview
+    options:
+      group_by: [local_planner]
+      columns:
+        - {metric: success, label: Success, format: "{:.0%}"}
+        - {metric: time_to_goal, label: Avg Time, format: "{:.1f}"}
+        - {metric: path_length, label: Avg Path, format: "{:.1f}"}
+      notes: notes.yaml
   - id: radar_local_planner
     type: radar
     title: Performance Overview by Local Planner

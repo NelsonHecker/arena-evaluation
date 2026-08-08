@@ -198,7 +198,7 @@ class ReportBuilder:
         """Pick the frame for one plot (per-plot data_source override support)."""
         src = spec.data_source
         if src is None or src == manifest.data_source:
-            return df if spec.type in ("trajectory", "timeseries", "line") else df_contestants
+            return df if spec.type in ("trajectory", "timeseries", "line", "table") else df_contestants
         if src not in self._source_frames:
             data_file = data_file_for(src)
             if not data_file:

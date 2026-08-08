@@ -23,6 +23,7 @@ class PlotlyRenderer:
             HeatmapRenderer,
             TimeseriesRenderer,
             LineRenderer,
+            TableRenderer,
         )
 
         self.renderers = {
@@ -36,6 +37,7 @@ class PlotlyRenderer:
             "heatmap": HeatmapRenderer,
             "timeseries": TimeseriesRenderer,
             "line": LineRenderer,
+            "table": TableRenderer,
         }
 
     def render(self, spec: PlotSpec, df: pl.DataFrame, run_dir: pathlib.Path | None = None) -> str | list[str] | None:

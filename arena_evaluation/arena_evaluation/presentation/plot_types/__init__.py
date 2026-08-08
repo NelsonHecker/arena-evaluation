@@ -8,6 +8,7 @@ from .histogram import HistogramRenderer
 from .heatmap import HeatmapRenderer
 from .timeseries import TimeseriesRenderer
 from .line import LineRenderer
+from .table import TableRenderer
 
 __all__ = [
     "ViolinRenderer",
@@ -20,4 +21,5 @@ __all__ = [
     "HeatmapRenderer",
     "TimeseriesRenderer",
     "LineRenderer",
+    "TableRenderer",
 ]
