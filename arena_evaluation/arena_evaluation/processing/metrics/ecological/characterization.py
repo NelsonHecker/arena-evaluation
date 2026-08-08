@@ -167,21 +167,26 @@ class CharacterizationCalculator(BaseMetricCalculator):
             if "total_level_af_dba" in out.columns else pl.lit(None, dtype=pl.Float64).alias("_dba"),
         )
         if out["_dba"].null_count() == len(out) and "velocity" in out.columns:
-            # Fallback: steady-state drivetrain model from joint states.
+            # Fallback: steady-state drivetrain model from joint states
+            # (omega_eq = RMS wheel speed, t_eq = mean |effort|).
             m = self._acoustic_model()
-            omega_eq = (
-                (pl.col("velocity") ** 2).list.mean().sqrt()
-                .cast(pl.Float64).fill_null(0.0).clip(lower_bound=m["omega_active"])
+            joints = (
+                out.select(["time_ns", "velocity", "effort"])
+                .explode(["velocity", "effort"])
+                .group_by("time_ns")
+                .agg(
+                    pl.col("velocity").pow(2).mean().sqrt().alias("_omega_eq"),
+                    pl.col("effort").abs().mean().alias("_t_eq"),
+                )
             )
-            t_eq = (
-                pl.col("effort").list.eval(pl.element().abs()).list.mean()
-                .cast(pl.Float64).fill_null(0.0)
-                if "effort" in out.columns else pl.lit(0.0)
+            out = out.join(joints, on="time_ns", how="left").with_columns(
+                pl.col("_omega_eq").fill_null(0.0).clip(lower_bound=m["omega_active"]),
+                pl.col("_t_eq").fill_null(0.0),
             )
             p_drive = (
                 (10.0 ** (m["beta_0"] / 10.0))
-                * (omega_eq / m["omega_ref"]) ** (m["beta_1"] / 10.0)
-                * (1.0 + t_eq / m["tau_ref"]) ** (m["beta_2"] / 10.0)
+                * (out["_omega_eq"] / m["omega_ref"]) ** (m["beta_1"] / 10.0)
+                * (1.0 + out["_t_eq"] / m["tau_ref"]) ** (m["beta_2"] / 10.0)
             )
             out = out.with_columns(
                 (10.0 * ((10.0 ** (m["L_base_0"] / 10.0)) + p_drive).log10()).alias("_dba")

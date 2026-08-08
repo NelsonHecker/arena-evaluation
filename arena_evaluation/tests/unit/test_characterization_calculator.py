@@ -27,9 +27,11 @@ def test_output_keys_and_units():
 
 
 def test_leq_power():
+    import math
+
     s = pl.Series([50.0, 60.0])
-    mean_power = _leq_power(s).mean()
-    assert abs(10.0 * mean_power.log10() - 10.0 * ((10**5 + 10**6) / 2).log10()) < 1e-6
+    mean_power = float(_leq_power(s).mean())
+    assert abs(10.0 * math.log10(mean_power) - 10.0 * math.log10((10**5 + 10**6) / 2)) < 1e-6
 
 
 def _sample_episode() -> AlignedEpisodeBundle:
