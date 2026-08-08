@@ -287,15 +287,14 @@ $ARENA_DATA_DIR/benchmarks/<run_id>/
 │   │   └── episode_000.yaml
 │   └── ...
 ├── combined_metrics.parquet   # after arena evaluation run
-├── characterization_summary.parquet   # after a characterization report
-├── characterization_samples.parquet   # after a characterization report
 └── report_manifest.yaml       # note: which manifest produced the last report
 ```
 
 The recorder is spawned per step and writes one MCAP per episode into `episodes/`; its episode
 lifecycle is driven by the `start_episode` service (see the [ingestion README](../../arena_evaluation/ingestion/README.md)).
-`arena evaluation run --report-manifest <name>` performs extraction + metrics + (for
-characterization manifests) the per-working-point analysis, then renders `report.html`.
+`arena evaluation run --report-manifest <name>` performs extraction + metrics, then renders
+`report.html`. Characterization is a regular metric calculator — the report derives the
+per-working-point curves from its `timeseries_char_*` columns, with no separate analysis step.
 
 Inspection helpers:
 

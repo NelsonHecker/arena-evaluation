@@ -114,22 +114,27 @@ state (the former `EpisodeSplitter` logic). New per-episode recordings skip wind
 
 ---
 
-## characterization/ — Open-Loop Energy/Acoustic Analysis
+## Open-Loop Characterization (ecological metric)
 
-The `ecological_characterization_calculator.py` turns a characterization benchmark's extraction
-cache into per-working-point energy/acoustic profiles. It is invoked automatically by
-`arena evaluation run/report --report-manifest characterization`.
+Characterization is a regular metric calculator —
+[`metrics/ecological/characterization.py`](metrics/ecological/characterization.py)
+(`CharacterizationCalculator`, NAME `characterization`). It attaches the recorded
+`characterization_phase` markers to every sample (the aligner carries them forward with a
+no-tolerance asof join into the `label` column; the calculator maps labels to
+kind/vx_target/wz_target via the task mode's schedule, with a cmd_vel fallback classifier) and
+emits per-episode list columns into the metrics row:
 
-- Reuses `TopicParquetStore` + `TopicAligner`.
-- Attaches the recorded `characterization_phase` markers (tolerance-free asof carry-forward) with a
-  cmd_vel fallback classifier.
-- Computes per-sample: `p_total_w` (recorded power), `p_mech_w = Σ|τ·ω|` (joints), travelled
-  distance, dBA (recorded acoustics, with a vectorized joint-model fallback).
-- Aggregates per working point (`phase_kind`, `vx_target`, `wz_target`): mean/std power, **J/m**
-  energy intensity, **L_Aeq,T**, **L_AFmax**, achieved velocity — merged across episode
-  repetitions into mean ± std confidence columns.
-- Writes `characterization_samples.parquet` (long per-sample) and
-  `characterization_summary.parquet` (per working point) into the benchmark dir.
+- `timeseries_char_time_s`, `timeseries_char_power_total_w`, `timeseries_char_power_mech_w`
+  (`Σ|τ·ω|`), `timeseries_char_dba` (recorded acoustics, with a steady-state joint-model
+  fallback), `timeseries_char_vx_achieved`, `timeseries_char_energy_intensity` (J/m per sample),
+  `timeseries_char_leq_power` (10^(dBA/10) — for exact L_Aeq), `timeseries_char_phase_kind`,
+  `timeseries_char_vx_target`, `timeseries_char_wz_target`.
+
+The report layer derives long frames and per-working-point aggregates from these columns (the
+`line` renderer explodes the lists and aggregates mean ± std / L_Aeq / max — see the
+`characterization` report manifest). No separate analysis module or artifacts are needed;
+`arena evaluation run --report-manifest characterization` works on `combined_metrics.parquet`
+directly.
 
 ---
 

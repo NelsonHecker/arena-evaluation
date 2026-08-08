@@ -93,11 +93,11 @@ plots: [ ... ]                           # list of PlotSpec
 ```
 
 - **`data_source`** selects the Parquet the report reads: `metrics`
-  (`combined_metrics.parquet` → `metrics.parquet`), `characterization_samples`,
-  `characterization_summary`, or any `<file>.parquet` name. Per-plot `data_source` overrides are
-  supported (e.g. summary curves inside a samples-based report).
-- **A characterization data source implies the analysis**: `arena evaluation run/report` with such a
-  manifest automatically extracts the episodes and runs the characterization calculator first.
+  (`combined_metrics.parquet` → `metrics.parquet`) or any `<file>.parquet` name. Per-plot
+  `data_source` overrides are supported. The `characterization` manifest uses `metrics` — the
+  per-sample data lives in the metric row's `timeseries_char_*` list columns (from the
+  `CharacterizationCalculator`), which the `line` renderer explodes into a long frame and
+  aggregates per working point.
 - Empty `groups`/`summary` fall back to the legacy hardcoded behavior, keeping old manifests valid.
 - A `report_manifest.yaml` note is written into the output dir recording which manifest was used.
 

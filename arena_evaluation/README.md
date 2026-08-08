@@ -74,8 +74,6 @@ arena_evaluation/
 │   │   ├── pipeline.py        ← ProcessingPipeline orchestrator
 │   │   ├── map_registry.py    ← Discovers and caches map images (PGM→PNG)
 │   │   └── metrics/           ← Pluggable metric calculators (performance/, social/, ecological/, naturalness/)
-│   ├── characterization/      ← Open-loop energy/acoustic analysis (Layer 3)
-│   │   └── ecological_characterization_calculator.py
 │   ├── presentation/          ← Layer 5: Report and plot generation
 │   │   ├── report_builder.py  ← Generates report.html (data-source aware, declarative groups/summary)
 │   │   ├── manifest_registry.py ← Resolves named/inline/path manifests (like suites/contests)
@@ -137,8 +135,9 @@ arena evaluation run --benchmark-dir <run_id>
 arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 ```
 
-A characterization manifest implies the analysis: `run`/`report` automatically extract the episodes,
-compute per-working-point energy/acoustic profiles, and render the report.
+Characterization is a plain metric calculator (per-episode `timeseries_char_*` columns in
+`combined_metrics.parquet`); the report manifest simply selects the `metrics` data source and
+derives the curves/table from those columns.
 
 ### Report manifests
 
