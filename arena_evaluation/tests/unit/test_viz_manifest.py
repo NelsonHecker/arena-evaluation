@@ -15,7 +15,7 @@ def test_standard_manifest_loads_and_roundtrips():
     manifest = VizManifest.load(p)
     assert manifest.name == "standard"
     assert manifest.data_source == "metrics"
-    assert len(manifest.plots) == 37
+    assert len(manifest.plots) == 38
     assert len(manifest.groups) == 8
     assert manifest.units  # units declared
     assert all(spec.id for spec in manifest.plots)

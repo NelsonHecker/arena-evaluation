@@ -34,7 +34,8 @@ def test_data_derived_rows():
     assert html is not None
     assert "<table" in html
     assert "dwb" in html and "teb" in html
-    assert "87%" in html  # mean of 1.0 and 0.75
+    assert "88%" in html  # mean of 1.0 and 0.75
+    assert "38%" in html  # teb mean of 0.5 and 0.25
     assert "Avg Time" in html
 
 

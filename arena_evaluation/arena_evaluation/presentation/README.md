@@ -106,7 +106,7 @@ plots: [ ... ]                           # list of PlotSpec
 | Field | Type | Description |
 |---|---|---|
 | `id` | `str` | Unique identifier, used as PNG filename |
-| `type` | `str` | `violin`, `box`, `bar`, `histogram`, `scatter`, `trajectory`, `radar`, `heatmap`, `timeseries`, `line` |
+| `type` | `str` | `violin`, `box`, `bar`, `histogram`, `scatter`, `trajectory`, `radar`, `heatmap`, `timeseries`, `line`, `table` |
 | `title` | `str` | Human-readable plot title |
 | `data_key` | `str` | Column name in the data source (or `"*"` for multi-metric types) |
 | `group_by` | `str \| list[str]` | Column(s) for grouping (trajectory faceting, line traces) |
@@ -129,6 +129,7 @@ plots: [ ... ]                           # list of PlotSpec
 | `time_to_s` | `line` | x is `time_ns` → divide by 1e9, label "Time [s]" |
 | `time_relative` | `line` | subtract per-trace x minimum so episodes overlay at t=0 |
 | `max_points_per_trace`, `max_traces` | `line` | Downsampling / trace caps for long frames |
+| `group_by`, `columns`, `notes` | `table` | see *Tables & agent notes* below |
 
 ---
 
@@ -144,12 +145,52 @@ plots: [ ... ]                           # list of PlotSpec
 - **`line`** — **long-format** line charts: one trace per `group_by` combination from per-sample or
   per-working-point frames (the characterization data shape), with optional mean±std confidence
   bands (`error_y`), `time_to_s`/`time_relative` transforms, and trace/point caps.
+- **`table`** — a declarative HTML table combining **data-derived columns** and **agent-written
+  notes** (see below). Renders as a styled `<table>` directly in the report.
 - **`trajectory`** — (x, y) paths with map overlay, time slider, dynamic markers, spawn-jump
   detection, multi-agent support, optional GIF export.
 - **`radar`** — normalized multi-metric profile per group.
 - **`heatmap`** — correlation matrix (`data_key="*"`) or pivot grid (options `x`/`y`).
 
 ---
+
+## Tables & agent notes
+
+A `table` plot is fully manifest-defined:
+
+```yaml
+- id: overview_table
+  type: table
+  title: Benchmark Overview
+  data_key: "*"
+  layout_group: overview
+  options:
+    group_by: [local_planner]                    # one row per group
+    columns:                                      # data-derived columns (means)
+      - {metric: success, label: Success, format: "{:.0%}"}
+      - {metric: time_to_goal, label: Avg Time, format: "{:.1f}"}
+    notes: notes.yaml                             # agent-written content (optional)
+```
+
+The **notes source** is how an agent (e.g. through MCP tools) writes dynamic overviews, summaries,
+or parsed values into the report: it places a `notes.yaml` in the benchmark dir and the table pulls
+it in on the next `arena evaluation report` run. Accepted shapes:
+
+```yaml
+# structured rows
+- {label: Conclusion, value: "DWB achieved the lowest energy intensity"}
+- {label: Best planner, value: dwb}
+# or a plain mapping
+Conclusion: "DWB achieved the lowest energy intensity"
+# or free text lines
+Conclusion: DWB achieved the lowest energy intensity
+# or inline in the manifest instead of a file:
+notes:
+  - {label: Run, value: 20260808-011247-characterization-characterization}
+```
+
+The manifest's `columns` also accept list-valued metrics (they are exploded before aggregating), so
+tables can summarize the `timeseries_char_*` characterization columns too.
 
 ## dimension_detector.py — Auto-Differentiation
 
