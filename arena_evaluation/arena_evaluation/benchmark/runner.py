@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import contextlib
 import datetime
 import logging
@@ -52,10 +53,6 @@ from .state import (
 )
 from .step import Step, StepErrorKind, StepResult
 
-# ---------------------------------------------------------------------------
-# Free functions (testable without ROS init)
-# ---------------------------------------------------------------------------
-
 
 class _WithSteps(typing.Protocol):
     steps: dict[str, StepResult]
@@ -72,16 +69,7 @@ _log = logging.getLogger(__name__)
 
 
 def build_launch_args(step: Step, simulator: str | None) -> list[str]:
-    """Return the arena launch argument list for a step, given the simulator name.
-
-    Per-mode params (task.scenario.file, task.random.*, ...) are not passed here;
-    the runner sets them via QueueEpisode before each RunEpisode goal.
-
-    Contestant args are forwarded verbatim, except keys that collide with
-    stage-owned launch args (sim, robot, world, tm_robots, tm_obstacles,
-    run_seed, auto_reset, tm_modules, record_data_dir), which would override
-    the stage's configuration. Those are logged and dropped.
-    """
+    """Return the arena launch argument list for a step, given the simulator name."""
     s = step.stage
     args = [
         *([f"sim:={simulator}"] if simulator is not None else []),
@@ -147,16 +135,10 @@ def _all_steps_grid(
     scale_episodes: float,
     record_root: pathlib.Path | None = None,
 ) -> list[Step]:
-    """Generate all steps for a benchmark suite and contest.
-
-    Deduplicates unhindered_peds steps to run once per stage.
-    All steps share the same episodes/ root directory; the recorder is responsible
-    for creating episode_XXX/ subdirectories as episodes arrive.
-    """
+    """Generate all steps for a benchmark suite and contest."""
     steps: list[Step] = []
     seen: set[str] = set()
 
-    # Flat episodes/ directory shared by all steps in the benchmark
     episodes_dir = (record_root / "episodes") if record_root is not None else None
 
     for contestant in contest.contestants:
@@ -167,6 +149,12 @@ def _all_steps_grid(
                 episodes=int(round(stage.episodes * scale_episodes)),
                 record_dir=episodes_dir,
             )
+            if not suite.references:
+                if main_step.key in seen:
+                    raise ValueError(f"duplicate step key: {main_step.key!r}")
+                seen.add(main_step.key)
+                steps.append(main_step)
+                continue
             ref_robot_step = Step(
                 contestant=contestant,
                 stage=stage,
@@ -181,7 +169,9 @@ def _all_steps_grid(
                 seen.add(step.key)
                 steps.append(step)
 
-    # Shared unhindered_peds reference step per stage
+    if not suite.references:
+        return steps
+
     dummy_peds_contestant = Contest.Contestant(name="unhindered_peds", args={})
     for stage in suite.stages:
         ref_peds_step = Step(
@@ -220,19 +210,12 @@ def build_pending(
             continue
         if existing.status == "failed" and not retry_failed:
             continue
-        # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
         pending.append(step)
     return pending
 
 
 def resolve_planner_identity(contestant: Contest.Contestant) -> tuple[str, str]:
-    """Return (local_planner, inter_planner) for a contestant.
-
-    Prefers the explicit ``mobile.local_planner`` / ``mobile.inter_planner``
-    contest config (both list-form and sweep-form contests carry it in
-    ``args["mobile"]``); falls back to the ``<prefix>-<local>-<inter>`` name
-    convention via ``split_planner_name``.
-    """
+    """Return (local_planner, inter_planner) for a contestant."""
     mobile = (contestant.args or {}).get("mobile")
     if isinstance(mobile, dict):
         lp = mobile.get("local_planner")
@@ -247,32 +230,13 @@ def env_key(step: Step, simulator: str | None) -> tuple:
     return (step.contestant.name, step.stage.robot, simulator)
 
 
-def group_pending(pending: list[Step], simulator: str | None) -> list[list[Step]]:
-    """Group consecutive steps with the same env_key, preserving suite order.
-
-    Splitting only happens when env_key changes between adjacent steps.
-    Reference steps (like unhindered_peds) reuse the active group's env if the
-    robot and simulator match.
-    """
-    if not pending:
-        return []
-    groups: list[list[Step]] = []
-    current: list[Step] = [pending[0]]
-    current_key = env_key(pending[0], simulator)
-    for step in pending[1:]:
-        k = env_key(step, simulator)
-        if step.is_reference and step.reference_type == "unhindered_peds":
-            same_env = (step.stage.robot == current[0].stage.robot)
-        else:
-            same_env = (k == current_key)
-        if same_env:
-            current.append(step)
-        else:
-            groups.append(current)
-            current = [step]
-            current_key = k
-    groups.append(current)
-    return groups
+def group_pending(steps: list[Step], simulator: str | None) -> list[list[Step]]:
+    groups = collections.defaultdict(list)
+    for step in steps:
+        groups[env_key(step, simulator)].append(step)
+    
+    sorted_groups = sorted(groups.values(), key=len, reverse=True)
+    return sorted_groups
 
 
 def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
@@ -345,13 +309,7 @@ def _flatten_per_mode_params(
     tm_obstacles: str,
     tm_robots: str,
 ) -> tuple[list[Parameter], list[Parameter]]:
-    """Route stage.config blocks to (obstacles_params, robots_params) as leaf-keyed Parameter[].
-
-    Top-level keys in stage_config are mode names matching tm_obstacles / tm_robots
-    (e.g. ``scenario``, ``random``). Each block is flattened to leaves relative to the
-    mode (e.g. ``static.n``, ``file``) per QueueEpisode contract. ``scenario.file`` values
-    are stripped to the stem (no path/extension).
-    """
+    """Route stage.config blocks to (obstacles_params, robots_params) as leaf-keyed Parameter[]."""
     obs: list[Parameter] = []
     rob: list[Parameter] = []
     for mode, mode_dict in (stage_config or {}).items():
@@ -373,9 +331,6 @@ _LATCHED = QoSProfile(
     durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
 )
 
-# Failures that mean the env itself is unusable, so the rest of the group
-# (and possibly the run) cannot proceed. Episode-level failures (no record,
-# timeout, robot got stuck, etc.) are NOT systemic, the next step can still run.
 _SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP)
 
 
@@ -462,10 +417,7 @@ class BenchmarkRunner(ArenaMixinNode):
         return build_launch_args(step, self._simulator)
 
     async def _await_env_visible(self, env_id: int) -> None:
-        """Wait for env_id to appear on /arena/state/envs.
-
-        No timeout. If the env never appears, this waits indefinitely (Ctrl+C to abort).
-        """
+        """Wait for env_id to appear on /arena/state/envs."""
         if env_id in self._env_records:
             return
         await self._await_hb(self._env_visible_events.setdefault(env_id, asyncio.Event()).wait(), f"env {env_id} to appear on /arena/state/envs")
@@ -486,10 +438,7 @@ class BenchmarkRunner(ArenaMixinNode):
             raise
 
     async def _await_or_env_died(self, env_id: int, awaitable: typing.Awaitable[_T]) -> _T:
-        """Race awaitable against env death. Raises _EnvDied if env_id disappears first.
-
-        No-op (returns awaitable's result) if env_id is not currently registered (pre-spawn).
-        """
+        """Race awaitable against env death. Raises _EnvDied if env_id disappears first."""
         death = self._env_gone_events.setdefault(env_id, asyncio.Event())
         op_task = asyncio.ensure_future(awaitable)
         death_task = asyncio.ensure_future(death.wait())
@@ -536,10 +485,6 @@ class BenchmarkRunner(ArenaMixinNode):
         await self._await_hb(queue_client.ensure(timeout_sec=None), f"queue_episode service on env {env_id}")
         self._queue_clients[env_id] = queue_client
 
-        # Recorder start_episode client: the recorder process is spawned per
-        # step (after this setup), so the client waits for it to appear — the
-        # first call happens when the first episode record arrives, by which
-        # time the recorder is up.
         self._recorder_clients[env_id] = self.create_client_wrapper(
             RecordEpisode, f"{env_ns_root}/start_episode"
         )
@@ -554,9 +499,6 @@ class BenchmarkRunner(ArenaMixinNode):
                 f"[env {env_id}] episode record: id={msg.episode_id} "
                 f"outcome={msg.outcome_state} ({label}) info={msg.outcome_info!r}"
             )
-            # QUEUED/RUNNING = episode is starting: explicitly signal the
-            # recorder instead of relying on its own topic match (which can
-            # race with DDS discovery when the env is reused across steps).
             if msg.outcome_state in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING):
                 triggered = self._triggered_episodes.get(env_id)
                 if triggered is not None and msg.episode_id not in triggered:
@@ -628,7 +570,16 @@ class BenchmarkRunner(ArenaMixinNode):
                 pass
             elif step.reference_type == "unhindered_peds":
                 req.tm_robots = "stationary"
-                rob_params = []
+                rob_params = [
+                    Parameter(
+                        name="pos_x",
+                        value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
+                    ),
+                    Parameter(
+                        name="pos_y",
+                        value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
+                    )
+                ]
         req.obstacles_params = obs_params
         req.robots_params = rob_params
         resp = await self.await_ros(queue.client.call_async(req))
@@ -751,10 +702,6 @@ class BenchmarkRunner(ArenaMixinNode):
                 }.get(rec.outcome_state, str(rec.outcome_state))
                 _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s")
 
-                # Authoritative stop: close the recorder's MCAP writer for this
-                # episode and record its outcome before advancing or killing
-                # the recorder process. The topic messages are NOT used for the
-                # lifecycle — the service is the single reliable system.
                 if rec.outcome_state in (
                     EpisodeRecord.SUCCESS,
                     EpisodeRecord.FAILED,
@@ -885,41 +832,38 @@ class BenchmarkRunner(ArenaMixinNode):
                 await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
         await asyncio.sleep(2.0)
 
-    async def _run_group(self, group: list[Step], slot_index: int) -> list[StepResult]:
+    async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
         env_id: int | None = None
-        results: list[StepResult] = []
         try:
-            spawned = await self._spawn_and_setup_env(group[0])
+            spawned = await self._spawn_and_setup_env(rep_step)
             if spawned is None:
-                results.append(
-                    StepResult(
-                        group[0].key,
+                abort = False
+                while not q.empty():
+                    try:
+                        step = q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    res = StepResult(
+                        step.key,
                         "failed",
                         None,
                         time.time(),
                         time.time(),
                         StepErrorKind.ENV_SETUP,
                         "spawn_env failed",
-                        episodes_total=group[0].episodes,
+                        episodes_total=step.episodes,
                     )
-                )
-                for step in group[1:]:
-                    results.append(
-                        StepResult(
-                            step.key,
-                            "skipped",
-                            None,
-                            time.time(),
-                            time.time(),
-                            StepErrorKind.CANCELLED,
-                            "aborted by upstream step setup failure",
-                            episodes_total=step.episodes,
-                        )
-                    )
-                return results
+                    if flush_cb(res):
+                        abort = True
+                return abort
             env_id, env_ns_root = spawned
 
-            for idx, step in enumerate(group):
+            while not q.empty():
+                try:
+                    step = q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                
                 recorder_proc = None
                 if step.record_dir is not None:
                     counter_file = step.record_dir / ".episode_counter"
@@ -963,7 +907,6 @@ class BenchmarkRunner(ArenaMixinNode):
                         stderr=subprocess.DEVNULL,
                         start_new_session=True,
                     )
-                    # wait a little bit for the ROS node to initialize
                     await asyncio.sleep(2.0)
 
                 await self._push_stage_config(env_id, step)
@@ -981,21 +924,46 @@ class BenchmarkRunner(ArenaMixinNode):
                         "cancelled",
                         episodes_total=step.episodes,
                     )
-                    results.append(step_result)
-                    for remaining in group[idx + 1 :]:
-                        results.append(
-                            StepResult(
-                                remaining.key,
-                                "skipped",
-                                env_id,
-                                time.time(),
-                                time.time(),
-                                StepErrorKind.CANCELLED,
-                                "cancelled",
-                                episodes_total=remaining.episodes,
-                            )
-                        )
+                    flush_cb(step_result)
+                    # if cancelled, drain the queue and mark skipped
+                    while not q.empty():
+                        try:
+                            rem_step = q.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        flush_cb(StepResult(
+                            rem_step.key,
+                            "skipped",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.CANCELLED,
+                            "cancelled",
+                            episodes_total=rem_step.episodes,
+                        ))
                     raise
+                except _EnvDied as exc:
+                    step_result = StepResult(
+                        step.key,
+                        "failed",
+                        env_id,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.ENV_SETUP,
+                        repr(exc),
+                        episodes_total=step.episodes,
+                    )
+                except Exception as exc:
+                    step_result = StepResult(
+                        step.key,
+                        "failed",
+                        env_id,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.INTERNAL,
+                        repr(exc),
+                        episodes_total=step.episodes,
+                    )
                 finally:
                     if recorder_proc is not None:
                         try:
@@ -1014,107 +982,10 @@ class BenchmarkRunner(ArenaMixinNode):
                             except Exception:
                                 pass
 
-                results.append(step_result)
+                abort = flush_cb(step_result)
+                if abort:
+                    return True
 
-                if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
-                    if idx + 1 >= len(group):
-                        break
-                    _log.warning(f"env {env_id} unusable after {step.key} ({step_result.error_kind}); respawning a fresh env for {len(group) - idx - 1} remaining step(s)")
-                    await self._despawn_env(env_id)
-                    spawned = await self._spawn_and_setup_env(group[idx + 1])
-                    if spawned is None:
-                        env_id = None
-                        for remaining in group[idx + 1 :]:
-                            results.append(
-                                StepResult(
-                                    remaining.key,
-                                    "skipped",
-                                    None,
-                                    time.time(),
-                                    time.time(),
-                                    StepErrorKind.ENV_SETUP,
-                                    "env respawn failed after a wedged env",
-                                    episodes_total=remaining.episodes,
-                                )
-                            )
-                        break
-                    env_id, env_ns_root = spawned
-
-        except _EnvDied as exc:
-            if not results:
-                results.append(
-                    StepResult(
-                        group[0].key,
-                        "failed",
-                        env_id,
-                        time.time(),
-                        time.time(),
-                        StepErrorKind.ENV_SETUP,
-                        repr(exc),
-                        episodes_total=group[0].episodes,
-                    )
-                )
-            already = {r.key for r in results}
-            for step in group:
-                if step.key not in already:
-                    results.append(
-                        StepResult(
-                            step.key,
-                            "skipped",
-                            env_id,
-                            time.time(),
-                            time.time(),
-                            StepErrorKind.CANCELLED,
-                            "aborted by upstream step setup failure",
-                            episodes_total=step.episodes,
-                        )
-                    )
-        except asyncio.CancelledError:
-            already = {r.key for r in results}
-            for step in group:
-                if step.key not in already:
-                    results.append(
-                        StepResult(
-                            step.key,
-                            "skipped",
-                            env_id,
-                            time.time(),
-                            time.time(),
-                            StepErrorKind.CANCELLED,
-                            "cancelled",
-                            episodes_total=step.episodes,
-                        )
-                    )
-            raise
-        except Exception as exc:
-            if not results:
-                results.append(
-                    StepResult(
-                        group[0].key,
-                        "failed",
-                        env_id,
-                        time.time(),
-                        time.time(),
-                        StepErrorKind.INTERNAL,
-                        repr(exc),
-                        episodes_total=group[0].episodes,
-                    )
-                )
-            already = {r.key for r in results}
-            for step in group:
-                if step.key not in already:
-                    results.append(
-                        StepResult(
-                            step.key,
-                            "skipped",
-                            env_id,
-                            time.time(),
-                            time.time(),
-                            StepErrorKind.CANCELLED,
-                            "aborted by upstream step setup failure",
-                            episodes_total=step.episodes,
-                        )
-                    )
         finally:
             self._completed_groups += 1
             keep_alive = self._noexit and self._completed_groups == self._total_groups and env_id is not None
@@ -1128,8 +999,9 @@ class BenchmarkRunner(ArenaMixinNode):
                     with contextlib.suppress(asyncio.TimeoutError, Exception):
                         await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
                 if keep_alive:
-                    _log.info(f"--noexit: keeping env {env_id} alive after last group {group[0].key}")
-        return results
+                    _log.info(f"--noexit: keeping env {env_id} alive after last group {rep_step.key}")
+        
+        return False
 
     def _publish_state(
         self,
@@ -1225,67 +1097,79 @@ class BenchmarkRunner(ArenaMixinNode):
         await self._spawn.ensure(timeout_sec=300.0)
         await self._despawn.ensure(timeout_sec=300.0)
 
-        groups = group_pending(pending, self._simulator)
-        self._total_groups = len(groups)
-        cap = max(1, min(self._env_n, len(groups) or 1))
-        free_slots: list[int] = list(range(cap))
-        in_flight: set[asyncio.Task[list[StepResult]]] = set()
+        blocks = group_pending(pending, self._simulator)
+        self._total_groups = len(blocks)
+        
+        block_queues: list[tuple[Step, asyncio.Queue[Step]]] = []
+        for block in blocks:
+            q = asyncio.Queue()
+            for step in block:
+                q.put_nowait(step)
+            block_queues.append((block[0], q))
 
-        def _mark_group_in_progress(group: list[Step]) -> None:
-            for step in group:
-                results[step.key] = StepResult(
-                    step.key,
-                    "in_progress",
-                    None,
-                    time.time(),
-                    None,
-                    None,
-                    None,
-                    episodes_total=step.episodes,
-                )
+        cap = max(1, min(self._env_n, len(pending) or 1))
+        in_flight: set[asyncio.Task[bool]] = set()
+
+        def _mark_step_in_progress(step: Step) -> None:
+            results[step.key] = StepResult(
+                step.key,
+                "in_progress",
+                None,
+                time.time(),
+                None,
+                None,
+                None,
+                episodes_total=step.episodes,
+            )
             self._run_dir.state.write(results)
             self._publish_state(results, steps_total)
 
-        def _flush_group_results(group_results: list[StepResult]) -> bool:
-            """Write results, return True only on a systemic setup failure before any episode ran."""
-            for res in group_results:
-                results[res.key] = res
-                _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={((res.ended_at or 0.0) - res.started_at):.1f}s")
+        def _flush_step_result(res: StepResult) -> bool:
+            results[res.key] = res
+            _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={((res.ended_at or 0.0) - res.started_at):.1f}s")
             self._run_dir.state.write(results)
             self._publish_state(results, steps_total)
+            
             total_episodes_run = sum(r.episodes_run for r in results.values())
             if total_episodes_run > 0:
                 return False
-            return any(r.status == "failed" and r.error_kind in _SYSTEMIC for r in group_results)
+            return res.status == "failed" and res.error_kind in _SYSTEMIC
+
+        async def _worker(slot_index: int) -> bool:
+            while True:
+                target_q = None
+                rep_step = None
+                for r_step, q in block_queues:
+                    if not q.empty():
+                        target_q = q
+                        rep_step = r_step
+                        break
+                
+                if target_q is None:
+                    break
+                
+                abort = await self._run_group_queue(rep_step, target_q, slot_index, _flush_step_result)
+                if abort:
+                    return True
+            return False
 
         try:
-            while groups or in_flight:
-                while groups and len(in_flight) < cap and free_slots:
-                    group = groups.pop(0)
-                    slot = free_slots.pop(0)
-                    _mark_group_in_progress(group)
-                    task: asyncio.Task[list[StepResult]] = asyncio.create_task(
-                        self._run_group(group, slot_index=slot),
-                        name=group[0].key,
-                    )
-                    task.add_done_callback(lambda _t, s=slot: free_slots.append(s))
-                    in_flight.add(task)
-                if not in_flight:
-                    break
+            for slot in range(cap):
+                in_flight.add(asyncio.create_task(_worker(slot), name=f"worker_{slot}"))
+            
+            while in_flight:
                 done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
                 for t in done:
-                    group_results: list[StepResult] = t.result()
-                    abort = _flush_group_results(group_results)
+                    abort = t.result()
                     if abort:
                         aborted_systemic = True
-                        first_failed = next(r for r in group_results if r.status == "failed" and r.error_kind in _SYSTEMIC)
-                        _log.error(f"benchmark: {first_failed.key} hit a systemic setup failure ({first_failed.error_kind}: {first_failed.error_detail}); aborting run before any episode ran, {len(groups)} pending group(s) skipped")
+                        _log.error(f"benchmark: worker hit a systemic setup failure; aborting run")
                         for t2 in in_flight:
                             t2.cancel()
                         with contextlib.suppress(Exception):
                             await asyncio.gather(*in_flight, return_exceptions=True)
-                        groups.clear()
                         in_flight.clear()
+                        block_queues.clear()
                         break
         except asyncio.CancelledError:
             for t in in_flight:
@@ -1558,6 +1442,5 @@ def cli_main(argv: list[str] | None = None) -> int:
     return BenchmarkRunner.exit_code
 
 
-# Convenience: allow `python -m arena_evaluation.benchmark.runner`
 if __name__ == "__main__":
     raise SystemExit(cli_main())
