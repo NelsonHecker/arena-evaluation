@@ -1,13 +1,15 @@
 """Unit tests for the open-loop characterization maneuver schedule.
 
-Pure Python — no ROS, no Gazebo required.
+Pure Python — no ROS, no Gazebo required. The schedule lives in
+task_generator (owned by the TM_Characterization robot task mode); the offline
+calculator imports the same module so labels never drift.
 """
 
 import pathlib
 
 import pytest
 
-from arena_evaluation.characterization.maneuvers import (
+from task_generator.tasks.robots.characterization.schedule import (
     ANGULAR_DWELL_S,
     IDLE_DURATION_S,
     LINEAR_DWELL_S,
@@ -34,19 +36,27 @@ def test_linear_sweep_coverage_up_to_2mps():
     phases = build_schedule()
     # The ramp-apex settles are also kind=LINEAR — match the sweep steps only.
     linear = [p for p in phases if p.name.startswith("linear_vx_")]
-    targets = sorted({p.vx_target for p in linear})
+    targets = sorted({p.vx_target for p in linear if p.vx_target > 0.0})
     assert targets == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
     assert max(targets) == VX_MAX
+    assert all(p.duration_s == LINEAR_DWELL_S for p in linear)
+    # Out-and-back: every forward step has a matching backward return at the
+    # same speed so the robot never runs out of map.
+    forward = {p.vx_target for p in linear if p.vx_target > 0.0}
+    backward = {p.vx_target for p in linear if p.vx_target < 0.0}
+    assert forward == {-v for v in backward}
     assert all(p.duration_s == LINEAR_DWELL_S for p in linear)
 
 
 def test_ramp_tests():
     phases = build_schedule()
-    ramps_up = [p for p in phases if p.kind == PhaseKind.RAMP_UP]
-    ramps_down = [p for p in phases if p.kind == PhaseKind.RAMP_DOWN]
+    ramps_up = [p for p in phases if p.kind == PhaseKind.RAMP_UP and p.vx_target > 0.0]
+    ramps_back = [p for p in phases if p.kind == PhaseKind.RAMP_UP and p.vx_target < 0.0]
     assert [p.ramp_s for p in ramps_up] == [0.5, 1.0, 2.0]
-    assert [p.ramp_s for p in ramps_down] == [0.5, 1.0, 2.0]
-    assert all(p.vx_target == VX_MAX for p in ramps_up + ramps_down)
+    assert all(p.vx_target == VX_MAX for p in ramps_up)
+    # Ramps return the robot to its start by accelerating backward to −vx_max.
+    assert [p.ramp_s for p in ramps_back] == [0.5, 1.0, 2.0]
+    assert all(p.vx_target == -VX_MAX for p in ramps_back)
     # Each ramp is followed by a settle at the apex.
     apexes = [p for p in phases if p.name.startswith("ramp_apex")]
     assert len(apexes) == 3

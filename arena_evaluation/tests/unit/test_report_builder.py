@@ -73,3 +73,57 @@ def test_report_builder_jinja2_rendering():
             assert "dwa" in content
             assert "mppi" in content
             assert "<div id='mock-plotly'></div>" in content
+
+
+
+
+def test_report_builder_characterization_from_metrics():
+    """A characterization manifest on the metrics frame derives the summary
+    table and line plots from the per-episode timeseries_char_* list columns."""
+    from arena_evaluation.presentation.viz_manifest import ManifestGroup, SummarySpec
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+
+        # Metrics frame: one episode row with per-sample char columns.
+        df = pl.DataFrame({
+            "planner": ["characterization"],
+            "episode": [1],
+            "timeseries_char_time_s": [[0.0, 1.0, 2.0]],
+            "timeseries_char_power_total_w": [[40.0, 60.0, 55.0]],
+            "timeseries_char_phase_kind": [["idle", "linear", "linear"]],
+            "timeseries_char_vx_target": [[0.0, 0.5, 1.0]],
+        })
+        df.write_parquet(tmp_path / "combined_metrics.parquet")
+
+        manifest = VizManifest(
+            name="characterization",
+            title="Characterization Report",
+            data_source="metrics",
+            groups=[ManifestGroup(id="power_curves", title="Power vs. Velocity Curves")],
+            summary=[SummarySpec(metric="timeseries_char_power_total_w", label="Mean Power", format="{:.1f}")],
+            summary_group_by=["timeseries_char_phase_kind"],
+            units={"timeseries_char_power_total_w": "W"},
+            plots=[
+                PlotSpec(
+                    id="line_power_vs_vx",
+                    type="line",
+                    title="Power vs Velocity",
+                    data_key="timeseries_char_vx_target",
+                    group_by=["timeseries_char_phase_kind"],
+                    options={"y": "timeseries_char_power_total_w", "aggregate": True, "mode": "lines+markers"},
+                    layout_group="power_curves",
+                ),
+            ],
+        )
+
+        builder = ReportBuilder(benchmark_dir=tmp_path, manifest=manifest)
+        builder.build()
+
+        content = (tmp_path / "report.html").read_text()
+        assert "Characterization Report" in content
+        assert "Power vs. Velocity Curves" in content
+        assert "Mean Power" in content      # derived summary column label
+        assert "W" in content               # unit-suffixed axis label
+        note = (tmp_path / "report_manifest.yaml").read_text()
+        assert "characterization" in note
