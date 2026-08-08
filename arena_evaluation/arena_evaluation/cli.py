@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import datetime
 import os
 import pathlib
 import sys
@@ -8,6 +9,7 @@ from arena_evaluation.processing.pipeline import ProcessingPipeline
 from arena_evaluation.presentation.report_builder import ReportBuilder
 from arena_evaluation.storage.data_root import latest_benchmark
 from arena_evaluation.storage.folder_manager import FolderManager
+
 
 def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
     search_roots = []
@@ -131,6 +133,19 @@ Examples:
         default=-1,
         help="Number of worker processes for parallel extraction and processing (-1 = auto-detect CPU count).",
     )
+    run_parent.add_argument(
+        "--report-manifest",
+        type=str,
+        default=None,
+        metavar="NAME|PATH|{...}",
+        help="Report manifest: a name from configs/benchmark/manifests/, a path to a "
+        "YAML file, or inline {...} YAML. Used by run/report/plot; ignored otherwise.",
+    )
+    run_parent.add_argument(
+        "--list-manifests",
+        action="store_true",
+        help="List the available named report manifests and exit.",
+    )
 
     subparsers.add_parser(
         "extract",
@@ -157,16 +172,6 @@ Examples:
         parents=[run_parent],
         help="Layer 5: Generate an interactive HTML report from existing metrics.parquet.",
     )
-    characterize_parser = subparsers.add_parser(
-        "characterize",
-        parents=[run_parent],
-        help="Open-loop characterization: energy/acoustic profile per maneuver working point.",
-    )
-    characterize_parser.add_argument(
-        "--force-extract",
-        action="store_true",
-        help="Force re-extraction of MCAP files, overwriting the topic cache.",
-    )
     subparsers.add_parser(
         "plot",
         parents=[run_parent],
@@ -174,6 +179,15 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if getattr(args, "list_manifests", False):
+        from arena_evaluation.presentation.manifest_registry import available_manifests
+
+        print("Available report manifests:")
+        for name in available_manifests():
+            print(f"  - {name}")
+        return 0
+
     args = resolve_paths(args)
 
     if args.benchmark_dir is None and args.run_dir is None:
@@ -231,24 +245,25 @@ Examples:
                     print(f"Processing benchmark: {benchmark_dir.name}")
                     pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
 
-    if args.command == "characterize":
-        from arena_evaluation.characterization.ecological_characterization_calculator import run_characterization
-
-        for benchmark_dir in args.benchmark_dir:
-            print(f"Characterizing benchmark: {benchmark_dir.name}")
-            run_characterization(benchmark_dir, output_dir=getattr(args, "output_dir", None))
-        return 0
-
     if args.command in ("run", "report", "plot"):
         output_dir = getattr(args, "output_dir", None)
         if not output_dir:
             output_dir = target_dirs[0]
-            
+
+        from arena_evaluation.presentation.manifest_registry import resolve_manifest
+
+        manifest_obj = resolve_manifest(getattr(args, "report_manifest", None), benchmark_dir=target_dirs[0])
+
         print(f"Building report/plots from {len(target_dirs)} sources into: {output_dir}")
         generate_gifs = getattr(args, "generate_gifs", False)
         _ctx = profiler.phase("report") if profiler else contextlib.nullcontext()
         with _ctx:
-            builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir, generate_gifs=generate_gifs)
+            builder = ReportBuilder.from_dirs(
+                target_dirs,
+                output_dir=output_dir,
+                manifest=manifest_obj,
+                generate_gifs=generate_gifs,
+            )
             builder.build()
         print("Report generation complete.")
 

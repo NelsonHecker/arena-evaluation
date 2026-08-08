@@ -1,0 +1,3 @@
+# Characterization contest: a single dummy contestant — the robot's task mode
+# (tm_robots: characterization) drives the sweep, not a navigation planner.
+- name: characterization

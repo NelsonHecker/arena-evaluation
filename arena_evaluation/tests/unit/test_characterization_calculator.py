@@ -1,104 +1,83 @@
-"""Unit tests for the characterization calculator's pure vectorized helpers.
+"""Unit tests for the CharacterizationCalculator (ecological metric).
 
 Pure Python + Polars — no ROS, no Gazebo required.
 """
 
-import math
-
 import polars as pl
-import pytest
 
-from arena_evaluation.characterization.ecological_characterization_calculator import (
-    add_distance,
-    add_mechanical_power,
-    attach_phase_labels,
-    leq_db,
-    summarize_samples,
+from arena_evaluation.processing.metrics.ecological.characterization import (
+    CharacterizationCalculator,
+    _leq_power,
 )
-from arena_evaluation.characterization.maneuvers import Phase, PhaseKind, build_schedule
+from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 
-def test_leq_db():
-    assert leq_db(pl.Series([50.0, 60.0])) == pytest.approx(
-        10.0 * math.log10((10**5 + 10**6) / 2), abs=1e-6
-    )
-    # A single constant level maps to itself
-    assert leq_db(pl.Series([55.0, 55.0])) == pytest.approx(55.0)
-    assert math.isnan(leq_db(pl.Series([], dtype=pl.Float64)))
+def _calc() -> CharacterizationCalculator:
+    return CharacterizationCalculator(RobotParams.load("jackal"))
 
 
-def test_add_distance():
-    df = pl.DataFrame({"time_ns": [0, 1, 2], "pos_x": [0.0, 3.0, 3.0], "pos_y": [0.0, 4.0, 4.0]})
-    out = add_distance(df)
-    assert out["ds_m"].to_list() == pytest.approx([0.0, 5.0, 0.0])
+def test_output_keys_and_units():
+    calc = _calc()
+    keys = calc.output_keys()
+    assert "timeseries_char_power_total_w" in keys
+    assert "timeseries_char_phase_kind" in keys
+    assert calc.UNITS["timeseries_char_power_total_w"] == "W"
+    assert calc.UNITS["timeseries_char_dba"] == "dBA"
+    assert len(keys) == len(set(keys))
 
 
-def test_add_mechanical_power():
+def test_leq_power():
+    s = pl.Series([50.0, 60.0])
+    mean_power = _leq_power(s).mean()
+    assert abs(10.0 * mean_power.log10() - 10.0 * ((10**5 + 10**6) / 2).log10()) < 1e-6
+
+
+def _sample_episode() -> AlignedEpisodeBundle:
+    """A small aligned frame: odom + power + joints + phase labels."""
     df = pl.DataFrame(
         {
-            "time_ns": [0, 1],
-            "joint_velocity": [[2.0, 2.0], [0.0, 0.0]],
-            "joint_effort": [[1.0, -3.0], [0.0, 0.0]],
+            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "pos_x": [0.0, 0.25, 0.75, 1.75],
+            "pos_y": [0.0, 0.0, 0.0, 0.0],
+            "vel_linear": [0.0, 0.25, 0.5, 1.0],
+            "total_power_w": [50.0, 55.0, 60.0, 65.0],
+            "total_level_af_dba": [42.0, 46.0, 51.0, 56.0],
+            "velocity": [[0.0, 0.0], [2.0, 2.0], [4.0, 4.0], [8.0, 8.0]],
+            "effort": [[0.1, 0.1], [0.5, -0.5], [1.0, 1.0], [1.0, -1.0]],
+            "label": ["linear_vx_0.25", "linear_vx_0.25", "linear_vx_0.50", "linear_vx_0.50"],
         }
     )
-    out = add_mechanical_power(df)
-    # P = |1|*2 + |-3|*2 = 8 W
-    assert out["p_mech_w"].to_list() == pytest.approx([8.0, 0.0])
-
-
-def test_attach_phase_labels_carry_forward():
-    odom = pl.DataFrame(
-        {
-            "time_ns": [10, 20, 30, 40],
-            "cmd_linear_x": [1.0, 1.0, 0.0, 0.0],
-            "cmd_angular_z": [0.0, 0.0, 0.0, 0.0],
-        }
+    return AlignedEpisodeBundle(
+        episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal"
     )
-    markers = pl.DataFrame({"time_ns": [5, 25], "label": ["linear_vx_1.00", "idle_mid"]})
-    out = attach_phase_labels(odom, markers, build_schedule())
-    assert out["phase_label"].to_list() == ["linear_vx_1.00", "linear_vx_1.00", "idle_mid", "idle_mid"]
-    assert out["phase_kind"].to_list() == ["linear", "linear", "idle", "idle"]
-    assert out["vx_target"].to_list() == pytest.approx([1.0, 1.0, 0.0, 0.0])
 
 
-def test_attach_phase_labels_fallback_without_markers():
-    odom = pl.DataFrame(
-        {
-            "time_ns": [10, 20, 30],
-            "cmd_linear_x": [0.0, 1.5, 0.0],
-            "cmd_angular_z": [0.0, 0.0, -1.0],
-        }
+def test_calculate_produces_timeseries():
+    calc = _calc()
+    out = calc.calculate(_sample_episode(), {})
+    assert out["timeseries_char_time_s"] == [0.0, 1.0, 2.0, 3.0]
+    assert out["timeseries_char_power_total_w"] == [50.0, 55.0, 60.0, 65.0]
+    assert out["timeseries_char_phase_kind"] == ["linear", "linear", "linear", "linear"]
+    assert out["timeseries_char_vx_target"] == [0.25, 0.25, 0.5, 0.5]
+    # P_mech = Σ|τ·ω|: 2.0*0.5 + 2.0*0.5 = 2.0 at t=1s
+    assert out["timeseries_char_power_mech_w"][1] == 2.0
+    # Energy intensity = p·dt/ds: 55 W * 1s / 0.25 m = 220 J/m at t=1s
+    assert out["timeseries_char_energy_intensity"][1] == 220.0
+    assert len(out["timeseries_char_dba"]) == 4
+
+
+def test_calculate_missing_power_and_acoustics():
+    df = _sample_episode().data.drop(["total_power_w", "total_level_af_dba"])
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    # Power degrades to 0; acoustics falls back to the joint model (non-null).
+    assert out["timeseries_char_power_total_w"] == [0.0, 0.0, 0.0, 0.0]
+    assert all(v is not None for v in out["timeseries_char_dba"])
+
+
+def test_calculate_empty_returns_none_keys():
+    ep = AlignedEpisodeBundle(
+        episode_id=0, data=pl.DataFrame(), start_pos=[], goal_pos=[], robot_name="env_0_jackal"
     )
-    out = attach_phase_labels(odom, None, build_schedule())
-    kinds = out["phase_kind"].to_list()
-    assert kinds == ["idle", "linear", "angular"]
-    assert out["vx_target"].to_list() == pytest.approx([0.0, 1.5, 0.0])
-    assert out["wz_target"].to_list() == pytest.approx([0.0, 0.0, -1.0])
-
-
-def test_summarize_samples_energy_intensity():
-    # 100 W for 5 s over 10 m → 500 J → 50 J/m
-    df = pl.DataFrame(
-        {
-            "phase_kind": ["linear", "linear", "linear", "linear", "linear"],
-            "vx_target": [1.0] * 5,
-            "wz_target": [0.0] * 5,
-            "p_total_w": [100.0] * 5,
-            "p_mech_w": [80.0] * 5,
-            "dba": [60.0] * 5,
-            "_l_power": [10**6] * 5,
-            "_e_total_j": [100.0] * 5,
-            "_e_mech_j": [80.0] * 5,
-            "ds_m": [2.0] * 5,
-            "dt_s": [1.0] * 5,
-            "vx_achieved": [1.0] * 5,
-        }
-    )
-    out = summarize_samples(df)
-    assert len(out) == 1
-    row = out.row(0, named=True)
-    assert row["energy_intensity_j_per_m"] == pytest.approx(50.0)
-    assert row["mech_energy_intensity_j_per_m"] == pytest.approx(40.0)
-    assert row["leq_af_dba"] == pytest.approx(60.0)
-    assert row["lafmax_af_dba"] == pytest.approx(60.0)
-    assert row["mean_power_total_w"] == pytest.approx(100.0)
+    out = _calc().calculate(ep, {})
+    assert all(v is None for v in out.values())
