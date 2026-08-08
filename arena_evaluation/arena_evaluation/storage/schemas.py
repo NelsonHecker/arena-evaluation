@@ -66,9 +66,10 @@ class RunMetadata(BaseModel):
 @dataclass(frozen=True)
 class RobotParams:
     """Robot physical parameters loaded at runtime."""
-    robot_radius: float
-    laser_min_range: float
-    laser_max_range: float
+    model: str = "unknown"
+    robot_radius: float = 0.25
+    laser_min_range: float = 0.0
+    laser_max_range: float = 30.0
 
     @classmethod
     def load(cls, model: str) -> "RobotParams":
@@ -94,8 +95,9 @@ class RobotParams:
                 radius = float(caps_content.get("radius", radius))
         except Exception:
             pass
-        
+
         return cls(
+            model=model,
             robot_radius=radius,
             laser_min_range=min_range,
             laser_max_range=max_range,

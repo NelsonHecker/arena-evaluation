@@ -65,7 +65,7 @@ class MCAPReader:
                 curr[parts[-1]] = v
         return res
 
-    def read(self) -> dict[str, TopicBundle]:
+    def read(self, map_name_fallback: str | None = None) -> dict[str, TopicBundle]:
         """
         Reads the data source and returns raw DataFrames/LazyFrames for each topic,
         organized by robot namespace.
@@ -98,6 +98,7 @@ class MCAPReader:
                 "collision_monitor_state": defaultdict(list),
                 "power": defaultdict(list),
                 "energy": defaultdict(list),
+                "acoustics": defaultdict(list),
                 "plan": defaultdict(list),
                 "initialpose": defaultdict(list),
                 "tf_gt": defaultdict(list),
@@ -325,6 +326,19 @@ class MCAPReader:
                             
                             appended = True
     
+                        # Acoustics (ego-noise estimates from the M4 model)
+                        elif topic.endswith("/acoustics"):
+                            robot_name = get_robot_name(parts, env_key)
+                            target = robot_data[robot_name]["acoustics"]
+                            target["time_ns"].append(ts_ns)
+                            target["total_level_af_dba"].append(getattr(ros_msg, "total_level_af_dba", None))
+                            target["total_level_zf_db"].append(getattr(ros_msg, "total_level_zf_db", None))
+                            target["baseline_level_dba"].append(getattr(ros_msg, "baseline_level_dba", None))
+                            target["drivetrain_level_dba"].append(getattr(ros_msg, "drivetrain_level_dba", None))
+                            target["uncertainty_1sigma_dba"].append(getattr(ros_msg, "uncertainty_1sigma_dba", None))
+                            target["validity_flags"].append(getattr(ros_msg, "validity_flags", 0))
+                            appended = True
+
                         # Characterization phase markers (open-loop sweeps)
                         elif topic.endswith("/characterization_phase"):
                             robot_name = get_robot_name(parts, env_key)
@@ -500,10 +514,10 @@ class MCAPReader:
             for writer in writers.values():
                 writer.close()
 
-        return self.load_bundles(topics_dir)
+        return self.load_bundles(topics_dir, map_name_fallback=map_name_fallback)
 
     @staticmethod
-    def load_bundles(topics_dir: pathlib.Path) -> dict[str, TopicBundle]:
+    def load_bundles(topics_dir: pathlib.Path, map_name_fallback: str | None = None) -> dict[str, TopicBundle]:
         # Reconstruct dict[str, TopicBundle]
         bundles = {}
         
@@ -536,7 +550,7 @@ class MCAPReader:
                     parent_is_world = parent in ("map", "world", "odom", "") or parent.endswith("/map") or parent.endswith("/world") or parent.endswith("/odom")
                     is_robot_base = child.endswith("base_link") or child.endswith("base_footprint") or "base_link" in child or "base_footprint" in child
                     if parent_is_world and not is_robot_base:
-                        match = re.match(r'^(env_\d+)(?:/|$)', child)
+                        match = re.match(r'^(env_\d+)(?:/map)?$', child)
                         if match and match.group(1) not in env_offsets:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
@@ -551,7 +565,7 @@ class MCAPReader:
                     parent_is_world = parent in ("map", "world", "odom", "") or parent.endswith("/map") or parent.endswith("/world") or parent.endswith("/odom")
                     is_robot_base = child.endswith("base_link") or child.endswith("base_footprint") or "base_link" in child or "base_footprint" in child
                     if parent_is_world and not is_robot_base:
-                        match = re.match(r'^(env_\d+)(?:/|$)', child)
+                        match = re.match(r'^(env_\d+)/map$', child)
                         if match and match.group(1) not in env_offsets:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
@@ -582,20 +596,59 @@ class MCAPReader:
             rb.episode_record = load_parquet(env_dir / "episode_record.parquet")
             
             mx, my = 0.0, 0.0
+            map_name = None
             if rb.episode_record is not None:
                 try:
                     ep_df = rb.episode_record.collect() if isinstance(rb.episode_record, pl.LazyFrame) else rb.episode_record
                     if "map" in ep_df.columns and len(ep_df) > 0:
                         map_name = str(ep_df["map"][0])
-                        from arena_evaluation.processing.map_registry import MapRegistry
-                        map_meta = MapRegistry.get_map_metadata(map_name, run_dir=topics_dir.parent)
-                        if map_meta and "origin" in map_meta and map_meta["origin"]:
-                            mx, my = float(map_meta["origin"][0]), float(map_meta["origin"][1])
+                except Exception:
+                    pass
+            
+            if not map_name and map_name_fallback:
+                map_name = map_name_fallback
+
+            if map_name:
+                try:
+                    from arena_evaluation.processing.map_registry import MapRegistry
+                    map_meta = MapRegistry.get_map_metadata(map_name, run_dir=topics_dir.parent)
+                    if map_meta and "origin" in map_meta and map_meta["origin"]:
+                        mx, my = float(map_meta["origin"][0]), float(map_meta["origin"][1])
                 except Exception:
                     pass
             
             total_ox = ox + mx
             total_oy = oy + my
+            
+            if rb.episode_record is not None and (total_ox != 0.0 or total_oy != 0.0):
+                try:
+                    import json
+                    ep_df = rb.episode_record.collect() if isinstance(rb.episode_record, pl.LazyFrame) else rb.episode_record
+                    
+                    if len(ep_df) > 0:
+                        new_starts = []
+                        new_goals = []
+                        for row in ep_df.iter_rows(named=True):
+                            s = json.loads(row.get("start_pos", "[]"))
+                            g = json.loads(row.get("goal_pos", "[]"))
+                            if len(s) >= 2:
+                                s[0] -= total_ox
+                                s[1] -= total_oy
+                            if len(g) >= 2:
+                                g[0] -= total_ox
+                                g[1] -= total_oy
+                            new_starts.append(json.dumps(s))
+                            new_goals.append(json.dumps(g))
+                            
+                        ep_df = ep_df.with_columns([
+                            pl.Series("start_pos", new_starts),
+                            pl.Series("goal_pos", new_goals)
+                        ])
+                        rb.episode_record = ep_df.lazy() if isinstance(rb.episode_record, pl.LazyFrame) else ep_df
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to offset episode_record coordinates: {e}")
+                    pass
             
             if rb.peds is not None and (total_ox != 0.0 or total_oy != 0.0):
                 try:
@@ -613,14 +666,31 @@ class MCAPReader:
             for t_name in ROBOT_TOPIC_NAMES:
                 lf = load_parquet(robot_dir / f"{t_name}.parquet")
                 if lf is not None:
-                    if (total_ox != 0.0 or total_oy != 0.0) and t_name == "tf_gt":
-                        try:
-                            lf = lf.with_columns([
-                                (pl.col("pos_x_gt") - total_ox).alias("pos_x_gt"),
-                                (pl.col("pos_y_gt") - total_oy).alias("pos_y_gt")
-                            ])
-                        except Exception:
-                            pass
+                    if (total_ox != 0.0 or total_oy != 0.0):
+                        if t_name in ("odom", "initialpose"):
+                            try:
+                                lf = lf.with_columns([
+                                    (pl.col("pos_x") - total_ox).alias("pos_x"),
+                                    (pl.col("pos_y") - total_oy).alias("pos_y")
+                                ])
+                            except Exception:
+                                pass
+                        elif t_name == "tf_gt":
+                            try:
+                                lf = lf.with_columns([
+                                    (pl.col("pos_x_gt") - total_ox).alias("pos_x_gt"),
+                                    (pl.col("pos_y_gt") - total_oy).alias("pos_y_gt")
+                                ])
+                            except Exception:
+                                pass
+                        elif t_name == "plan":
+                            try:
+                                lf = lf.with_columns([
+                                    pl.col("poses_x").list.eval(pl.element() - total_ox),
+                                    pl.col("poses_y").list.eval(pl.element() - total_oy)
+                                ])
+                            except Exception:
+                                pass
                     setattr(rb, t_name, lf)
                     
             bundles[robot_name] = rb

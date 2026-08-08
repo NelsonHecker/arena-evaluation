@@ -41,6 +41,7 @@ class Suite(typing.NamedTuple):
             name=name,
             stages=[cls.Stage.parse(stage) for stage in obj["stages"]],
             launch_args={str(k): str(v) for k, v in obj.get("launch", {}).items()},
+            references=bool(obj.get("references", True)),
         )
 
     class Index(int):
@@ -112,6 +113,7 @@ class Suite(typing.NamedTuple):
     name: str
     stages: list[Suite.Stage]
     launch_args: dict[str, str] = {}
+    references: bool = True
 
     @property
     def min_index(self) -> Suite.Index:

@@ -8,7 +8,7 @@ import polars as pl
 import os
 import concurrent.futures
 
-from ..storage.schemas import RobotParams, RunDescriptor, EpisodeDescriptor, TopicBundle
+from ..storage.schemas import RobotParams, RunDescriptor, EpisodeDescriptor, TopicBundle, AlignedEpisodeBundle
 from ..storage.folder_manager import FolderManager
 
 def _worker_init():
@@ -37,7 +37,6 @@ from ..benchmark.profiler import PipelineProfiler
 
 from .mcap_reader import MCAPReader
 from .topic_aligner import TopicAligner
-from .episode_splitter import EpisodeSplitter
 from .parquet_store import ParquetStore, TopicParquetStore
 from .metrics.registry import MetricRegistry
 
@@ -76,8 +75,8 @@ class ProcessingPipeline:
         with _ctx:
             print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) → {topics_dir}...")
             reader = MCAPReader(mcap_path)
-            bundles = reader.read()
-            TopicParquetStore.write(bundles, topics_dir)
+            bundles = reader.read(map_name_fallback=ep.map)
+            TopicParquetStore.write(bundles, topics_dir, overwrite=True)
             return bundles
 
     def process_episode(self, ep: EpisodeDescriptor, force_extract: bool = False) -> dict | None:
@@ -124,18 +123,55 @@ class ProcessingPipeline:
                     field for field in (
                         "odom", "scan", "cmd_vel", "joint_states", "peds",
                         "collision_events", "collision_monitor_state",
-                        "power", "energy", "plan", "initialpose", "tf", "tf_static", "tf_gt"
+                        "power", "energy", "acoustics", "plan", "initialpose",
+                        "tf", "tf_static", "tf_gt", "characterization_phase"
                     )
                     if getattr(bundle, field, None) is not None
                 }
 
-                aligner = TopicAligner()
-                splitter = EpisodeSplitter(aligner)
-                episodes = splitter.split(bundle, robot_name=robot_name)
-
-                if not episodes:
-                    print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid episodes found in MCAP")
+                if bundle.odom is None:
                     continue
+                    
+                aligner = TopicAligner()
+                aligned_df = aligner.align(bundle)
+                if isinstance(aligned_df, pl.LazyFrame):
+                    aligned_df = aligned_df.collect()
+                
+                if aligned_df is None or len(aligned_df) < 5:
+                    print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid data found in MCAP after alignment")
+                    continue
+                
+                start_pos, goal_pos = [], []
+                first_row = aligned_df.row(0, named=True)
+                last_row = aligned_df.row(-1, named=True)
+                
+                if "pos_x" in first_row and "pos_y" in first_row and first_row["pos_x"] is not None:
+                    start_pos = [first_row["pos_x"], first_row["pos_y"], first_row.get("yaw", 0.0)]
+                
+                if "pos_x" in last_row and "pos_y" in last_row and last_row["pos_x"] is not None:
+                    goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
+                
+                plan_df = bundle.plan.collect() if isinstance(bundle.plan, pl.LazyFrame) else bundle.plan
+                if plan_df is not None and len(plan_df) > 0:
+                    row_plan = plan_df.row(-1, named=True)
+                    if "poses_x" in row_plan and len(row_plan["poses_x"]) > 0:
+                        goal_pos = [row_plan["poses_x"][-1], row_plan["poses_y"][-1], row_plan["poses_yaw"][-1]]
+                
+                num_pedestrians = 0
+                if "num_pedestrians" in aligned_df.columns:
+                    peds = aligned_df["num_pedestrians"].drop_nulls()
+                    if len(peds) > 0:
+                        num_pedestrians = int(peds.max())
+
+                aligned_ep = AlignedEpisodeBundle(
+                    episode_id=ep.episode_id,
+                    data=aligned_df,
+                    start_pos=start_pos,
+                    goal_pos=goal_pos,
+                    num_pedestrians=num_pedestrians,
+                    robot_name=robot_name
+                )
+                episodes = [aligned_ep]
 
                 # Each per-episode MCAP should produce exactly 1 AlignedEpisodeBundle
                 for aligned_ep in episodes:
@@ -363,14 +399,50 @@ class ProcessingPipeline:
             total_episodes_valid = 0
 
             for robot_name, bundle in bundles.items():
+                if bundle.odom is None:
+                    continue
+                    
                 print(f"  [{robot_name}] Splitting into episodes...")
                 aligner = TopicAligner()
-                splitter = EpisodeSplitter(aligner)
-                episodes = splitter.split(bundle, robot_name=robot_name)
-
-                if not episodes:
-                    print(f"  [{robot_name}] [skip] No valid episodes found")
+                aligned_df = aligner.align(bundle)
+                if isinstance(aligned_df, pl.LazyFrame):
+                    aligned_df = aligned_df.collect()
+                
+                if aligned_df is None or len(aligned_df) < 5:
+                    print(f"  [{robot_name}] [skip] No valid data found in MCAP after alignment")
                     continue
+                
+                start_pos, goal_pos = [], []
+                first_row = aligned_df.row(0, named=True)
+                last_row = aligned_df.row(-1, named=True)
+                
+                if "pos_x" in first_row and "pos_y" in first_row and first_row["pos_x"] is not None:
+                    start_pos = [first_row["pos_x"], first_row["pos_y"], first_row.get("yaw", 0.0)]
+                
+                if "pos_x" in last_row and "pos_y" in last_row and last_row["pos_x"] is not None:
+                    goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
+                
+                plan_df = bundle.plan.collect() if isinstance(bundle.plan, pl.LazyFrame) else bundle.plan
+                if plan_df is not None and len(plan_df) > 0:
+                    row_plan = plan_df.row(-1, named=True)
+                    if "poses_x" in row_plan and len(row_plan["poses_x"]) > 0:
+                        goal_pos = [row_plan["poses_x"][-1], row_plan["poses_y"][-1], row_plan["poses_yaw"][-1]]
+                
+                num_pedestrians = 0
+                if "num_pedestrians" in aligned_df.columns:
+                    peds = aligned_df["num_pedestrians"].drop_nulls()
+                    if len(peds) > 0:
+                        num_pedestrians = int(peds.max())
+
+                aligned_ep = AlignedEpisodeBundle(
+                    episode_id=0,
+                    data=aligned_df,
+                    start_pos=start_pos,
+                    goal_pos=goal_pos,
+                    num_pedestrians=num_pedestrians,
+                    robot_name=robot_name
+                )
+                episodes = [aligned_ep]
 
                 robot_model = metadata.robot_model[0] if metadata.robot_model else "turtlebot3_burger"
                 robot_params = RobotParams.load(robot_model)

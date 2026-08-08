@@ -12,6 +12,7 @@ import signal
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -130,7 +131,6 @@ class DataRecorderNode(Node):
                 self.set_parameters([Parameter("data_recorder_autoprefix", Parameter.Type.STRING, timestamp)])
             else:
                 timestamp = param_value
-            # Auto mode: create a flat episodes/ directory under data/
             workspace_root = pathlib.Path(self.base_dir).parents[3]
             record_data_dir_path = workspace_root / "data" / timestamp / "episodes"
         else:
@@ -139,7 +139,6 @@ class DataRecorderNode(Node):
                 workspace_root = pathlib.Path(self.base_dir).parents[3]
                 record_data_dir_path = workspace_root / record_data_dir_path
 
-        # episodes_root is the episodes/ directory — episode_XXX/ dirs go inside it
         self.episodes_root = record_data_dir_path.resolve()
         self.episodes_root.mkdir(parents=True, exist_ok=True)
         try:
@@ -194,6 +193,8 @@ class DataRecorderNode(Node):
         self._topic_registry: dict[str, rosbag2_py.TopicMetadata] = {}
         self._write_drop_count = 0
         self._write_success_count = 0
+        self._pre_episode_buffer = []
+        self.latched_topic_names = set()
 
 
         self.qos = QoSProfile(
@@ -228,8 +229,10 @@ class DataRecorderNode(Node):
         except ImportError:
             RecordEpisode = None
         if RecordEpisode is not None:
+            self.service_cb_group = MutuallyExclusiveCallbackGroup()
             self._start_service = self.create_service(
-                RecordEpisode, "start_episode", self._start_episode_service_callback
+                RecordEpisode, "start_episode", self._start_episode_service_callback,
+                callback_group=self.service_cb_group
             )
             self._log_info("start_episode service ready")
         else:
@@ -244,7 +247,7 @@ class DataRecorderNode(Node):
                 pass
         self.log_file_path = self.episodes_root / "recorder.log"
         try:
-            self.log_file = open(self.log_file_path, "a", buffering=1)  # Line buffered
+            self.log_file = open(self.log_file_path, "a", buffering=1)
         except Exception as e:
             print(f"[DataRecorder] Failed to open log file at {self.log_file_path}: {e}", flush=True)
             self.log_file = None
@@ -286,7 +289,7 @@ class DataRecorderNode(Node):
 
         mcap_config_path = os.path.join(self.base_dir, "config", "mcap_writer_options.yaml")
         if not os.path.exists(mcap_config_path):
-            self._log_warn(f"mcap_writer_options.yaml not found — recording WITHOUT compression")
+            self._log_warn(f"mcap_writer_options.yaml not found — recording without compression")
             mcap_config_path = ""
 
         storage_options = rosbag2_py.StorageOptions(
@@ -307,6 +310,14 @@ class DataRecorderNode(Node):
                 self.writer.open(storage_options, converter_options)
                 self.topics_metadata = {}
                 self.last_recorded_times = {}
+                
+                if hasattr(self, '_pre_episode_buffer') and self._pre_episode_buffer:
+                    self._log_info(f"Flushing {len(self._pre_episode_buffer)} pre-episode buffered messages to writer")
+                    for topic_name, serialized_msg, timestamp_ns in self._pre_episode_buffer:
+                        self._ensure_topic_in_bag(topic_name)
+                        self.writer.write(topic_name.strip('/'), serialized_msg, timestamp_ns)
+                        self.recorded_topics.add(topic_name.strip('/'))
+                    self._pre_episode_buffer.clear()
             self._log_info(f"MCAP writer opened for {ep_name}")
         except Exception as e:
             self._log_error(f"Failed to open MCAP writer for {ep_name}: {e}")
@@ -314,6 +325,7 @@ class DataRecorderNode(Node):
 
     def _close_current_writer(self):
         """Flush, close the current writer, and flatten the rosbag2 subdirectory."""
+            
         with self.writer_lock:
             if self.writer is None:
                 return
@@ -324,8 +336,6 @@ class DataRecorderNode(Node):
             finally:
                 self.writer = None
 
-        # rosbag2 creates: ep_dir/ep_name/ep_name_0.mcap
-        # Flatten to:      ep_dir/ep_name.mcap
         if self.current_episode_dir is not None:
             ep_name = self.current_episode_dir.name
             inner_dir = self.current_episode_dir / ep_name
@@ -340,7 +350,6 @@ class DataRecorderNode(Node):
                     except Exception as e:
                         self._log_error(f"Failed to flatten {mcap_file}: {e}")
                 
-                # Merge rosbag2 metadata if present
                 rosbag_meta = inner_dir / "metadata.yaml"
                 if rosbag_meta.exists():
                     try:
@@ -353,7 +362,6 @@ class DataRecorderNode(Node):
                             self.current_metadata.rosbag2_topics = bag_info.get("topics_with_message_count")
                             self._log_info(f"Merged rosbag2 metadata into episode metadata.")
                         
-                        # Remove it so that we don't have duplicate information and rmdir succeeds
                         rosbag_meta.unlink()
                     except Exception as e:
                         self._log_error(f"Failed to merge rosbag metadata: {e}")
@@ -363,7 +371,6 @@ class DataRecorderNode(Node):
                 except Exception as e:
                     self._log_warn(f"Failed to remove inner dir {inner_dir.name}: {e}")
 
-        # Write final episode metadata
         self._finalize_episode_metadata()
 
     def _setup_subscriptions(self):
@@ -388,10 +395,15 @@ class DataRecorderNode(Node):
             self._register_topic(topic_name, msg_type)
 
             qos_profile = self.latched_qos if t_def.qos_transient_local else self.qos
-            if key == "episode_record":
-                qos_profile = self.reliable_volatile_qos
+            if t_def.qos_transient_local:
+                self.latched_topic_names.add(topic_name.strip('/'))
 
             if key == "episode_record":
+                qos_profile = QoSProfile(
+                    reliability=QoSReliabilityPolicy.RELIABLE,
+                    durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                    depth=1,
+                )
                 callback = self.episode_record_callback
             elif key == "robots_fleet":
                 callback = self.robots_fleet_callback
@@ -451,7 +463,6 @@ class DataRecorderNode(Node):
             
         if self.current_time is not None and new_time < self.current_time:
             self._log_warn(f"Backward time jump detected: {self.current_time} -> {new_time}")
-            # Time went backward (sim reset). Reset last_recorded_times so we don't drop messages.
             self.last_recorded_times.clear()
             
         self.current_time = new_time
@@ -464,15 +475,7 @@ class DataRecorderNode(Node):
             del self._pre_clock_buffer
 
     def _begin_episode(self, episode_id: int, source: str = "episode_record") -> bool:
-        """Open a writer for a new episode unless one was already started for it.
-
-        Deduplicates the two start triggers: the runner's start_episode service
-        call (authoritative) and the passive EpisodeRecord observation (fallback
-        for manual runs without a runner).
-
-        Returns True if this call actually started the episode (the caller then
-        writes the start marker), False if it was a no-op.
-        """
+        """Open a writer for a new episode unless one was already started for it."""
         if episode_id in self._seen_episodes:
             return False
         self._seen_episodes.add(episode_id)
@@ -482,11 +485,7 @@ class DataRecorderNode(Node):
         return True
 
     def _stop_episode(self, episode_id: int, outcome_state: int = 0, outcome_info: str = "") -> None:
-        """Close the current episode writer and record its outcome.
-
-        Service-driven (the runner's authoritative stop signal). Ignored when it
-        does not match the episode currently being recorded (stale/duplicate).
-        """
+        """Close the current episode writer and record its outcome."""
         if self.current_sim_episode_id != episode_id:
             self._log_info(f"stop_episode ignored for episode_id={episode_id} (current is {self.current_sim_episode_id})")
             return
@@ -498,6 +497,8 @@ class DataRecorderNode(Node):
             except Exception as e:
                 self._log_error(f"Failed to write outcome metadata: {e}")
         self._close_current_writer()
+        if hasattr(self, '_pre_episode_buffer'):
+            self._pre_episode_buffer.clear()
 
     def _start_episode_service_callback(self, request, response):
         """Authoritative episode lifecycle: START opens the writer, STOP closes it."""
@@ -519,11 +520,6 @@ class DataRecorderNode(Node):
         return response
 
     def episode_record_callback(self, msg: EpisodeRecord):
-        # The EpisodeRecord topic is NOT the recording lifecycle anymore — the
-        # runner drives start/stop via the start_episode service, so a missed
-        # or late topic message can never corrupt recording. This callback only
-        # enriches episode metadata (map, robot model, task params) and serves
-        # as a start fallback for manual runs without a runner.
         outcome_state = getattr(msg, 'outcome_state', 0)
         outcome_label = _OUTCOME_LABELS.get(outcome_state, f"UNKNOWN({outcome_state})")
         self._log_info(
@@ -535,6 +531,11 @@ class DataRecorderNode(Node):
             self._begin_episode(msg.episode_id, source="episode_record")
 
         self._update_metadata_from_episode(msg)
+        
+        env_namespace = self.get_namespace().strip('/')
+        now = self.current_time or self.get_clock().now().nanoseconds
+        topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
+        self._write_to_bag_at(topic, msg, now)
         
     def robots_fleet_callback(self, msg):
         env_namespace = self.get_namespace().strip('/')
@@ -567,6 +568,8 @@ class DataRecorderNode(Node):
                     self._register_topic(topic_name, msg_type)
 
                     qos_profile = self.latched_qos if t_def.qos_transient_local else self.qos
+                    if t_def.qos_transient_local:
+                        self.latched_topic_names.add(topic_name.strip('/'))
 
                     if t_def.throttled:
                         callback = self._create_throttled_callback(topic_name)
@@ -614,7 +617,6 @@ class DataRecorderNode(Node):
         throttle_ms = self._resolve_throttle_ms(topic_name)
 
         def callback(msg):
-            # Never write until simulation clock has been received
             if self.current_time is None:
                 if hasattr(self, '_pre_clock_buffer'):
                     self._pre_clock_buffer.append((topic_name, msg))
@@ -628,7 +630,6 @@ class DataRecorderNode(Node):
 
     def _create_unthrottled_callback(self, topic_name: str):
         def callback(msg):
-            # Never write until simulation clock has been received
             if self.current_time is None:
                 if hasattr(self, '_pre_clock_buffer'):
                     self._pre_clock_buffer.append((topic_name, msg))
@@ -686,6 +687,15 @@ class DataRecorderNode(Node):
 
         with self.writer_lock:
             if self.writer is None:
+                if not hasattr(self, '_pre_episode_buffer'):
+                    self._pre_episode_buffer = []
+                
+                topic_stripped = topic_name.strip('/')
+                if topic_stripped in getattr(self, 'latched_topic_names', set()):
+                    if len(self._pre_episode_buffer) < 10000:
+                        self._pre_episode_buffer.append((topic_name, serialized_msg, timestamp_ns))
+                        return
+                
                 self._write_drop_count += 1
                 if self._write_drop_count <= 10 or self._write_drop_count % 100 == 0:
                     self._log_warn(f"DROP (writer=None) topic={topic_name} drop_count={self._write_drop_count}")
@@ -849,7 +859,6 @@ class DataRecorderNode(Node):
         )
         self._log_info("Finalizing recording — closing last episode writer...")
 
-        # Close current episode writer (also flattens rosbag2 subdir + finalizes yaml)
         self._close_current_writer()
 
         self._log_info(
