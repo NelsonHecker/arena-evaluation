@@ -19,8 +19,9 @@ class SeabornRenderer:
             ScatterRenderer,
             HistogramRenderer,
             HeatmapRenderer,
+            LineRenderer,
         )
-        
+
         self.renderers = {
             "violin": ViolinRenderer,
             "box": BoxRenderer,
@@ -30,6 +31,7 @@ class SeabornRenderer:
             "scatter": ScatterRenderer,
             "histogram": HistogramRenderer,
             "heatmap": HeatmapRenderer,
+            "line": LineRenderer,
         }
         
         from .color_utils import set_global_color_palette

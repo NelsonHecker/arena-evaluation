@@ -1,0 +1,84 @@
+# Social focus: proxemics, gaze, and pedestrian interaction.
+manifest_version: "1.0"
+name: social
+title: Social Report — Human-Robot Interaction
+description: Personal-space invasion, gaze behaviour, and pedestrian disturbance.
+data_source: metrics
+groups:
+  - {id: social, title: Social & Pedestrian Interaction}
+  - {id: details, title: Trajectory Traces}
+units:
+  total_time_in_personal_space: s
+  avg_velocity_in_personal_space: m/s
+  total_time_looking_at_pedestrians: s
+  total_time_looked_at_by_pedestrians: s
+  ped_path_deflection_m: m
+  path_length: m
+plots:
+  - id: violin_personal_space_local
+    type: violin
+    title: Time in Personal Space by Local Planner
+    data_key: total_time_in_personal_space
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: violin_personal_space_inter
+    type: violin
+    title: Time in Personal Space by Inter-Planner
+    data_key: total_time_in_personal_space
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: box_looking_at_peds_local
+    type: box
+    title: Time Looking at Pedestrians by Local Planner
+    data_key: total_time_looking_at_pedestrians
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: box_looking_at_peds_inter
+    type: box
+    title: Time Looking at Pedestrians by Inter-Planner
+    data_key: total_time_looking_at_pedestrians
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: box_looked_at_by_peds_local
+    type: box
+    title: Time Looked at by Pedestrians by Local Planner
+    data_key: total_time_looked_at_by_pedestrians
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: box_looked_at_by_peds_inter
+    type: box
+    title: Time Looked at by Pedestrians by Inter-Planner
+    data_key: total_time_looked_at_by_pedestrians
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: violin_deflection_local
+    type: violin
+    title: Pedestrian Path Deflection by Local Planner
+    data_key: ped_path_deflection_m
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: pedestrian_trajectory_plot
+    type: trajectory
+    title: Pedestrian Trajectories
+    data_key: pedestrian_path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: details
+    options: {overlay_markers: false}
+  - id: trajectory_plot
+    type: trajectory
+    title: Robot Trajectories
+    data_key: path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: details
+    filter: {is_reference: false}

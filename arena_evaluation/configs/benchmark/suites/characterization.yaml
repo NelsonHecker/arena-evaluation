@@ -1,0 +1,17 @@
+# Open-loop characterization: the robot drives its own maneuver sweep in an
+# empty world (tm_robots: characterization drives exact cmd_vel profiles and
+# tags phases). Episodes = repetitions → cross-episode confidence bands.
+references: false
+stages:
+  - name: characterization
+    map: map_empty
+    robot: jackal
+    episodes: 3
+    tm_robots: characterization
+    tm_obstacles: random
+    config:
+      random:
+        dynamic: {min: 0, max: 0}
+        static: {min: 0, max: 0}
+        interactive: {min: 0, max: 0}
+    timeout: 300s

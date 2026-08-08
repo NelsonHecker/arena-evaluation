@@ -11,6 +11,8 @@ class TimeseriesRenderer(BasePlotRenderer):
     PLOT_TYPE = "timeseries"
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
+        import plotly.express as px
+
         df_filtered = self._apply_filters(df)
         diff_col, df_filtered = self.resolve_diff_col(df_filtered)
 
@@ -20,7 +22,7 @@ class TimeseriesRenderer(BasePlotRenderer):
                 metrics = [self.spec.data_key]
             else:
                 return None
-                
+
         # Must have timeseries_time_s or similar as X axis
         x_col = self.spec.options.get("x", "timeseries_time_s")
 
@@ -37,10 +39,8 @@ class TimeseriesRenderer(BasePlotRenderer):
             return None
 
         fig = go.Figure()
-        
+
         planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
-        colors = px.colors.qualitative.Plotly if hasattr(px, "colors") else ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
-        import plotly.express as px
         colors = px.colors.qualitative.Plotly
         
         # Build traces

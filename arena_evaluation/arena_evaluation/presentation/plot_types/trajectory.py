@@ -125,7 +125,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                             else:
                                 goals_x_by_agent[k].append(path_arr[last_idx, 0])
                                 goals_y_by_agent[k].append(path_arr[last_idx, 1])
-                                goals_idx_by_agent[k].append(current_len + first_idx)
+                                goals_idx_by_agent[k].append(current_len + last_idx)
                                 
                     all_x_by_agent[k].extend(path_arr[:, 0])
                     all_y_by_agent[k].extend(path_arr[:, 1])
@@ -593,18 +593,32 @@ class TrajectoryRenderer(BasePlotRenderer):
                             first_idx = int(clean_indices[first_clean_idx])
                             last_idx = int(clean_indices[-1])
                             
-                            starts_x.append(path_arr[first_idx, 0])
-                            starts_y.append(path_arr[first_idx, 1])
-                            markers_data.append({"frame": current_len + first_idx, "x": path_arr[first_idx, 0], "y": path_arr[first_idx, 1], "type": "start"})
+                            # True start/goal from dataframe
+                            true_start = row.get("start")
+                            true_goal = row.get("goal")
+                            
+                            if isinstance(true_start, (list, tuple, np.ndarray)) and len(true_start) >= 2:
+                                starts_x.append(true_start[0])
+                                starts_y.append(true_start[1])
+                                markers_data.append({"frame": current_len + first_idx, "x": true_start[0], "y": true_start[1], "type": "start"})
+                            else:
+                                starts_x.append(path_arr[first_idx, 0])
+                                starts_y.append(path_arr[first_idx, 1])
+                                markers_data.append({"frame": current_len + first_idx, "x": path_arr[first_idx, 0], "y": path_arr[first_idx, 1], "type": "start"})
                             
                             if is_collision:
                                 col_x.append(path_arr[last_idx, 0])
                                 col_y.append(path_arr[last_idx, 1])
                                 markers_data.append({"frame": current_len + last_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "collision"})
                             else:
-                                goals_x.append(path_arr[last_idx, 0])
-                                goals_y.append(path_arr[last_idx, 1])
-                                markers_data.append({"frame": current_len + first_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "goal"})
+                                if isinstance(true_goal, (list, tuple, np.ndarray)) and len(true_goal) >= 2:
+                                    goals_x.append(true_goal[0])
+                                    goals_y.append(true_goal[1])
+                                    markers_data.append({"frame": current_len + last_idx, "x": true_goal[0], "y": true_goal[1], "type": "goal"})
+                                else:
+                                    goals_x.append(path_arr[last_idx, 0])
+                                    goals_y.append(path_arr[last_idx, 1])
+                                    markers_data.append({"frame": current_len + last_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "goal"})
                                 
                     all_x_by_agent[planner][k]["x"].extend(path_arr[:, 0])
                     all_x_by_agent[planner][k]["x"].append(np.nan) # Separator for seaborn
