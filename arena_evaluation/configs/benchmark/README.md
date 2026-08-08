@@ -15,12 +15,14 @@ configs/benchmark/
 │   ├── all_maps_random.yaml
 │   ├── arena_corridor.yaml
 │   ├── arena_hospital_small.yaml
-│   └── map_empty.yaml
+│   ├── map_empty.yaml
+│   └── characterization.yaml   — open-loop energy/acoustic sweep
 └── contests/         — planner lineups
     ├── basic.yaml
     ├── allplanners.yaml
     ├── inter.yaml
-    └── planners.yaml
+    ├── planners.yaml
+    └── characterization.yaml  — dummy contestant (the task mode drives, not a planner)
 ```
 
 ## Suite files
@@ -57,6 +59,39 @@ stages:
 | `config` | dict | Per-mode params; top-level keys must match `tm_robots`/`tm_obstacles` (e.g. `scenario`, `random`). Inner leaves map to `task.<mode>.<leaf>` via QueueEpisode (see [task_generator/tasks/obstacles/README.md](../../../../task_generator/task_generator/tasks/obstacles/README.md)) |
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
 | `timeout` | string | Per-episode timeout; defaults to `Constants.Robot.TIMEOUT` if absent |
+
+Suite-level `references: false` disables the automatically generated reference steps
+(`unobstructed_robot` / `unhindered_peds`); characterization suites use it because the sweep
+itself is the reference.
+
+### Characterization suite
+
+```yaml
+references: false
+stages:
+  - name: characterization
+    map: map_empty
+    robot: jackal
+    episodes: 3            # repetitions → cross-episode confidence bands
+    tm_robots: characterization   # TM_Robots mode that drives the open-loop sweep
+    tm_obstacles: random
+    config:
+      random:
+        dynamic: {min: 0, max: 0}
+        static: {min: 0, max: 0}
+        interactive: {min: 0, max: 0}
+    timeout: 300s
+```
+
+The `characterization` robot task mode (in `task_generator`) drives `cmd_vel` directly through the
+robot's rated envelope — idle blocks, 0.25→vx_max linear steps with 5 s out-and-back dwells,
+transient ramps, pivot rates — tagging every maneuver with `characterization_phase` markers. Run it
+like any benchmark and analyse with the characterization report manifest:
+
+```bash
+arena evaluation benchmark --suite characterization --contest characterization
+arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
+```
 
 ## Contest files
 
@@ -246,8 +281,21 @@ $ARENA_DATA_DIR/benchmarks/<run_id>/
 ├── progress.csv               # append-only, one row per episode
 ├── runner.log
 ├── .benchmark_state.json      # per-step status, atomic write
-└── <contestant>/<stage>/      # recorder output
+├── episodes/                  # recorder output — one MCAP per episode
+│   ├── episode_000/
+│   │   ├── episode_000.mcap
+│   │   └── episode_000.yaml
+│   └── ...
+├── combined_metrics.parquet   # after arena evaluation run
+├── characterization_summary.parquet   # after a characterization report
+├── characterization_samples.parquet   # after a characterization report
+└── report_manifest.yaml       # note: which manifest produced the last report
 ```
+
+The recorder is spawned per step and writes one MCAP per episode into `episodes/`; its episode
+lifecycle is driven by the `start_episode` service (see the [ingestion README](../../arena_evaluation/ingestion/README.md)).
+`arena evaluation run --report-manifest <name>` performs extraction + metrics + (for
+characterization manifests) the per-working-point analysis, then renders `report.html`.
 
 Inspection helpers:
 

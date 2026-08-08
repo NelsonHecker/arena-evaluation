@@ -1,6 +1,6 @@
 # ingestion — Layer 1: Live Data Recording
 
-This package contains the ROS 2 node that records a live simulation run into a structured MCAP file.
+This package contains the ROS 2 node that records a live simulation run into structured MCAP files.
 
 It is the **only** component that requires a running ROS 2 environment. Everything else in the pipeline (`processing/`, `presentation/`) operates entirely offline.
 
@@ -9,9 +9,12 @@ It is the **only** component that requires a running ROS 2 environment. Everythi
 ## Responsibilities
 
 - Subscribe to all relevant ROS 2 topics during a simulation run.
-- Write a **single continuous MCAP file** for the entire step (one planner × one stage × N episodes).
-- Embed `EpisodeRecord` messages directly into the MCAP stream so the processing layer can use them as episode boundary markers.
-- Write and continuously update `metadata.yaml` with run-level context.
+- Write **one MCAP file per episode** into `episodes/episode_XXX/` (the flat per-episode structure).
+- Open/close episode writers through the **`start_episode` service** — driven authoritatively by the
+  benchmark runner, so a missed or late `EpisodeRecord` topic message can never corrupt the recording
+  lifecycle.
+- Enrich each episode's `episode_XXX.yaml` metadata (planner, local/inter planner, suite, contest,
+  stage, map, robot, task params, outcome) from recorder parameters and the `EpisodeRecord` topic.
 - Flush and close the MCAP cleanly on SIGTERM / SIGINT.
 
 ---
@@ -21,126 +24,142 @@ It is the **only** component that requires a running ROS 2 environment. Everythi
 | File | Purpose |
 |---|---|
 | `recorder.py` | `DataRecorderNode` — the main ROS 2 recording node |
-| `metadata.py` | `IngestionMetadata` helper — builds initial `RunMetadata` from environment |
+| `metadata.py` | `IngestionMetadata` — builds the full per-episode `RunMetadata` |
 | `topics.py` | Topic name constants and canonical type-string mapping |
 
 ---
 
 ## recorder.py — DataRecorderNode
 
-### How It Is Launched
+### Episode lifecycle (service-driven)
 
-The node is registered as the `record` console script entry point in `setup.py` and is spawned automatically by the `task_generator` launch system when `record_data_dir` is passed.
+The recorder does **not** start/stop on `EpisodeRecord` topic messages. The benchmark runner controls
+the lifecycle through the `RecordEpisode` service (`arena_evaluation_msgs/srv/RecordEpisode.srv`):
 
-```bash
-# Manual launch (auto-timestamped output folder)
-arena launch sim:=gazebo task_mode:=random record_data_dir:=data \
-    world:=map_empty robot:=jackal
-
-# The recorder is started internally with something equivalent to:
-arena evaluation record \
-    --ros-args -p record_data_dir:=/opt/arena_ws/data/recordings/20260528-210000
+```
+COMMAND_START  episode_id → opens episode_XXX.mcap + writes episode_XXX.yaml
+COMMAND_STOP   episode_id → closes the writer, records outcome_state/outcome_info in the yaml
 ```
 
-### Output Path Resolution
+The runner sends START when it observes an episode beginning (QUEUED/RUNNING record) and STOP when the
+episode terminates — and it **awaits** the STOP ack before killing the recorder, so the MCAP is always
+flushed per episode.
 
-The `record_data_dir` parameter is resolved in priority order:
+The `EpisodeRecord` topic subscription remains, but only for:
+- **metadata enrichment** (`map`, `robot_model`, `tm_*` params, `obstacles_params`/`robots_params`), and
+- a **start fallback for manual runs** without a runner (a first-seen QUEUED/RUNNING record opens a writer).
 
-1. **ROS parameter** `record_data_dir` — set by the benchmark runner launch args.
-2. **Command-line arg** `--dir` / `-d` — for manual invocation.
-3. **Default** `auto:/` — generates a timestamped folder automatically.
+Terminal records are logged but never drive lifecycle.
 
-If the resolved path ends in a bare root directory name (`data` or `recordings`), a timestamp subdirectory is automatically appended so recordings are never written directly into the root.
+### Output structure
 
-**Benchmark run structure:**
+Each episode is recorded into its own directory (per-episode MCAPs make the processing layer trivial —
+one MCAP == one episode, no in-bag splitting needed):
+
 ```
-data/<benchmark_id>/recordings/<planner>/<stage>/
-├── metadata.yaml
-├── params.yaml
-└── recording/
-    └── recording_0.mcap
+data/benchmarks/<run_id>/episodes/
+├── .episode_counter
+├── episode_000/
+│   ├── episode_000.mcap      ← flattened from rosbag2's subdirectory
+│   └── episode_000.yaml      ← full context: identity + task params + outcome
+├── episode_001/ ...
+└── recorder.log
 ```
 
-**Ad-hoc run structure:**
-```
-data/recordings/<YYYYMMDD-HHMMSS>/
-├── metadata.yaml
-├── params.yaml
-└── recording/
-    └── recording_0.mcap
-```
+### Parameters
+
+The runner passes the full episode context as ROS parameters, which are written into every
+`episode_XXX.yaml`:
+
+| Parameter | Meaning |
+|---|---|
+| `record_data_dir` | The `episodes/` root |
+| `benchmark_id` | Run id (also the benchmark directory name) |
+| `contestant` | Contestant/planner name (written as `planner`) |
+| `stage`, `map`, `world` | Stage identity |
+| `suite_name`, `contest_name` | Benchmark context |
+| `local_planner`, `inter_planner` | Explicit planner identity from the contest config |
+| `robot` | Robot model (seeds `robot_model` before topic discovery) |
+| `episodes_requested` | Episode count for the step |
+| `is_reference`, `reference_type` | Reference-step flags |
+| `episode_id_offset` | Continued episode numbering across steps (`.episode_counter`) |
 
 ### Recorded Topics
 
-All topics use **simulation time** from `/clock` as timestamps. Messages are dropped until the first `/clock` tick to prevent timestamp monotonicity violations.
+All topics use **simulation time** from `/clock` as timestamps. Messages are buffered until the first
+`/clock` tick to prevent timestamp monotonicity violations.
 
 | Topic | Message Type | Throttle |
 |---|---|---|
-| `/{ns}/cmd_vel` | `geometry_msgs/Twist` | 20 ms |
-| `/{ns}/lidar` | `sensor_msgs/LaserScan` | 100 ms |
-| `/{ns}/{robot}_velocity_controller/odom` | `nav_msgs/Odometry` | 20 ms |
-| `/{ns}/joint_states` | `sensor_msgs/JointState` | 20 ms |
+| `/{ns}/cmd_vel` | `geometry_msgs/Twist` | rate-limited |
+| `/{ns}/joint_states` | `sensor_msgs/JointState` | rate-limited |
 | `/{ns}/plan` | `nav_msgs/Path` | unthrottled |
 | `/{ns}/collision_events` | `arena_robots_msgs/CollisionEvents` | unthrottled |
-| `/{parent_ns}/goal_pose` | `geometry_msgs/PoseStamped` | unthrottled |
-| `/{parent_ns}/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` | unthrottled |
-| `/{parent_ns}/arena_peds` | `arena_people_msgs/Pedestrians` | 20 ms |
+| `/{ns}/collision_monitor_state` | `nav2_msgs/CollisionMonitorState` | unthrottled |
+| `/{ns}/power_publisher/power` | `arena_robots_msgs/Power` | rate-limited |
+| `/{ns}/power_publisher/energy` | `arena_robots_msgs/Energy` | rate-limited |
+| `/{ns}/acoustics` | `arena_robots_msgs/Acoustics` | rate-limited |
+| `/{ns}/characterization_phase` | `std_msgs/String` | unthrottled (open-loop sweep markers) |
+| `/{robot_ns}/odom` | `nav_msgs/Odometry` | rate-limited |
+| `/{parent_ns}/arena_peds` | `arena_people_msgs/Pedestrians` | rate-limited |
+| `/{parent_ns}/agent_states` | `arena_humansim_msgs/AgentStates` | rate-limited |
 | `/{parent_ns}/state/episode` | `task_generator_msgs/EpisodeRecord` | unthrottled |
 | `/{parent_ns}/state/robots` | `task_generator_msgs/RobotFleet` | latched |
-| `/tf` | `tf2_msgs/TFMessage` | 20 ms |
-| `/tf_static` | `tf2_msgs/TFMessage` | latched |
+| `/tf`, `/tf_static` | `tf2_msgs/TFMessage` | rate-limited / latched |
 | `/clock` | `rosgraph_msgs/Clock` | (time tracking only) |
 
-A dynamic discovery timer fires every 1 second to detect non-standard odom and scan topic names.
+A dynamic discovery timer detects non-standard odom topic names. Robot topics are subscribed when the
+`RobotFleet` message announces a robot (namespace from the fleet).
 
 ### Shutdown Behaviour
 
-The node installs `SIGTERM` and `SIGINT` handlers that trigger `finalize()`:
+The node installs `SIGTERM`/`SIGINT` handlers that trigger `finalize()`:
 
 1. Sets `is_shutting_down = True` so no new writes occur.
-2. Writes the final `metadata.yaml` with `recording_ended_at`, `episodes_recorded`, `pedsim_available`, `recorded_topics`.
-3. Calls `writer.close()` to flush rosbag2 buffers and write the MCAP index.
+2. Closes the current writer (flushing rosbag2 buffers, flattening the MCAP into `episode_XXX.mcap`).
+3. Finalizes `episode_XXX.yaml` with `recording_ended_at`, `recorded_topics`, `pedsim_available`.
 
-> If the process is killed with `SIGKILL`, `finalize()` is not called. The MCAP may be incomplete or unindexed. rosbag2 can still read it, but the final metadata fields will be missing.
+> If the process is killed with `SIGKILL`, `finalize()` is not called. The MCAP may be incomplete or
+> unindexed; the final metadata fields will be missing.
 
 ---
 
 ## metadata.py — IngestionMetadata
 
-Static helper that builds the initial `RunMetadata` object written to `metadata.yaml` at node startup.
+Builds the `RunMetadata` object written to each `episode_XXX.yaml` — the **single self-contained
+source of context** for later processing/reporting:
 
 ```python
-metadata = IngestionMetadata.create_initial_metadata(
+metadata = IngestionMetadata.create_episode_metadata(
     benchmark_id="my_benchmark",
-    planner="dwa",
+    planner="dwb",
     stage="stage_1",
-    episodes_requested=10,
+    map_name="map_empty",
+    episode_id=0,
     robot_model="jackal",
-    suite_name="default",
-    contest_name="dwa_vs_teb",
+    suite_name="basic",
+    contest_name="basic",
+    local_planner="dwb",          # explicit, from the contestant's mobile config
+    inter_planner="navigate_w_replanning_time",
+    episodes_requested=5,
+    task_generator_episode_id=1,  # sim-side id for correlating with progress.csv
 )
 ```
 
-Fields populated at startup:
-- `recording_started_at` — UTC ISO timestamp
-- `arena_git_sha` / `arena_git_dirty` — from `git rev-parse HEAD` in the workspace
-- `python_version` — from `sys.version`
-- `ros_distro` — from `$ROS_DISTRO`
-- `map` — from the world/map parameter
-- `inter_planner` — parsed from the planner/contestant name
-- `agent_name` — the agent/robot name
+When `local_planner`/`inter_planner` are not provided (manual runs), they fall back to the
+`<prefix>-<local>-<inter>` name convention via `split_planner_name` (`storage/planner_names.py`).
 
 ---
 
 ## topics.py — Topic Definitions
 
-Provides the canonical list of topic names and their expected ROS message type strings (used when registering topics with rosbag2).
+Provides the canonical list of topic names and their expected ROS message type strings (used when
+registering topics with rosbag2).
 
 ```python
 from arena_evaluation.ingestion.topics import get_topics
 
 topics = get_topics(namespace="arena/env_0/task_generator_node/jackal")
-# Returns list of (topic_name, msg_type_string) tuples
 ```
 
 ---
@@ -152,8 +171,8 @@ Edit `config/data_recorder_config.yaml` to control sampling rates:
 ```yaml
 record_frequencies:
   default: 20.0   # ms — fallback
-  lidar:  100.0   # ms — 10 Hz
-  odom:    20.0   # ms — 50 Hz
+  lidar:   100.0  # ms — 10 Hz
+  odom:     20.0  # ms — 50 Hz
 ```
 
-Keys are matched as **substrings** of the full topic name, so `"lidar"` matches both `…/lidar` and `…/gpu_lidar/scan`.
+Keys are matched as **substrings** of the full topic name.
