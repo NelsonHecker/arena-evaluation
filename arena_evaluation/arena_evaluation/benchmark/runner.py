@@ -21,7 +21,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from arena_evaluation_msgs.msg import BenchmarkState
-from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
+from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper, param_value_to_launch_str
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
 
@@ -35,6 +35,7 @@ from task_generator_msgs.srv import QueueEpisode
 STATE_TOPIC = "/arena/benchmark/state"
 
 _CANCEL_SETTLE_S = 30.0
+_HEARTBEAT_S = 30.0
 
 from .config import Contest, Suite
 from .state import (
@@ -65,11 +66,34 @@ class _HasStateSteps(typing.Protocol):
 _log = logging.getLogger(__name__)
 
 
+def _per_mode_launch_args(step: Step) -> list[str]:
+    """Stage per-mode config as `task.<mode>.<leaf>` launch args, so the first
+    configure() sees them before QueueEpisode can run."""
+    s = step.stage
+    obs_params, rob_params = _flatten_per_mode_params(
+        s.config,
+        tm_obstacles=s.tm_obstacles.value,
+        tm_robots=s.tm_robots.value,
+    )
+    seen: dict[str, str] = {}
+    for mode, params in ((s.tm_obstacles.value, obs_params), (s.tm_robots.value, rob_params)):
+        for param in params:
+            value = param_value_to_launch_str(param.value)
+            if value is None:
+                continue
+            seen[f"task.{mode}.{param.name}"] = value
+    return [f"{k}:={v}" for k, v in seen.items()]
+
+
 def build_launch_args(step: Step, simulator: str | None) -> list[str]:
     """Return the arena launch argument list for a step, given the simulator name.
 
-    Per-mode params (task.scenario.file, task.random.*, ...) are not passed here;
-    the runner sets them via QueueEpisode before each RunEpisode goal.
+    Per-mode params (task.scenario.file, task.random.*, ...) are passed at spawn as
+    `task.<mode>.<leaf>` launch args: a task mode resolves its params in __init__, so
+    a mode whose default is unresolvable for this world (e.g. scenario `default` on a
+    world that has no such scenario) would fail configure() and never reach ACTIVE,
+    which is a prerequisite for QueueEpisode. QueueEpisode still drives per-step
+    changes within a group, where the env is already up.
 
     Contestant args are forwarded verbatim, except keys that collide with
     stage-owned launch args (sim, robot, world, tm_robots, tm_obstacles,
@@ -87,6 +111,7 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
         "auto_reset:=false",
         "tm_modules:=",
     ]
+    args.extend(_per_mode_launch_args(step))
     if s.optim:
         for k, v in s.optim.items():
             args.append(f"optim.{k}:={v}")
@@ -101,7 +126,9 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
                 if k in own_keys:
                     _log.warning(
                         "contestant %r: arg %r=%r ignored, controlled by stage",
-                        step.contestant.name, k, driver,
+                        step.contestant.name,
+                        k,
+                        driver,
                     )
                 else:
                     args.append(f"{k}:={driver}")
@@ -112,7 +139,9 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
                 if fk in own_keys:
                     _log.warning(
                         "contestant %r: arg %r=%r ignored, controlled by stage",
-                        step.contestant.name, fk, iv,
+                        step.contestant.name,
+                        fk,
+                        iv,
                     )
                     continue
                 args.append(f"{fk}:={iv}")
@@ -122,7 +151,9 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
             if k in own_keys:
                 _log.warning(
                     "contestant %r: arg %r=%r ignored, controlled by stage",
-                    step.contestant.name, k, v,
+                    step.contestant.name,
+                    k,
+                    v,
                 )
                 continue
             args.append(f"{k}:={v}")
@@ -286,10 +317,7 @@ def _flatten_per_mode_params(
         if not isinstance(mode_dict, dict):
             continue
         is_scenario = mode == "scenario"
-        patched: dict = {
-            k: (pathlib.Path(val).stem if is_scenario and k == "file" and isinstance(val, str) else val)
-            for k, val in mode_dict.items()
-        }
+        patched: dict = {k: (pathlib.Path(val).stem if is_scenario and k == "file" and isinstance(val, str) else val) for k, val in mode_dict.items()}
         params = _walk_dict(patched)
         if mode == tm_obstacles:
             obs.extend(params)
@@ -396,7 +424,22 @@ class BenchmarkRunner(ArenaMixinNode):
         """
         if env_id in self._env_records:
             return
-        await self._env_visible_events.setdefault(env_id, asyncio.Event()).wait()
+        await self._await_hb(self._env_visible_events.setdefault(env_id, asyncio.Event()).wait(), f"env {env_id} to appear on /arena/state/envs")
+
+    async def _await_hb(self, awaitable: typing.Awaitable[_T], what: str) -> _T:
+        """Await with no timeout, warning every _HEARTBEAT_S while `what` stays pending."""
+        task = asyncio.ensure_future(awaitable)
+        waited = 0.0
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=_HEARTBEAT_S)
+                if task in done:
+                    return task.result()
+                waited += _HEARTBEAT_S
+                _log.warning(f"still waiting for {what} ({waited:.0f}s elapsed)")
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
 
     async def _await_or_env_died(self, env_id: int, awaitable: typing.Awaitable[_T]) -> _T:
         """Race awaitable against env death. Raises _EnvDied if env_id disappears first.
@@ -407,9 +450,7 @@ class BenchmarkRunner(ArenaMixinNode):
         op_task = asyncio.ensure_future(awaitable)
         death_task = asyncio.ensure_future(death.wait())
         try:
-            done, pending = await asyncio.wait(
-                {op_task, death_task}, return_when=asyncio.FIRST_COMPLETED
-            )
+            done, pending = await asyncio.wait({op_task, death_task}, return_when=asyncio.FIRST_COMPLETED)
             if death_task in done and op_task not in done:
                 for t in pending:
                     t.cancel()
@@ -444,15 +485,11 @@ class BenchmarkRunner(ArenaMixinNode):
             return
 
         action_name = f"{env_ns_root}/lifecycle/run_episode"
-        self._episode_action_clients[env_id] = self.create_action_client_wrapper(
-            RunEpisode, action_name
-        )
+        self._episode_action_clients[env_id] = self.create_action_client_wrapper(RunEpisode, action_name)
         self._episode_records[env_id] = {}
 
-        queue_client = self.create_client_wrapper(
-            QueueEpisode, f"{env_ns_root}/config/queue_episode"
-        )
-        await queue_client.ensure(timeout_sec=30.0)
+        queue_client = self.create_client_wrapper(QueueEpisode, f"{env_ns_root}/config/queue_episode")
+        await self._await_hb(queue_client.ensure(timeout_sec=None), f"queue_episode service on env {env_id}")
         self._queue_clients[env_id] = queue_client
 
         def _on_episode_record(msg: EpisodeRecord) -> None:
@@ -522,21 +559,22 @@ class BenchmarkRunner(ArenaMixinNode):
                 ep_started_wall = time.time()
 
                 try:
-                    goal_handle = await self._await_or_env_died(
-                        env_id, ac.send_goal(goal)
-                    )
+                    goal_handle = await self._await_or_env_died(env_id, ac.send_goal(goal))
                 except (_EnvDied, asyncio.CancelledError):
                     raise
                 except Exception as exc:
                     episodes_failed += 1
-                    _log.error(
-                        f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                        f"goal rejected ({exc}); env action server is wedged, abandoning env"
-                    )
+                    _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} goal rejected ({exc}); env action server is wedged, abandoning env")
                     return StepResult(
-                        step.key, "failed", env_id, started, time.time(),
-                        StepErrorKind.ENV_SETUP, f"run_episode goal rejected: {exc}",
-                        episodes_run=episodes_run, episodes_failed=episodes_failed,
+                        step.key,
+                        "failed",
+                        env_id,
+                        started,
+                        time.time(),
+                        StepErrorKind.ENV_SETUP,
+                        f"run_episode goal rejected: {exc}",
+                        episodes_run=episodes_run,
+                        episodes_failed=episodes_failed,
                         episodes_total=step.episodes,
                     )
 
@@ -547,10 +585,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                 except TimeoutError:
                     episodes_failed += 1
-                    _log.warning(
-                        f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                        f"TIMEOUT after {step.stage.timeout}s; cancelling and advancing"
-                    )
+                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {step.stage.timeout}s; cancelling and advancing")
                     try:
                         await asyncio.wait_for(
                             self._await_or_env_died(env_id, self.await_ros(goal_handle.cancel_goal_async())),
@@ -563,21 +598,21 @@ class BenchmarkRunner(ArenaMixinNode):
                     except _EnvDied:
                         raise
                     except TimeoutError:
-                        _log.error(
-                            f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                            f"cancel did not settle in {_CANCEL_SETTLE_S}s; env is wedged, abandoning env"
-                        )
+                        _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} cancel did not settle in {_CANCEL_SETTLE_S}s; env is wedged, abandoning env")
                         return StepResult(
-                            step.key, "failed", env_id, started, time.time(),
-                            StepErrorKind.ENV_SETUP, "run_episode cancel did not settle; env wedged",
-                            episodes_run=episodes_run, episodes_failed=episodes_failed,
+                            step.key,
+                            "failed",
+                            env_id,
+                            started,
+                            time.time(),
+                            StepErrorKind.ENV_SETUP,
+                            "run_episode cancel did not settle; env wedged",
+                            episodes_run=episodes_run,
+                            episodes_failed=episodes_failed,
                             episodes_total=step.episodes,
                         )
                     except Exception as exc:
-                        _log.warning(
-                            f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                            f"error awaiting cancel ({exc}); advancing"
-                        )
+                        _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} error awaiting cancel ({exc}); advancing")
                     continue
                 ep_ended_sim = self.sim_time.to_seconds()
                 ep_ended_wall = time.time()
@@ -586,14 +621,17 @@ class BenchmarkRunner(ArenaMixinNode):
                 episode_id = result.episode_id
 
                 if result.state == RunEpisode.Result.FATAL:
-                    _log.error(
-                        f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                        f"FATAL: {result.info} -- aborting step"
-                    )
+                    _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} FATAL: {result.info} -- aborting step")
                     return StepResult(
-                        step.key, "failed", env_id, started, time.time(),
-                        StepErrorKind.ROBOT_SETUP, f"env reported FATAL: {result.info}",
-                        episodes_run=episodes_run, episodes_failed=episodes_failed,
+                        step.key,
+                        "failed",
+                        env_id,
+                        started,
+                        time.time(),
+                        StepErrorKind.ROBOT_SETUP,
+                        f"env reported FATAL: {result.info}",
+                        episodes_run=episodes_run,
+                        episodes_failed=episodes_failed,
                         episodes_total=step.episodes,
                     )
 
@@ -601,10 +639,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 rec = recs.get(episode_id)
                 if rec is None:
                     episodes_failed += 1
-                    _log.warning(
-                        f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                        f"no EpisodeRecord for episode_id={episode_id}; counted as failed"
-                    )
+                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} no EpisodeRecord for episode_id={episode_id}; counted as failed")
                     continue
 
                 episodes_run += 1
@@ -616,12 +651,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     EpisodeRecord.FAILED: "FAILED",
                     EpisodeRecord.SKIPPED: "SKIPPED",
                 }.get(rec.outcome_state, str(rec.outcome_state))
-                _log.info(
-                    f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
-                    f"{state_label} info={rec.outcome_info!r} "
-                    f"sim={ep_ended_sim - ep_started_sim:.1f}s "
-                    f"wall={ep_ended_wall - ep_started_wall:.1f}s"
-                )
+                _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s")
 
                 ts_iso = datetime.datetime.now(tz=datetime.UTC).isoformat()
                 self._run_dir.progress.append(
@@ -637,27 +667,33 @@ class BenchmarkRunner(ArenaMixinNode):
                     ended_at=ep_ended_sim,
                 )
         except _EnvDied as exc:
-            _log.warning(
-                f"{step.key} env={env_id} env died mid-step after "
-                f"run={episodes_run}, failed={episodes_failed}: {exc}"
-            )
+            _log.warning(f"{step.key} env={env_id} env died mid-step after run={episodes_run}, failed={episodes_failed}: {exc}")
             return StepResult(
-                step.key, "failed", env_id, started, time.time(),
-                StepErrorKind.ENV_SETUP, repr(exc),
-                episodes_run=episodes_run, episodes_failed=episodes_failed,
+                step.key,
+                "failed",
+                env_id,
+                started,
+                time.time(),
+                StepErrorKind.ENV_SETUP,
+                repr(exc),
+                episodes_run=episodes_run,
+                episodes_failed=episodes_failed,
                 episodes_total=step.episodes,
             )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            _log.exception(
-                f"{step.key} env={env_id} unexpected error mid-step after "
-                f"run={episodes_run}, failed={episodes_failed}"
-            )
+            _log.exception(f"{step.key} env={env_id} unexpected error mid-step after run={episodes_run}, failed={episodes_failed}")
             return StepResult(
-                step.key, "failed", env_id, started, time.time(),
-                StepErrorKind.INTERNAL, repr(exc),
-                episodes_run=episodes_run, episodes_failed=episodes_failed,
+                step.key,
+                "failed",
+                env_id,
+                started,
+                time.time(),
+                StepErrorKind.INTERNAL,
+                repr(exc),
+                episodes_run=episodes_run,
+                episodes_failed=episodes_failed,
                 episodes_total=step.episodes,
             )
 
@@ -671,9 +707,15 @@ class BenchmarkRunner(ArenaMixinNode):
             status = "failed"
 
         return StepResult(
-            step.key, status, env_id, started, time.time(),
-            None, None,
-            episodes_run=episodes_run, episodes_failed=episodes_failed,
+            step.key,
+            status,
+            env_id,
+            started,
+            time.time(),
+            None,
+            None,
+            episodes_run=episodes_run,
+            episodes_failed=episodes_failed,
             episodes_total=step.episodes,
         )
 
@@ -683,7 +725,7 @@ class BenchmarkRunner(ArenaMixinNode):
         req.ns = ""
         req.headless = self._headless
         req.launch_args = self._build_launch_args(launch_step)
-        resp = await self.await_ros(self._spawn.client.call_async(req))
+        resp = await self._await_hb(self.await_ros(self._spawn.client.call_async(req)), f"spawn_env for {launch_step.key}")
         if resp is None or not resp.success:
             msg = resp.error_msg if resp is not None else "no response"
             _log.error(f"spawn_env failed for {launch_step.key}: {msg}")
@@ -701,9 +743,9 @@ class BenchmarkRunner(ArenaMixinNode):
             with contextlib.suppress(Exception):
                 dreq = DespawnEnv.Request()
                 dreq.env_id = env_id
-                await self._despawn.call_timeout(dreq, timeout_sec=30.0)
+                await self._await_hb(self._despawn.call_forever(dreq), f"despawn of env {env_id}")
             with contextlib.suppress(asyncio.TimeoutError, Exception):
-                await self._wait_env_gone(env_id, timeout=30.0)
+                await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
 
     async def _run_group(self, group: list[Step], slot_index: int) -> list[StepResult]:
         env_id: int | None = None
@@ -711,18 +753,31 @@ class BenchmarkRunner(ArenaMixinNode):
         try:
             spawned = await self._spawn_and_setup_env(group[0])
             if spawned is None:
-                results.append(StepResult(
-                    group[0].key, "failed", None, time.time(), time.time(),
-                    StepErrorKind.ENV_SETUP, "spawn_env failed",
-                    episodes_total=group[0].episodes,
-                ))
+                results.append(
+                    StepResult(
+                        group[0].key,
+                        "failed",
+                        None,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.ENV_SETUP,
+                        "spawn_env failed",
+                        episodes_total=group[0].episodes,
+                    )
+                )
                 for step in group[1:]:
-                    results.append(StepResult(
-                        step.key, "skipped", None, time.time(), time.time(),
-                        StepErrorKind.CANCELLED,
-                        "aborted by upstream step setup failure",
-                        episodes_total=step.episodes,
-                    ))
+                    results.append(
+                        StepResult(
+                            step.key,
+                            "skipped",
+                            None,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.CANCELLED,
+                            "aborted by upstream step setup failure",
+                            episodes_total=step.episodes,
+                        )
+                    )
                 return results
             env_id, env_ns_root = spawned
 
@@ -730,11 +785,17 @@ class BenchmarkRunner(ArenaMixinNode):
                 recorder_proc = None
                 if step.record_dir is not None:
                     recorder_proc = await asyncio.create_subprocess_exec(
-                        "ros2", "run", "arena_evaluation", "record",
+                        "ros2",
+                        "run",
+                        "arena_evaluation",
+                        "record",
                         "--ros-args",
-                        "-p", "use_sim_time:=true",
-                        "-p", f"record_data_dir:={step.record_dir}",
-                        "-r", f"__ns:={env_ns_root}",
+                        "-p",
+                        "use_sim_time:=true",
+                        "-p",
+                        f"record_data_dir:={step.record_dir}",
+                        "-r",
+                        f"__ns:={env_ns_root}",
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         start_new_session=True,
@@ -748,17 +809,29 @@ class BenchmarkRunner(ArenaMixinNode):
                     step_result = await self._run_episodes(step, env_id)
                 except asyncio.CancelledError:
                     step_result = StepResult(
-                        step.key, "skipped", env_id, time.time(), time.time(),
-                        StepErrorKind.CANCELLED, "cancelled",
+                        step.key,
+                        "skipped",
+                        env_id,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.CANCELLED,
+                        "cancelled",
                         episodes_total=step.episodes,
                     )
                     results.append(step_result)
-                    for remaining in group[idx + 1:]:
-                        results.append(StepResult(
-                            remaining.key, "skipped", env_id, time.time(), time.time(),
-                            StepErrorKind.CANCELLED, "cancelled",
-                            episodes_total=remaining.episodes,
-                        ))
+                    for remaining in group[idx + 1 :]:
+                        results.append(
+                            StepResult(
+                                remaining.key,
+                                "skipped",
+                                env_id,
+                                time.time(),
+                                time.time(),
+                                StepErrorKind.CANCELLED,
+                                "cancelled",
+                                episodes_total=remaining.episodes,
+                            )
+                        )
                     raise
                 finally:
                     if recorder_proc is not None:
@@ -783,87 +856,116 @@ class BenchmarkRunner(ArenaMixinNode):
                 if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
                     if idx + 1 >= len(group):
                         break
-                    _log.warning(
-                        f"env {env_id} unusable after {step.key} "
-                        f"({step_result.error_kind}); respawning a fresh env for "
-                        f"{len(group) - idx - 1} remaining step(s)"
-                    )
+                    _log.warning(f"env {env_id} unusable after {step.key} ({step_result.error_kind}); respawning a fresh env for {len(group) - idx - 1} remaining step(s)")
                     await self._despawn_env(env_id)
                     spawned = await self._spawn_and_setup_env(group[idx + 1])
                     if spawned is None:
                         env_id = None
-                        for remaining in group[idx + 1:]:
-                            results.append(StepResult(
-                                remaining.key, "skipped", None, time.time(), time.time(),
-                                StepErrorKind.ENV_SETUP,
-                                "env respawn failed after a wedged env",
-                                episodes_total=remaining.episodes,
-                            ))
+                        for remaining in group[idx + 1 :]:
+                            results.append(
+                                StepResult(
+                                    remaining.key,
+                                    "skipped",
+                                    None,
+                                    time.time(),
+                                    time.time(),
+                                    StepErrorKind.ENV_SETUP,
+                                    "env respawn failed after a wedged env",
+                                    episodes_total=remaining.episodes,
+                                )
+                            )
                         break
                     env_id, env_ns_root = spawned
 
         except _EnvDied as exc:
             if not results:
-                results.append(StepResult(
-                    group[0].key, "failed", env_id, time.time(), time.time(),
-                    StepErrorKind.ENV_SETUP, repr(exc),
-                    episodes_total=group[0].episodes,
-                ))
+                results.append(
+                    StepResult(
+                        group[0].key,
+                        "failed",
+                        env_id,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.ENV_SETUP,
+                        repr(exc),
+                        episodes_total=group[0].episodes,
+                    )
+                )
             already = {r.key for r in results}
             for step in group:
                 if step.key not in already:
-                    results.append(StepResult(
-                        step.key, "skipped", env_id, time.time(), time.time(),
-                        StepErrorKind.CANCELLED,
-                        "aborted by upstream step setup failure",
-                        episodes_total=step.episodes,
-                    ))
+                    results.append(
+                        StepResult(
+                            step.key,
+                            "skipped",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.CANCELLED,
+                            "aborted by upstream step setup failure",
+                            episodes_total=step.episodes,
+                        )
+                    )
         except asyncio.CancelledError:
             already = {r.key for r in results}
             for step in group:
                 if step.key not in already:
-                    results.append(StepResult(
-                        step.key, "skipped", env_id, time.time(), time.time(),
-                        StepErrorKind.CANCELLED, "cancelled",
-                        episodes_total=step.episodes,
-                    ))
+                    results.append(
+                        StepResult(
+                            step.key,
+                            "skipped",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.CANCELLED,
+                            "cancelled",
+                            episodes_total=step.episodes,
+                        )
+                    )
             raise
         except Exception as exc:
             if not results:
-                results.append(StepResult(
-                    group[0].key, "failed", env_id, time.time(), time.time(),
-                    StepErrorKind.INTERNAL, repr(exc),
-                    episodes_total=group[0].episodes,
-                ))
+                results.append(
+                    StepResult(
+                        group[0].key,
+                        "failed",
+                        env_id,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.INTERNAL,
+                        repr(exc),
+                        episodes_total=group[0].episodes,
+                    )
+                )
             already = {r.key for r in results}
             for step in group:
                 if step.key not in already:
-                    results.append(StepResult(
-                        step.key, "skipped", env_id, time.time(), time.time(),
-                        StepErrorKind.CANCELLED,
-                        "aborted by upstream step setup failure",
-                        episodes_total=step.episodes,
-                    ))
+                    results.append(
+                        StepResult(
+                            step.key,
+                            "skipped",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.CANCELLED,
+                            "aborted by upstream step setup failure",
+                            episodes_total=step.episodes,
+                        )
+                    )
         finally:
             self._completed_groups += 1
-            keep_alive = (
-                self._noexit
-                and self._completed_groups == self._total_groups
-                and env_id is not None
-            )
+            keep_alive = self._noexit and self._completed_groups == self._total_groups and env_id is not None
             if env_id is not None:
                 self._teardown_env_clients(env_id)
                 if env_id in self._env_records and not keep_alive:
                     with contextlib.suppress(Exception):
                         dreq = DespawnEnv.Request()
                         dreq.env_id = env_id
-                        await self._despawn.call_timeout(dreq, timeout_sec=30.0)
+                        await self._await_hb(self._despawn.call_forever(dreq), f"despawn of env {env_id}")
                     with contextlib.suppress(asyncio.TimeoutError, Exception):
-                        await self._wait_env_gone(env_id, timeout=30.0)
+                        await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
                 if keep_alive:
-                    _log.info(
-                        f"--noexit: keeping env {env_id} alive after last group {group[0].key}"
-                    )
+                    _log.info(f"--noexit: keeping env {env_id} alive after last group {group[0].key}")
         return results
 
     def _publish_state(
@@ -905,9 +1007,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
     async def _shutdown_arena(self) -> None:
         if self._noexit:
-            _log.info(
-                "--noexit: leaving arena_runtime.launch.py running; Ctrl+C its terminal to stop"
-            )
+            _log.info("--noexit: leaving arena_runtime.launch.py running; Ctrl+C its terminal to stop")
             return
         p = self._arena_proc
         if p is None or p.poll() is not None:
@@ -925,7 +1025,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 continue
         with contextlib.suppress(ProcessLookupError):
             os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-            
+
         if self._arena_log_file is not None:
             with contextlib.suppress(Exception):
                 self._arena_log_file.close()
@@ -942,13 +1042,16 @@ class BenchmarkRunner(ArenaMixinNode):
 
         passthrough = dict(self._arena_passthrough)
         cmd = [
-            "ros2", "launch", "arena_bringup", "arena_runtime.launch.py",
+            "ros2",
+            "launch",
+            "arena_bringup",
+            "arena_runtime.launch.py",
             *(f"{k}:={v}" for k, v in passthrough.items()),
         ]
-        
+
         log_path = self._run_dir.path / "runner.log"
         self._arena_log_file = log_path.open("a")
-        
+
         self._arena_proc = subprocess.Popen(
             cmd,
             stdout=self._arena_log_file,
@@ -968,7 +1071,13 @@ class BenchmarkRunner(ArenaMixinNode):
         def _mark_group_in_progress(group: list[Step]) -> None:
             for step in group:
                 results[step.key] = StepResult(
-                    step.key, "in_progress", None, time.time(), None, None, None,
+                    step.key,
+                    "in_progress",
+                    None,
+                    time.time(),
+                    None,
+                    None,
+                    None,
                     episodes_total=step.episodes,
                 )
             self._run_dir.state.write(results)
@@ -978,20 +1087,13 @@ class BenchmarkRunner(ArenaMixinNode):
             """Write results, return True only on a systemic setup failure before any episode ran."""
             for res in group_results:
                 results[res.key] = res
-                _log.info(
-                    f"[{res.status}] {res.key} env={res.env_id} "
-                    f"episodes={res.episodes_run}/{res.episodes_total} "
-                    f"(failed={res.episodes_failed}) "
-                    f"t={((res.ended_at or 0.0) - res.started_at):.1f}s"
-                )
+                _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={((res.ended_at or 0.0) - res.started_at):.1f}s")
             self._run_dir.state.write(results)
             self._publish_state(results, steps_total)
             total_episodes_run = sum(r.episodes_run for r in results.values())
             if total_episodes_run > 0:
                 return False
-            return any(
-                r.status == "failed" and r.error_kind in _SYSTEMIC for r in group_results
-            )
+            return any(r.status == "failed" and r.error_kind in _SYSTEMIC for r in group_results)
 
         try:
             while groups or in_flight:
@@ -1013,15 +1115,8 @@ class BenchmarkRunner(ArenaMixinNode):
                     abort = _flush_group_results(group_results)
                     if abort:
                         aborted_systemic = True
-                        first_failed = next(
-                            r for r in group_results
-                            if r.status == "failed" and r.error_kind in _SYSTEMIC
-                        )
-                        _log.error(
-                            f"benchmark: {first_failed.key} hit a systemic setup failure "
-                            f"({first_failed.error_kind}: {first_failed.error_detail}); "
-                            f"aborting run before any episode ran, {len(groups)} pending group(s) skipped"
-                        )
+                        first_failed = next(r for r in group_results if r.status == "failed" and r.error_kind in _SYSTEMIC)
+                        _log.error(f"benchmark: {first_failed.key} hit a systemic setup failure ({first_failed.error_kind}: {first_failed.error_detail}); aborting run before any episode ran, {len(groups)} pending group(s) skipped")
                         for t2 in in_flight:
                             t2.cancel()
                         with contextlib.suppress(Exception):
@@ -1066,9 +1161,7 @@ def _is_inline_suite(suite_name: str) -> bool:
     return stripped.startswith("[") or stripped.startswith("{")
 
 
-def _load_suite_contest(
-    suite_name: str, contest_name: str
-) -> tuple[Suite, Contest, dict, list | dict]:
+def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Contest, dict, list | dict]:
     share = pathlib.Path(get_package_share_directory("arena_evaluation"))
     bench_dir = share / "configs" / "benchmark"
 
@@ -1097,17 +1190,11 @@ def _warn_config_drift(manifest: Manifest) -> None:
     """Non-fatal: note when the on-disk suite/contest for this run's names has drifted
     from the config the run was created with. Resume always replays the stored config."""
     try:
-        _, _, suite_dict, contest_dict = _load_suite_contest(
-            manifest.suite_name, manifest.contest_name
-        )
+        _, _, suite_dict, contest_dict = _load_suite_contest(manifest.suite_name, manifest.contest_name)
     except FileNotFoundError:
         return
     if compute_config_hash(suite_dict, contest_dict) != manifest.config_hash:
-        _log.warning(
-            f"on-disk config for suite={manifest.suite_name!r} "
-            f"contest={manifest.contest_name!r} differs from this run's stored config, "
-            f"resuming with the stored config"
-        )
+        _log.warning(f"on-disk config for suite={manifest.suite_name!r} contest={manifest.contest_name!r} differs from this run's stored config, resuming with the stored config")
 
 
 def _resolve_resume_config(
@@ -1136,7 +1223,7 @@ def _default_run_id(suite_name: str, contest_name: str) -> str:
     return f"{ts}-{suite_stem}-{contest_stem}"
 
 
-_KV_RE = re.compile(r"^\w+:=.*$")
+_KV_RE = re.compile(r"^[\w.]+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
@@ -1160,15 +1247,13 @@ def cli_main(argv: list[str] | None = None) -> int:
         nargs="?",
         const="__auto__",
         default=None,
-        help="Resume a prior run. Bare --resume picks the most recent resumable; "
-             "--resume <run_id> opens that run explicitly.",
+        help="Resume a prior run. Bare --resume picks the most recent resumable; --resume <run_id> opens that run explicitly.",
     )
     p.add_argument("--retry-failed", action="store_true")
     p.add_argument(
         "--noexit",
         action="store_true",
-        help="On completion, leave arena_runtime.launch.py and the last env running so you "
-             "can poke at it. Recording stops with the last episode as usual.",
+        help="On completion, leave arena_runtime.launch.py and the last env running so you can poke at it. Recording stops with the last episode as usual.",
     )
     args, extras = p.parse_known_args(argv)
 
@@ -1180,10 +1265,6 @@ def cli_main(argv: list[str] | None = None) -> int:
     for arg in extras:
         k, v = arg.split(":=", 1)
         arena_passthrough[k] = v
-
-    env_n = int(arena_passthrough.get("env_n", "1"))
-    headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
-    simulator = arena_passthrough.get("sim", None)
 
     try:
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
@@ -1216,22 +1297,25 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
+            arena_passthrough = {**suite.launch_args, **man.launch_args, **arena_passthrough}
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
-            run_dir.progress.write_comment(
-                f"resumed at {datetime.datetime.now(tz=datetime.UTC).isoformat()}"
-            )
+            run_dir.progress.write_comment(f"resumed at {datetime.datetime.now(tz=datetime.UTC).isoformat()}")
         else:
             suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
+            arena_passthrough = {**suite.launch_args, **arena_passthrough}
+            simulator = arena_passthrough.get("sim", None)
+
+        env_n = int(arena_passthrough.get("env_n", "1"))
+        headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
 
         steps = _all_steps(contest, suite, scale_episodes)
         if not steps:
             print(
-                f"benchmark: empty grid (suite={suite.name!r} contest={contest.name!r} "
-                "produced no steps)",
+                f"benchmark: empty grid (suite={suite.name!r} contest={contest.name!r} produced no steps)",
                 file=sys.stderr,
             )
             return 2
@@ -1249,10 +1333,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 {
                     "key": c.key,
                     "contestant": attrs.asdict(c.contestant),
-                    "stage": {
-                        k: v.value if isinstance(v, (Constants.TaskMode.TM_Robots, Constants.TaskMode.TM_Obstacles)) else v
-                        for k, v in c.stage._asdict().items()
-                    },
+                    "stage": {k: v.value if isinstance(v, (Constants.TaskMode.TM_Robots, Constants.TaskMode.TM_Obstacles)) else v for k, v in c.stage._asdict().items()},
                     "episodes_planned": c.episodes,
                 }
                 for c in steps
@@ -1273,6 +1354,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
+                launch_args=dict(arena_passthrough),
             )
             run_dir = RunDir.create(data_root, run_id, manifest)
     except FileNotFoundError as exc:
@@ -1285,8 +1367,7 @@ def cli_main(argv: list[str] | None = None) -> int:
         return 2
 
     print(
-        f"benchmark: prepared run_id={run_dir.manifest.run_id} "
-        f"steps={len(steps)} dir={run_dir.path}",
+        f"benchmark: prepared run_id={run_dir.manifest.run_id} steps={len(steps)} dir={run_dir.path}",
         file=sys.stderr,
     )
 

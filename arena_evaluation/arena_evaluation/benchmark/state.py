@@ -89,6 +89,7 @@ class Manifest:
     suite: dict
     contest: list | dict
     steps: list[dict]
+    launch_args: dict = dataclasses.field(default_factory=dict)
 
     def to_yaml(self) -> str:
         return yaml.dump(dataclasses.asdict(self), allow_unicode=True, sort_keys=False)
