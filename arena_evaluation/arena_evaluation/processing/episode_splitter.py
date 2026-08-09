@@ -33,6 +33,27 @@ def _env_offset(tf_static: pl.DataFrame | None) -> tuple[float, float] | None:
         return None
     return (float(rows["trans_x"][0]), float(rows["trans_y"][0]))
 
+
+def _episode_snapshot(snapshot: pl.DataFrame | None, start_time: int, end_time: int) -> pl.DataFrame | None:
+    """Episode-scoped snapshot rows: in-window rows plus the seed, all rows of the latest
+    snapshot stamp at-or-before `start_time`, or the first stamp inside the window if none."""
+    if snapshot is None or len(snapshot) == 0:
+        return None
+
+    window = snapshot.filter((pl.col("time_ns") >= start_time) & (pl.col("time_ns") <= end_time))
+
+    seed_candidates = snapshot.filter(pl.col("time_ns") <= start_time)
+    if len(seed_candidates) > 0:
+        seed_time = seed_candidates["time_ns"].max()
+    elif len(window) > 0:
+        seed_time = window["time_ns"].min()
+    else:
+        return None
+
+    seed = snapshot.filter(pl.col("time_ns") == seed_time)
+    return pl.concat([seed, window]).unique().sort("time_ns")
+
+
 class EpisodeSplitter:
     """
     Splits continuous topic data into discrete episodes using EpisodeRecord messages.
@@ -65,7 +86,7 @@ class EpisodeSplitter:
         record_df = _to_df(bundle.episode_record)
         initialpose_df = _to_df(bundle.initialpose)
         plan_df = _to_df(bundle.plan)
-        semantic_events_df = _to_df(bundle.semantic_events)
+        semantic_snapshot_df = _to_df(bundle.semantic_snapshot)
         env_offset = _env_offset(_to_df(bundle.tf_static))
 
         episodes = []
@@ -82,7 +103,7 @@ class EpisodeSplitter:
                         goal_pos=[],
                         num_pedestrians=self._estimate_peds(aligned_df),
                         robot_name=robot_name,
-                        semantic_events=semantic_events_df,
+                        semantic_snapshot=semantic_snapshot_df,
                         env_offset=env_offset,
                     )
                 )
@@ -165,12 +186,6 @@ class EpisodeSplitter:
                 if "pos_x" in last_row and "pos_y" in last_row:
                     goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
 
-            episode_semantic_events = None
-            if semantic_events_df is not None and len(semantic_events_df) > 0:
-                episode_semantic_events = semantic_events_df.filter(
-                    (pl.col("time_ns") >= start_time) & (pl.col("time_ns") <= end_time)
-                )
-
             episodes.append(
                 AlignedEpisodeBundle(
                     episode_id=row["episode_id"],
@@ -179,7 +194,7 @@ class EpisodeSplitter:
                     goal_pos=goal_pos,
                     num_pedestrians=self._estimate_peds(aligned_df),
                     robot_name=robot_name,
-                    semantic_events=episode_semantic_events,
+                    semantic_snapshot=_episode_snapshot(semantic_snapshot_df, start_time, end_time),
                     conditions=_parse_conditions(row.get("conditions")),
                     env_offset=env_offset,
                 )

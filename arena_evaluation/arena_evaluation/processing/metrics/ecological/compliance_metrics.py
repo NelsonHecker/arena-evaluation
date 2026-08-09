@@ -151,6 +151,67 @@ def _restricted_zone_entries(zone_idx: np.ndarray, zones: list[_ZoneGeometry]) -
     return entries
 
 
+_RECONSTRUCTED_EVENTS_SCHEMA = {
+    "time_ns": pl.Int64, "entity": pl.Utf8, "kind": pl.Utf8, "field": pl.Utf8,
+    "previous": pl.Utf8, "current": pl.Utf8,
+}
+
+
+def _stringify_snapshot_value(row: dict) -> str:
+    """Native snapshot value to the historic event wire convention: lowercase bool, str(float), raw string."""
+    if row["field_kind"] == "predicate":
+        return "true" if row["value_bool"] else "false"
+    if row["field_kind"] == "continuous":
+        return str(row["value_num"])
+    return row["value_str"] if row["value_str"] is not None else ""
+
+
+def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
+    """Event-equivalent (time_ns, entity, kind, field, previous, current) rows, derived by
+    keeping only the change points of each entity+field's stepwise snapshot series. The first
+    kept row per series is the seed value (from the episode's seed snapshot), `previous` empty.
+    """
+    empty = pl.DataFrame(schema=_RECONSTRUCTED_EVENTS_SCHEMA)
+    if snapshot is None or len(snapshot) == 0:
+        return empty
+
+    rows = snapshot.filter(pl.col("field_kind") != "members").sort("time_ns")
+    if len(rows) == 0:
+        return empty
+
+    out_time: list[int] = []
+    out_entity: list[str] = []
+    out_kind: list[str] = []
+    out_field: list[str] = []
+    out_previous: list[str] = []
+    out_current: list[str] = []
+
+    for (entity, kind, field), group in rows.group_by(["entity", "kind", "field"]):
+        previous: str | None = None
+        for row in group.sort("time_ns").iter_rows(named=True):
+            current = _stringify_snapshot_value(row)
+            if current != previous:
+                out_time.append(row["time_ns"])
+                out_entity.append(entity)
+                out_kind.append(kind)
+                out_field.append(field)
+                out_previous.append(previous if previous is not None else "")
+                out_current.append(current)
+                previous = current
+
+    if not out_time:
+        return empty
+
+    return pl.DataFrame({
+        "time_ns": out_time,
+        "entity": out_entity,
+        "kind": out_kind,
+        "field": out_field,
+        "previous": out_previous,
+        "current": out_current,
+    }).sort("time_ns")
+
+
 def _door_open_series(events: pl.DataFrame) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Per-door sorted (time_ns, is_open) event series, name keyed by entity suffix."""
     door_events = events.filter((pl.col("kind") == "door") & (pl.col("field") == "state")).sort("time_ns")
@@ -187,8 +248,9 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
     the recorded world asset by name, not from the semantic snapshot (which only
     republishes the same literal YAML values), flattened into the single map frame
     the runtime renders via `WorldDescription.compact_world`. Doorway blocking
-    replays `semantic_events` door state exactly as the seed metric's
-    `_time_waiting_at_doors` replay does, seeded `"closed"` at episode start.
+    replays the same door-state transitions reconstructed from `semantic_snapshot`
+    that `_time_waiting_at_doors` uses, seeded from the entity's first recorded
+    snapshot value.
     Single-robot attribution assumption per SPEC_M1 M1.3. Returns schema-consistent
     `None` for every output key when the recorded world is not locally present.
 
@@ -262,8 +324,8 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         if not doors:
             return 0.0
 
-        events = episode.semantic_events
-        if events is None or len(events) == 0 or "kind" not in events.columns:
+        events = _reconstruct_events(episode.semantic_snapshot)
+        if len(events) == 0:
             return 0.0
 
         door_series = _door_open_series(events)

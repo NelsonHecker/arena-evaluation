@@ -41,7 +41,7 @@ except ImportError:
     HAS_COLLISION = False
 
 try:
-    from task_generator_msgs.msg import EpisodeRecord, RobotFleet, SemanticSnapshot, SemanticEvent
+    from task_generator_msgs.msg import EpisodeRecord, RobotFleet, SemanticSnapshot
     HAS_TASK_GEN = True
 except ImportError:
     class EpisodeRecord:
@@ -49,8 +49,6 @@ except ImportError:
     class RobotFleet:
         pass
     class SemanticSnapshot:
-        pass
-    class SemanticEvent:
         pass
     HAS_TASK_GEN = False
 
@@ -292,13 +290,13 @@ class DataRecorderNode(Node):
         topics_dict = get_topics(namespace="", parent_namespace=env_namespace)
 
         for key, t_def in topics_dict.items():
-            if key not in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot", "semantic_events"):
+            if key not in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot"):
                 continue
 
             topic_name = t_def.name_template
             msg_type = t_def.msg_type
 
-            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "AgentStates", "EpisodeRecord", "RobotFleet", "SemanticSnapshot", "SemanticEvent") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
+            if isinstance(msg_type, type) and msg_type.__name__ in ("Pedestrians", "AgentStates", "EpisodeRecord", "RobotFleet", "SemanticSnapshot") and not msg_type.__module__.startswith("arena_") and not msg_type.__module__.startswith("task_generator_"):
                 continue
 
             self._register_topic(topic_name, msg_type)
@@ -311,8 +309,6 @@ class DataRecorderNode(Node):
                 callback = self.robots_fleet_callback
             elif key == "semantic_snapshot":
                 callback = self.semantic_snapshot_callback
-            elif key == "semantic_events":
-                callback = self.semantic_events_callback
             elif t_def.throttled:
                 callback = self._create_throttled_callback(topic_name)
             else:
@@ -326,8 +322,6 @@ class DataRecorderNode(Node):
                 self.get_logger().info(f"Subscribed to RobotFleet on {topic_name}")
             elif key == "semantic_snapshot":
                 self.get_logger().info(f"Subscribed to SemanticSnapshot on {topic_name}")
-            elif key == "semantic_events":
-                self.get_logger().info(f"Subscribed to SemanticEvent on {topic_name}")
 
         self.create_timer(1.0, self.discover_topics)
 
@@ -402,12 +396,6 @@ class DataRecorderNode(Node):
         topic = f"/{env_namespace}/state/semantics" if env_namespace else "/state/semantics"
         self._write_to_bag_at(topic, msg, now)
 
-    def semantic_events_callback(self, msg: SemanticEvent):
-        env_namespace = self.get_namespace().strip('/')
-        now = self.current_time or self.get_clock().now().nanoseconds
-        topic = f"/{env_namespace}/state/semantic_events" if env_namespace else "/state/semantic_events"
-        self._write_to_bag_at(topic, msg, now)
-
     def robots_fleet_callback(self, msg):
         env_namespace = self.get_namespace().strip('/')
         now = self.current_time or self.get_clock().now().nanoseconds
@@ -427,7 +415,7 @@ class DataRecorderNode(Node):
                 topics_dict = get_topics(namespace=robot_ns, parent_namespace=env_namespace)
                 
                 for key, t_def in topics_dict.items():
-                    if key in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot", "semantic_events"):
+                    if key in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot"):
                         continue
                         
                     topic_name = t_def.name_template

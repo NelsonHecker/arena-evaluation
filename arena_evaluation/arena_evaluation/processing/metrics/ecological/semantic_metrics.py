@@ -3,6 +3,7 @@ import typing
 import polars as pl
 
 from ..base import BaseMetricCalculator
+from .compliance_metrics import _reconstruct_events
 
 if typing.TYPE_CHECKING:
     from ....storage.schemas import AlignedEpisodeBundle
@@ -21,11 +22,12 @@ def _parse_float(token: str) -> float:
 
 class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
     """
-    Door/elevator interaction metrics replayed from the semantic event stream.
+    Door/elevator interaction metrics derived from the recorded semantic snapshot.
 
-    time_waiting_at_doors: seconds a door was `triggered` while not `open`,
-    seeded per episode with the reset defaults. The stream carries no
-    per-entity position, so multi-robot episodes over-count.
+    time_waiting_at_doors: seconds a door was `triggered` while not `open`, replayed
+    over the per-field change-point series reconstructed from `semantic_snapshot`
+    (see `_reconstruct_events`), seeded by the entity's first recorded snapshot value.
+    The series carries no per-entity position, so multi-robot episodes over-count.
     elevator_rides: `just_arrived` rising edges with `occupants` > 0.
     `occupants` is a scalar, so attribution to the robot holds only in
     single-robot episodes.
@@ -33,7 +35,7 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
 
     NAME = "semantic_interaction_metrics"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = ["semantic_events"]
+    REQUIRED_TOPICS = ["semantic_snapshot"]
 
     UNITS = {
         "time_waiting_at_doors": "s",
@@ -53,8 +55,8 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any]
     ) -> dict[str, typing.Any]:
 
-        events = episode.semantic_events
-        if events is None or len(events) == 0 or "kind" not in events.columns:
+        events = _reconstruct_events(episode.semantic_snapshot)
+        if len(events) == 0:
             return {"time_waiting_at_doors": 0.0, "elevator_rides": 0}
 
         end_time_ns = None

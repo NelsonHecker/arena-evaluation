@@ -36,13 +36,12 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         HAS_HUMANSIM = False
 
     try:
-        from task_generator_msgs.msg import EpisodeRecord, RobotFleet, SemanticSnapshot, SemanticEvent
+        from task_generator_msgs.msg import EpisodeRecord, RobotFleet, SemanticSnapshot
         HAS_TASK_GEN = True
     except ImportError:
         EpisodeRecord = type("EpisodeRecord", (), {})
         RobotFleet = type("RobotFleet", (), {})
         SemanticSnapshot = type("SemanticSnapshot", (), {})
-        SemanticEvent = type("SemanticEvent", (), {})
         HAS_TASK_GEN = False
 
     try:
@@ -91,10 +90,6 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         )
         topics["semantic_snapshot"] = TopicDefinition(
             f"{p_ns}/state/semantics", SemanticSnapshot, throttled=False,
-            qos_transient_local=True,
-        )
-        topics["semantic_events"] = TopicDefinition(
-            f"{p_ns}/state/semantic_events", SemanticEvent, throttled=False,
             qos_transient_local=True,
         )
 

@@ -14,6 +14,7 @@ from .compliance_metrics import (
     _extract_door_geometry,
     _offset_doors,
     _offset_zones,
+    _reconstruct_events,
     _zone_membership,
 )
 from .semantic_metrics import _parse_bool, _parse_float
@@ -230,7 +231,8 @@ def _latency_distribution(triggers: list[int], changes: list[int]) -> list[float
 
 class RegimeMetricsCalculator(BaseMetricCalculator):
     """
-    Regime-change metrics replayed from the semantic event stream.
+    Regime-change metrics replayed from the semantic snapshot, reconstructed into a
+    per-field change-point series (see `_reconstruct_events`).
 
     used_elevator_during_alarm: alarm windows overlapped by nonzero elevator occupancy
     (single-robot proxy, `members` is snapshot-only and not carried per episode).
@@ -303,8 +305,8 @@ class RegimeMetricsCalculator(BaseMetricCalculator):
         del prior_results
         results: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
 
-        events = episode.semantic_events
-        has_events = events is not None and len(events) > 0 and "kind" in events.columns
+        events = _reconstruct_events(episode.semantic_snapshot)
+        has_events = len(events) > 0
         kinds = set(events["kind"].unique().to_list()) if has_events else set()
 
         pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)

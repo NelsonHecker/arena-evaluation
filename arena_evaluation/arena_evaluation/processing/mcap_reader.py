@@ -13,6 +13,21 @@ import pyarrow.parquet as pq
 from ..storage.schemas import TopicBundle
 
 
+_SEMANTIC_SNAPSHOT_SCHEMA = pa.schema([
+    ("time_ns", pa.int64()),
+    ("env_id", pa.int64()),
+    ("world", pa.string()),
+    ("entity", pa.string()),
+    ("kind", pa.string()),
+    ("field", pa.string()),
+    ("field_kind", pa.string()),
+    ("value_str", pa.string()),
+    ("value_num", pa.float64()),
+    ("value_bool", pa.bool_()),
+    ("value_list", pa.list_(pa.string())),
+])
+
+
 def _iter_messages_tolerant(reader):
     """Yield decoded messages, stopping cleanly at a truncated tail (unfinalized recording)."""
     from mcap.exceptions import EndOfFile
@@ -62,20 +77,40 @@ class MCAPReader:
         return str(val)
 
     @staticmethod
-    def _append_semantic_entity(target: dict, ts_ns: int, env_id: int, world: str, ent) -> None:
-        """Append one SemanticEntityState row, including the M2 `members` column."""
+    def _append_semantic_field(
+        target: dict, ts_ns: int, env_id: int, world: str, entity: str, kind: str,
+        field: str, field_kind: str,
+        value_str: str | None = None,
+        value_num: float | None = None,
+        value_bool: bool | None = None,
+        value_list: list[str] | None = None,
+    ) -> None:
+        """Append one long-format (entity, field) row of the flattened semantic snapshot."""
         target["time_ns"].append(ts_ns)
         target["env_id"].append(env_id)
         target["world"].append(world)
-        target["entity"].append(ent.entity)
-        target["kind"].append(ent.kind)
-        target["discrete_names"].append(list(ent.discrete_names))
-        target["discrete_values"].append(list(ent.discrete_values))
-        target["continuous_names"].append(list(ent.continuous_names))
-        target["continuous_values"].append(list(ent.continuous_values))
-        target["predicate_names"].append(list(ent.predicate_names))
-        target["predicate_values"].append(list(ent.predicate_values))
-        target["members"].append(list(ent.members))
+        target["entity"].append(entity)
+        target["kind"].append(kind)
+        target["field"].append(field)
+        target["field_kind"].append(field_kind)
+        target["value_str"].append(value_str)
+        target["value_num"].append(value_num)
+        target["value_bool"].append(value_bool)
+        target["value_list"].append(value_list)
+
+    @staticmethod
+    def _append_semantic_entity(target: dict, ts_ns: int, env_id: int, world: str, ent) -> None:
+        """Flatten one SemanticEntityState into long-format rows, one per discrete/continuous/predicate field plus a `members` row."""
+        for name, value in zip(ent.discrete_names, ent.discrete_values):
+            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, name, "discrete", value_str=value)
+        for name, value in zip(ent.continuous_names, ent.continuous_values):
+            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, name, "continuous", value_num=float(value))
+        for name, value in zip(ent.predicate_names, ent.predicate_values):
+            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, name, "predicate", value_bool=bool(value))
+        MCAPReader._append_semantic_field(
+            target, ts_ns, env_id, world, ent.entity, ent.kind, "__members__", "members",
+            value_list=list(ent.members),
+        )
 
     @staticmethod
     def _unflatten_dict(d: dict) -> dict:
@@ -134,7 +169,6 @@ class MCAPReader:
             "tf": defaultdict(list),
             "tf_static": defaultdict(list),
             "semantic_snapshot": defaultdict(list),
-            "semantic_events": defaultdict(list),
         }
         
         robot_data = defaultdict(new_robot_data)
@@ -153,7 +187,8 @@ class MCAPReader:
                 if not topic_data or len(topic_data.get("time_ns", [])) == 0:
                     continue
                 
-                batch = pa.RecordBatch.from_pydict(dict(topic_data))
+                schema_override = _SEMANTIC_SNAPSHOT_SCHEMA if topic_name == "semantic_snapshot" else None
+                batch = pa.RecordBatch.from_pydict(dict(topic_data), schema=schema_override)
                 writer_key = ("__global__", topic_name)
                 
                 if writer_key not in writers:
@@ -376,19 +411,6 @@ class MCAPReader:
                             self._append_semantic_entity(target, ts_ns, ros_msg.env_id, ros_msg.world, ent)
                             appended = True
 
-                    # Semantic events (one row per changed field)
-                    elif topic.endswith("/state/semantic_events"):
-                        target = global_data["semantic_events"]
-                        target["time_ns"].append(ts_ns)
-                        target["env_id"].append(ros_msg.env_id)
-                        target["entity"].append(ros_msg.entity)
-                        target["kind"].append(ros_msg.kind)
-                        target["field_kind"].append("predicate" if ros_msg.field_kind == 1 else "state")
-                        target["field"].append(ros_msg.field)
-                        target["previous"].append(ros_msg.previous)
-                        target["current"].append(ros_msg.current)
-                        appended = True
-
                     # Collision Events (Taskgen simulation)
                     elif topic.endswith("/collision_events"):
                         robot_name = parts[-2] if len(parts) >= 2 else "unknown"
@@ -545,7 +567,6 @@ class MCAPReader:
             rb.tf = global_bundle.tf
             rb.tf_static = global_bundle.tf_static
             rb.semantic_snapshot = global_bundle.semantic_snapshot
-            rb.semantic_events = global_bundle.semantic_events
 
             for t_name in new_robot_data().keys():
                 lf = load_parquet(robot_dir / f"{t_name}.parquet")

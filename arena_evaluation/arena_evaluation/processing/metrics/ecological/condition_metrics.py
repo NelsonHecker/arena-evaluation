@@ -10,7 +10,7 @@ import numpy as np
 import polars as pl
 
 from ..base import BaseMetricCalculator
-from .compliance_metrics import _extract_zone_geometry, _offset_zones, _zone_membership, _ZoneGeometry
+from .compliance_metrics import _extract_zone_geometry, _offset_zones, _reconstruct_events, _zone_membership, _ZoneGeometry
 
 if typing.TYPE_CHECKING:
     from arena_simulation_setup.shared.conditions import EntityAtom, MembershipAtom
@@ -21,38 +21,6 @@ logger = logging.getLogger(__name__)
 
 _ENV_PREFIX = re.compile(r"^env_\d+/")
 _FLOAT_TOLERANCE = 1e-6
-
-# Total (kind, field) reset-default table, wire-stringified per SPEC C1 and SPEC_M2 M2.C1.
-# Registration of every field a kind exposes; the value is the reset column of those tables.
-# Params-dependent resets (signal/schedule state, gate locked, occupancy cap) use their
-# documented neutral literal, overwritten by the first recorded event.
-_RESET_DEFAULTS: dict[tuple[str, str], str] = {
-    ("door", "state"): "closed",
-    ("door", "progress"): "0.0",
-    ("door", "open"): "false",
-    ("door", "in_transit"): "false",
-    ("door", "triggered"): "false",
-    ("elevator", "arriving_eta"): "-1.0",
-    ("elevator", "occupants"): "0.0",
-    ("elevator", "departing"): "false",
-    ("elevator", "in_transit"): "false",
-    ("elevator", "dispatched"): "false",
-    ("elevator", "just_arrived"): "false",
-    ("elevator", "cabin_door"): "closed",
-    ("elevator", "cabin_door_progress"): "0.0",
-    ("signal", "state"): "",
-    ("signal", "phase_remaining"): "0.0",
-    ("signal", "stop"): "false",
-    ("schedule", "state"): "",
-    ("schedule", "active"): "false",
-    ("schedule", "window_remaining"): "-1.0",
-    ("gate", "locked"): "true",
-    ("gate", "blocked"): "false",
-    ("pressure_plate", "pressed"): "false",
-    ("occupancy_cap", "occupancy"): "0.0",
-    ("occupancy_cap", "cap"): "0.0",
-    ("occupancy_cap", "over_cap"): "false",
-}
 
 
 def _strip_env(name: str) -> str:
@@ -76,18 +44,14 @@ def _values_equal(recorded: str, expected: str) -> bool:
     return recorded == expected
 
 
-def _entity_roster(events: pl.DataFrame | None) -> dict[str, tuple[str, frozenset[str]]]:
-    """Bare entity name -> (recorded sim_path, kinds), for names resolving to a single sim_path."""
-    if events is None or len(events) == 0 or "entity" not in events.columns:
+def _entity_roster(snapshot: pl.DataFrame | None) -> dict[str, str]:
+    """Bare entity name -> recorded sim_path, for names resolving to a single sim_path."""
+    if snapshot is None or len(snapshot) == 0 or "entity" not in snapshot.columns:
         return {}
-    seen = events.select("entity", "kind").unique()
     paths: dict[str, set[str]] = defaultdict(set)
-    kinds: dict[str, set[str]] = defaultdict(set)
-    for row in seen.iter_rows(named=True):
-        bare = _strip_env(row["entity"])
-        paths[bare].add(row["entity"])
-        kinds[bare].add(row["kind"])
-    return {bare: (next(iter(p)), frozenset(kinds[bare])) for bare, p in paths.items() if len(p) == 1}
+    for entity in snapshot["entity"].unique().to_list():
+        paths[_strip_env(entity)].add(entity)
+    return {bare: next(iter(p)) for bare, p in paths.items() if len(p) == 1}
 
 
 def _ped_roster(data: pl.DataFrame) -> dict[str, str]:
@@ -109,11 +73,11 @@ def _entity_field_series(events: pl.DataFrame, entity: str, field: str) -> tuple
     return rows["time_ns"].to_numpy(), rows["current"].to_list()
 
 
-def _value_at(times: np.ndarray, values: list[str], default: str, t_ns: int) -> str:
-    """Stepwise value at `t_ns`, the reset default before the first recorded event."""
+def _value_at(times: np.ndarray, values: list[str], t_ns: int) -> str:
+    """Stepwise value at `t_ns`, holding the earliest known (seed) value before it."""
     idx = int(np.searchsorted(times, t_ns, side="right")) - 1
     if idx < 0:
-        return default
+        idx = 0
     return values[idx]
 
 
@@ -124,33 +88,30 @@ def _first_true(series: np.ndarray) -> int | None:
 
 @dataclasses.dataclass
 class _EvalContext:
-    events: pl.DataFrame | None
+    events: pl.DataFrame
     time_ns: np.ndarray
     pos_x: np.ndarray
     pos_y: np.ndarray
     data: pl.DataFrame
     zones_by_name: dict[str, _ZoneGeometry]
-    entity_roster: dict[str, tuple[str, frozenset[str]]]
+    entity_roster: dict[str, str]
     ped_roster: dict[str, str]
     pose_valid: bool = True
 
 
 def _entity_atom_series(atom: EntityAtom, ctx: _EvalContext) -> tuple[np.ndarray | None, bool]:
     """Boolean `entity.field == value` series over the odom axis, plus a resolvable flag."""
-    resolved = ctx.entity_roster.get(atom.entity)
-    if resolved is None:
+    entity = ctx.entity_roster.get(atom.entity)
+    if entity is None:
         return None, False
-    entity, kinds = resolved
-    candidate_kinds = sorted(k for k in kinds if (k, atom.field) in _RESET_DEFAULTS)
-    if not candidate_kinds:
-        return None, False
-    kind = candidate_kinds[0]
-    default = _RESET_DEFAULTS[(kind, atom.field)]
 
     times, values = _entity_field_series(ctx.events, entity, atom.field)
+    if len(times) == 0:
+        return None, False
+
     series = np.zeros(len(ctx.time_ns), dtype=bool)
     for i in range(len(ctx.time_ns)):
-        series[i] = _values_equal(_value_at(times, values, default, int(ctx.time_ns[i])), atom.value)
+        series[i] = _values_equal(_value_at(times, values, int(ctx.time_ns[i])), atom.value)
     return series, True
 
 
@@ -251,8 +212,9 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
     Offline verdicts for the episode's `conditions` clause list (SPEC_M3 M3.3).
 
     Each clause is one of five operators (`always`, `never`, `eventually`, `before`,
-    `never_during`) over bare atoms, an `entity.field == value` test replayed from the
-    reset default over the recorded `semantic_events`, or a `<subject> in <zone>` test
+    `never_during`) over bare atoms, an `entity.field == value` test reconstructed as a
+    stepwise series from the episode's `semantic_snapshot` rows (seeded by the latest
+    snapshot at-or-before the episode start), or a `<subject> in <zone>` test
     on the ego odom pose or a recorded pedestrian, both against zone polygons loaded
     from the recorded world asset in the flattened multi-level frame. An atom is
     UNKNOWN when its zone, entity field, or ped is unresolvable, a clause is UNKNOWN
@@ -343,13 +305,13 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
             return empty
 
         ctx = _EvalContext(
-            events=episode.semantic_events,
+            events=_reconstruct_events(episode.semantic_snapshot),
             time_ns=time_ns,
             pos_x=pos_x,
             pos_y=pos_y,
             data=episode.data,
             zones_by_name={zone.name: zone for zone in zones},
-            entity_roster=_entity_roster(episode.semantic_events),
+            entity_roster=_entity_roster(episode.semantic_snapshot),
             ped_roster=_ped_roster(episode.data),
             pose_valid=bool(episode.start_pos),
         )

@@ -6,9 +6,8 @@ pytest.importorskip("arena_simulation_setup.shared.conditions")
 
 from arena_simulation_setup.shared.conditions import parse_atom
 
-from arena_evaluation.processing.metrics.ecological.compliance_metrics import _ZoneGeometry
+from arena_evaluation.processing.metrics.ecological.compliance_metrics import _ZoneGeometry, _reconstruct_events
 from arena_evaluation.processing.metrics.ecological.condition_metrics import (
-    _RESET_DEFAULTS,
     ConditionComplianceCalculator,
     _EvalContext,
     _atom_series,
@@ -37,13 +36,13 @@ def _start_pos(data):
     return []
 
 
-def _episode(data, semantic_events=None, conditions=None):
+def _episode(data, semantic_snapshot=None, conditions=None):
     return AlignedEpisodeBundle(
         episode_id=1,
         data=data,
         start_pos=_start_pos(data),
         goal_pos=[],
-        semantic_events=semantic_events,
+        semantic_snapshot=semantic_snapshot,
         conditions=conditions,
     )
 
@@ -60,7 +59,26 @@ def _square(name):
     )
 
 
-def _ctx(time_ns, pos_x=None, pos_y=None, events=None, data=None, zones=None):
+def _snap(rows):
+    """Synthetic long-format snapshot rows: (time_ns, entity, kind, field, field_kind, value)."""
+    time_ns, entity, kind, field, field_kind = [], [], [], [], []
+    value_str, value_num, value_bool = [], [], []
+    for t, e, k, f, fk, v in rows:
+        time_ns.append(t)
+        entity.append(e)
+        kind.append(k)
+        field.append(f)
+        field_kind.append(fk)
+        value_str.append(v if fk == "discrete" else None)
+        value_num.append(float(v) if fk == "continuous" else None)
+        value_bool.append(bool(v) if fk == "predicate" else None)
+    return pl.DataFrame({
+        "time_ns": time_ns, "entity": entity, "kind": kind, "field": field, "field_kind": field_kind,
+        "value_str": value_str, "value_num": value_num, "value_bool": value_bool,
+    })
+
+
+def _ctx(time_ns, pos_x=None, pos_y=None, snapshot=None, data=None, zones=None):
     n = len(time_ns)
     time_arr = np.asarray(time_ns)
     pos_x = np.zeros(n) if pos_x is None else np.asarray(pos_x, dtype=float)
@@ -68,18 +86,18 @@ def _ctx(time_ns, pos_x=None, pos_y=None, events=None, data=None, zones=None):
     zones = zones or []
     data = data if data is not None else pl.DataFrame({"time_ns": list(time_ns)})
     return _EvalContext(
-        events=events,
+        events=_reconstruct_events(snapshot),
         time_ns=time_arr,
         pos_x=pos_x,
         pos_y=pos_y,
         data=data,
         zones_by_name={z.name: z for z in zones},
-        entity_roster=_entity_roster(events),
+        entity_roster=_entity_roster(snapshot),
         ped_roster=_ped_roster(data),
     )
 
 
-# ── small helpers ────────────────────────────────────────────────────────
+# -- small helpers --------------------------------------------------------
 
 def test_strip_env_removes_only_leading_env_segment():
     assert _strip_env("env_0/ward_a_door") == "ward_a_door"
@@ -96,12 +114,12 @@ def test_values_equal_float_tolerance_and_string():
     assert _values_equal("true", "true") is True
 
 
-def test_value_at_holds_reset_default_before_first_event():
+def test_value_at_holds_seed_value_before_and_after_first_recorded_time():
     times = np.array([2_000_000_000, 4_000_000_000])
     values = ["open", "closed"]
-    assert _value_at(times, values, "closed", 0) == "closed"
-    assert _value_at(times, values, "closed", 2_000_000_000) == "open"
-    assert _value_at(times, values, "closed", 5_000_000_000) == "closed"
+    assert _value_at(times, values, 0) == "open"
+    assert _value_at(times, values, 2_000_000_000) == "open"
+    assert _value_at(times, values, 5_000_000_000) == "closed"
 
 
 def test_first_true_returns_earliest_index_or_none():
@@ -109,15 +127,7 @@ def test_first_true_returns_earliest_index_or_none():
     assert _first_true(np.array([False, False])) is None
 
 
-def test_reset_defaults_cover_door_and_elevator_fields():
-    assert _RESET_DEFAULTS[("door", "state")] == "closed"
-    assert _RESET_DEFAULTS[("door", "open")] == "false"
-    assert _RESET_DEFAULTS[("elevator", "arriving_eta")] == "-1.0"
-    assert _RESET_DEFAULTS[("elevator", "just_arrived")] == "false"
-    assert ("door", "bogus") not in _RESET_DEFAULTS
-
-
-# ── operator verdicts ────────────────────────────────────────────────────
+# -- operator verdicts ----------------------------------------------------
 
 def test_always_true_and_false():
     assert _operator_verdict("always", np.array([True, True]), True, None, False) is True
@@ -187,28 +197,25 @@ def test_never_during_unknown_when_atom_unresolvable():
     assert _operator_verdict("never_during", p, True, None, False) is None
 
 
-# ── entity atoms ─────────────────────────────────────────────────────────
+# -- entity atoms ---------------------------------------------------------
 
-def _door_events(rows):
-    return pl.DataFrame(rows, schema=["time_ns", "entity", "kind", "field", "current"], orient="row")
-
-
-def test_entity_atom_true_after_recorded_event():
-    events = _door_events([
-        (2_000_000_000, "env_0/door_1", "door", "open", "true"),
+def test_entity_atom_true_after_recorded_change():
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "open", "predicate", False),
+        (2_000_000_000, "env_0/door_1", "door", "open", "predicate", True),
     ])
-    ctx = _ctx([0, 1_000_000_000, 3_000_000_000], events=events)
+    ctx = _ctx([0, 1_000_000_000, 3_000_000_000], snapshot=snapshot)
     series, ok = _entity_atom_series(parse_atom("door_1.open == true"), ctx)
 
     assert ok is True
     assert list(series) == [False, False, True]
 
 
-def test_entity_atom_holds_reset_default_with_zero_events_on_field():
-    events = _door_events([
-        (1_000_000_000, "env_0/door_1", "door", "state", "opening"),
+def test_entity_atom_holds_seed_value_when_never_changed():
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "open", "predicate", False),
     ])
-    ctx = _ctx([0, 2_000_000_000], events=events)
+    ctx = _ctx([0, 2_000_000_000], snapshot=snapshot)
     series, ok = _entity_atom_series(parse_atom("door_1.open == false"), ctx)
 
     assert ok is True
@@ -216,10 +223,10 @@ def test_entity_atom_holds_reset_default_with_zero_events_on_field():
 
 
 def test_entity_atom_unresolvable_unknown_entity():
-    events = _door_events([
-        (1_000_000_000, "env_0/door_1", "door", "state", "open"),
+    snapshot = _snap([
+        (1_000_000_000, "env_0/door_1", "door", "state", "discrete", "open"),
     ])
-    ctx = _ctx([0, 2_000_000_000], events=events)
+    ctx = _ctx([0, 2_000_000_000], snapshot=snapshot)
     series, ok = _entity_atom_series(parse_atom("ghost.open == true"), ctx)
 
     assert series is None
@@ -227,10 +234,10 @@ def test_entity_atom_unresolvable_unknown_entity():
 
 
 def test_entity_atom_unresolvable_field_not_registered():
-    events = _door_events([
-        (1_000_000_000, "env_0/door_1", "door", "state", "open"),
+    snapshot = _snap([
+        (1_000_000_000, "env_0/door_1", "door", "state", "discrete", "open"),
     ])
-    ctx = _ctx([0, 2_000_000_000], events=events)
+    ctx = _ctx([0, 2_000_000_000], snapshot=snapshot)
     series, ok = _entity_atom_series(parse_atom("door_1.nonsense == x"), ctx)
 
     assert series is None
@@ -238,23 +245,25 @@ def test_entity_atom_unresolvable_field_not_registered():
 
 
 def test_entity_roster_drops_ambiguous_bare_names():
-    events = _door_events([
-        (0, "env_0/door_1", "door", "state", "open"),
-        (0, "env_1/door_1", "door", "state", "open"),
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "state", "discrete", "open"),
+        (0, "env_1/door_1", "door", "state", "discrete", "open"),
     ])
-    roster = _entity_roster(events)
+    roster = _entity_roster(snapshot)
 
     assert "door_1" not in roster
 
 
 def test_entity_atom_resolves_multi_kind_entity_and_drops_env_duplicate():
-    events = _door_events([
-        (2_000_000_000, "env_0/main_door/0", "door", "open", "true"),
-        (2_000_000_000, "env_0/main_door/0", "gate", "locked", "false"),
-        (0, "env_0/x/0", "door", "open", "true"),
-        (0, "env_1/x/0", "door", "open", "true"),
+    snapshot = _snap([
+        (0, "env_0/main_door/0", "door", "open", "predicate", False),
+        (2_000_000_000, "env_0/main_door/0", "door", "open", "predicate", True),
+        (0, "env_0/main_door/0", "gate", "locked", "predicate", True),
+        (2_000_000_000, "env_0/main_door/0", "gate", "locked", "predicate", False),
+        (0, "env_0/x/0", "door", "open", "predicate", True),
+        (0, "env_1/x/0", "door", "open", "predicate", True),
     ])
-    ctx = _ctx([0, 3_000_000_000], events=events)
+    ctx = _ctx([0, 3_000_000_000], snapshot=snapshot)
 
     open_series, open_ok = _entity_atom_series(parse_atom("main_door/0.open == true"), ctx)
     locked_series, locked_ok = _entity_atom_series(parse_atom("main_door/0.locked == false"), ctx)
@@ -265,7 +274,7 @@ def test_entity_atom_resolves_multi_kind_entity_and_drops_env_duplicate():
     assert dup_series is None and dup_ok is False
 
 
-# ── robot zone atoms ─────────────────────────────────────────────────────
+# -- robot zone atoms -----------------------------------------------------
 
 def test_robot_zone_membership_inside_and_outside():
     ctx = _ctx([0, 1_000_000_000], pos_x=[1.0, 10.0], pos_y=[1.0, 10.0], zones=[_square("lobby")])
@@ -300,7 +309,7 @@ def test_robot_zone_unresolvable_without_pose_anchor():
     assert list(series) == [True, True]
 
 
-# ── ped zone atoms ───────────────────────────────────────────────────────
+# -- ped zone atoms -------------------------------------------------------
 
 def _ped_data(time_ns, names, positions):
     return pl.DataFrame({
@@ -348,8 +357,11 @@ def test_ped_zone_unresolvable_without_peds_names_column():
 
 
 def test_atom_series_dispatches_membership_and_entity():
-    events = _door_events([(2_000_000_000, "env_0/door_1", "door", "open", "true")])
-    ctx = _ctx([0, 3_000_000_000], pos_x=[1.0, 1.0], pos_y=[1.0, 1.0], events=events, zones=[_square("lobby")])
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "open", "predicate", False),
+        (2_000_000_000, "env_0/door_1", "door", "open", "predicate", True),
+    ])
+    ctx = _ctx([0, 3_000_000_000], pos_x=[1.0, 1.0], pos_y=[1.0, 1.0], snapshot=snapshot, zones=[_square("lobby")])
 
     robot_series, robot_ok = _atom_series(parse_atom("robot in lobby"), ctx)
     entity_series, entity_ok = _atom_series(parse_atom("door_1.open == true"), ctx)
@@ -358,7 +370,7 @@ def test_atom_series_dispatches_membership_and_entity():
     assert entity_ok is True and list(entity_series) == [False, True]
 
 
-# ── clause verdicts / malformed ──────────────────────────────────────────
+# -- clause verdicts / malformed ------------------------------------------
 
 def test_clause_verdict_scores_valid_clause():
     ctx = _ctx([0, 1_000_000_000], pos_x=[1.0, 10.0], pos_y=[1.0, 10.0], zones=[_square("lobby")])
@@ -376,7 +388,7 @@ def test_clause_verdict_unknown_on_malformed_dict():
     assert _clause_verdict({"p": "robot in lobby"}, ctx) is None
 
 
-# ── calculator end to end ────────────────────────────────────────────────
+# -- calculator end to end ------------------------------------------------
 
 def test_calculate_all_none_without_conditions():
     calc = _calc()

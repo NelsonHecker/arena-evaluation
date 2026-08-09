@@ -13,6 +13,7 @@ from arena_evaluation.processing.metrics.ecological.compliance_metrics import (
     _extract_zone_geometry,
     _is_open_at,
     _quiet_zone_dwell,
+    _reconstruct_events,
     _restricted_zone_entries,
     _speed_zone_metrics,
     _zone_membership,
@@ -29,14 +30,33 @@ def _start_pos(data):
     return []
 
 
-def _episode(data, semantic_events=None):
+def _episode(data, semantic_snapshot=None):
     return AlignedEpisodeBundle(
         episode_id=1,
         data=data,
         start_pos=_start_pos(data),
         goal_pos=[],
-        semantic_events=semantic_events,
+        semantic_snapshot=semantic_snapshot,
     )
+
+
+def _snap(rows):
+    """Synthetic long-format snapshot rows: (time_ns, entity, kind, field, field_kind, value)."""
+    time_ns, entity, kind, field, field_kind = [], [], [], [], []
+    value_str, value_num, value_bool = [], [], []
+    for t, e, k, f, fk, v in rows:
+        time_ns.append(t)
+        entity.append(e)
+        kind.append(k)
+        field.append(f)
+        field_kind.append(fk)
+        value_str.append(v if fk == "discrete" else None)
+        value_num.append(float(v) if fk == "continuous" else None)
+        value_bool.append(bool(v) if fk == "predicate" else None)
+    return pl.DataFrame({
+        "time_ns": time_ns, "entity": entity, "kind": kind, "field": field, "field_kind": field_kind,
+        "value_str": value_str, "value_num": value_num, "value_bool": value_bool,
+    })
 
 
 def test_world_not_threaded_returns_none_defaults():
@@ -167,13 +187,10 @@ def test_door_open_series_and_query():
 
 def test_doorway_blocking_time_requires_stationary_and_open():
     doors = [_DoorGeometry(name="door_1", center_x=0.0, center_y=0.0, radius=1.0)]
-    events = pl.DataFrame({
-        "time_ns": [0, 2_000_000_000],
-        "entity": ["env_0/door_1", "env_0/door_1"],
-        "kind": ["door", "door"],
-        "field": ["state", "state"],
-        "current": ["open", "open"],
-    })
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "state", "discrete", "open"),
+        (2_000_000_000, "env_0/door_1", "door", "state", "discrete", "open"),
+    ])
     data = pl.DataFrame({
         "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
         "pos_x": [0.0, 0.0, 0.0, 0.0],
@@ -181,7 +198,7 @@ def test_doorway_blocking_time_requires_stationary_and_open():
         "yaw": [0.0, 0.0, 0.0, 0.0],
         "vel_linear": [0.0, 0.0, 1.0, 0.0],  # moving through [2s, 3s)
     })
-    episode = _episode(data, semantic_events=events)
+    episode = _episode(data, semantic_snapshot=snapshot)
 
     calc = _calc()
     pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
@@ -194,7 +211,7 @@ def test_doorway_blocking_time_requires_stationary_and_open():
     assert total == pytest.approx(2.0)
 
 
-def test_doorway_blocking_degrades_to_zero_without_events():
+def test_doorway_blocking_degrades_to_zero_without_snapshot():
     doors = [_DoorGeometry(name="door_1", center_x=0.0, center_y=0.0, radius=1.0)]
     data = pl.DataFrame({
         "time_ns": [0, 1_000_000_000],
@@ -203,7 +220,7 @@ def test_doorway_blocking_degrades_to_zero_without_events():
         "yaw": [0.0, 0.0],
         "vel_linear": [0.0, 0.0],
     })
-    episode = _episode(data, semantic_events=None)
+    episode = _episode(data, semantic_snapshot=None)
     calc = _calc()
 
     pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
@@ -342,3 +359,82 @@ def test_offset_zones_and_doors_translate_geometry():
     assert z.restricted is True and d.radius == 2.0
 
     assert _offset_zones([zone], (0.0, 0.0))[0] is zone
+
+
+def test_reconstruct_events_empty_without_snapshot():
+    events = _reconstruct_events(None)
+
+    assert len(events) == 0
+    assert events.columns == ["time_ns", "entity", "kind", "field", "previous", "current"]
+
+    empty_snapshot = pl.DataFrame({
+        "time_ns": [], "entity": [], "kind": [], "field": [], "field_kind": [],
+        "value_str": [], "value_num": [], "value_bool": [],
+    })
+    assert len(_reconstruct_events(empty_snapshot)) == 0
+
+
+def test_reconstruct_events_seeds_first_row_and_collapses_duplicates():
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "state", "discrete", "closed"),
+        (1_000_000_000, "env_0/door_1", "door", "state", "discrete", "closed"),  # unchanged, dropped
+        (2_000_000_000, "env_0/door_1", "door", "state", "discrete", "open"),
+    ])
+
+    events = _reconstruct_events(snapshot)
+    rows = events.sort("time_ns").to_dicts()
+
+    assert rows == [
+        {"time_ns": 0, "entity": "env_0/door_1", "kind": "door", "field": "state", "previous": "", "current": "closed"},
+        {"time_ns": 2_000_000_000, "entity": "env_0/door_1", "kind": "door", "field": "state", "previous": "closed", "current": "open"},
+    ]
+
+
+def test_reconstruct_events_stringifies_predicate_and_continuous():
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "open", "predicate", False),
+        (1_000_000_000, "env_0/door_1", "door", "open", "predicate", True),
+        (0, "env_0/elevator_1", "elevator", "arriving_eta", "continuous", -1.0),
+        (1_000_000_000, "env_0/elevator_1", "elevator", "arriving_eta", "continuous", 4.5),
+    ])
+
+    events = _reconstruct_events(snapshot)
+    by_field = {(r["entity"], r["field"], r["time_ns"]): r["current"] for r in events.to_dicts()}
+
+    assert by_field[("env_0/door_1", "open", 0)] == "false"
+    assert by_field[("env_0/door_1", "open", 1_000_000_000)] == "true"
+    assert by_field[("env_0/elevator_1", "arriving_eta", 0)] == "-1.0"
+    assert by_field[("env_0/elevator_1", "arriving_eta", 1_000_000_000)] == "4.5"
+
+
+def test_reconstruct_events_excludes_members_rows():
+    snapshot = _snap([
+        (0, "env_0/lobby", "occupancy_cap", "cap", "continuous", 2.0),
+    ])
+    snapshot = pl.concat([
+        snapshot,
+        pl.DataFrame({
+            "time_ns": [0], "entity": ["env_0/lobby"], "kind": ["occupancy_cap"], "field": ["__members__"],
+            "field_kind": ["members"], "value_str": [None], "value_num": [None], "value_bool": [None],
+        }),
+    ])
+
+    events = _reconstruct_events(snapshot)
+
+    assert "__members__" not in events["field"].to_list()
+    assert len(events) == 1
+
+
+def test_reconstruct_events_independent_per_entity_and_field():
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "state", "discrete", "closed"),
+        (0, "env_0/door_2", "door", "state", "discrete", "open"),
+        (1_000_000_000, "env_0/door_2", "door", "state", "discrete", "closed"),
+    ])
+
+    events = _reconstruct_events(snapshot)
+    door_1 = events.filter(pl.col("entity") == "env_0/door_1")
+    door_2 = events.filter(pl.col("entity") == "env_0/door_2").sort("time_ns")
+
+    assert door_1["current"].to_list() == ["closed"]
+    assert door_2["current"].to_list() == ["open", "closed"]

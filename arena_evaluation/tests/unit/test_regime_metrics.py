@@ -31,21 +31,40 @@ def _start_pos(data):
     return []
 
 
-def _episode(data, semantic_events=None):
+def _episode(data, semantic_snapshot=None):
     return AlignedEpisodeBundle(
         episode_id=1,
         data=data,
         start_pos=_start_pos(data),
         goal_pos=[],
-        semantic_events=semantic_events,
+        semantic_snapshot=semantic_snapshot,
     )
+
+
+def _snap(rows):
+    """Synthetic long-format snapshot rows: (time_ns, entity, kind, field, field_kind, value)."""
+    time_ns, entity, kind, field, field_kind = [], [], [], [], []
+    value_str, value_num, value_bool = [], [], []
+    for t, e, k, f, fk, v in rows:
+        time_ns.append(t)
+        entity.append(e)
+        kind.append(k)
+        field.append(f)
+        field_kind.append(fk)
+        value_str.append(v if fk == "discrete" else None)
+        value_num.append(float(v) if fk == "continuous" else None)
+        value_bool.append(bool(v) if fk == "predicate" else None)
+    return pl.DataFrame({
+        "time_ns": time_ns, "entity": entity, "kind": kind, "field": field, "field_kind": field_kind,
+        "value_str": value_str, "value_num": value_num, "value_bool": value_bool,
+    })
 
 
 def _bool(token: str) -> bool:
     return token.strip().lower() in ("true", "1")
 
 
-# ── _windows ──────────────────────────────────────────────────────────────
+# -- _windows --------------------------------------------------------------
 
 def test_windows_pairs_transitions_and_holds_open_at_end():
     events = pl.DataFrame({
@@ -81,7 +100,7 @@ def test_windows_does_not_hold_open_past_a_closing_transition():
     assert windows["sig_1"] == [(1_000_000_000, 2_000_000_000)]
 
 
-# ── _active_at / _overlaps ───────────────────────────────────────────────
+# -- _active_at / _overlaps -----------------------------------------------
 
 def test_active_at_checks_half_open_interval():
     intervals = [(1_000_000_000, 3_000_000_000)]
@@ -98,7 +117,7 @@ def test_overlaps_detects_intersection():
     assert _overlaps(0, 10, 20, 30) is False
 
 
-# ── used_elevator_during_alarm ───────────────────────────────────────────
+# -- used_elevator_during_alarm -------------------------------------------
 
 def test_used_elevator_during_alarm_counts_overlapping_window():
     events = pl.DataFrame({
@@ -124,7 +143,7 @@ def test_used_elevator_during_alarm_no_overlap_not_counted():
     assert _used_elevator_during_alarm(events, end_time_ns=5_000_000_000) == 0
 
 
-# ── entered_over_cap_zone ────────────────────────────────────────────────
+# -- entered_over_cap_zone ------------------------------------------------
 
 def test_entered_over_cap_zone_counts_transitions_during_over_cap_window():
     events = pl.DataFrame({
@@ -168,7 +187,7 @@ def test_entered_over_cap_zone_zero_without_any_over_cap_window():
     assert count == 0
 
 
-# ── ran_red_signal ───────────────────────────────────────────────────────
+# -- ran_red_signal -------------------------------------------------------
 
 def test_ran_red_signal_counts_entries_during_stop_window():
     events = pl.DataFrame({
@@ -224,7 +243,7 @@ def test_ran_red_signal_skips_signal_without_matching_door():
     assert count == 0
 
 
-# ── cmd_vel change detection / replan triggers / latency ────────────────
+# -- cmd_vel change detection / replan triggers / latency ----------------
 
 def test_cmd_vel_change_times_detects_change_above_epsilon():
     data = pl.DataFrame({
@@ -269,7 +288,7 @@ def test_latency_distribution_drops_trigger_without_subsequent_change():
     assert latencies == [pytest.approx(1.0)]
 
 
-# ── occupancy zone geometry extraction ───────────────────────────────────
+# -- occupancy zone geometry extraction -----------------------------------
 
 def test_extract_occupancy_zone_geometry_filters_by_annotation():
     from arena_simulation_setup.shared.semantics import SemanticCfg
@@ -293,9 +312,9 @@ def test_extract_occupancy_zone_geometry_filters_by_annotation():
     assert zones[0].name == "lobby"
 
 
-# ── end-to-end calculate() ───────────────────────────────────────────────
+# -- end-to-end calculate() -----------------------------------------------
 
-def test_calculate_returns_none_defaults_without_semantic_events():
+def test_calculate_returns_none_defaults_without_semantic_snapshot():
     calc = _calc()
     data = pl.DataFrame({
         "time_ns": [0, 1_000_000_000],
@@ -304,7 +323,7 @@ def test_calculate_returns_none_defaults_without_semantic_events():
         "yaw": [0.0, 0.0],
     })
 
-    results = calc.calculate(_episode(data, semantic_events=None), {})
+    results = calc.calculate(_episode(data, semantic_snapshot=None), {})
 
     assert all(v is None for v in results.values())
     assert set(results) == set(calc.output_keys())
@@ -318,16 +337,14 @@ def test_calculate_used_elevator_during_alarm_end_to_end_without_world():
         "pos_y": [0.0, 0.0, 0.0],
         "yaw": [0.0, 0.0, 0.0],
     })
-    events = pl.DataFrame({
-        "time_ns": [1_000_000_000, 5_000_000_000, 2_000_000_000, 3_000_000_000],
-        "entity": ["env_0/fire_alarm", "env_0/fire_alarm", "env_0/main_elevator", "env_0/main_elevator"],
-        "kind": ["schedule", "schedule", "elevator", "elevator"],
-        "field": ["active", "active", "occupants", "occupants"],
-        "previous": ["", "true", "", "1.0"],
-        "current": ["true", "false", "1.0", "0.0"],
-    })
+    snapshot = _snap([
+        (1_000_000_000, "env_0/fire_alarm", "schedule", "active", "predicate", True),
+        (5_000_000_000, "env_0/fire_alarm", "schedule", "active", "predicate", False),
+        (2_000_000_000, "env_0/main_elevator", "elevator", "occupants", "continuous", 1.0),
+        (3_000_000_000, "env_0/main_elevator", "elevator", "occupants", "continuous", 0.0),
+    ])
 
-    results = calc.calculate(_episode(data, semantic_events=events), {})
+    results = calc.calculate(_episode(data, semantic_snapshot=snapshot), {})
 
     assert results["used_elevator_during_alarm"] == 1
     assert results["ran_red_signal"] is None
@@ -345,16 +362,12 @@ def test_calculate_replan_latency_end_to_end():
         "linear_x": [0.0, 0.0, 0.0, 0.5, 0.5],
         "angular_z": [0.0, 0.0, 0.0, 0.0, 0.0],
     })
-    events = pl.DataFrame({
-        "time_ns": [1_000_000_000],
-        "entity": ["env_0/door_1"],
-        "kind": ["door"],
-        "field": ["open"],
-        "previous": ["false"],
-        "current": ["true"],
-    })
+    snapshot = _snap([
+        (0, "env_0/door_1", "door", "open", "predicate", False),
+        (1_000_000_000, "env_0/door_1", "door", "open", "predicate", True),
+    ])
 
-    results = calc.calculate(_episode(data, semantic_events=events), {})
+    results = calc.calculate(_episode(data, semantic_snapshot=snapshot), {})
 
     assert results["replan_latency_after_state_change_median"] == pytest.approx(2.0)
     assert results["replan_latency_after_state_change_p95"] == pytest.approx(2.0)
@@ -374,16 +387,12 @@ def test_calculate_entered_over_cap_zone_with_cached_world():
         "pos_y": [10.0, 1.0, 10.0, 1.0],
         "yaw": [0.0, 0.0, 0.0, 0.0],
     })
-    events = pl.DataFrame({
-        "time_ns": [0, 4_000_000_000],
-        "entity": ["env_0/lobby", "env_0/lobby"],
-        "kind": ["occupancy_cap", "occupancy_cap"],
-        "field": ["over_cap", "over_cap"],
-        "previous": ["", "true"],
-        "current": ["true", "false"],
-    })
+    snapshot = _snap([
+        (0, "env_0/lobby", "occupancy_cap", "over_cap", "predicate", True),
+        (4_000_000_000, "env_0/lobby", "occupancy_cap", "over_cap", "predicate", False),
+    ])
 
-    results = calc.calculate(_episode(data, semantic_events=events), {})
+    results = calc.calculate(_episode(data, semantic_snapshot=snapshot), {})
 
     assert results["entered_over_cap_zone"] == 2
 
@@ -400,16 +409,12 @@ def test_calculate_ran_red_signal_with_cached_world():
         "pos_y": [5.0, 0.0, 5.0],
         "yaw": [0.0, 0.0, 0.0],
     })
-    events = pl.DataFrame({
-        "time_ns": [0, 3_000_000_000],
-        "entity": ["env_0/crossing_1", "env_0/crossing_1"],
-        "kind": ["signal", "signal"],
-        "field": ["stop", "stop"],
-        "previous": ["", "true"],
-        "current": ["true", "false"],
-    })
+    snapshot = _snap([
+        (0, "env_0/crossing_1", "signal", "stop", "predicate", True),
+        (3_000_000_000, "env_0/crossing_1", "signal", "stop", "predicate", False),
+    ])
 
-    results = calc.calculate(_episode(data, semantic_events=events), {})
+    results = calc.calculate(_episode(data, semantic_snapshot=snapshot), {})
 
     assert results["ran_red_signal"] == 1
 
@@ -436,16 +441,14 @@ def test_calculate_world_not_locally_present_leaves_geometry_metrics_none():
             "pos_y": [0.0, 0.0, 0.0],
             "yaw": [0.0, 0.0, 0.0],
         })
-        events = pl.DataFrame({
-            "time_ns": [1_000_000_000, 5_000_000_000, 2_000_000_000, 3_000_000_000],
-            "entity": ["env_0/fire_alarm", "env_0/fire_alarm", "env_0/main_elevator", "env_0/main_elevator"],
-            "kind": ["schedule", "schedule", "elevator", "elevator"],
-            "field": ["active", "active", "occupants", "occupants"],
-            "previous": ["", "true", "", "1.0"],
-            "current": ["true", "false", "1.0", "0.0"],
-        })
+        snapshot = _snap([
+            (1_000_000_000, "env_0/fire_alarm", "schedule", "active", "predicate", True),
+            (5_000_000_000, "env_0/fire_alarm", "schedule", "active", "predicate", False),
+            (2_000_000_000, "env_0/main_elevator", "elevator", "occupants", "continuous", 1.0),
+            (3_000_000_000, "env_0/main_elevator", "elevator", "occupants", "continuous", 0.0),
+        ])
 
-        results = calc.calculate(_episode(data, semantic_events=events), {})
+        results = calc.calculate(_episode(data, semantic_snapshot=snapshot), {})
     finally:
         rm.logger.removeHandler(handler)
 

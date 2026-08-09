@@ -20,20 +20,23 @@ class _FakeEntity:
         self.members = members
 
 
-def test_append_semantic_entity_includes_members_column():
+def test_append_semantic_entity_flattens_fields_into_long_rows():
     target = defaultdict(list)
     ent = _FakeEntity("env_0/lobby", "occupancy_cap", ["env_0/robot_0", "env_0/human_1"])
 
     MCAPReader._append_semantic_entity(target, 1_000_000_000, 0, "hospital_small", ent)
 
-    assert target["time_ns"] == [1_000_000_000]
-    assert target["env_id"] == [0]
-    assert target["world"] == ["hospital_small"]
-    assert target["entity"] == ["env_0/lobby"]
-    assert target["kind"] == ["occupancy_cap"]
-    assert target["discrete_names"] == [["state"]]
-    assert target["predicate_values"] == [[True]]
-    assert target["members"] == [["env_0/robot_0", "env_0/human_1"]]
+    assert target["time_ns"] == [1_000_000_000, 1_000_000_000, 1_000_000_000]
+    assert target["env_id"] == [0, 0, 0]
+    assert target["world"] == ["hospital_small"] * 3
+    assert target["entity"] == ["env_0/lobby"] * 3
+    assert target["kind"] == ["occupancy_cap"] * 3
+    assert target["field"] == ["state", "over_cap", "__members__"]
+    assert target["field_kind"] == ["discrete", "predicate", "members"]
+    assert target["value_str"] == ["open", None, None]
+    assert target["value_num"] == [None, None, None]
+    assert target["value_bool"] == [None, True, None]
+    assert target["value_list"] == [None, None, ["env_0/robot_0", "env_0/human_1"]]
 
 
 def test_append_semantic_entity_defaults_to_empty_members():
@@ -42,7 +45,8 @@ def test_append_semantic_entity_defaults_to_empty_members():
 
     MCAPReader._append_semantic_entity(target, 0, 0, "world", ent)
 
-    assert target["members"] == [[]]
+    assert target["value_list"][-1] == []
+    assert target["field"][-1] == "__members__"
 
 
 def test_append_semantic_entity_accumulates_across_calls():
@@ -53,5 +57,25 @@ def test_append_semantic_entity_accumulates_across_calls():
     MCAPReader._append_semantic_entity(target, 0, 0, "world", ent_a)
     MCAPReader._append_semantic_entity(target, 1_000_000_000, 0, "world", ent_b)
 
-    assert target["entity"] == ["env_0/lobby", "env_0/elevator_1"]
-    assert target["members"] == [["env_0/robot_0"], ["env_0/robot_0", "env_0/robot_1"]]
+    assert target["entity"] == ["env_0/lobby"] * 3 + ["env_0/elevator_1"] * 3
+    assert target["value_list"][2] == ["env_0/robot_0"]
+    assert target["value_list"][5] == ["env_0/robot_0", "env_0/robot_1"]
+
+
+def test_append_semantic_field_appends_one_row():
+    target = defaultdict(list)
+
+    MCAPReader._append_semantic_field(
+        target, 2_000_000_000, 1, "world", "env_1/door_1", "door", "open", "predicate", value_bool=True,
+    )
+
+    assert target["time_ns"] == [2_000_000_000]
+    assert target["env_id"] == [1]
+    assert target["entity"] == ["env_1/door_1"]
+    assert target["kind"] == ["door"]
+    assert target["field"] == ["open"]
+    assert target["field_kind"] == ["predicate"]
+    assert target["value_bool"] == [True]
+    assert target["value_str"] == [None]
+    assert target["value_num"] == [None]
+    assert target["value_list"] == [None]
