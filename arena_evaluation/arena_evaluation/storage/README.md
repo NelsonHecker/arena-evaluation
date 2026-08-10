@@ -11,7 +11,6 @@ This package contains the shared data types and infrastructure used by **all** o
 | `schemas.py` | Pydantic and dataclass type definitions (the data model) |
 | `folder_manager.py` | `FolderManager` — resolves and validates all output paths |
 | `manifest.py` | `MetadataWriter` — reads and writes `metadata.yaml` |
-| `planner_names.py` | `split_planner_name` — the shared `<prefix>-<local>-<inter>` convention |
 | `exceptions.py` | Domain-specific exceptions for the whole pipeline |
 
 ---
@@ -42,11 +41,9 @@ meta = RunMetadata(
 )
 ```
 
-**Write-on-startup fields** — known at recording start: `benchmark_id`, `planner`, `robot_model`, `map`, `stage`, `suite_name`, `contest_name`, `local_planner`, `inter_planner`, `episodes_requested`, `recording_started_at`, `arena_git_sha`, `arena_git_dirty`, `python_version`, `ros_distro`.
+**Write-on-startup fields** — known at recording start: `benchmark_id`, `planner`, `robot_model`, `map`, `stage`, `suite_name`, `contest_name`, `recording_started_at`, `arena_git_sha`, `arena_git_dirty`, `python_version`, `ros_distro`.
 
 **Write-on-episode fields** — populated from `EpisodeRecord` messages: `tm_obstacles`, `tm_robots`, `tm_modules`, `obstacles_params`, `robots_params`.
-
-**Write-on-stop fields** — written by the runner's `stop_episode` service call: `outcome_state`, `outcome_info`, plus `task_generator_episode_id` for correlating with `progress.csv`.
 
 **Write-on-shutdown fields** — finalized on clean exit: `recording_ended_at`, `episodes_recorded`, `pedsim_available`, `recorded_topics`.
 
@@ -76,19 +73,9 @@ class TopicBundle:
     scan: pl.DataFrame | None
     cmd_vel: pl.DataFrame | None
     joint_states: pl.DataFrame | None
-    power: pl.DataFrame | None
-    energy: pl.DataFrame | None
-    acoustics: pl.DataFrame | None
-    characterization_phase: pl.DataFrame | None
     peds: pl.DataFrame | None
     episode_record: pl.DataFrame | None
     collision_events: pl.DataFrame | None
-    collision_monitor_state: pl.DataFrame | None
-    plan: pl.DataFrame | None
-    initialpose: pl.DataFrame | None
-    tf: pl.DataFrame | None
-    tf_static: pl.DataFrame | None
-    tf_gt: pl.DataFrame | None
 ```
 
 Each DataFrame has a `time_ns` column (nanoseconds since epoch) as its primary time axis.
@@ -118,7 +105,7 @@ params = RobotParams.load("jackal")
 
 ### `PlotSpec`
 
-Pydantic model for entries in a report manifest. Supports `auto_differentiate: bool` (default `True`) to automatically resolve the color axis across multiple dimensions (planner, robot, stage, etc), plus a per-plot `data_source` override (defaults to the manifest's). `VizManifest` additionally declares `data_source`, `groups`, `summary`/`summary_group_by`, and `units` — see the [presentation README](../presentation/README.md).
+Pydantic model for entries in `viz_manifest.yaml`. Supports `auto_differentiate: bool` (default `True`) to automatically resolve the color axis when analyzing data across multiple benchmarks that vary by different dimensions (planner, robot, stage, etc).
 
 ---
 
@@ -145,20 +132,14 @@ metrics   = fm.metrics_path(run_dir)
 combined  = fm.combined_metrics_path("my_benchmark")
 # → /opt/arena_ws/data/my_benchmark/combined_metrics.parquet
 
-# Characterization analysis outputs
-fm.characterization_summary_path("my_benchmark")   # → …/characterization_summary.parquet
-fm.characterization_samples_path("my_benchmark")   # → …/characterization_samples.parquet
-
-# Discover all valid episodes in a benchmark (flat per-episode structure)
-eps = fm.discover_episodes("my_benchmark")
-# → list[EpisodeDescriptor]  (episode_XXX/ dirs with episode_XXX.yaml sidecars)
+# Discover all valid runs in a benchmark
+runs = fm.discover_runs("my_benchmark")
+# → list[RunDescriptor]
 ```
 
 **Path traversal protection:** every resolved path is checked with `resolved.relative_to(data_root)`. If the path escapes `data_root`, a `ValueError` is raised.
 
-**Episode discovery:** `discover_episodes()` scans `data_root/<benchmark_id>/episodes/episode_XXX/`
-for directories containing `episode_XXX.yaml` (the recorder's flat per-episode output). Legacy
-`recordings/<planner>/<stage>/` runs are still discoverable via `discover_runs()`.
+**Run discovery:** `discover_runs()` scans `data_root/<benchmark_id>/recordings/<planner>/<stage>/` for directories containing a `metadata.yaml` file.
 
 ---
 
