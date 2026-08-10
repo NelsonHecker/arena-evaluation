@@ -120,3 +120,19 @@ def compute_attenuations(
     )
 
     return out_attenuations
+
+
+def downsample_occupancy(grid: np.ndarray, ds: int) -> np.ndarray:
+    """Downsample an occupancy grid keeping walls (max-pool over ds x ds windows).
+
+    Plain strided slicing (grid[::ds, ::ds]) drops 1-px walls entirely; max-pool
+    keeps a wall if ANY sub-pixel is wall, preserving thin structures.
+    Returns a C-contiguous uint8 array for the C++ solver.
+    """
+    if ds <= 1:
+        return grid
+    h, w = grid.shape
+    h2, w2 = h // ds, w // ds
+    g = grid[: h2 * ds, : w2 * ds].reshape(h2, ds, w2, ds)
+    pooled = g.max(axis=(1, 3)).astype(np.uint8)
+    return np.ascontiguousarray(pooled)

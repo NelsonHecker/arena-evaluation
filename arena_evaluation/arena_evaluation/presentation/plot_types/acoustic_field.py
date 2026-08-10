@@ -10,6 +10,7 @@ from PIL import Image
 
 from .base import BasePlotRenderer
 from ...processing.map_registry import MapRegistry
+from ...processing.acoustics.impedance_grid import downsample_occupancy
 
 try:
     from ...processing.acoustics.impedance_grid import compute_attenuations
@@ -55,9 +56,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
     def _compute_full_field(self, grid, resolution, ox, oy,
                             rx_m, ry_m, source_dba, downsample=1):
         if downsample > 1:
-            grid = grid[::downsample, ::downsample]
-            if not grid.flags["C_CONTIGUOUS"]:
-                grid = np.ascontiguousarray(grid)
+            # max-pool keeps 1-px walls instead of dropping them (strided slicing loses thin walls)
+            grid = downsample_occupancy(grid, downsample)
             resolution = resolution * downsample
 
         h, w = grid.shape

@@ -44,4 +44,7 @@ setup(
             'characterize = arena_evaluation.characterization.characterization_node:main',
         ],
     },
+    package_data={
+        'arena_evaluation.processing.acoustics': ['solver.cpp', 'solver.so'],
+    },
 )
