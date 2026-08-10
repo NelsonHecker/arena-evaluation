@@ -41,7 +41,6 @@ class Suite(typing.NamedTuple):
             name=name,
             stages=[cls.Stage.parse(stage) for stage in obj["stages"]],
             launch_args={str(k): str(v) for k, v in obj.get("launch", {}).items()},
-            references=bool(obj.get("references", True)),
         )
 
     class Index(int):
@@ -58,7 +57,6 @@ class Suite(typing.NamedTuple):
         seed: int
         timeout: float
         optim: dict | None = None
-        timeout_peds: float | None = None
 
         @classmethod
         def _make_serializable(cls, item: object) -> object:
@@ -104,19 +102,13 @@ class Suite(typing.NamedTuple):
             obj.setdefault("config", {})
             raw_timeout = obj.pop("timeout", None)
             timeout_f = _DEFAULT_TIMEOUT_S if raw_timeout is None else _parse_duration(str(raw_timeout))
-            raw_timeout_peds = obj.pop("timeout_peds", None)
-            timeout_peds_f = _parse_duration(str(raw_timeout_peds)) if raw_timeout_peds is not None else None
             optim = obj.pop("optim", None)
             obj.setdefault("seed", cls.hash(obj))
-            return cls(timeout=timeout_f, optim=optim, timeout_peds=timeout_peds_f, **obj)
+            return cls(timeout=timeout_f, optim=optim, **obj)
 
     name: str
     stages: list[Suite.Stage]
     launch_args: dict[str, str] = {}
-<<<<<<< HEAD
-=======
-    references: bool = True
->>>>>>> origin-fork/jazzy
 
     @property
     def min_index(self) -> Suite.Index:

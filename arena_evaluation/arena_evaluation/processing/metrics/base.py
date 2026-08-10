@@ -8,26 +8,59 @@ if typing.TYPE_CHECKING:
 
 
 class BaseMetricCalculator(ABC):
-    """Abstract Base Class for all metric calculators."""
+    """
+    Abstract Base Class for all metric calculators.
+    
+    A metric calculator takes an aligned episode bundle and any previously
+    calculated metrics it depends on, and returns a dictionary of scalar
+    or array results.
+    
+    To implement a new calculator:
+    1. Subclass `BaseMetricCalculator`.
+    2. Set the `NAME`, `CATEGORY`, `REQUIRES_PEDSIM`, and `DEPENDS_ON` class attributes.
+    3. Implement `output_keys()` to declare what keys this calculator provides.
+    4. Implement `calculate()` to perform the actual computation.
+    
+    The registry will automatically discover your subclass if it is located
+    in the `arena_evaluation.processing.metrics` package hierarchy.
+    """
 
+    # The unique name of this calculator (used as a key in the registry and dependencies)
     NAME: str = ""
+    
+    # Category of the metric (e.g., "performance", "social", "naturalness")
     CATEGORY: str = "general"
+    
+    # Whether this metric requires pedestrian simulation data (arena_peds)
     REQUIRES_PEDSIM: bool = False
+    
+    # List of calculator NAMEs that must be run before this one.
     DEPENDS_ON: list[str] = []
+    
+    # List of topics required by this calculator. Each entry can be a string
+    # (strictly required topic) or a collection/tuple of strings (any of the listed topics).
     REQUIRED_TOPICS: list[str | list[str] | tuple[str, ...] | set[str]] = []
+    
+    # Dictionary mapping output keys to their SI units.
     UNITS: dict[str, str] = {}
-    PRIMARY_OUTPUTS: list[str] = []
-    OUTPUT_DIRECTIONS: dict[str, str] = {}
 
     def __init__(self, robot_params: RobotParams):
-        """Initializes the calculator with robot parameters."""
+        """
+        Initializes the calculator with robot parameters.
+        """
         self.robot_params = robot_params
 
     def resolve_robot_pose(self, episode: "AlignedEpisodeBundle") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame."""
+        """
+        Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame.
+        Handles both absolute/relative TF ground truth (tf_gt) and fallback to raw odom.
+        Returns:
+            (pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans)
+        """
         import numpy as np
         import polars as pl
         
+        # Filter out rows with null or nan in active coordinates to disregard them from calculations
         if episode.data is not None and len(episode.data) > 0:
             use_gt = "pos_x_gt" in episode.data.columns
             if use_gt:
@@ -43,7 +76,6 @@ class BaseMetricCalculator(ABC):
                     pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan()
                 )
         
-<<<<<<< HEAD
         # 1. Extract raw odom
         anchor_x = anchor_y = anchor_yaw = None
         if episode.data is not None and len(episode.data) > 0:
@@ -53,23 +85,6 @@ class BaseMetricCalculator(ABC):
             anchor_x, anchor_y, anchor_yaw = odom_x[0], odom_y[0], odom_yaw[0]
 
             # Detect teleport jumps in the episode
-=======
-        if episode.data is not None and len(episode.data) > 0:
-            if "pos_x" in episode.data.columns:
-                odom_x = episode.data["pos_x"].to_numpy().copy()
-                odom_y = episode.data["pos_y"].to_numpy().copy()
-                odom_yaw = episode.data["yaw"].to_numpy().copy()
-            elif "pos_x_gt" in episode.data.columns:
-                odom_x = episode.data["pos_x_gt"].to_numpy().copy()
-                odom_y = episode.data["pos_y_gt"].to_numpy().copy()
-                odom_yaw = episode.data["yaw_gt"].to_numpy().copy()
-            else:
-                odom_x = np.array([], dtype=np.float64)
-                odom_y = np.array([], dtype=np.float64)
-                odom_yaw = np.array([], dtype=np.float64)
-
-            
->>>>>>> origin-fork/jazzy
             if len(odom_x) > 1:
                 dists = np.sqrt(np.diff(odom_x)**2 + np.diff(odom_y)**2)
                 jumps = np.where(dists > 0.5)[0]
@@ -108,6 +123,7 @@ class BaseMetricCalculator(ABC):
             odom_y = np.array([], dtype=np.float64)
             odom_yaw = np.array([], dtype=np.float64)
         
+        # 2. Transform raw odom to map frame if start_pos is available
         if episode.start_pos and len(episode.start_pos) >= 2 and len(odom_x) > 0:
             start_x, start_y = episode.start_pos[0], episode.start_pos[1]
             start_yaw = episode.start_pos[2] if len(episode.start_pos) >= 3 else 0.0
@@ -130,6 +146,7 @@ class BaseMetricCalculator(ABC):
         else:
             odom_x_trans, odom_y_trans, odom_yaw_trans = odom_x, odom_y, odom_yaw
 
+        # 3. Check if we should use ground truth TF
         use_gt = episode.data is not None and "pos_x_gt" in episode.data.columns
         if use_gt:
             pos_x = episode.data["pos_x_gt"].to_numpy().copy()
@@ -145,7 +162,10 @@ class BaseMetricCalculator(ABC):
     @classmethod
     @abstractmethod
     def output_keys(cls) -> list[str]:
-        """Returns a list of keys that this calculator will output."""
+        """
+        Returns a list of keys that this calculator will output.
+        This is used to construct the final Parquet schema.
+        """
         pass
 
     @abstractmethod
@@ -154,5 +174,17 @@ class BaseMetricCalculator(ABC):
         episode: "AlignedEpisodeBundle",
         prior_results: dict[str, typing.Any]
     ) -> dict[str, typing.Any]:
-        """Calculate metrics for a single episode."""
+        """
+        Calculate metrics for a single episode.
+        
+        Args:
+            episode: The aligned bundle of topic DataFrames for this episode.
+            prior_results: Results from calculators this one depends on.
+            
+        Returns:
+            A dictionary mapping output keys to their calculated values.
+            Values should be python scalars, lists, or numpy arrays.
+            If calculation fails, return a dictionary of None/NaN values
+            so the schema remains consistent.
+        """
         pass
