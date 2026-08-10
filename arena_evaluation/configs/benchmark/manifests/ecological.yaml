@@ -1,0 +1,76 @@
+# Ecological focus: energy consumption, power draw, and battery behaviour.
+manifest_version: "1.0"
+name: ecological
+title: Ecological Report — Energy & Power
+description: Energy consumption, power splits, and battery behaviour across planners.
+data_source: metrics
+groups:
+  - {id: energy, title: Energy Consumption}
+  - {id: power, title: Power Draw Over Time}
+  - {id: overview, title: Performance Overview}
+units:
+  energy_total_wh: Wh
+  energy_static_wh: Wh
+  energy_mechanical_wh: Wh
+  energy_thermal_wh: Wh
+  time_to_goal: s
+  path_length: m
+  collision_amount: ""
+  timeseries_power_total_w: W
+  timeseries_power_static_w: W
+  timeseries_power_mechanical_w: W
+  timeseries_power_thermal_w: W
+  timeseries_battery_soc: "%"
+  timeseries_time_s: s
+  timeseries_velocity_linear: m/s
+plots:
+  - id: bar_energy_breakdown
+    type: bar
+    title: Energy Breakdown (%)
+    data_key: energy_total_wh
+    differentiate: local_planner
+    layout_group: energy
+    options:
+      stacked: true
+      metrics: [energy_static_wh, energy_mechanical_wh, energy_thermal_wh]
+  - id: violin_energy_local
+    type: violin
+    title: Total Energy by Local Planner
+    data_key: energy_total_wh
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: energy
+  - id: violin_energy_inter
+    type: violin
+    title: Total Energy by Inter-Planner
+    data_key: energy_total_wh
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: energy
+  - id: timeseries_power
+    type: timeseries
+    title: Power & Battery Over Time
+    data_key: timeseries_power_total_w
+    differentiate: local_planner
+    layout_group: power
+    group_by: [stage]
+    options:
+      x: timeseries_time_s
+      metrics: [timeseries_power_total_w, timeseries_power_static_w, timeseries_power_mechanical_w, timeseries_power_thermal_w, timeseries_battery_soc]
+  - id: timeseries_velocity
+    type: timeseries
+    title: Velocity Over Time
+    data_key: timeseries_velocity_linear
+    differentiate: local_planner
+    layout_group: power
+    group_by: [stage]
+    options: {x: timeseries_time_s}
+  - id: radar_local_planner
+    type: radar
+    title: Performance Overview by Local Planner
+    data_key: "*"
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: overview
+    options:
+      metrics: [success, path_efficiency, time_to_goal, collision_amount, energy_total_wh]

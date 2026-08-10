@@ -27,6 +27,14 @@ class ScatterRenderer(BasePlotRenderer):
         if pdf.empty:
             return None
 
+        if df_filtered.schema[x_col] == pl.List or df_filtered.schema[y_col] == pl.List:
+            cols_to_explode = [col for col in [x_col, y_col] if df_filtered.schema[col] == pl.List]
+            df_filtered = df_filtered.explode(cols_to_explode)
+            pdf = df_filtered.to_pandas()
+
+        if pdf.empty:
+            return None
+
         fig = px.scatter(
             pdf,
             x=x_col,
@@ -59,6 +67,14 @@ class ScatterRenderer(BasePlotRenderer):
             return
 
         pdf = df_filtered.to_pandas()
+        if pdf.empty:
+            return
+
+        if df_filtered.schema[x_col] == pl.List or df_filtered.schema[y_col] == pl.List:
+            cols_to_explode = [col for col in [x_col, y_col] if df_filtered.schema[col] == pl.List]
+            df_filtered = df_filtered.explode(cols_to_explode)
+            pdf = df_filtered.to_pandas()
+
         if pdf.empty:
             return
 

@@ -1,0 +1,17 @@
+# Authoritative episode lifecycle for the DataRecorder, driven by the benchmark
+# runner. START opens the MCAP writer; STOP closes it and records the outcome.
+# The recorder does NOT start or stop on EpisodeRecord topic messages — the
+# topic is used for metadata enrichment only, so a missed/late topic message
+# can never corrupt the recording lifecycle.
+
+uint8 COMMAND_START = 1
+uint8 COMMAND_STOP  = 2
+uint8 command
+uint32 episode_id
+# For COMMAND_STOP: terminal outcome (SUCCESS=2/FAILED=3/SKIPPED=4/FATAL=5) and
+# its info string, stored in the episode metadata yaml.
+uint8 outcome_state
+string outcome_info
+---
+bool success
+string message

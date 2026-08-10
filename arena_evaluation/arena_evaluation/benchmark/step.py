@@ -13,12 +13,19 @@ from .config import Contest, Suite
 class Step:
     contestant: Contest.Contestant
     stage: Suite.Stage
-    episodes: int
-    record_dir: pathlib.Path | None
+    episodes: int = 1
+    record_dir: pathlib.Path | None = None
+    is_reference: bool = False
+    reference_type: str | None = None
 
     @property
     def key(self) -> str:
+        if self.is_reference and self.reference_type:
+            if self.contestant.name.endswith(self.reference_type):
+                return f"{self.contestant.name}/{self.stage.name}"
+            return f"{self.contestant.name}_{self.reference_type}/{self.stage.name}"
         return f"{self.contestant.name}/{self.stage.name}"
+
 
 
 class StepErrorKind(enum.StrEnum):

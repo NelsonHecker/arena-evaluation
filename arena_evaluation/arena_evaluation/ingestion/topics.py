@@ -19,7 +19,9 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
     from sensor_msgs.msg import JointState
     from nav_msgs.msg import Path
+    from std_msgs.msg import String
     from tf2_msgs.msg import TFMessage
+<<<<<<< HEAD
 
     try:
         from arena_people_msgs.msg import Pedestrians
@@ -57,6 +59,13 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     except ImportError:
         CollisionMonitorState = type("CollisionMonitorState", (), {})
         HAS_NAV2_COLLISION = False
+=======
+    from arena_people_msgs.msg import Pedestrians
+    from arena_humansim_msgs.msg import AgentStates
+    from task_generator_msgs.msg import EpisodeRecord, RobotFleet
+    from arena_robots_msgs.msg import CollisionEvents, Power, Energy, Acoustics
+    from nav2_msgs.msg import CollisionMonitorState
+>>>>>>> origin-fork/jazzy
 
     ns = f"/{namespace}" if namespace else ""
     p_ns = f"/{parent_namespace}" if parent_namespace else ""
@@ -71,8 +80,19 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "initialpose": TopicDefinition(f"{p_ns}/initialpose", PoseWithCovarianceStamped, throttled=False),
         "tf": TopicDefinition("/tf", TFMessage, throttled=True),
         "tf_static": TopicDefinition("/tf_static", TFMessage, throttled=False, qos_transient_local=True),
+        "peds": TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True),
+        "agent_states": TopicDefinition(f"{p_ns}/agent_states", AgentStates, throttled=True),
+        "episode_record": TopicDefinition(f"{p_ns}/state/episode", EpisodeRecord, throttled=False, qos_transient_local=True),
+        "robots_fleet": TopicDefinition(f"{p_ns}/state/robots", RobotFleet, throttled=False, qos_transient_local=True),
+        "collision_events": TopicDefinition(f"{ns}/collision_events", CollisionEvents, throttled=False),
+        "power": TopicDefinition(f"{ns}/power_publisher/power", Power, throttled=True),
+        "energy": TopicDefinition(f"{ns}/power_publisher/energy", Energy, throttled=True),
+        "acoustics": TopicDefinition(f"{ns}/acoustics", Acoustics, throttled=True),
+        "characterization_phase": TopicDefinition(f"{ns}/characterization_phase", String, throttled=False),
+        "collision_monitor_state": TopicDefinition(f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False),
     }
 
+<<<<<<< HEAD
     if HAS_PEDSIM:
         topics["peds"] = TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True)
 
@@ -103,4 +123,6 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
             f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False,
         )
 
+=======
+>>>>>>> origin-fork/jazzy
     return topics

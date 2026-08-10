@@ -28,6 +28,8 @@ class TimeMetricsCalculator(BaseMetricCalculator):
         "time_to_goal": "s",
         "idling_time": "s",
     }
+
+    PRIMARY_OUTPUTS = ["time_to_goal", "idling_time"]
     
     @classmethod
     def output_keys(cls) -> list[str]:

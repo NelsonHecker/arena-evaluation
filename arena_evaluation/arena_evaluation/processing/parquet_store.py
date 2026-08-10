@@ -91,7 +91,7 @@ class TopicParquetStore:
     Reads and writes a TopicBundle to individual Parquet files per topic.
     """
     @staticmethod
-    def write(bundles: dict[str, TopicBundle], dest_dir: pathlib.Path) -> None:
+    def write(bundles: dict[str, TopicBundle], dest_dir: pathlib.Path, overwrite: bool = False) -> None:
         """
         Write non-None DataFrames/LazyFrames in a dict of TopicBundles to Parquet files using zstd compression.
         """
@@ -119,7 +119,7 @@ class TopicParquetStore:
                         final_path = robot_dir / f"{field.name}.parquet"
                     
                     if isinstance(df, pl.LazyFrame):
-                        if final_path.exists():
+                        if not overwrite and final_path.exists():
                             continue
                         df = df.collect()
                     
@@ -143,7 +143,7 @@ class TopicParquetStore:
             if path.exists():
                 try:
                     lf = pl.scan_parquet(path)
-                    if "time_ns" in lf.columns:
+                    if "time_ns" in lf.collect_schema().names():
                         lf = lf.sort("time_ns")
                     return lf
                 except Exception as e:

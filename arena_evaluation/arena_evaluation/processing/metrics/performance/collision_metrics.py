@@ -30,6 +30,9 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         "result": "",
         "success": "",
     }
+
+    PRIMARY_OUTPUTS = ["success", "collision_amount"]
+    OUTPUT_DIRECTIONS = {"success": "higher"}
     
     TIMEOUT_THRESHOLD_S = 180.0
     MAX_COLLISIONS = 3

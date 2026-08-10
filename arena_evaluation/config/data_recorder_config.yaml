@@ -1,5 +1,5 @@
-max_episodes: 15 # terminates simulation upon reaching xth episode
-max_time: 1200 # terminates simulation after x seconds
+max_episodes: 1000 # terminates simulation upon reaching xth episode
+max_time: 12000 # terminates simulation after x seconds
 
 # Throttle intervals in milliseconds. Keys are matched as substrings of the
 record_frequencies:

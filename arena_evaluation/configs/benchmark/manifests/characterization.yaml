@@ -1,0 +1,123 @@
+# Open-loop characterization report: energy & acoustic profiles per maneuver
+# working point, derived entirely from the per-episode metric frame
+# (combined_metrics.parquet). The CharacterizationCalculator emits per-sample
+# timeseries_char_* list columns; the line renderer explodes them into a long
+# frame and aggregates per working point (mean ± std / L_Aeq / max).
+manifest_version: "1.0"
+name: characterization
+title: Open-Loop Characterization Report
+description: Energy and acoustic performance across open-loop maneuver working points.
+data_source: metrics
+groups:
+  - {id: power_curves, title: Power vs. Velocity Curves}
+  - {id: acoustic_curves, title: Acoustic Levels vs. Velocity}
+  - {id: time_traces, title: Power & Noise Over Time}
+  - {id: overview, title: Overview & Baselines}
+units:
+  timeseries_char_power_total_w: W
+  timeseries_char_power_mech_w: W
+  timeseries_char_dba: dBA
+  timeseries_char_vx_achieved: m/s
+  timeseries_char_vx_target: m/s
+  timeseries_char_wz_target: rad/s
+  timeseries_char_energy_intensity: J/m
+  timeseries_char_time_s: s
+summary:
+  - {metric: timeseries_char_power_total_w, label: Mean Power, format: "{:.1f}"}
+  - {metric: timeseries_char_power_mech_w, label: Mech Power, format: "{:.1f}"}
+  - {metric: timeseries_char_dba, label: Mean Level, format: "{:.1f}"}
+  - {metric: timeseries_char_energy_intensity, label: Energy Intensity, format: "{:.2f}"}
+summary_group_by: [timeseries_char_phase_kind]
+plots:
+  # ── Overview ────────────────────────────────────────────────────────────────
+  - id: notes_table
+    type: table
+    title: Analysis Notes
+    data_key: "*"
+    layout_group: overview
+    options:
+      notes: notes.yaml
+  # ── Power vs. Velocity (aggregated per working point, mean ± std) ──────────
+  - id: line_power_vs_vx_linear
+    type: line
+    title: Total Power vs. Linear Velocity (mean ± std)
+    data_key: timeseries_char_vx_target
+    group_by: [timeseries_char_phase_kind]
+    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_mech_power_vs_vx
+    type: line
+    title: Mechanical Power vs. Linear Velocity (mean ± std)
+    data_key: timeseries_char_vx_target
+    group_by: [timeseries_char_phase_kind]
+    options: {y: timeseries_char_power_mech_w, aggregate: true, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_power_vs_wz_angular
+    type: line
+    title: Total Power vs. Angular Velocity (mean ± std)
+    data_key: timeseries_char_wz_target
+    group_by: [timeseries_char_phase_kind]
+    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_energy_intensity_vs_vx
+    type: line
+    title: Energy Intensity vs. Linear Velocity (mean ± std)
+    data_key: timeseries_char_vx_target
+    group_by: [timeseries_char_phase_kind]
+    options: {y: timeseries_char_energy_intensity, aggregate: true, mode: "lines+markers"}
+    layout_group: power_curves
+
+  # ── Acoustic levels vs. velocity ───────────────────────────────────────────
+  - id: line_leq_vs_vx
+    type: line
+    title: Equivalent Level L_Aeq vs. Linear Velocity
+    data_key: timeseries_char_vx_target
+    group_by: [timeseries_char_phase_kind]
+    options: {y: timeseries_char_dba, aggregate: true, reduce: leq, mode: "lines+markers"}
+    layout_group: acoustic_curves
+  - id: line_lafmax_vs_vx
+    type: line
+    title: Peak Level L_AFmax vs. Linear Velocity
+    data_key: timeseries_char_vx_target
+    group_by: [timeseries_char_phase_kind]
+    options: {y: timeseries_char_dba, aggregate: true, reduce: max, mode: "lines+markers"}
+    layout_group: acoustic_curves
+
+  # ── Time traces (per episode, time-relative so episodes overlay) ───────────
+  - id: line_power_over_time
+    type: line
+    title: Total Power Over Time (per episode)
+    data_key: timeseries_char_time_s
+    group_by: [episode]
+    options: {y: timeseries_char_power_total_w, time_relative: true, max_points_per_trace: 5000}
+    layout_group: time_traces
+  - id: line_mech_power_over_time
+    type: line
+    title: Mechanical Power Over Time (per episode)
+    data_key: timeseries_char_time_s
+    group_by: [episode]
+    options: {y: timeseries_char_power_mech_w, time_relative: true, max_points_per_trace: 5000}
+    layout_group: time_traces
+  - id: line_dba_over_time
+    type: line
+    title: Acoustic Level Over Time (per episode)
+    data_key: timeseries_char_time_s
+    group_by: [episode]
+    options: {y: timeseries_char_dba, time_relative: true, max_points_per_trace: 5000}
+    layout_group: time_traces
+
+  # ── Overview & baselines ────────────────────────────────────────────────────
+  - id: bar_idle_standby_power
+    type: bar
+    title: Standby Power by Robot (idle phases)
+    data_key: timeseries_char_power_total_w
+    differentiate: timeseries_char_phase_kind
+    layout_group: overview
+    filter: {timeseries_char_phase_kind: idle}
+  - id: scatter_achieved_vs_commanded
+    type: scatter
+    title: Achieved vs. Commanded Linear Velocity
+    data_key: timeseries_char_vx_target
+    differentiate: timeseries_char_phase_kind
+    layout_group: overview
+    options: {y: timeseries_char_vx_achieved}

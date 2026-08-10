@@ -168,7 +168,8 @@ def _params_to_json(params: list) -> str:
 
 class ProgressLog:
     _HEADER = (
-        "ts_iso,run_id,step_key,contestant,stage,env_id,episode_id,"
+        "ts_iso,run_id,step_key,contestant,stage,env_id,episode_id,parent_episode_id,"
+        "is_reference,reference_type,"
         "world,seed,tm_robots,tm_obstacles,tm_modules,robots,"
         "outcome_state,outcome_info,started_at,ended_at,runtime_s,"
         "robots_params_json,obstacles_params_json,"
@@ -197,6 +198,9 @@ class ProgressLog:
         episode_record: object,
         started_at: float,
         ended_at: float,
+        parent_episode_id: int | None = None,
+        is_reference: bool = False,
+        reference_type: str | None = None,
         error_kind: StepErrorKind | None = None,
         error_detail: str | None = None,
     ) -> None:
@@ -210,6 +214,9 @@ class ProgressLog:
             stage,
             env_id if env_id is not None else "",
             episode_id,
+            parent_episode_id if parent_episode_id is not None else "",
+            "true" if is_reference else "false",
+            reference_type or "",
             rec.world,
             rec.seed,
             rec.tm_robots,

@@ -125,7 +125,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                             else:
                                 goals_x_by_agent[k].append(path_arr[last_idx, 0])
                                 goals_y_by_agent[k].append(path_arr[last_idx, 1])
-                                goals_idx_by_agent[k].append(current_len + first_idx)
+                                goals_idx_by_agent[k].append(current_len + last_idx)
                                 
                     all_x_by_agent[k].extend(path_arr[:, 0])
                     all_y_by_agent[k].extend(path_arr[:, 1])
@@ -238,7 +238,6 @@ class TrajectoryRenderer(BasePlotRenderer):
                     encoded = base64.b64encode(f.read()).decode("utf-8")
                 
                 res = map_meta["resolution"]
-                origin_x, origin_y = map_meta["origin"][:2]
                 w_m = map_meta["width"] * res
                 h_m = map_meta["height"] * res
                 
@@ -247,8 +246,8 @@ class TrajectoryRenderer(BasePlotRenderer):
                         source=f"data:image/png;base64,{encoded}",
                         xref="x",
                         yref="y",
-                        x=origin_x,
-                        y=origin_y + h_m,
+                        x=0,
+                        y=h_m,
                         sizex=w_m,
                         sizey=h_m,
                         xanchor="left",
@@ -259,8 +258,8 @@ class TrajectoryRenderer(BasePlotRenderer):
                     )
                 )
                 
-                layout_args["xaxis"] = dict(range=[origin_x, origin_x + w_m])
-                layout_args["yaxis"] = dict(range=[origin_y, origin_y + h_m], scaleanchor="x", scaleratio=1)
+                layout_args["xaxis"] = dict(range=[0, w_m])
+                layout_args["yaxis"] = dict(range=[0, h_m], scaleanchor="x", scaleratio=1)
             except Exception as e:
                 print(f"Failed to overlay map {map_name}: {e}")
                 
@@ -507,12 +506,11 @@ class TrajectoryRenderer(BasePlotRenderer):
             try:
                 img = mpimg.imread(map_meta["png_path"])
                 res = map_meta["resolution"]
-                origin_x, origin_y = map_meta["origin"][:2]
                 w_m = map_meta["width"] * res
                 h_m = map_meta["height"] * res
-                plt.imshow(img, extent=[origin_x, origin_x + w_m, origin_y, origin_y + h_m], alpha=0.5, origin='upper', zorder=0)
-                plt.xlim(origin_x, origin_x + w_m)
-                plt.ylim(origin_y, origin_y + h_m)
+                plt.imshow(img, extent=[0, w_m, 0, h_m], alpha=0.5, origin='upper', zorder=0)
+                plt.xlim(0, w_m)
+                plt.ylim(0, h_m)
             except Exception as e:
                 print(f"Failed to overlay map {map_name} in seaborn: {e}")
                 
@@ -595,18 +593,32 @@ class TrajectoryRenderer(BasePlotRenderer):
                             first_idx = int(clean_indices[first_clean_idx])
                             last_idx = int(clean_indices[-1])
                             
-                            starts_x.append(path_arr[first_idx, 0])
-                            starts_y.append(path_arr[first_idx, 1])
-                            markers_data.append({"frame": current_len + first_idx, "x": path_arr[first_idx, 0], "y": path_arr[first_idx, 1], "type": "start"})
+                            # True start/goal from dataframe
+                            true_start = row.get("start")
+                            true_goal = row.get("goal")
+                            
+                            if isinstance(true_start, (list, tuple, np.ndarray)) and len(true_start) >= 2:
+                                starts_x.append(true_start[0])
+                                starts_y.append(true_start[1])
+                                markers_data.append({"frame": current_len + first_idx, "x": true_start[0], "y": true_start[1], "type": "start"})
+                            else:
+                                starts_x.append(path_arr[first_idx, 0])
+                                starts_y.append(path_arr[first_idx, 1])
+                                markers_data.append({"frame": current_len + first_idx, "x": path_arr[first_idx, 0], "y": path_arr[first_idx, 1], "type": "start"})
                             
                             if is_collision:
                                 col_x.append(path_arr[last_idx, 0])
                                 col_y.append(path_arr[last_idx, 1])
                                 markers_data.append({"frame": current_len + last_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "collision"})
                             else:
-                                goals_x.append(path_arr[last_idx, 0])
-                                goals_y.append(path_arr[last_idx, 1])
-                                markers_data.append({"frame": current_len + first_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "goal"})
+                                if isinstance(true_goal, (list, tuple, np.ndarray)) and len(true_goal) >= 2:
+                                    goals_x.append(true_goal[0])
+                                    goals_y.append(true_goal[1])
+                                    markers_data.append({"frame": current_len + last_idx, "x": true_goal[0], "y": true_goal[1], "type": "goal"})
+                                else:
+                                    goals_x.append(path_arr[last_idx, 0])
+                                    goals_y.append(path_arr[last_idx, 1])
+                                    markers_data.append({"frame": current_len + last_idx, "x": path_arr[last_idx, 0], "y": path_arr[last_idx, 1], "type": "goal"})
                                 
                     all_x_by_agent[planner][k]["x"].extend(path_arr[:, 0])
                     all_x_by_agent[planner][k]["x"].append(np.nan) # Separator for seaborn

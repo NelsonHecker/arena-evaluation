@@ -1,0 +1,75 @@
+# Safety focus: success rate, collisions, and trajectory behaviour.
+manifest_version: "1.0"
+name: safety
+title: Safety Report — Success & Collisions
+description: Success rate, collision behaviour, and trajectory traces.
+data_source: metrics
+groups:
+  - {id: safety, title: Safety & Collision Metrics}
+  - {id: motion, title: Motion Dynamics Metrics}
+  - {id: details, title: Trajectory Traces}
+units:
+  collision_amount: ""
+  time_to_goal: s
+  path_length: m
+  velocity_mean: m/s
+  acceleration_mean: m/s2
+  jerk_mean: m/s3
+plots:
+  - id: bar_success_local
+    type: bar
+    title: Success Rate by Local Planner
+    data_key: success
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: safety
+  - id: bar_success_inter
+    type: bar
+    title: Success Rate by Inter-Planner
+    data_key: success
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: safety
+  - id: box_collisions_local
+    type: box
+    title: Collision Amount by Local Planner
+    data_key: collision_amount
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: safety
+  - id: box_collisions_inter
+    type: box
+    title: Collision Amount by Inter-Planner
+    data_key: collision_amount
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: safety
+  - id: heatmap_success_pivot
+    type: heatmap
+    title: Success Rate Pivot Grid (Local vs Inter Planner)
+    data_key: success
+    layout_group: safety
+    options: {x: inter_planner, y: local_planner}
+  - id: box_jerk_local
+    type: box
+    title: Mean Jerk by Local Planner
+    data_key: jerk_mean
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: motion
+  - id: box_jerk_inter
+    type: box
+    title: Mean Jerk by Inter-Planner
+    data_key: jerk_mean
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: motion
+  - id: trajectory_plot
+    type: trajectory
+    title: Robot Trajectories
+    data_key: path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: details
+    filter: {is_reference: false}

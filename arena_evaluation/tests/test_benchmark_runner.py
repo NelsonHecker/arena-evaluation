@@ -198,7 +198,8 @@ def test_state_file_backward_compat_error_field(tmp_path: pathlib.Path):
 # ---------------------------------------------------------------------------
 
 _EXPECTED_HEADERS = [
-    "ts_iso", "run_id", "step_key", "contestant", "stage", "env_id", "episode_id",
+    "ts_iso", "run_id", "step_key", "contestant", "stage", "env_id", "episode_id", "parent_episode_id",
+    "is_reference", "reference_type",
     "world", "seed", "tm_robots", "tm_obstacles", "tm_modules", "robots",
     "outcome_state", "outcome_info", "started_at", "ended_at", "runtime_s",
     "robots_params_json", "obstacles_params_json",
@@ -221,7 +222,7 @@ def test_progress_log_header_column_count(tmp_path: pathlib.Path):
     with (tmp_path / "progress.csv").open(newline="") as fh:
         reader = csv.reader(fh)
         headers = next(reader)
-    assert len(headers) == 22
+    assert len(headers) == 25
 
 
 def test_progress_log_append(tmp_path: pathlib.Path):
@@ -599,6 +600,15 @@ def test_build_launch_args_arm_cap_forwarded():
     assert "arm.controller:=ompl" in args
 
 
+def test_build_launch_args_passthrough_cli_args_forwarded():
+    cell = _make_cell()
+    passthrough = {"optim.obstacles": "bbox", "headless": "true", "env_n": "1"}
+    args = build_launch_args(cell, "gazebo", passthrough=passthrough)
+    assert "optim.obstacles:=bbox" in args
+    assert not any(a.startswith("headless:=") for a in args)
+    assert not any(a.startswith("env_n:=") for a in args)
+
+
 def test_build_launch_args_multiple_cap_keys_all_pass():
     cell = _make_cell(contestant_args={
         "mobile.local_planner": "teb",
@@ -701,7 +711,12 @@ def test_build_pending_empty_state_all_steps_pending(tmp_path: pathlib.Path):
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
     keys = {c.key for c in steps}
-    assert keys == {"pa/s1", "pa/s2", "pb/s1", "pb/s2"}
+    assert keys == {
+        "pa/s1", "pa/s2", "pb/s1", "pb/s2",
+        "pa_unobstructed_robot/s1", "pa_unobstructed_robot/s2",
+        "pb_unobstructed_robot/s1", "pb_unobstructed_robot/s2",
+        "unhindered_peds/s1", "unhindered_peds/s2",
+    }
 
 
 def test_build_pending_ok_steps_skipped(tmp_path: pathlib.Path):
@@ -709,6 +724,8 @@ def test_build_pending_ok_steps_skipped(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     state_steps = {
         "pa/s1": StepResult("pa/s1", "ok", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
     }
     run_dir = _fake_run_dir(state_steps)
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
@@ -720,6 +737,8 @@ def test_build_pending_failed_without_retry_skipped(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     state_steps = {
         "pa/s1": StepResult("pa/s1", "failed", None, 0.0, 1.0, StepErrorKind.ENV_SETUP, "error"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "failed", None, 0.0, 1.0, StepErrorKind.ENV_SETUP, "error"),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "failed", None, 0.0, 1.0, StepErrorKind.ENV_SETUP, "error"),
     }
     run_dir = _fake_run_dir(state_steps)
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
@@ -731,6 +750,8 @@ def test_build_pending_failed_with_retry_included(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     state_steps = {
         "pa/s1": StepResult("pa/s1", "failed", None, 0.0, 1.0, StepErrorKind.ENV_SETUP, "error"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
     }
     run_dir = _fake_run_dir(state_steps)
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=True, record_root=tmp_path)
@@ -747,6 +768,8 @@ def test_build_pending_partial_always_retried(tmp_path: pathlib.Path):
             "pa/s1", "partial", None, 0.0, 1.0, None, None,
             episodes_run=3, episodes_failed=2,
         ),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
     }
     run_dir = _fake_run_dir(state_steps)
     steps_no_flag = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
@@ -760,6 +783,8 @@ def test_build_pending_skipped_always_retried(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     state_steps = {
         "pa/s1": StepResult("pa/s1", "skipped", None, 0.0, 1.0, StepErrorKind.CANCELLED, "cancelled"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
     }
     run_dir = _fake_run_dir(state_steps)
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
@@ -771,6 +796,8 @@ def test_build_pending_in_progress_always_retried(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     state_steps = {
         "pa/s1": StepResult("pa/s1", "in_progress", None, 0.0, None, None, None),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
     }
     run_dir = _fake_run_dir(state_steps)
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
@@ -782,8 +809,16 @@ def test_build_pending_mixed_states(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     state_steps = {
         "pa/s1": StepResult("pa/s1", "ok", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
         "pa/s2": StepResult("pa/s2", "failed", None, 0.0, 1.0, StepErrorKind.INTERNAL, "err"),
+        "pa_unobstructed_robot/s2": StepResult("pa_unobstructed_robot/s2", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s2": StepResult("unhindered_peds/s2", "ok", None, 0.0, 1.0, None, None),
         "pa/s3": StepResult("pa/s3", "partial", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s3": StepResult("pa_unobstructed_robot/s3", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s3": StepResult("unhindered_peds/s3", "ok", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s4": StepResult("pa_unobstructed_robot/s4", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s4": StepResult("unhindered_peds/s4", "ok", None, 0.0, 1.0, None, None),
         # pa/s4 not in state -> pending
     }
     run_dir = _fake_run_dir(state_steps)
@@ -798,8 +833,8 @@ def test_build_pending_record_dir_set_from_record_root(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
-    assert len(steps) == 1
-    assert steps[0].record_dir == tmp_path / "recordings" / "pa" / "s1"
+    # All steps now share the flat episodes/ directory under record_root
+    assert steps[0].record_dir == tmp_path / "episodes"
 
 
 def test_build_pending_duplicate_key_raises(tmp_path: pathlib.Path):
@@ -1030,6 +1065,21 @@ def test_group_pending_empty():
     assert group_pending([], "gazebo") == []
 
 
+def test_group_pending_unhindered_peds_reuses_env():
+    from arena_evaluation.benchmark.runner import Step, Contest, group_pending
+    step_main = _make_step_for("alpha", "s1", robot="jackal")
+    dummy_contestant = Contest.Contestant(name="unhindered_peds", args={})
+    step_peds = Step(
+        contestant=dummy_contestant,
+        stage=step_main.stage,
+        is_reference=True,
+        reference_type="unhindered_peds",
+    )
+    groups = group_pending([step_main, step_peds], "gazebo")
+    assert len(groups) == 1
+    assert len(groups[0]) == 2
+
+
 def test_env_key_components():
     from arena_evaluation.benchmark.runner import env_key
     step = _make_step_for("planner_a", "indoor", robot="jackal")
@@ -1137,3 +1187,33 @@ def test_flatten_typed_values():
     assert by_name["a_bool"].value.bool_value is True
     assert by_name["a_float"].value.type == ParameterType.PARAMETER_DOUBLE
     assert by_name["a_float"].value.double_value == pytest.approx(3.14)
+
+
+def test_unobstructed_robot_clears_dynamic_preserves_static():
+    import copy
+    from rcl_interfaces.msg import ParameterType
+    from arena_evaluation.benchmark.runner import _flatten_per_mode_params
+
+    stage_config = {
+        "random": {
+            "static": {"min": 4, "max": 4, "models": ["shelf"]},
+            "dynamic": {"min": 2, "max": 2, "models": ["arenian"]},
+        }
+    }
+
+    # Simulate logic in _push_stage_config for reference_type="unobstructed_robot"
+    patched_config = copy.deepcopy(stage_config)
+    mode_block = patched_config.setdefault("random", {})
+    mode_block["dynamic"] = {"min": 0, "max": 0}
+
+    obs_params, _ = _flatten_per_mode_params(
+        patched_config, tm_obstacles="random", tm_robots="random"
+    )
+
+    by_name = {p.name: p for p in obs_params}
+    assert "dynamic.n" in by_name
+    assert by_name["dynamic.n"].value.type == ParameterType.PARAMETER_INTEGER_ARRAY
+    assert list(by_name["dynamic.n"].value.integer_array_value) == [0, 0]
+    assert "static.n" in by_name
+    assert list(by_name["static.n"].value.integer_array_value) == [4, 4]
+

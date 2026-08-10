@@ -13,48 +13,76 @@ class BarRenderer(BasePlotRenderer):
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
-        if self.spec.data_key not in df_filtered.columns:
-            return None
-
         diff_col, df_filtered = self.resolve_diff_col(df_filtered)
         if diff_col not in df_filtered.columns:
             return None
 
-        grouped = (
-            df_filtered
-            .group_by(diff_col)
-            .agg([
-                pl.col(self.spec.data_key).mean().alias("mean"),
-                pl.col(self.spec.data_key).std().alias("std"),
-            ])
-            .to_pandas()
-        )
+        is_stacked = self.spec.options.get("stacked", False)
 
-        if grouped.empty:
-            return None
+        if is_stacked:
+            metrics = self.spec.options.get("metrics", [])
+            if not metrics:
+                return None
+            
+            # Aggregate the sum of each metric per planner, divide by count (mean) or use absolute sum
+            agg_exprs = [pl.col(m).mean().alias(m) for m in metrics if m in df_filtered.columns]
+            if not agg_exprs:
+                return None
+                
+            grouped = df_filtered.group_by(diff_col).agg(agg_exprs).to_pandas()
+            if grouped.empty:
+                return None
+                
+            # Normalize to 100%
+            grouped[metrics] = grouped[metrics].div(grouped[metrics].sum(axis=1), axis=0) * 100
+            
+            fig = px.bar(
+                grouped,
+                x=diff_col,
+                y=metrics,
+                title=self.spec.title,
+                template="plotly_white",
+                barmode="stack",
+                labels={"value": "Percentage (%)", "variable": "Component", diff_col: diff_col.lstrip("_").replace("_", " ").title()}
+            )
+            fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
+            
+        else:
+            if self.spec.data_key not in df_filtered.columns:
+                return None
+            grouped = (
+                df_filtered
+                .group_by(diff_col)
+                .agg([
+                    pl.col(self.spec.data_key).mean().alias("mean"),
+                    pl.col(self.spec.data_key).std().alias("std"),
+                ])
+                .to_pandas()
+            )
 
-        fig = px.bar(
-            grouped,
-            x=diff_col,
-            y="mean",
-            color=diff_col,
-            error_y="std",
-            template="plotly_white",
-            title=self.spec.title,
-            labels={
-                "mean": self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
-                diff_col: diff_col.lstrip("_").replace("_", " ").title()
-            }
-        )
-        fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+            if grouped.empty:
+                return None
 
-        return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
+            fig = px.bar(
+                grouped,
+                x=diff_col,
+                y="mean",
+                color=diff_col,
+                error_y="std",
+                template="plotly_white",
+                title=self.spec.title,
+                labels={
+                    "mean": self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
+                    diff_col: diff_col.lstrip("_").replace("_", " ").title()
+                }
+            )
+            fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+
+            return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
-        if self.spec.data_key not in df_filtered.columns:
-            return
-
         diff_col, df_filtered = self.resolve_diff_col(df_filtered)
         if diff_col not in df_filtered.columns:
             return

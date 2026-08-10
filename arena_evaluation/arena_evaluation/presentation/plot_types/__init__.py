@@ -6,6 +6,10 @@ from .radar import RadarRenderer
 from .scatter import ScatterRenderer
 from .histogram import HistogramRenderer
 from .heatmap import HeatmapRenderer
+from .timeseries import TimeseriesRenderer
+from .line import LineRenderer
+from .table import TableRenderer
+from .acoustic_field import AcousticFieldRenderer
 
 __all__ = [
     "ViolinRenderer",
@@ -16,4 +20,8 @@ __all__ = [
     "ScatterRenderer",
     "HistogramRenderer",
     "HeatmapRenderer",
+    "TimeseriesRenderer",
+    "LineRenderer",
+    "TableRenderer",
+    "AcousticFieldRenderer",
 ]

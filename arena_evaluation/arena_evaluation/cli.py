@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import datetime
 import os
 import pathlib
 import sys
@@ -7,6 +9,7 @@ from arena_evaluation.processing.pipeline import ProcessingPipeline
 from arena_evaluation.presentation.report_builder import ReportBuilder
 from arena_evaluation.storage.data_root import latest_benchmark
 from arena_evaluation.storage.folder_manager import FolderManager
+
 
 def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
     search_roots = []
@@ -119,6 +122,30 @@ Examples:
         action="store_true",
         help="Generate animated GIFs for trajectories (computationally intensive).",
     )
+    run_parent.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable resource profiling. Writes pipeline_profile.yaml with per-phase CPU, GPU, RAM, and duration stats.",
+    )
+    run_parent.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        help="Number of worker processes for parallel extraction and processing (-1 = auto-detect CPU count).",
+    )
+    run_parent.add_argument(
+        "--report-manifest",
+        type=str,
+        default=None,
+        metavar="NAME|PATH|{...}",
+        help="Report manifest: a name from configs/benchmark/manifests/, a path to a "
+        "YAML file, or inline {...} YAML. Used by run/report/plot; ignored otherwise.",
+    )
+    run_parent.add_argument(
+        "--list-manifests",
+        action="store_true",
+        help="List the available named report manifests and exit.",
+    )
 
     subparsers.add_parser(
         "extract",
@@ -152,6 +179,15 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if getattr(args, "list_manifests", False):
+        from arena_evaluation.presentation.manifest_registry import available_manifests
+
+        print("Available report manifests:")
+        for name in available_manifests():
+            print(f"  - {name}")
+        return 0
+
     args = resolve_paths(args)
 
     if args.benchmark_dir is None and args.run_dir is None:
@@ -169,6 +205,13 @@ Examples:
             print(f"Error: directory does not exist: {d}")
             sys.exit(1)
 
+    profiler = None
+    if getattr(args, "profile", False):
+        from arena_evaluation.benchmark.profiler import PipelineProfiler as _PP
+
+        output_dir = getattr(args, "output_dir", None) or target_dirs[0]
+        profiler = _PP(output_dir=output_dir, sample_hz=2.0)
+
     if args.command in ("extract", "run", "process"):
         force_extract = getattr(args, "force_extract", False)
         if args.command == "run":
@@ -177,7 +220,7 @@ Examples:
         if getattr(args, "run_dir", None):
             for run_dir in args.run_dir:
                 fm = FolderManager(data_root=run_dir.parent)
-                pipeline = ProcessingPipeline(fm)
+                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=getattr(args, "workers", None))
                 
                 if args.command == "extract":
                     print(f"Extracting single run: {run_dir}")
@@ -193,7 +236,7 @@ Examples:
         else:
             for benchmark_dir in args.benchmark_dir:
                 fm = FolderManager(data_root=benchmark_dir.parent)
-                pipeline = ProcessingPipeline(fm)
+                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=getattr(args, "workers", None))
                 
                 if args.command == "extract":
                     print(f"Extracting benchmark: {benchmark_dir.name}")
@@ -206,12 +249,26 @@ Examples:
         output_dir = getattr(args, "output_dir", None)
         if not output_dir:
             output_dir = target_dirs[0]
-            
+
+        from arena_evaluation.presentation.manifest_registry import resolve_manifest
+
+        manifest_obj = resolve_manifest(getattr(args, "report_manifest", None), benchmark_dir=target_dirs[0])
+
         print(f"Building report/plots from {len(target_dirs)} sources into: {output_dir}")
         generate_gifs = getattr(args, "generate_gifs", False)
-        builder = ReportBuilder.from_dirs(target_dirs, output_dir=output_dir, generate_gifs=generate_gifs)
-        builder.build()
+        _ctx = profiler.phase("report") if profiler else contextlib.nullcontext()
+        with _ctx:
+            builder = ReportBuilder.from_dirs(
+                target_dirs,
+                output_dir=output_dir,
+                manifest=manifest_obj,
+                generate_gifs=generate_gifs,
+            )
+            builder.build()
         print("Report generation complete.")
+
+    if profiler is not None:
+        profiler.write_summary()
 
 if __name__ == "__main__":
     main()

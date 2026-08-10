@@ -1,3 +1,5 @@
+# SESSION SNAPSHOT (2026-08-10) — plotly_renderer.py with unconditional run_dir.
+# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/presentation/plotly_renderer.py
 from __future__ import annotations
 
 import pathlib
@@ -6,12 +8,12 @@ from ..storage.schemas import PlotSpec
 
 class PlotlyRenderer:
     """Dispatches plot rendering to the correct Plotly class."""
-    
+
     def __init__(self, units: dict[str, str] | None = None):
         self.units = units or {}
         from .color_utils import set_global_color_palette
         set_global_color_palette()
-        
+
         from .plot_types import (
             ViolinRenderer,
             BoxRenderer,
@@ -21,8 +23,12 @@ class PlotlyRenderer:
             ScatterRenderer,
             HistogramRenderer,
             HeatmapRenderer,
+            TimeseriesRenderer,
+            LineRenderer,
+            TableRenderer,
+            AcousticFieldRenderer,
         )
-        
+
         self.renderers = {
             "violin": ViolinRenderer,
             "box": BoxRenderer,
@@ -32,14 +38,19 @@ class PlotlyRenderer:
             "scatter": ScatterRenderer,
             "histogram": HistogramRenderer,
             "heatmap": HeatmapRenderer,
+            "timeseries": TimeseriesRenderer,
+            "line": LineRenderer,
+            "table": TableRenderer,
+            "acoustic_field": AcousticFieldRenderer,
         }
 
     def render(self, spec: PlotSpec, df: pl.DataFrame, run_dir: pathlib.Path | None = None) -> str | list[str] | None:
         renderer_cls = self.renderers.get(spec.type)
         if not renderer_cls:
             return None
-            
+
         renderer = renderer_cls(spec, units=self.units)
-        if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
-            renderer.run_dir = run_dir
+        renderer.run_dir = run_dir
+        if renderer_cls.__name__ == "TrajectoryRenderer":
+            renderer.generate_gifs = False  # GIFs are seaborn-only
         return renderer.render_plotly(df)
