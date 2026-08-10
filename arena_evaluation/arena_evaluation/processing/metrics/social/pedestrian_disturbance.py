@@ -31,6 +31,8 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         "ped_round_trips_completed": "",
     }
 
+    PRIMARY_OUTPUTS = ["ped_path_deflection_m"]
+
     @classmethod
     def output_keys(cls) -> list[str]:
         return [

@@ -35,6 +35,8 @@ class ProxemicsCalculator(BaseMetricCalculator):
         "total_time_in_personal_space": "s",
         "avg_velocity_in_personal_space": "m/s",
     }
+
+    PRIMARY_OUTPUTS = ["total_time_in_personal_space"]
     
     PERSONAL_SPACE_RADIUS = 1.2
     

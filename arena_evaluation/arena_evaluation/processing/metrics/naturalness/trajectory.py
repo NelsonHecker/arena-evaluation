@@ -25,6 +25,8 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         "topological_complexity": ""
     }
 
+    PRIMARY_OUTPUTS = ["ade", "fde"]
+
     @classmethod
     def output_keys(cls) -> list[str]:
         return ["ade", "fde", "adtw", "path_irregularity", "topological_complexity"]

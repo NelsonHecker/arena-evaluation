@@ -111,7 +111,9 @@ class MetricRegistry:
                 "requires_pedsim": calc.REQUIRES_PEDSIM,
                 "depends_on": calc.DEPENDS_ON,
                 "required_topics": getattr(calc, "REQUIRED_TOPICS", []),
-                "outputs": calc.output_keys()
+                "outputs": calc.output_keys(),
+                "primary_outputs": list(getattr(calc, "PRIMARY_OUTPUTS", [])),
+                "output_directions": dict(getattr(calc, "OUTPUT_DIRECTIONS", {})),
             }
             for name, calc in self.calculators.items()
         ]
@@ -126,18 +128,7 @@ class MetricRegistry:
         pedsim_available: bool = True,
         available_topics: set[str] | None = None
     ) -> dict[str, typing.Any]:
-        """
-        Executes all calculators in topological order.
-        
-        Args:
-            episode: The aligned episode data.
-            pedsim_available: If False, calculators requiring pedsim are skipped.
-            available_topics: Topics that are available in the recording/run.
-            
-        Returns:
-            A flat dictionary containing outputs from all executed calculators.
-            Skipped or failed calculators have their output keys filled with None.
-        """
+        """Executes all calculators in topological order."""
         results = {}
 
         if available_topics is None:

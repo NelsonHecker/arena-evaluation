@@ -1,3 +1,5 @@
+# SESSION SNAPSHOT (2026-08-10) — seaborn_renderer.py with unconditional run_dir.
+# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/presentation/seaborn_renderer.py
 from __future__ import annotations
 
 import pathlib
@@ -6,7 +8,7 @@ from ..storage.schemas import PlotSpec
 
 class SeabornRenderer:
     """Dispatches plot rendering to the correct static PNG class."""
-    
+
     def __init__(self, generate_gifs: bool = False, units: dict[str, str] | None = None):
         self.generate_gifs = generate_gifs
         self.units = units or {}
@@ -20,6 +22,7 @@ class SeabornRenderer:
             HistogramRenderer,
             HeatmapRenderer,
             LineRenderer,
+            AcousticFieldRenderer,
         )
 
         self.renderers = {
@@ -32,8 +35,9 @@ class SeabornRenderer:
             "histogram": HistogramRenderer,
             "heatmap": HeatmapRenderer,
             "line": LineRenderer,
+            "acoustic_field": AcousticFieldRenderer,
         }
-        
+
         from .color_utils import set_global_color_palette
         set_global_color_palette()
 
@@ -41,10 +45,9 @@ class SeabornRenderer:
         renderer_cls = self.renderers.get(spec.type)
         if not renderer_cls:
             return
-            
+
         renderer = renderer_cls(spec, units=self.units)
-        if hasattr(renderer, "run_dir") or renderer_cls.__name__ == "TrajectoryRenderer":
-            renderer.run_dir = run_dir
-            if renderer_cls.__name__ == "TrajectoryRenderer":
-                renderer.generate_gifs = self.generate_gifs
+        renderer.run_dir = run_dir
+        if renderer_cls.__name__ == "TrajectoryRenderer":
+            renderer.generate_gifs = self.generate_gifs
         renderer.render_seaborn(df, out_path)

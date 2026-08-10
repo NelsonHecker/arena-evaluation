@@ -160,7 +160,6 @@ class DataRecorderNode(Node):
         ref_type = self.get_parameter("reference_type").value
         self.reference_type = ref_type if ref_type else None
         self._episode_id_offset = int(self.get_parameter("episode_id_offset").value or 0)
-        self._counter_file = self.episodes_root / ".episode_counter"
 
         env_namespace = self.get_namespace().strip('/')
         self.env_ns_root = f"/{env_namespace}" if env_namespace else ""
@@ -276,11 +275,6 @@ class DataRecorderNode(Node):
         self.current_episode_id = global_episode_id
         self.current_episode_dir = ep_dir
         self.current_metadata_path = ep_dir / f"{ep_name}.yaml"
-
-        try:
-            self._counter_file.write_text(str(global_episode_id + 1))
-        except Exception as e:
-            self._log_warn(f"Failed to update .episode_counter: {e}")
 
         self._write_episode_metadata(global_episode_id)
 

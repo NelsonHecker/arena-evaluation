@@ -24,6 +24,8 @@ class EnergyMetricCalculator(BaseMetricCalculator):
         "battery_soc_final": "%",
     }
 
+    PRIMARY_OUTPUTS = ["energy_total_wh", "energy_mechanical_wh"]
+
     def output_keys(self) -> list[str]:
         return [
             # Scalars (aggregates for the episode)

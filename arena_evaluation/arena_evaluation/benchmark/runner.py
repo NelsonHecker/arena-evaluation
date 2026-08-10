@@ -68,7 +68,7 @@ class _HasStateSteps(typing.Protocol):
 _log = logging.getLogger(__name__)
 
 
-def build_launch_args(step: Step, simulator: str | None) -> list[str]:
+def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, str] | None = None) -> list[str]:
     """Return the arena launch argument list for a step, given the simulator name."""
     s = step.stage
     args = [
@@ -125,6 +125,13 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
                     v,
                 )
                 continue
+            args.append(f"{k}:={v}")
+            
+    if passthrough:
+        for k, v in passthrough.items():
+            if k in ("headless", "env_n"):
+                continue
+            if k not in own_keys:
                 args.append(f"{k}:={v}")
     return args
 
@@ -232,10 +239,26 @@ def env_key(step: Step, simulator: str | None) -> tuple:
 
 def group_pending(steps: list[Step], simulator: str | None) -> list[list[Step]]:
     groups = collections.defaultdict(list)
+    peds_steps = []
+    
     for step in steps:
-        groups[env_key(step, simulator)].append(step)
+        if step.is_reference and step.reference_type == "unhindered_peds":
+            peds_steps.append(step)
+        else:
+            groups[env_key(step, simulator)].append(step)
     
     sorted_groups = sorted(groups.values(), key=len, reverse=True)
+    
+    for step in peds_steps:
+        placed = False
+        for g in sorted_groups:
+            if g[0].stage.robot == step.stage.robot:
+                g.append(step)
+                placed = True
+                break
+        if not placed:
+            sorted_groups.append([step])
+            
     return sorted_groups
 
 
@@ -245,7 +268,7 @@ def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
     for k, v in d.items():
         name = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            if "min" in v and "max" in v and len(v) == 2:
+            if "min" in v and "max" in v:
                 n_name = f"{name}.n"
                 pv = ParameterValue()
                 val_min = v["min"]
@@ -260,6 +283,10 @@ def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
                 p.name = n_name
                 p.value = pv
                 out.append(p)
+                
+                other = {ik: iv for ik, iv in v.items() if ik not in ("min", "max")}
+                if other:
+                    out.extend(_walk_dict(other, name))
                 continue
             out.extend(_walk_dict(v, name))
             continue
@@ -414,7 +441,7 @@ class BenchmarkRunner(ArenaMixinNode):
         self._env_records = {e.env_id: e for e in msg.envs}
 
     def _build_launch_args(self, step: Step) -> list[str]:
-        return build_launch_args(step, self._simulator)
+        return build_launch_args(step, self._simulator, passthrough=self._arena_passthrough)
 
     async def _await_env_visible(self, env_id: int) -> None:
         """Wait for env_id to appear on /arena/state/envs."""
@@ -866,11 +893,8 @@ class BenchmarkRunner(ArenaMixinNode):
                 
                 recorder_proc = None
                 if step.record_dir is not None:
-                    counter_file = step.record_dir / ".episode_counter"
-                    try:
-                        episode_id_offset = int(counter_file.read_text().strip()) if counter_file.exists() else 0
-                    except Exception:
-                        episode_id_offset = 0
+                    episode_id_offset = self._global_episode_id_offset
+                    self._global_episode_id_offset += step.episodes
 
                     lp, ip = resolve_planner_identity(step.contestant)
                     recorder_args = [
@@ -1096,6 +1120,16 @@ class BenchmarkRunner(ArenaMixinNode):
 
         await self._spawn.ensure(timeout_sec=300.0)
         await self._despawn.ensure(timeout_sec=300.0)
+
+        self._global_episode_id_offset = 0
+        episodes_dir = self._run_dir.path / "episodes"
+        if episodes_dir.exists():
+            for d in episodes_dir.glob("episode_*"):
+                try:
+                    idx = int(d.name.split("_")[1])
+                    self._global_episode_id_offset = max(self._global_episode_id_offset, idx + 1)
+                except Exception:
+                    pass
 
         blocks = group_pending(pending, self._simulator)
         self._total_groups = len(blocks)

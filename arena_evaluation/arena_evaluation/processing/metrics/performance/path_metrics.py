@@ -44,6 +44,8 @@ class PathMetricsCalculator(BaseMetricCalculator):
         "roughness_mean": "m²",
         "angle_over_length": "rad/m",
     }
+
+    PRIMARY_OUTPUTS = ["path_length", "curvature_mean", "roughness_mean"]
     
     @classmethod
     def output_keys(cls) -> list[str]:

@@ -667,7 +667,7 @@ class MCAPReader:
                 lf = load_parquet(robot_dir / f"{t_name}.parquet")
                 if lf is not None:
                     if (total_ox != 0.0 or total_oy != 0.0):
-                        if t_name in ("odom", "initialpose"):
+                        if t_name == "initialpose":
                             try:
                                 lf = lf.with_columns([
                                     (pl.col("pos_x") - total_ox).alias("pos_x"),

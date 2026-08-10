@@ -1,3 +1,6 @@
+# SESSION SNAPSHOT (2026-08-10) — standard.yaml manifest (full), including the
+# acoustic field spec with manifest-configurable options.
+# Path: src/Arena/arena_evaluation/arena_evaluation/configs/benchmark/manifests/standard.yaml
 # Standard benchmark report — the default layout for arena_evaluation.
 # Mirrors the previous hardcoded presentation/viz_manifest.py default.
 manifest_version: "1.0"
@@ -332,3 +335,36 @@ plots:
     layout_group: ecological
     group_by: [stage]
     options: {x: timeseries_time_s}
+  - id: box_acoustic_max
+    type: box
+    title: Max Pedestrian Acoustic Exposure (dBA)
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    layout_group: ecological
+  - id: box_acoustic_leq
+    type: box
+    title: Leq Pedestrian Acoustic Exposure (dBA)
+    data_key: ped_leq_exposure_dba
+    differentiate: local_planner
+    layout_group: ecological
+  - id: box_acoustic_startle
+    type: box
+    title: Max Pedestrian Startle Factor (dBA/s)
+    data_key: ped_max_startle_factor
+    differentiate: local_planner
+    layout_group: ecological
+  # Acoustic field plot — fully manifest-configurable:
+  #   filter:  {planner: [dwb, teb]}      # select specific runs (list = membership)
+  #   mode:    single                     # one worst-case image (default: grid)
+  #   downsample: 2                       # solver stride (1 = full res)
+  #   vmin:    42                         # color-scale floor (default: hospital ambient)
+  #   include_reference: true             # include unhindered reference runs
+  - id: acoustic_field_worst_case
+    type: acoustic_field
+    title: "Acoustic Impact (Worst-Case Frame)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: ecological
+    options:
+      downsample: 1

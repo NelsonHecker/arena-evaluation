@@ -31,6 +31,11 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         "time_looked_at_by_pedestrians": "",
         "total_time_looked_at_by_pedestrians": "s",
     }
+
+    PRIMARY_OUTPUTS = [
+        "total_time_looking_at_pedestrians",
+        "total_time_looked_at_by_pedestrians",
+    ]
     
     GAZE_CONE_DEG = 5.0
     
