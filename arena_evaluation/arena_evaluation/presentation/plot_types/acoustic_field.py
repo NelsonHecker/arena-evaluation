@@ -11,6 +11,7 @@ from PIL import Image
 from .base import BasePlotRenderer
 from ...processing.map_registry import MapRegistry
 from ...processing.acoustics.impedance_grid import downsample_occupancy
+from ...processing.acoustics.door_map import door_segments, build_pixel_tl
 
 try:
     from ...processing.acoustics.impedance_grid import compute_attenuations
@@ -54,7 +55,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         return grid, meta
 
     def _compute_full_field(self, grid, resolution, ox, oy,
-                            rx_m, ry_m, source_dba, downsample=1):
+                            rx_m, ry_m, source_dba, downsample=1, pixel_tl=None):
         if downsample > 1:
             # max-pool keeps 1-px walls instead of dropping them (strided slicing loses thin walls)
             grid = downsample_occupancy(grid, downsample)
@@ -73,6 +74,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         attenuations = compute_attenuations(
             grid, resolution, rx_px, ry_px, tx, ty,
             wall_tl=47.0, mic_distance=1.0,
+            pixel_tl=pixel_tl,
         )
 
         att_grid = attenuations.reshape((h, w))
@@ -83,14 +85,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
     def _render_cell_png(self, grid, resolution, ox, oy,
                          rx_m, ry_m, source_dba, peds, title, out_path,
-                         downsample=1, vmin=None, vmax=None):
+                         downsample=1, vmin=None, vmax=None, pixel_tl=None, doors=None):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         result = self._compute_full_field(grid, resolution, ox, oy,
                                           rx_m, ry_m, source_dba,
-                                          downsample=downsample)
+                                          downsample=downsample, pixel_tl=pixel_tl)
         if result is None:
             return False
         field_dba, eff_res, (h, w) = result
@@ -103,6 +105,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
         render_grid = np.where((mask_grid == 1) | np.isinf(field_dba), np.nan, field_dba)
         render_grid = np.flipud(render_grid)
 
+        # Downsample the door mask to match the rendered grid, for visual marking
+        door_overlay = None
+        if doors:
+            door_mask = np.zeros_like(mask_grid, dtype=bool)
+            for _name, (m, _tl) in doors.items():
+                door_mask |= m[::downsample, ::downsample] if downsample > 1 else m
+            if door_mask.any():
+                door_overlay = np.ma.masked_where(~door_mask, door_mask)
+
         plt.figure(figsize=_CELL_FIGSIZE)
         ax = plt.gca()
         ax.set_facecolor("black")
@@ -111,6 +122,11 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         im = plt.imshow(render_grid, cmap="inferno", origin="upper", extent=extent,
                         vmin=vmin, vmax=vmax)
+        if door_overlay is not None:
+            # doors rendered distinctly (cyan hatch) so they are visually
+            # distinguishable from plain walls
+            ax.imshow(np.flipud(door_overlay.astype(np.float32)), cmap="Blues",
+                      origin="upper", extent=extent, vmin=0, vmax=1, alpha=0.45)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
         plt.plot(rx_m, ry_m, "g*", markersize=8, label="Robot")
@@ -225,6 +241,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
         vmin = float(self.spec.options.get("vmin", _HOSPITAL_AMBIENT_DBA))
         mode = str(self.spec.options.get("mode", "grid")).lower()
 
+        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+
         plots_dir = pathlib.Path(self.run_dir) / "plots" if self.run_dir else pathlib.Path("plots")
 
         # ── single mode: one worst-case image ───────────────────────────────────
@@ -243,6 +261,12 @@ class AcousticFieldRenderer(BasePlotRenderer):
             if vmax <= vmin:
                 vmax = vmin + 20.0
 
+            pixel_tl = None
+            door_states = worst.get("door_states") or {}
+            if doors:
+                open_set = {n for n, st in door_states.items() if st == "open"}
+                pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+
             ok = self._render_cell_png(
                 grid, resolution, ox, oy,
                 worst["robot_x"], worst["robot_y"], worst["source_dba"],
@@ -252,6 +276,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 downsample=downsample,
                 vmin=vmin,
                 vmax=vmax,
+                pixel_tl=pixel_tl,
+                doors=doors if pixel_tl is not None else None,
             )
             if not ok:
                 return ""
@@ -302,6 +328,12 @@ class AcousticFieldRenderer(BasePlotRenderer):
             safe = safe.replace("/", "_").replace(" ", "_")
             png_path = plots_dir / f"{safe}.png"
 
+            pixel_tl = None
+            door_states = worst.get("door_states") or {}
+            if doors:
+                open_set = {n for n, st in door_states.items() if st == "open"}
+                pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+
             ok = self._render_cell_png(
                 grid, resolution, ox, oy,
                 worst["robot_x"], worst["robot_y"], worst["source_dba"],
@@ -311,6 +343,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 downsample=downsample,
                 vmin=vmin,
                 vmax=global_max,
+                pixel_tl=pixel_tl,
+                doors=doors if pixel_tl is not None else None,
             )
             if ok:
                 cells.append({
@@ -364,6 +398,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
         downsample = int(self.spec.options.get("downsample", 1))
         vmin = float(self.spec.options.get("vmin", _HOSPITAL_AMBIENT_DBA))
 
+        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+
         worst = self._pick_worst_row(work_df)
         if worst is None:
             return
@@ -371,6 +407,12 @@ class AcousticFieldRenderer(BasePlotRenderer):
         vmax = float(np.ceil(worst["ped_max_exposure_dba"] / 10.0) * 10.0)
         if vmax <= vmin:
             vmax = vmin + 20.0
+
+        pixel_tl = None
+        door_states = worst.get("door_states") or {}
+        if doors:
+            open_set = {n for n, st in door_states.items() if st == "open"}
+            pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
 
         self._render_cell_png(
             grid, resolution, ox, oy,
@@ -381,4 +423,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
             downsample=downsample,
             vmin=vmin,
             vmax=vmax,
+            pixel_tl=pixel_tl,
+            doors=doors if pixel_tl is not None else None,
         )

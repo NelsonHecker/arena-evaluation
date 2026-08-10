@@ -23,18 +23,29 @@ import sys  # noqa: E402
 if str(sys_path) not in sys.path:
     sys.path.insert(0, str(sys_path))
 
-from acoustic_scenarios import scenarios, build, RES, WALL_TL, MIC_DIST  # noqa: E402
+from acoustic_scenarios import scenarios, build, door_pixels, RES, WALL_TL, MIC_DIST  # noqa: E402
+
+DOOR_TL = 25.0  # closed-door transmission loss (lighter than the 47 dB wall)
 
 WALL = 1
 
 
-def _solve(grid, start_m, target_m, wall_tl=WALL_TL, mic=MIC_DIST) -> float:
+def _tl_map(grid, spec, open_doors=False):
+    """Per-pixel TL map: walls 47 dB; door pixels DOOR_TL (or 0 when open)."""
+    tl = np.where(grid == WALL, WALL_TL, 0.0).astype(np.float32)
+    for (y, x) in door_pixels(spec):
+        if 0 <= y < grid.shape[0] and 0 <= x < grid.shape[1]:
+            tl[y, x] = 0.0 if open_doors else DOOR_TL
+    return np.ascontiguousarray(tl)
+
+
+def _solve(grid, start_m, target_m, wall_tl=WALL_TL, mic=MIC_DIST, pixel_tl=None) -> float:
     sx, sy = start_m
     tx, ty = target_m
     att = compute_attenuations(
         grid, RES, sx / RES, sy / RES,
         np.array([tx / RES], np.float32), np.array([ty / RES], np.float32),
-        wall_tl=wall_tl, mic_distance=mic,
+        wall_tl=wall_tl, mic_distance=mic, pixel_tl=pixel_tl,
     )
     return float(att[0])
 
@@ -167,6 +178,40 @@ def test_corridor_closed_door_blocks():
     assert att >= los + 30.0, f"closed corridor door must block: {att:.1f}"
 
 
+# ── Door vs wall dB distinction (per-pixel TL) ────────────────────────────────
+
+def test_closed_door_cheaper_than_wall():
+    """A closed door (25 dB) attenuates LESS than a solid wall (47 dB)."""
+    door = scenarios()["two_rooms_door_closed_middle"]
+    wall = scenarios()["two_rooms_wall_only"]
+    g_door = build({**door, "_name": "two_rooms_door_closed_middle"})
+    g_wall = build({**wall, "_name": "two_rooms_wall_only"})
+    a_door = _solve(g_door, door["start"], door["target"], pixel_tl=_tl_map(g_door, door))
+    a_wall = _solve(g_wall, wall["start"], wall["target"], pixel_tl=_tl_map(g_wall, wall))
+    los = _los_db(door["start"], door["target"])
+    assert np.isclose(a_door, los + DOOR_TL, atol=2.0), f"door: {a_door:.1f} vs {los + DOOR_TL:.1f}"
+    assert np.isclose(a_wall, los + WALL_TL, atol=2.0), f"wall: {a_wall:.1f} vs {los + WALL_TL:.1f}"
+    assert a_door < a_wall - 15.0, f"door {a_door:.1f} must be cheaper than wall {a_wall:.1f}"
+
+
+def test_open_door_equals_free_space():
+    """An OPEN door (TL 0) is acoustically free space."""
+    spec = scenarios()["two_rooms_door_open_middle"]
+    grid = build({**spec, "_name": "two_rooms_door_open_middle"})
+    a_open = _solve(grid, spec["start"], spec["target"], pixel_tl=_tl_map(grid, spec, open_doors=True))
+    a_plain = _solve(np.zeros_like(grid), spec["start"], spec["target"])
+    assert np.isclose(a_open, a_plain, atol=0.5), f"{a_open:.1f} vs {a_plain:.1f}"
+
+
+def test_door_state_flips_attenuation():
+    """Same geometry, door open vs closed, must differ by ~DOOR_TL."""
+    spec = scenarios()["two_rooms_door_open_middle"]
+    grid = build({**spec, "_name": "two_rooms_door_open_middle"})
+    a_open = _solve(grid, spec["start"], spec["target"], pixel_tl=_tl_map(grid, spec, open_doors=True))
+    a_closed = _solve(grid, spec["start"], spec["target"], pixel_tl=_tl_map(grid, spec, open_doors=False))
+    assert np.isclose(a_closed - a_open, DOOR_TL, atol=2.0), f"{a_closed - a_open:.1f}"
+
+
 # ── Wall TL sensitivity ───────────────────────────────────────────────────────
 
 def test_wall_tl_scales_linearly():
@@ -184,17 +229,12 @@ def test_wall_tl_scales_linearly():
 # ── Semantic-door integration (see plan): carve door pixels per state ─────────
 
 def test_door_carving_open_vs_closed():
-    """The planned semantic integration carves door pixels; emulate it here."""
+    """Semantic door integration: door state flips the per-pixel TL in place."""
     spec = scenarios()["two_rooms_door_open_middle"]
-    grid_open = build({**spec, "_name": "two_rooms_door_open_middle"})
-    # emulate 'closed': block the door pixels
-    mid = grid_open.shape[0] // 2
-    grid_closed = grid_open.copy()
-    grid_closed[mid - 10:mid + 10, grid_closed.shape[1] // 2] = WALL
-
+    grid = build({**spec, "_name": "two_rooms_door_open_middle"})
     start, target = spec["start"], spec["target"]
-    a_closed = _solve(grid_closed, start, target)
-    a_open = _solve(grid_open, start, target)
+    a_open = _solve(grid, start, target, pixel_tl=_tl_map(grid, spec, open_doors=True))
+    a_closed = _solve(grid, start, target, pixel_tl=_tl_map(grid, spec, open_doors=False))
     los = _los_db(start, target)
-    assert a_open < los + 2.0, f"carved door should open: {a_open:.1f}"
-    assert a_closed >= los + 30.0, f"blocked door should close: {a_closed:.1f}"
+    assert a_open < los + 2.0, f"open door should be ~LOS: {a_open:.1f}"
+    assert a_closed >= los + 20.0, f"closed door should block: {a_closed:.1f}"

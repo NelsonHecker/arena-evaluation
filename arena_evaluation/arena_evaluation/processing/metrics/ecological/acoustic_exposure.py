@@ -21,6 +21,9 @@ try:
 except ImportError:
     compute_attenuations = None
 
+from ...acoustics.door_map import door_segments, build_pixel_tl
+from ...acoustics.door_state import DoorStateTimeline
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +133,21 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         grid, resolution, origin = map_data
         ox, oy = origin[0], origin[1]
+
+        # Semantic door geometry + per-frame door state (PR #68 semantics)
+        # Doors are per-pixel entities: closed = door TL (25 dB), open = carved.
+        doors = door_segments(map_name, grid, resolution, origin, run_dir=run_dir)
+        tl_cache: dict[tuple, np.ndarray] = {}
+        state_timeline = DoorStateTimeline.from_semantic_frame(
+            getattr(episode, "semantic_snapshot", None)
+        )
+        if doors:
+            logger.info(
+                "AcousticExposureCalculator: %d semantic doors loaded; "
+                "semantic timeline %s",
+                len(doors),
+                "present" if state_timeline is not None else "ABSENT (doors default closed)",
+            )
 
         if "pos_x_gt" not in df.columns or "pos_y_gt" not in df.columns:
             logger.warning("Ground-truth position columns missing for episode %s", episode.episode_id)
@@ -246,6 +264,18 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             px_px = (px_m - ox) / resolution
             py_px = (py_m - oy) / resolution
 
+            # Door-aware per-pixel TL (open doors carved to 0 dB)
+            open_set = (
+                state_timeline.open_doors_at(int(df["time_ns"][i]))
+                if state_timeline is not None
+                else frozenset()
+            )
+            tl_key = tuple(sorted(open_set))
+            pixel_tl = tl_cache.get(tl_key)
+            if pixel_tl is None:
+                pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
+                tl_cache[tl_key] = pixel_tl
+
             # Run C++ solver
             attenuations = compute_attenuations(
                 occupancy_grid=grid,
@@ -254,8 +284,9 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 start_y_px=ry_px,
                 target_xs_px=px_px,
                 target_ys_px=py_px,
-                wall_tl=47.0,  # single configurable TL
+                wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
                 mic_distance=1.0,
+                pixel_tl=pixel_tl,
             )
 
             # Filter out infinity (unreachable)
@@ -349,6 +380,13 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             "robot_y": float(ry_m[max_idx]),
             "source_dba": float(source_dba[max_idx]),
             "pedestrians": [[float(p[0]), float(p[1])] for p in worst_pts],
+            "door_states": {
+                name: ("open" if name in (
+                    state_timeline.open_doors_at(int(df["time_ns"][max_idx]))
+                    if state_timeline is not None else frozenset())
+                else "closed")
+                for name in doors
+            },
         }
 
         logger.info(

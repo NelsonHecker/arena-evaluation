@@ -9,7 +9,6 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BenchmarkState.msg"
   "srv/ChangeDirectory.srv"
-  "srv/RecordEpisode.srv"
   DEPENDENCIES builtin_interfaces
 )
 

@@ -587,11 +587,12 @@ class DataRecorderNode(Node):
 
 
     def _write_initial_metadata(self):
-        metadata = IngestionMetadata.create_initial_metadata(
+        metadata = IngestionMetadata.create_episode_metadata(
             benchmark_id=self.benchmark_id,
             planner=self.planner,
             stage=self.stage,
             map_name=self.world,
+            episode_id=0,
             episodes_requested=0,
             robot_model=self.robot_model,
             suite_name=self.suite_name,

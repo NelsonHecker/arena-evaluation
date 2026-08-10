@@ -49,6 +49,7 @@ class RunMetadata(BaseModel):
 @dataclass(frozen=True)
 class RobotParams:
     """Robot physical parameters loaded at runtime."""
+    model: str
     robot_radius: float
     laser_min_range: float
     laser_max_range: float
@@ -79,6 +80,7 @@ class RobotParams:
             pass
         
         return cls(
+            model=model,
             robot_radius=radius,
             laser_min_range=min_range,
             laser_max_range=max_range,

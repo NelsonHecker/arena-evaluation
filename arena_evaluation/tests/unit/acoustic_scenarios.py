@@ -47,34 +47,50 @@ def _corridor(width_px: int, length_px: int) -> np.ndarray:
     return grid
 
 
+def door_pixels(spec: dict) -> list[tuple[int, int]]:
+    """Pixel coordinates of the door (shared-wall gap) for the two_rooms scenarios.
+
+    For door-open variants these are the carved free pixels; for closed/wall-only
+    variants they mark where the door would be. Used to build the per-pixel TL
+    map so closed doors (25 dB) differ from plain walls (47 dB).
+    """
+    return spec.get("door_pixels", [])
+
+
 def scenarios() -> dict[str, dict]:
     door_h = 20  # 2 m door height in px
     mid = ROOM // 2
     s = {}
 
+    door_mid = [(y, ROOM) for y in range(mid - door_h // 2, mid + door_h // 2)]
     s["two_rooms_door_open_middle"] = {
         "grid": _room_pair((mid - door_h // 2, mid + door_h // 2)),
         "desc": "10x10m rooms, 2m door centered on the shared wall, OPEN",
         "start": (0.5, 5.0), "target": (19.5, 5.0),  # meters, straight through the door
         "expect": "line_of_sight",
+        "door_pixels": door_mid,
     }
     s["two_rooms_door_closed_middle"] = {
         "grid": _room_pair(None),
-        "desc": "10x10m rooms, solid wall (door CLOSED)",
+        "desc": "10x10m rooms, door CLOSED (25 dB door TL, lighter than the 47 dB wall)",
         "start": (0.5, 5.0), "target": (19.5, 5.0),
         "expect": "blocked",
+        "door_pixels": door_mid,
     }
+    door_side = [(y, ROOM) for y in range(10, 10 + door_h)]
     s["two_rooms_door_open_side"] = {
         "grid": _room_pair((10, 10 + door_h)),
         "desc": "10x10m rooms, 2m door at the BOTTOM side of the shared wall, OPEN",
         "start": (0.5, 5.0), "target": (19.5, 5.0),
         "expect": "detour",
+        "door_pixels": door_side,
     }
     s["two_rooms_door_closed_side"] = {
         "grid": _room_pair(None),
-        "desc": "10x10m rooms, solid wall (side door CLOSED)",
+        "desc": "10x10m rooms, side door CLOSED (25 dB door TL)",
         "start": (0.5, 5.0), "target": (19.5, 5.0),
         "expect": "blocked",
+        "door_pixels": door_side,
     }
     s["two_rooms_wall_only"] = {
         "grid": _room_pair(None),
@@ -121,14 +137,21 @@ def build(spec: dict) -> np.ndarray:
 
 
 def export_pngs(out_dir: pathlib.Path) -> dict[str, pathlib.Path]:
-    """Render each scenario as a PNG (walls white on black) for visual inspection."""
+    """Render each scenario as a PNG for visual inspection.
+
+    Walls are white; DOOR pixels are drawn in gray (128) so doors stay visually
+    distinct from plain walls even when closed.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {}
     for name, spec in scenarios().items():
         grid = build({**spec, "_name": name})
-        img = Image.fromarray((grid * 255).astype(np.uint8))
+        img = (grid * 255).astype(np.uint8)
+        for (y, x) in door_pixels(spec):
+            if 0 <= y < img.shape[0] and 0 <= x < img.shape[1]:
+                img[y, x] = 128  # door: gray
         p = out_dir / f"{name}.png"
-        img.save(p)
+        Image.fromarray(img).save(p)
         paths[name] = p
     return paths
 
