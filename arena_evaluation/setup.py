@@ -31,8 +31,8 @@ setup(
         'test': ['pytest>=7'],
     },
     zip_safe=True,
-    maintainer='NamTruongTran',
-    maintainer_email='trannamtruong98@gmail.com',
+    maintainer='NelsonHecker',
+    maintainer_email='heckernelson@gmail.com',
     description='Record, evaluate, and plot navigational metrics to evaluate ROS navigation planners',
     license='BSD',
     entry_points={
@@ -46,5 +46,6 @@ setup(
     },
     package_data={
         'arena_evaluation.processing.acoustics': ['solver.cpp', 'solver.so'],
+        'arena_evaluation.presentation': ['*.j2', '*.html.j2'],
     },
 )

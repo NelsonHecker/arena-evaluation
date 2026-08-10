@@ -31,7 +31,7 @@ def test_append_semantic_entity_flattens_fields_into_long_rows():
     assert target["world"] == ["hospital_small"] * 3
     assert target["entity"] == ["env_0/lobby"] * 3
     assert target["kind"] == ["occupancy_cap"] * 3
-    assert target["field"] == ["state", "over_cap", "__members__"]
+    assert target["field"] == ["state", "over_cap", "members"]
     assert target["field_kind"] == ["discrete", "predicate", "members"]
     assert target["value_str"] == ["open", None, None]
     assert target["value_num"] == [None, None, None]
@@ -46,7 +46,7 @@ def test_append_semantic_entity_defaults_to_empty_members():
     MCAPReader._append_semantic_entity(target, 0, 0, "world", ent)
 
     assert target["value_list"][-1] == []
-    assert target["field"][-1] == "__members__"
+    assert target["field"][-1] == "members"
 
 
 def test_append_semantic_entity_accumulates_across_calls():

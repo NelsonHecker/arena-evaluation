@@ -95,12 +95,20 @@ class EpisodeSplitter:
             aligned_df = self.aligner.align(bundle)
             aligned_df = _to_df(aligned_df)
             if aligned_df is not None and len(aligned_df) >= self.min_episode_frames:
+                start_pos, goal_pos = [], []
+                first_row = aligned_df.row(0, named=True)
+                last_row = aligned_df.row(-1, named=True)
+                if "pos_x" in first_row and "pos_y" in first_row and first_row["pos_x"] is not None:
+                    start_pos = [first_row["pos_x"], first_row["pos_y"], first_row.get("yaw", 0.0)]
+                if "pos_x" in last_row and "pos_y" in last_row and last_row["pos_x"] is not None:
+                    goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
+                
                 episodes.append(
                     AlignedEpisodeBundle(
                         episode_id=0,
                         data=aligned_df,
-                        start_pos=[],
-                        goal_pos=[],
+                        start_pos=start_pos,
+                        goal_pos=goal_pos,
                         num_pedestrians=self._estimate_peds(aligned_df),
                         robot_name=robot_name,
                         semantic_snapshot=semantic_snapshot_df,

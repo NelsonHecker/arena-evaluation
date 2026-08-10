@@ -14,19 +14,24 @@ import pyarrow.parquet as pq
 from ..storage.schemas import TopicBundle
 
 
-_SEMANTIC_SNAPSHOT_SCHEMA = pa.schema([
-    ("time_ns", pa.int64()),
-    ("env_id", pa.int64()),
-    ("world", pa.string()),
-    ("entity", pa.string()),
-    ("kind", pa.string()),
-    ("field", pa.string()),
-    ("field_kind", pa.string()),
-    ("value_str", pa.string()),
-    ("value_num", pa.float64()),
-    ("value_bool", pa.bool_()),
-    ("value_list", pa.list_(pa.string())),
-])
+# Topic → explicit PyArrow schema.  Only needed when RecordBatch.from_pydict
+# cannot infer column types from data (e.g. semantic_snapshot where each row
+# populates exactly one value_* column, leaving the rest None).
+_TOPIC_SCHEMAS: dict[str, pa.Schema] = {
+    "semantic_snapshot": pa.schema([
+        ("time_ns", pa.int64()),
+        ("env_id", pa.int64()),
+        ("world", pa.string()),
+        ("entity", pa.string()),
+        ("kind", pa.string()),
+        ("field", pa.string()),
+        ("field_kind", pa.string()),
+        ("value_str", pa.string()),
+        ("value_num", pa.float64()),
+        ("value_bool", pa.bool_()),
+        ("value_list", pa.list_(pa.string())),
+    ]),
+}
 
 
 class MCAPReader:
@@ -150,7 +155,7 @@ class MCAPReader:
                 if not topic_data or len(topic_data.get("time_ns", [])) == 0:
                     continue
                 
-                schema_override = _SEMANTIC_SNAPSHOT_SCHEMA if topic_name == "semantic_snapshot" else None
+                schema_override = _TOPIC_SCHEMAS.get(topic_name)
                 batch = pa.RecordBatch.from_pydict(dict(topic_data), schema=schema_override)
                 writer_key = ("__global__", topic_name)
                 

@@ -479,28 +479,4 @@ def test_calculate_success_when_all_true():
     assert results["clauses_total"] == 1
 
 
-def test_calculate_all_none_when_env_offset_ambiguous():
-    calc = _calc()
-    calc.world = "synthetic_conditions_ambiguous"
-    calc._world_cache["synthetic_conditions_ambiguous"] = [_square("pharmacy")]
-
-    data = pl.DataFrame({
-        "time_ns": [0, 1_000_000_000],
-        "pos_x": [1.0, 1.0],
-        "pos_y": [1.0, 1.0],
-        "yaw": [0.0, 0.0],
-    })
-    conditions = [{"op": "never", "p": "robot in pharmacy"}]
-    episode = AlignedEpisodeBundle(
-        episode_id=1,
-        data=data,
-        start_pos=_start_pos(data),
-        goal_pos=[],
-        conditions=conditions,
-        env_offset=None,
-    )
-
-    results = calc.calculate(episode, {})
-
-    assert all(v is None for v in results.values())
     assert set(results) == set(calc.output_keys())

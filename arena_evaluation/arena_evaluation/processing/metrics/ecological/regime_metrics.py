@@ -331,12 +331,10 @@ class RegimeMetricsCalculator(BaseMetricCalculator):
                     results["replan_latency_after_state_change_p95"] = float(np.percentile(latencies, 95))
 
         n = len(pos_x)
-        if self.world is not None and episode.start_pos and n > 0 and len(time_ns) == n and episode.env_offset is not None:
+        if self.world is not None and episode.start_pos and n > 0 and len(time_ns) == n:
             loaded = self._load_world(self.world)
             if loaded is not None:
                 zones, doors = loaded
-                zones = _offset_zones(zones, episode.env_offset)
-                doors = _offset_doors(doors, episode.env_offset)
 
                 if has_events and "occupancy_cap" in kinds and zones:
                     zone_idx = _zone_membership(pos_x, pos_y, zones)

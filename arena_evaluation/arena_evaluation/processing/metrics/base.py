@@ -57,7 +57,9 @@ class BaseMetricCalculator(ABC):
                 odom_y = np.array([], dtype=np.float64)
                 odom_yaw = np.array([], dtype=np.float64)
 
-            
+            raw_odom_x0 = odom_x[0] if len(odom_x) > 0 else 0.0
+            raw_odom_y0 = odom_y[0] if len(odom_y) > 0 else 0.0
+            raw_odom_yaw0 = odom_yaw[0] if len(odom_yaw) > 0 else 0.0
             if len(odom_x) > 1:
                 dists = np.sqrt(np.diff(odom_x)**2 + np.diff(odom_y)**2)
                 jumps = np.where(dists > 0.5)[0]
@@ -100,9 +102,9 @@ class BaseMetricCalculator(ABC):
             start_x, start_y = episode.start_pos[0], episode.start_pos[1]
             start_yaw = episode.start_pos[2] if len(episode.start_pos) >= 3 else 0.0
             
-            odom_x0 = odom_x[0]
-            odom_y0 = odom_y[0]
-            odom_yaw0 = odom_yaw[0]
+            odom_x0 = raw_odom_x0
+            odom_y0 = raw_odom_y0
+            odom_yaw0 = raw_odom_yaw0
             
             theta = start_yaw - odom_yaw0
             cos_t = np.cos(theta)

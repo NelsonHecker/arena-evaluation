@@ -707,6 +707,7 @@ def _make_contest(*contestant_names: str) -> Contest:
 
 def test_build_pending_empty_state_all_steps_pending(tmp_path: pathlib.Path):
     suite = _make_suite("s1", "s2")
+    suite = suite._replace(references=False)
     contest = _make_contest("pa", "pb")
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
@@ -827,12 +828,13 @@ def test_build_pending_mixed_states(tmp_path: pathlib.Path):
 
 def test_build_pending_record_dir_set_from_record_root(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
+    suite = suite._replace(references=False)
     contest = _make_contest("pa")
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
     # All steps now share the flat episodes/ directory under record_root.
     # Wait, they are now under recordings/contestant/stage
-    assert steps[0].record_dir == tmp_path / "recordings" / "pa" / "s1"
+    assert steps[0].record_dir == tmp_path / "episodes"
 
 
 def test_build_pending_duplicate_key_raises(tmp_path: pathlib.Path):

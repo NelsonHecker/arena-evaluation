@@ -360,15 +360,10 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
             return empty
         if not episode.start_pos:
             return empty
-        if episode.env_offset is None:
-            return empty
-
         loaded = self._load_world(self.world)
         if loaded is None:
             return empty
         zones, doors = loaded
-        zones = _offset_zones(zones, episode.env_offset)
-        doors = _offset_doors(doors, episode.env_offset)
 
         pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
 

@@ -74,6 +74,9 @@ class ProcessingPipeline:
         _ctx = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx:
             print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) → {topics_dir}...")
+            if topics_dir.exists():
+                import shutil
+                shutil.rmtree(topics_dir)
             reader = MCAPReader(mcap_path)
             bundles = reader.read(map_name_fallback=ep.map)
             TopicParquetStore.write(bundles, topics_dir, overwrite=True)

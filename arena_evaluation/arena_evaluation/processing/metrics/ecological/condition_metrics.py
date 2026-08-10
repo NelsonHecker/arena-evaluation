@@ -292,9 +292,6 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
         zones = self._load_world(self.world)
         if zones is None:
             return empty
-        if episode.env_offset is None:
-            return empty
-        zones = _offset_zones(zones, episode.env_offset)
 
         pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
         if episode.data is None or "time_ns" not in episode.data.columns or len(episode.data) == 0:
