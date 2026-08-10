@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import contextlib
 import datetime
 import logging
@@ -21,7 +22,8 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from arena_evaluation_msgs.msg import BenchmarkState
-from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper, param_value_to_launch_str
+from arena_evaluation_msgs.srv import RecordEpisode
+from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
 
@@ -37,6 +39,10 @@ STATE_TOPIC = "/arena/benchmark/state"
 _CANCEL_SETTLE_S = 30.0
 _HEARTBEAT_S = 30.0
 
+# EpisodeRecord.outcome_state labels (task_generator_msgs/msg/EpisodeRecord.msg)
+_EPISODE_OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
+
+from ..storage.planner_names import split_planner_name
 from .config import Contest, Suite
 from .state import (
     Manifest,
@@ -46,10 +52,6 @@ from .state import (
     find_most_recent_resumable,
 )
 from .step import Step, StepErrorKind, StepResult
-
-# ---------------------------------------------------------------------------
-# Free functions (testable without ROS init)
-# ---------------------------------------------------------------------------
 
 
 class _WithSteps(typing.Protocol):
@@ -66,40 +68,8 @@ class _HasStateSteps(typing.Protocol):
 _log = logging.getLogger(__name__)
 
 
-def _per_mode_launch_args(step: Step) -> list[str]:
-    """Stage per-mode config as `task.<mode>.<leaf>` launch args, so the first
-    configure() sees them before QueueEpisode can run."""
-    s = step.stage
-    obs_params, rob_params = _flatten_per_mode_params(
-        s.config,
-        tm_obstacles=s.tm_obstacles.value,
-        tm_robots=s.tm_robots.value,
-    )
-    seen: dict[str, str] = {}
-    for mode, params in ((s.tm_obstacles.value, obs_params), (s.tm_robots.value, rob_params)):
-        for param in params:
-            value = param_value_to_launch_str(param.value)
-            if value is None:
-                continue
-            seen[f"task.{mode}.{param.name}"] = value
-    return [f"{k}:={v}" for k, v in seen.items()]
-
-
-def build_launch_args(step: Step, simulator: str | None) -> list[str]:
-    """Return the arena launch argument list for a step, given the simulator name.
-
-    Per-mode params (task.scenario.file, task.random.*, ...) are passed at spawn as
-    `task.<mode>.<leaf>` launch args: a task mode resolves its params in __init__, so
-    a mode whose default is unresolvable for this world (e.g. scenario `default` on a
-    world that has no such scenario) would fail configure() and never reach ACTIVE,
-    which is a prerequisite for QueueEpisode. QueueEpisode still drives per-step
-    changes within a group, where the env is already up.
-
-    Contestant args are forwarded verbatim, except keys that collide with
-    stage-owned launch args (sim, robot, world, tm_robots, tm_obstacles,
-    run_seed, auto_reset, tm_modules, record_data_dir), which would override
-    the stage's configuration. Those are logged and dropped.
-    """
+def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, str] | None = None) -> list[str]:
+    """Return the arena launch argument list for a step, given the simulator name."""
     s = step.stage
     args = [
         *([f"sim:={simulator}"] if simulator is not None else []),
@@ -111,7 +81,6 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
         "auto_reset:=false",
         "tm_modules:=",
     ]
-    args.extend(_per_mode_launch_args(step))
     if s.optim:
         for k, v in s.optim.items():
             args.append(f"optim.{k}:={v}")
@@ -157,7 +126,75 @@ def build_launch_args(step: Step, simulator: str | None) -> list[str]:
                 )
                 continue
             args.append(f"{k}:={v}")
+            
+    if passthrough:
+        for k, v in passthrough.items():
+            if k in ("headless", "env_n"):
+                continue
+            if k not in own_keys:
+                args.append(f"{k}:={v}")
     return args
+
+
+def _all_steps_grid(
+    suite: Suite,
+    contest: Contest,
+    scale_episodes: float,
+    record_root: pathlib.Path | None = None,
+) -> list[Step]:
+    """Generate all steps for a benchmark suite and contest."""
+    steps: list[Step] = []
+    seen: set[str] = set()
+
+    episodes_dir = (record_root / "episodes") if record_root is not None else None
+
+    for contestant in contest.contestants:
+        for stage in suite.stages:
+            main_step = Step(
+                contestant=contestant,
+                stage=stage,
+                episodes=int(round(stage.episodes * scale_episodes)),
+                record_dir=episodes_dir,
+            )
+            if not suite.references:
+                if main_step.key in seen:
+                    raise ValueError(f"duplicate step key: {main_step.key!r}")
+                seen.add(main_step.key)
+                steps.append(main_step)
+                continue
+            ref_robot_step = Step(
+                contestant=contestant,
+                stage=stage,
+                episodes=int(round(stage.episodes * scale_episodes)),
+                record_dir=episodes_dir,
+                is_reference=True,
+                reference_type="unobstructed_robot",
+            )
+            for step in (main_step, ref_robot_step):
+                if step.key in seen:
+                    raise ValueError(f"duplicate step key: {step.key!r}")
+                seen.add(step.key)
+                steps.append(step)
+
+    if not suite.references:
+        return steps
+
+    dummy_peds_contestant = Contest.Contestant(name="unhindered_peds", args={})
+    for stage in suite.stages:
+        ref_peds_step = Step(
+            contestant=dummy_peds_contestant,
+            stage=stage,
+            episodes=int(round(stage.episodes * scale_episodes)),
+            record_dir=episodes_dir,
+            is_reference=True,
+            reference_type="unhindered_peds",
+        )
+        if ref_peds_step.key in seen:
+            raise ValueError(f"duplicate step key: {ref_peds_step.key!r}")
+        seen.add(ref_peds_step.key)
+        steps.append(ref_peds_step)
+
+    return steps
 
 
 def build_pending(
@@ -168,43 +205,31 @@ def build_pending(
     retry_failed: bool,
     record_root: pathlib.Path,
 ) -> list[Step]:
-    """Return the list of steps that still need to be run.
-
-    Retry policy:
-      - Not in state file   -> run.
-      - status: ok          -> skip (done).
-      - status: failed      -> skip unless retry_failed=True.
-      - status: partial     -> always retry; partial steps are definitionally
-                               incomplete (some episodes failed or the run was
-                               interrupted), so they need a full re-run.
-      - status: skipped     -> run again (skipped = cancelled, deserves a fresh try).
-      - status: in_progress -> run again (interrupted mid-flight).
-    """
+    """Return the list of steps that still need to be run."""
     state_steps = run_dir.state.steps
-    steps: list[Step] = []
-    seen: set[str] = set()
-    for contestant in contest.contestants:
-        for stage in suite.stages:
-            step = Step(
-                contestant=contestant,
-                stage=stage,
-                episodes=int(round(stage.episodes * scale_episodes)),
-                record_dir=record_root / "recordings" / contestant.name / stage.name,
-            )
-            if step.key in seen:
-                raise ValueError(f"duplicate step key: {step.key!r}")
-            seen.add(step.key)
-            existing = state_steps.get(step.key)
-            if existing is None:
-                steps.append(step)
-                continue
-            if existing.status == "ok":
-                continue
-            if existing.status == "failed" and not retry_failed:
-                continue
-            # partial, skipped, in_progress, or failed+retry_failed: (re-)run.
-            steps.append(step)
-    return steps
+    pending: list[Step] = []
+    for step in _all_steps_grid(suite, contest, scale_episodes, record_root):
+        existing = state_steps.get(step.key)
+        if existing is None:
+            pending.append(step)
+            continue
+        if existing.status == "ok":
+            continue
+        if existing.status == "failed" and not retry_failed:
+            continue
+        pending.append(step)
+    return pending
+
+
+def resolve_planner_identity(contestant: Contest.Contestant) -> tuple[str, str]:
+    """Return (local_planner, inter_planner) for a contestant."""
+    mobile = (contestant.args or {}).get("mobile")
+    if isinstance(mobile, dict):
+        lp = mobile.get("local_planner")
+        if lp:
+            ip = mobile.get("inter_planner")
+            return str(lp), str(ip) if ip else "none"
+    return split_planner_name(contestant.name)
 
 
 def env_key(step: Step, simulator: str | None) -> tuple:
@@ -212,26 +237,29 @@ def env_key(step: Step, simulator: str | None) -> tuple:
     return (step.contestant.name, step.stage.robot, simulator)
 
 
-def group_pending(pending: list[Step], simulator: str | None) -> list[list[Step]]:
-    """Group consecutive steps with the same env_key, preserving suite order.
-
-    Splitting only happens when env_key changes between adjacent steps.
-    """
-    if not pending:
-        return []
-    groups: list[list[Step]] = []
-    current: list[Step] = [pending[0]]
-    current_key = env_key(pending[0], simulator)
-    for step in pending[1:]:
-        k = env_key(step, simulator)
-        if k == current_key:
-            current.append(step)
+def group_pending(steps: list[Step], simulator: str | None) -> list[list[Step]]:
+    groups = collections.defaultdict(list)
+    peds_steps = []
+    
+    for step in steps:
+        if step.is_reference and step.reference_type == "unhindered_peds":
+            peds_steps.append(step)
         else:
-            groups.append(current)
-            current = [step]
-            current_key = k
-    groups.append(current)
-    return groups
+            groups[env_key(step, simulator)].append(step)
+    
+    sorted_groups = sorted(groups.values(), key=len, reverse=True)
+    
+    for step in peds_steps:
+        placed = False
+        for g in sorted_groups:
+            if g[0].stage.robot == step.stage.robot:
+                g.append(step)
+                placed = True
+                break
+        if not placed:
+            sorted_groups.append([step])
+            
+    return sorted_groups
 
 
 def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
@@ -240,7 +268,7 @@ def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
     for k, v in d.items():
         name = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            if "min" in v and "max" in v and len(v) == 2:
+            if "min" in v and "max" in v:
                 n_name = f"{name}.n"
                 pv = ParameterValue()
                 val_min = v["min"]
@@ -255,6 +283,10 @@ def _walk_dict(d: dict, prefix: str = "") -> list[Parameter]:
                 p.name = n_name
                 p.value = pv
                 out.append(p)
+                
+                other = {ik: iv for ik, iv in v.items() if ik not in ("min", "max")}
+                if other:
+                    out.extend(_walk_dict(other, name))
                 continue
             out.extend(_walk_dict(v, name))
             continue
@@ -304,13 +336,7 @@ def _flatten_per_mode_params(
     tm_obstacles: str,
     tm_robots: str,
 ) -> tuple[list[Parameter], list[Parameter]]:
-    """Route stage.config blocks to (obstacles_params, robots_params) as leaf-keyed Parameter[].
-
-    Top-level keys in stage_config are mode names matching tm_obstacles / tm_robots
-    (e.g. ``scenario``, ``random``). Each block is flattened to leaves relative to the
-    mode (e.g. ``static.n``, ``file``) per QueueEpisode contract. ``scenario.file`` values
-    are stripped to the stem (no path/extension).
-    """
+    """Route stage.config blocks to (obstacles_params, robots_params) as leaf-keyed Parameter[]."""
     obs: list[Parameter] = []
     rob: list[Parameter] = []
     for mode, mode_dict in (stage_config or {}).items():
@@ -332,9 +358,6 @@ _LATCHED = QoSProfile(
     durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
 )
 
-# Failures that mean the env itself is unusable, so the rest of the group
-# (and possibly the run) cannot proceed. Episode-level failures (no record,
-# timeout, robot got stuck, etc.) are NOT systemic, the next step can still run.
 _SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP)
 
 
@@ -389,11 +412,14 @@ class BenchmarkRunner(ArenaMixinNode):
 
         self._episode_records: dict[int, dict[int, EpisodeRecord]] = {}
         self._env_subs: dict[int, list] = {}
+        self._recorder_clients: dict[int, ClientWrapper] = {}
+        self._triggered_episodes: dict[int, set[int]] = {}
 
         self.create_subscription(EnvRegistry, "/arena/state/envs", self._on_envs, _LATCHED)
         self._state_pub = self.create_publisher(BenchmarkState, STATE_TOPIC, _LATCHED)
 
         self._arena_proc: subprocess.Popen | None = None
+        self._parent_episode_map: dict[tuple[str, str, int], int] = {}
 
     def _build_pending(self) -> list[Step]:
         return build_pending(
@@ -415,13 +441,10 @@ class BenchmarkRunner(ArenaMixinNode):
         self._env_records = {e.env_id: e for e in msg.envs}
 
     def _build_launch_args(self, step: Step) -> list[str]:
-        return build_launch_args(step, self._simulator)
+        return build_launch_args(step, self._simulator, passthrough=self._arena_passthrough)
 
     async def _await_env_visible(self, env_id: int) -> None:
-        """Wait for env_id to appear on /arena/state/envs.
-
-        No timeout. If the env never appears, this waits indefinitely (Ctrl+C to abort).
-        """
+        """Wait for env_id to appear on /arena/state/envs."""
         if env_id in self._env_records:
             return
         await self._await_hb(self._env_visible_events.setdefault(env_id, asyncio.Event()).wait(), f"env {env_id} to appear on /arena/state/envs")
@@ -442,10 +465,7 @@ class BenchmarkRunner(ArenaMixinNode):
             raise
 
     async def _await_or_env_died(self, env_id: int, awaitable: typing.Awaitable[_T]) -> _T:
-        """Race awaitable against env death. Raises _EnvDied if env_id disappears first.
-
-        No-op (returns awaitable's result) if env_id is not currently registered (pre-spawn).
-        """
+        """Race awaitable against env death. Raises _EnvDied if env_id disappears first."""
         death = self._env_gone_events.setdefault(env_id, asyncio.Event())
         op_task = asyncio.ensure_future(awaitable)
         death_task = asyncio.ensure_future(death.wait())
@@ -492,10 +512,38 @@ class BenchmarkRunner(ArenaMixinNode):
         await self._await_hb(queue_client.ensure(timeout_sec=None), f"queue_episode service on env {env_id}")
         self._queue_clients[env_id] = queue_client
 
+        self._recorder_clients[env_id] = self.create_client_wrapper(
+            RecordEpisode, f"{env_ns_root}/start_episode"
+        )
+        self._triggered_episodes[env_id] = set()
+
         def _on_episode_record(msg: EpisodeRecord) -> None:
             recs = self._episode_records.get(env_id)
             if recs is not None:
                 recs[msg.episode_id] = msg
+            label = _EPISODE_OUTCOME_LABELS.get(msg.outcome_state, f"UNKNOWN({msg.outcome_state})")
+            _log.info(
+                f"[env {env_id}] episode record: id={msg.episode_id} "
+                f"outcome={msg.outcome_state} ({label}) info={msg.outcome_info!r}"
+            )
+            if msg.outcome_state in (EpisodeRecord.QUEUED, EpisodeRecord.RUNNING):
+                triggered = self._triggered_episodes.get(env_id)
+                if triggered is not None and msg.episode_id not in triggered:
+                    triggered.add(msg.episode_id)
+                    rc = self._recorder_clients.get(env_id)
+                    if rc is not None:
+                        _log.info(f"[env {env_id}] signalling recorder to start episode {msg.episode_id}")
+                        req = RecordEpisode.Request()
+                        req.command = RecordEpisode.Request.COMMAND_START
+                        req.episode_id = msg.episode_id
+                        fut = rc.client.call_async(req)
+                        fut.add_done_callback(
+                            lambda f, eid=msg.episode_id: _log.warning(
+                                f"[env {env_id}] recorder start_episode({eid}) failed: {f.exception()}"
+                            ) if f.exception() else _log.info(
+                                f"[env {env_id}] recorder confirmed start of episode {eid}"
+                            )
+                        )
 
         sub_ep = self.create_subscription(
             EpisodeRecord,
@@ -515,6 +563,10 @@ class BenchmarkRunner(ArenaMixinNode):
         qc = self._queue_clients.pop(env_id, None)
         if qc is not None:
             qc.client.destroy()
+        rc = self._recorder_clients.pop(env_id, None)
+        if rc is not None:
+            rc.client.destroy()
+        self._triggered_episodes.pop(env_id, None)
         self._episode_records.pop(env_id, None)
         self._env_visible_events.pop(env_id, None)
 
@@ -527,11 +579,34 @@ class BenchmarkRunner(ArenaMixinNode):
         req.tm_obstacles = step.stage.tm_obstacles.value
         req.tm_modules = []
         req.keep_modules = False
+        stage_config = step.stage.config or {}
+        if step.is_reference and step.reference_type == "unobstructed_robot":
+            import copy
+            stage_config = copy.deepcopy(stage_config)
+            mode_block = stage_config.setdefault(step.stage.tm_obstacles.value, {})
+            if isinstance(mode_block, dict):
+                mode_block["dynamic"] = {"min": 0, "max": 0}
+
         obs_params, rob_params = _flatten_per_mode_params(
-            step.stage.config,
+            stage_config,
             tm_obstacles=step.stage.tm_obstacles.value,
             tm_robots=step.stage.tm_robots.value,
         )
+        if step.is_reference:
+            if step.reference_type == "unobstructed_robot":
+                pass
+            elif step.reference_type == "unhindered_peds":
+                req.tm_robots = "stationary"
+                rob_params = [
+                    Parameter(
+                        name="pos_x",
+                        value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
+                    ),
+                    Parameter(
+                        name="pos_y",
+                        value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
+                    )
+                ]
         req.obstacles_params = obs_params
         req.robots_params = rob_params
         resp = await self.await_ros(queue.client.call_async(req))
@@ -553,7 +628,7 @@ class BenchmarkRunner(ArenaMixinNode):
             for ep_idx in range(step.episodes):
                 goal = RunEpisode.Goal()
                 goal.world = step.stage.map
-                goal.seed = step.stage.seed
+                goal.seed = (step.stage.seed + ep_idx) if step.stage.seed is not None else ep_idx
 
                 ep_started_sim = self.sim_time.to_seconds()
                 ep_started_wall = time.time()
@@ -578,19 +653,20 @@ class BenchmarkRunner(ArenaMixinNode):
                         episodes_total=step.episodes,
                     )
 
+                timeout_s = step.stage.timeout
+                if step.is_reference and step.reference_type == "unhindered_peds" and step.stage.timeout_peds is not None:
+                    timeout_s = step.stage.timeout_peds
+
                 try:
                     result_obj = await asyncio.wait_for(
                         self._await_or_env_died(env_id, ac.await_result(goal_handle)),
-                        timeout=step.stage.timeout,
+                        timeout=timeout_s,
                     )
                 except TimeoutError:
                     episodes_failed += 1
-                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {step.stage.timeout}s; cancelling and advancing")
+                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {timeout_s}s; cancelling and advancing")
                     try:
-                        await asyncio.wait_for(
-                            self._await_or_env_died(env_id, self.await_ros(goal_handle.cancel_goal_async())),
-                            timeout=_CANCEL_SETTLE_S,
-                        )
+                        await self.await_ros(goal_handle.cancel_goal_async())
                         await asyncio.wait_for(
                             self._await_or_env_died(env_id, ac.await_result(goal_handle)),
                             timeout=_CANCEL_SETTLE_S,
@@ -653,6 +729,38 @@ class BenchmarkRunner(ArenaMixinNode):
                 }.get(rec.outcome_state, str(rec.outcome_state))
                 _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s")
 
+                if rec.outcome_state in (
+                    EpisodeRecord.SUCCESS,
+                    EpisodeRecord.FAILED,
+                    EpisodeRecord.SKIPPED,
+                    EpisodeRecord.FATAL,
+                ):
+                    rc = self._recorder_clients.get(env_id)
+                    if rc is not None:
+                        req = RecordEpisode.Request()
+                        req.command = RecordEpisode.Request.COMMAND_STOP
+                        req.episode_id = episode_id
+                        req.outcome_state = rec.outcome_state
+                        req.outcome_info = rec.outcome_info
+                        try:
+                            resp = await rc.call_timeout(req, timeout_sec=5.0)
+                            if resp is None:
+                                _log.warning(f"[env {env_id}] recorder stop_episode({episode_id}) timed out")
+                            else:
+                                _log.info(f"[env {env_id}] recorder stopped episode {episode_id} ({state_label})")
+                        except Exception as exc:
+                            _log.warning(f"[env {env_id}] recorder stop_episode({episode_id}) failed: {exc}")
+
+                parent_ep_id = None
+                if not step.is_reference:
+                    self._parent_episode_map[(step.contestant.name, step.stage.name, ep_idx)] = episode_id
+                    self._parent_episode_map[("__stage__", step.stage.name, ep_idx)] = episode_id
+                else:
+                    if step.reference_type == "unobstructed_robot":
+                        parent_ep_id = self._parent_episode_map.get((step.contestant.name, step.stage.name, ep_idx))
+                    else:
+                        parent_ep_id = self._parent_episode_map.get(("__stage__", step.stage.name, ep_idx))
+
                 ts_iso = datetime.datetime.now(tz=datetime.UTC).isoformat()
                 self._run_dir.progress.append(
                     ts_iso=ts_iso,
@@ -665,6 +773,9 @@ class BenchmarkRunner(ArenaMixinNode):
                     episode_record=rec,
                     started_at=ep_started_sim,
                     ended_at=ep_ended_sim,
+                    parent_episode_id=parent_ep_id,
+                    is_reference=step.is_reference,
+                    reference_type=step.reference_type,
                 )
         except _EnvDied as exc:
             _log.warning(f"{step.key} env={env_id} env died mid-step after run={episodes_run}, failed={episodes_failed}: {exc}")
@@ -746,6 +857,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 await self._await_hb(self._despawn.call_forever(dreq), f"despawn of env {env_id}")
             with contextlib.suppress(asyncio.TimeoutError, Exception):
                 await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
+        await asyncio.sleep(2.0)
 
     async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
         env_id: int | None = None
@@ -1106,18 +1218,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
 
 def _all_steps(contest: Contest, suite: Suite, scale_episodes: float) -> list[Step]:
-    steps: list[Step] = []
-    for contestant in contest.contestants:
-        for stage in suite.stages:
-            steps.append(
-                Step(
-                    contestant=contestant,
-                    stage=stage,
-                    episodes=int(round(stage.episodes * scale_episodes)),
-                    record_dir=None,
-                )
-            )
-    return steps
+    return _all_steps_grid(suite, contest, scale_episodes, record_root=None)
 
 
 def _is_inline_contest(contest_name: str) -> bool:
@@ -1192,7 +1293,7 @@ def _default_run_id(suite_name: str, contest_name: str) -> str:
     return f"{ts}-{suite_stem}-{contest_stem}"
 
 
-_KV_RE = re.compile(r"^[\w.]+:=.*$")
+_KV_RE = re.compile(r"^[\w\.\-]+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
@@ -1220,6 +1321,11 @@ def cli_main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--retry-failed", action="store_true")
     p.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable system resource profiling. Writes simulation_profile.yaml with peak/mean CPU, GPU, RAM, and disk I/O stats.",
+    )
+    p.add_argument(
         "--noexit",
         action="store_true",
         help="On completion, leave arena_runtime.launch.py and the last env running so you can poke at it. Recording stops with the last episode as usual.",
@@ -1234,6 +1340,10 @@ def cli_main(argv: list[str] | None = None) -> int:
     for arg in extras:
         k, v = arg.split(":=", 1)
         arena_passthrough[k] = v
+
+    env_n = int(arena_passthrough.get("env_n", "1"))
+    headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
+    simulator = arena_passthrough.get("sim", None)
 
     try:
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
@@ -1266,7 +1376,6 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
-            arena_passthrough = {**suite.launch_args, **man.launch_args, **arena_passthrough}
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
@@ -1275,11 +1384,6 @@ def cli_main(argv: list[str] | None = None) -> int:
             suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
-            arena_passthrough = {**suite.launch_args, **arena_passthrough}
-            simulator = arena_passthrough.get("sim", None)
-
-        env_n = int(arena_passthrough.get("env_n", "1"))
-        headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
 
         steps = _all_steps(contest, suite, scale_episodes)
         if not steps:
@@ -1304,6 +1408,8 @@ def cli_main(argv: list[str] | None = None) -> int:
                     "contestant": attrs.asdict(c.contestant),
                     "stage": {k: v.value if isinstance(v, (Constants.TaskMode.TM_Robots, Constants.TaskMode.TM_Obstacles)) else v for k, v in c.stage._asdict().items()},
                     "episodes_planned": c.episodes,
+                    "is_reference": getattr(c, "is_reference", False),
+                    "reference_type": getattr(c, "reference_type", None),
                 }
                 for c in steps
             ]
@@ -1323,7 +1429,6 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
-                launch_args=dict(arena_passthrough),
             )
             run_dir = RunDir.create(data_root, run_id, manifest)
     except FileNotFoundError as exc:
@@ -1342,6 +1447,13 @@ def cli_main(argv: list[str] | None = None) -> int:
 
     run_dir.attach_log_handler(logging.getLogger())
 
+    profiler = None
+    if args.profile:
+        from .profiler import SimulationProfiler
+
+        profiler = SimulationProfiler(output_dir=run_dir.path, sample_hz=2.0)
+        profiler.start()
+
     try:
         BenchmarkRunner.run_main(
             suite=suite,
@@ -1358,9 +1470,11 @@ def cli_main(argv: list[str] | None = None) -> int:
         )
     except KeyboardInterrupt:
         return 130
+    finally:
+        if profiler is not None:
+            profiler.stop()
     return BenchmarkRunner.exit_code
 
 
-# Convenience: allow `python -m arena_evaluation.benchmark.runner`
 if __name__ == "__main__":
     raise SystemExit(cli_main())

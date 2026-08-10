@@ -12,18 +12,27 @@ import typing
 
 class RunMetadata(BaseModel):
     """
-    Metadata for a benchmark run, serialized to metadata.yaml.
+    Metadata for a single episode, serialized to episode_XXX.yaml.
     """
     benchmark_id: str
     planner: str
     robot_model: list[str] = Field(default_factory=list)
     map: str
     stage: str
-    episodes_requested: int
-    suite_name: str
-    contest_name: str
-    inter_planner: str
-    agent_name: str
+    episode_id: int | None = None
+    episodes_requested: int = 0
+    suite_name: str = ""
+    contest_name: str = ""
+    local_planner: str = ""
+    inter_planner: str = ""
+    agent_name: str = ""
+    # Sim-side episode id (task_generator counter) for correlating with
+    # progress.csv / the runner's episode records.
+    task_generator_episode_id: int | None = None
+    # Terminal outcome written by the runner's stop_episode service call
+    # (QUEUED=0, RUNNING=1, SUCCESS=2, FAILED=3, SKIPPED=4, FATAL=5).
+    outcome_state: int | None = None
+    outcome_info: str = ""
     recording_started_at: str
     arena_git_sha: str | None = None
     arena_git_dirty: bool = False
@@ -45,14 +54,22 @@ class RunMetadata(BaseModel):
     episodes_valid: int | None = None
     pipeline_version: str | None = None
 
+    rosbag2_message_count: int | None = None
+    rosbag2_topics: list[typing.Any] | None = None
+
+    env_ns_root: str | None = None
+    is_reference: bool = False
+    reference_type: str | None = None
+    parent_episode_id: int | None = None
+
 
 @dataclass(frozen=True)
 class RobotParams:
     """Robot physical parameters loaded at runtime."""
-    model: str
-    robot_radius: float
-    laser_min_range: float
-    laser_max_range: float
+    model: str = "unknown"
+    robot_radius: float = 0.25
+    laser_min_range: float = 0.0
+    laser_max_range: float = 30.0
 
     @classmethod
     def load(cls, model: str) -> "RobotParams":
@@ -78,7 +95,7 @@ class RobotParams:
                 radius = float(caps_content.get("radius", radius))
         except Exception:
             pass
-        
+
         return cls(
             model=model,
             robot_radius=radius,
@@ -89,11 +106,24 @@ class RobotParams:
 
 @dataclass(frozen=True)
 class RunDescriptor:
-    """Describes a single run discovered by FolderManager."""
+    """Describes a single run (step) discovered by FolderManager. Legacy."""
     run_dir: str
     benchmark_id: str
     planner: str
     stage: str
+
+
+@dataclass(frozen=True)
+class EpisodeDescriptor:
+    """Describes a single episode discovered in the flat episodes/ folder structure."""
+    episode_dir: str
+    benchmark_id: str
+    episode_id: int
+    planner: str
+    stage: str
+    map: str = "unknown"
+    is_reference: bool = False
+    reference_type: str | None = None
 
 
 @dataclass
@@ -107,7 +137,11 @@ class TopicBundle:
     episode_record: pl.DataFrame | None = None
     collision_events: pl.DataFrame | None = None
     collision_monitor_state: pl.DataFrame | None = None
+    power: pl.DataFrame | None = None
+    energy: pl.DataFrame | None = None
+    acoustics: pl.DataFrame | None = None
     plan: pl.DataFrame | None = None
+    characterization_phase: pl.DataFrame | None = None
     initialpose: pl.DataFrame | None = None
     tf: pl.DataFrame | None = None
     tf_static: pl.DataFrame | None = None
@@ -126,7 +160,9 @@ class AlignedEpisodeBundle:
     robot_name: str | None = None
     semantic_snapshot: pl.DataFrame | None = None
     conditions: list[dict] | None = None
-    env_offset: tuple[float, float] | None = (0.0, 0.0)
+    run: typing.Any = None # RunDescriptor
+    folder_manager: typing.Any = None # FolderManager
+    peds: pl.DataFrame | None = None # Raw pedestrian dataframe
 
 
 class PlotSpec(BaseModel):
@@ -138,6 +174,9 @@ class PlotSpec(BaseModel):
     group_by: list[str] | str | None = None
     differentiate: str | None = "planner"
     auto_differentiate: bool = True
-    filter: dict[str, str] | None = None
+    filter: dict[str, typing.Any] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
+    # Per-plot data source override (e.g. "characterization_summary" when the
+    # manifest default is "characterization_samples"). None = manifest default.
+    data_source: str | None = None

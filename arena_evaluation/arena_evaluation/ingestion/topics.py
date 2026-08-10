@@ -19,44 +19,13 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
     from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
     from sensor_msgs.msg import JointState
     from nav_msgs.msg import Path
+    from std_msgs.msg import String
     from tf2_msgs.msg import TFMessage
-
-    try:
-        from arena_people_msgs.msg import Pedestrians
-        HAS_PEDSIM = True
-    except ImportError:
-        Pedestrians = type("Pedestrians", (), {})
-        HAS_PEDSIM = False
-
-    try:
-        from arena_humansim_msgs.msg import AgentStates
-        HAS_HUMANSIM = True
-    except ImportError:
-        AgentStates = type("AgentStates", (), {})
-        HAS_HUMANSIM = False
-
-    try:
-        from task_generator_msgs.msg import EpisodeRecord, RobotFleet, SemanticSnapshot
-        HAS_TASK_GEN = True
-    except ImportError:
-        EpisodeRecord = type("EpisodeRecord", (), {})
-        RobotFleet = type("RobotFleet", (), {})
-        SemanticSnapshot = type("SemanticSnapshot", (), {})
-        HAS_TASK_GEN = False
-
-    try:
-        from arena_robots_msgs.msg import CollisionEvents
-        HAS_COLLISION = True
-    except ImportError:
-        CollisionEvents = type("CollisionEvents", (), {})
-        HAS_COLLISION = False
-
-    try:
-        from nav2_msgs.msg import CollisionMonitorState
-        HAS_NAV2_COLLISION = True
-    except ImportError:
-        CollisionMonitorState = type("CollisionMonitorState", (), {})
-        HAS_NAV2_COLLISION = False
+    from arena_people_msgs.msg import Pedestrians
+    from arena_humansim_msgs.msg import AgentStates
+    from task_generator_msgs.msg import EpisodeRecord, RobotFleet, SemanticSnapshot
+    from arena_robots_msgs.msg import CollisionEvents, Power, Energy, Acoustics
+    from nav2_msgs.msg import CollisionMonitorState
 
     ns = f"/{namespace}" if namespace else ""
     p_ns = f"/{parent_namespace}" if parent_namespace else ""
@@ -71,36 +40,17 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "initialpose": TopicDefinition(f"{p_ns}/initialpose", PoseWithCovarianceStamped, throttled=False),
         "tf": TopicDefinition("/tf", TFMessage, throttled=True),
         "tf_static": TopicDefinition("/tf_static", TFMessage, throttled=False, qos_transient_local=True),
+        "peds": TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True),
+        "agent_states": TopicDefinition(f"{p_ns}/agent_states", AgentStates, throttled=True),
+        "episode_record": TopicDefinition(f"{p_ns}/state/episode", EpisodeRecord, throttled=False, qos_transient_local=True),
+        "robots_fleet": TopicDefinition(f"{p_ns}/state/robots", RobotFleet, throttled=False, qos_transient_local=True),
+        "semantic_snapshot": TopicDefinition(f"{p_ns}/state/semantics", SemanticSnapshot, throttled=False, qos_transient_local=True),
+        "collision_events": TopicDefinition(f"{ns}/collision_events", CollisionEvents, throttled=False),
+        "power": TopicDefinition(f"{ns}/power_publisher/power", Power, throttled=True),
+        "energy": TopicDefinition(f"{ns}/power_publisher/energy", Energy, throttled=True),
+        "acoustics": TopicDefinition(f"{ns}/acoustics", Acoustics, throttled=True),
+        "characterization_phase": TopicDefinition(f"{ns}/characterization_phase", String, throttled=False),
+        "collision_monitor_state": TopicDefinition(f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False),
     }
-
-    if HAS_PEDSIM:
-        topics["peds"] = TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True)
-
-    if HAS_HUMANSIM:
-        topics["agent_states"] = TopicDefinition(f"{p_ns}/agent_states", AgentStates, throttled=True)
-
-    if HAS_TASK_GEN:
-        topics["episode_record"] = TopicDefinition(
-            f"{p_ns}/state/episode", EpisodeRecord, throttled=False,
-            qos_transient_local=False,
-        )
-        topics["robots_fleet"] = TopicDefinition(
-            f"{p_ns}/state/robots", RobotFleet, throttled=False,
-            qos_transient_local=True,
-        )
-        topics["semantic_snapshot"] = TopicDefinition(
-            f"{p_ns}/state/semantics", SemanticSnapshot, throttled=False,
-            qos_transient_local=True,
-        )
-
-    if HAS_COLLISION:
-        topics["collision_events"] = TopicDefinition(
-            f"{ns}/collision_events", CollisionEvents, throttled=False,
-        )
-
-    if HAS_NAV2_COLLISION:
-        topics["collision_monitor_state"] = TopicDefinition(
-            f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False,
-        )
 
     return topics
