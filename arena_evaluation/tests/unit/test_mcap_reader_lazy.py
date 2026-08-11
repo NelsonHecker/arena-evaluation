@@ -139,6 +139,13 @@ def test_mcap_reader_tf_gt_extraction():
         transforms = [
             MockStampedTransform(
                 frame_id="map",
+                child_frame_id="env_0/map",
+                tx=0.0,
+                ty=0.0,
+                qw=1.0
+            ),
+            MockStampedTransform(
+                frame_id="map",
                 child_frame_id="env_0/base_link",
                 tx=5.5,
                 ty=10.0,

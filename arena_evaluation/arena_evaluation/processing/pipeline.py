@@ -189,7 +189,8 @@ class ProcessingPipeline:
                     num_pedestrians=num_pedestrians,
                     robot_name=robot_name,
                     semantic_snapshot=semantic_snapshot_df,
-                    conditions=conditions
+                    conditions=conditions,
+                    map=ep.map,
                 )
                 episodes = [aligned_ep]
 

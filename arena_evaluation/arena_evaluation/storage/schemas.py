@@ -163,6 +163,7 @@ class AlignedEpisodeBundle:
     run: typing.Any = None # RunDescriptor
     folder_manager: typing.Any = None # FolderManager
     peds: pl.DataFrame | None = None # Raw pedestrian dataframe
+    map: str | None = None  # map name (e.g. "hospital_1")
 
 
 class PlotSpec(BaseModel):

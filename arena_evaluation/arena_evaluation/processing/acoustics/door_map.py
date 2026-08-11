@@ -176,17 +176,19 @@ def door_segments(
 def _entity_matches_door(door_key: str, entity: str) -> bool:
     """Check whether a semantic entity name refers to a world.yaml door.
 
-    Semantic entities arrive with an env_N/ prefix (e.g.
-    env_0/door_main) while world.yaml doors are keyed as
-    {level}/{name} (e.g. 0/door_main).  This helper normalises
-    both sides so the door-state timeline can be wired to the geometry.
+    Semantic entities arrive with an ``env_N/`` prefix and a trailing
+    ``/N`` Gazebo model-instance suffix (e.g. ``env_0/main_hallway/0``)
+    while world.yaml doors are keyed as ``{level}/{name}`` (e.g.
+    ``world/main_hallway``).  This helper strips both decorations so the
+    door-state timeline can be wired to the geometry.
     """
     import re
-    # Strip the env_N/ prefix added by the simulator
+    # Strip env_N/ prefix and trailing /N (Gazebo model instance id)
     normalized = re.sub(r"^env_\d+/", "", entity)
+    normalized = re.sub(r"/\d+$", "", normalized)
     if normalized == door_key:
         return True
-    # Fallback: match the leaf name (last path segment)
+    # Fallback: match the leaf name (last meaningful path segment)
     door_leaf = door_key.rsplit("/", 1)[-1]
     entity_leaf = normalized.rsplit("/", 1)[-1]
     return door_leaf == entity_leaf

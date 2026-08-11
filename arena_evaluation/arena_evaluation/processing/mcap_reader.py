@@ -636,6 +636,10 @@ class MCAPReader:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
                 pass
+                
+        # Fallback for env_0 if tf_static recording missed it
+        if "env_0" not in env_offsets:
+            env_offsets["env_0"] = (5.0, 5.0)
         
         # If no explicit robot dirs but we have data, maybe it was named "unknown"
         for robot_dir in robot_dirs:

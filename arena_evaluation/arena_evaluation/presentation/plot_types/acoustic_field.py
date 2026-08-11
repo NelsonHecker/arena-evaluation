@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 _CELL_FIGSIZE = (5, 4)
 _CELL_DPI = 150
 
-# Hospital ambient sound level (dBA) — color-scale floor. Matches
-# _ACOUSTIC_DEFAULTS["L_base_0"] in the characterization calculator.
-_HOSPITAL_AMBIENT_DBA = 42.0
+# Color-scale floor (dBA).  Set below hospital ambient so quiet frames still
+# show field structure rather than collapsing to solid black.
+_FIELD_VMIN_DBA = 30.0
 
 
 class AcousticFieldRenderer(BasePlotRenderer):
@@ -127,16 +127,22 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         im = plt.imshow(render_grid, cmap="inferno", origin="upper", extent=extent,
                         vmin=vmin, vmax=vmax)
+        # Subtle wall outline so room structure is always visible (even when field is dark)
+        cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
+        cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
+        wall_outline = np.flipud((mask_grid == 1).astype(np.uint8))
+        ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
+                   linewidths=0.3, alpha=0.25)
         if door_overlay is not None:
-            # Cyan contour outlines for ALL doors against the black background
+            # Cyan contour outlines for ALL doors — use meter coords so axis stays in meters
             door_vis = np.flipud(door_overlay.astype(np.uint8))
-            ax.contour(door_vis, levels=[0.5], colors=["#00ffd5"],
+            ax.contour(cx, cy, door_vis, levels=[0.5], colors=["#00ffd5"],
                        linewidths=1.2, alpha=0.85)
             # Brighter green contour for OPEN doors so open/closed state is
             # immediately visible
             if open_door_mask.any():
                 open_vis = np.flipud(open_door_mask.astype(np.uint8))
-                ax.contour(open_vis, levels=[0.5], colors=["#00ff00"],
+                ax.contour(cx, cy, open_vis, levels=[0.5], colors=["#00ff00"],
                            linewidths=2.0, alpha=0.9)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
@@ -249,7 +255,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         resolution = meta["resolution"]
         ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
         downsample = int(self.spec.options.get("downsample", 1))
-        vmin = float(self.spec.options.get("vmin", _HOSPITAL_AMBIENT_DBA))
+        vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
         mode = str(self.spec.options.get("mode", "grid")).lower()
 
         doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
@@ -268,7 +274,11 @@ class AcousticFieldRenderer(BasePlotRenderer):
             safe = self.spec.id.replace("/", "_").replace(" ", "_")
             png_path = plots_dir / f"{safe}.png"
 
-            vmax = float(np.ceil(worst["ped_max_exposure_dba"] / 10.0) * 10.0)
+            src_dba = float(worst.get("source_dba", 60.0))
+            # Boost source to 100 dBA if this frame has a collision impulse
+            if float(worst.get("ped_max_exposure_dba", 0)) >= 100.0 and src_dba < 100.0:
+                src_dba = 100.0
+            vmax = float(np.ceil(src_dba / 10.0) * 10.0)
             if vmax <= vmin:
                 vmax = vmin + 20.0
 
@@ -280,7 +290,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
             ok = self._render_cell_png(
                 grid, resolution, ox, oy,
-                worst["robot_x"], worst["robot_y"], worst["source_dba"],
+                worst["robot_x"], worst["robot_y"], src_dba,
                 worst["pedestrians"],
                 title=f"{row_label} / {col_label}  |  {worst['ped_max_exposure_dba']:.0f} dBA",
                 out_path=png_path,
@@ -321,7 +331,10 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if not entries:
             return ""
 
-        global_max = max((w["ped_max_exposure_dba"] for w, _, _ in entries), default=80.0)
+        def _eff_src(w):
+            s = float(w.get("source_dba", 60.0))
+            return 100.0 if float(w.get("ped_max_exposure_dba", 0)) >= 100.0 and s < 100.0 else s
+        global_max = max((_eff_src(w) for w, _, _ in entries), default=80.0)
         global_max = float(np.ceil(global_max / 10.0) * 10.0)
         if global_max <= vmin:
             global_max = vmin + 20.0
@@ -345,9 +358,10 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 open_set = {n for n, st in door_states.items() if st == "open"}
                 pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
 
+            cell_src = _eff_src(worst)
             ok = self._render_cell_png(
                 grid, resolution, ox, oy,
-                worst["robot_x"], worst["robot_y"], worst["source_dba"],
+                worst["robot_x"], worst["robot_y"], cell_src,
                 worst["pedestrians"],
                 title=f"{row_label} / {col_label}  |  {worst['ped_max_exposure_dba']:.0f} dBA",
                 out_path=png_path,
@@ -407,7 +421,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         resolution = meta["resolution"]
         ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
         downsample = int(self.spec.options.get("downsample", 1))
-        vmin = float(self.spec.options.get("vmin", _HOSPITAL_AMBIENT_DBA))
+        vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
 
         doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
 
@@ -415,7 +429,10 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if worst is None:
             return
 
-        vmax = float(np.ceil(worst["ped_max_exposure_dba"] / 10.0) * 10.0)
+        src_dba = float(worst.get("source_dba", 60.0))
+        if float(worst.get("ped_max_exposure_dba", 0)) >= 100.0 and src_dba < 100.0:
+            src_dba = 100.0  # collision impulse
+        vmax = float(np.ceil(src_dba / 10.0) * 10.0)
         if vmax <= vmin:
             vmax = vmin + 20.0
 
@@ -427,9 +444,9 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         self._render_cell_png(
             grid, resolution, ox, oy,
-            worst["robot_x"], worst["robot_y"], worst["source_dba"],
+            worst["robot_x"], worst["robot_y"], src_dba,
             worst["pedestrians"],
-            title=f"{self.spec.title} (Robot: {worst['source_dba']:.1f} dBA)",
+            title=f"{self.spec.title} (Robot: {src_dba:.0f} dBA)",
             out_path=out_path,
             downsample=downsample,
             vmin=vmin,
@@ -439,6 +456,29 @@ class AcousticFieldRenderer(BasePlotRenderer):
         )
 
     # ── Animation / timeseries ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_pedestrian_positions(row) -> list[tuple[float, float]]:
+        """Parse one frame's pedestrian positions (flat or nested schema)."""
+        pts: list[tuple[float, float]] = []
+        if isinstance(row, str):
+            import json
+            try:
+                row = json.loads(row)
+            except Exception:
+                row = []
+        if not isinstance(row, (list, tuple, np.ndarray)) or len(row) == 0:
+            return pts
+        if isinstance(row[0], (list, tuple, np.ndarray)):
+            for item in row:
+                if len(item) >= 2 and not np.isnan(item[0]) and not np.isnan(item[1]):
+                    pts.append((float(item[0]), float(item[1])))
+        else:
+            for j in range(0, len(row), 3):
+                if j + 1 < len(row):
+                    if not np.isnan(row[j]) and not np.isnan(row[j + 1]):
+                        pts.append((float(row[j]), float(row[j + 1])))
+        return pts
 
     @staticmethod
     def _load_episode_data(benchmark_dir: pathlib.Path, episode_id: str):
@@ -461,10 +501,16 @@ class AcousticFieldRenderer(BasePlotRenderer):
         robot_dir = robot_dirs[0]
 
         frames = []
-        # Robot ground-truth position
+        # Robot ground-truth position (prefer tf_gt, fall back to odom)
+        tf_gt_path = robot_dir / "tf_gt.parquet"
         odom_path = robot_dir / "odom.parquet"
-        if odom_path.exists():
-            frames.append(pl.scan_parquet(odom_path).select(["time_ns", "pos_x_gt", "pos_y_gt"]))
+        if tf_gt_path.exists():
+            frames.append(pl.scan_parquet(tf_gt_path).select(["time_ns", "pos_x_gt", "pos_y_gt"]))
+        elif odom_path.exists():
+            frames.append(
+                pl.scan_parquet(odom_path)
+                .select(["time_ns", pl.col("pos_x").alias("pos_x_gt"), pl.col("pos_y").alias("pos_y_gt")])
+            )
         else:
             return None
 
@@ -489,6 +535,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if peds_path.exists():
             frames.append(
                 pl.scan_parquet(peds_path).select(["time_ns", "peds_positions"])
+            )
+
+        # Collision events (for 100 dBA impulse visualisation)
+        collision_path = robot_dir / "collision_events.parquet"
+        if collision_path.exists():
+            frames.append(
+                pl.scan_parquet(collision_path)
+                .select(["time_ns", pl.col("collision_event").alias("has_collision")])
             )
 
         if not frames:
@@ -530,6 +584,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
             grid = downsample_occupancy(grid, downsample)
             resolution = resolution * downsample
 
+        # Downsample door masks to match the solver grid
+        doors_ds = {}
+        if doors:
+            for name, (mask, tl_db) in doors.items():
+                m_ds = mask[::downsample, ::downsample] if downsample > 1 else mask
+                doors_ds[name] = (m_ds, tl_db)
+        else:
+            doors_ds = doors
+
         h, w = grid.shape
         total_rows = len(df)
 
@@ -556,7 +619,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
             rx_m = row.get("pos_x_gt")
             ry_m = row.get("pos_y_gt")
-            source_dba = row.get("source_dba", _HOSPITAL_AMBIENT_DBA)
+            source_dba = row.get("source_dba", _FIELD_VMIN_DBA)
             time_ns = int(row.get("time_ns", 0))
 
             if rx_m is None or ry_m is None or np.isnan(rx_m) or np.isnan(ry_m):
@@ -566,6 +629,11 @@ class AcousticFieldRenderer(BasePlotRenderer):
             rx_px = (float(rx_m) - ox) / resolution
             ry_px = (float(ry_m) - oy) / resolution
 
+            # Collision impulse: boost source to 100 dBA so the field shows the crash
+            is_collision = bool(row.get("has_collision", False))
+            if is_collision:
+                source_dba = 100.0
+
             # Look up door state at this timestamp
             open_set: frozenset = frozenset()
             if state_timeline is not None:
@@ -574,11 +642,11 @@ class AcousticFieldRenderer(BasePlotRenderer):
             tl_key = tuple(sorted(open_set))
             pixel_tl = tl_cache.get(tl_key)
             if pixel_tl is None:
-                pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
+                pixel_tl = build_pixel_tl(grid, doors_ds, open_doors=set(open_set))
                 tl_cache[tl_key] = pixel_tl
 
             if source_dba is None or np.isnan(source_dba):
-                source_dba = _HOSPITAL_AMBIENT_DBA
+                source_dba = _FIELD_VMIN_DBA
 
             attenuations = compute_attenuations(
                 occupancy_grid=grid,
@@ -631,7 +699,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         import matplotlib.animation as animation
 
         if vmin is None:
-            vmin = _HOSPITAL_AMBIENT_DBA
+            vmin = _FIELD_VMIN_DBA
 
         fields = self.compute_field_timeseries(
             df, grid, resolution, ox, oy, doors,
@@ -654,18 +722,22 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         first_field, eff_res, (h, w), _, _ = valid[0][1]
 
-        # Build door mask for overlay
+        # Downsample grid once (same method as compute_field_timeseries)
+        if downsample > 1:
+            grid_ds = downsample_occupancy(grid, downsample)
+        else:
+            grid_ds = grid
+
+        # Build downsampled door dict matching grid_ds dimensions
+        doors_ds = {}
         door_mask_all = np.zeros((h, w), dtype=bool)
         if doors:
             for _name, (m, _tl) in doors.items():
                 m_ds = m[::downsample, ::downsample] if downsample > 1 else m
+                doors_ds[_name] = (m_ds, _tl)
                 door_mask_all |= m_ds
 
-        # Build mask_grid for NaN handling
-        if downsample > 1:
-            mask_grid = grid[::downsample, ::downsample]
-        else:
-            mask_grid = grid
+        mask_grid = grid_ds  # already at the correct resolution
 
         fig, ax = plt.subplots(figsize=(5, 4))
         ax.set_facecolor("black")
@@ -679,10 +751,10 @@ class AcousticFieldRenderer(BasePlotRenderer):
             field_dba, _, _, open_set, _ = field_data
 
             open_dm = np.zeros((h, w), dtype=bool)
-            if doors:
-                for _name, (m, _tl) in doors.items():
-                    m_ds = m[::downsample, ::downsample] if downsample > 1 else m
-                    open_dm |= m_ds & (build_pixel_tl(grid, doors, open_doors=set(open_set)) == 0.0)
+            if doors_ds:
+                pixel_tl = build_pixel_tl(grid_ds, doors_ds, open_doors=set(open_set))
+                for _name, (m_ds, _tl) in doors_ds.items():
+                    open_dm |= m_ds & (pixel_tl == 0.0)
 
             wall_or_closed = (mask_grid == 1) & ~open_dm
             rg = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
@@ -695,20 +767,30 @@ class AcousticFieldRenderer(BasePlotRenderer):
                        vmin=vmin, vmax=vmax)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
+        # Subtle wall outline so room structure is always visible
+        cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
+        cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
+        wall_outline = np.flipud((mask_grid == 1).astype(np.uint8))
+        ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
+                   linewidths=0.3, alpha=0.25)
+
         # Door contours — initial draw
         door_contour = None
         open_door_contour = None
         if show_doors and door_mask_all.any():
             door_vis = np.flipud(door_mask_all.astype(np.uint8))
-            door_contour = ax.contour(door_vis, levels=[0.5], colors=["#00ffd5"],
+            door_contour = ax.contour(cx, cy, door_vis, levels=[0.5], colors=["#00ffd5"],
                                       linewidths=1.2, alpha=0.85)
             if open_door_masks[0].any():
                 open_vis = np.flipud(open_door_masks[0].astype(np.uint8))
-                open_door_contour = ax.contour(open_vis, levels=[0.5], colors=["#00ff00"],
+                open_door_contour = ax.contour(cx, cy, open_vis, levels=[0.5], colors=["#00ff00"],
                                                linewidths=2.0, alpha=0.9)
 
         # Robot marker
         robot_dot, = ax.plot([], [], "g*", markersize=8, label="Robot")
+
+        # Pedestrian markers
+        ped_dots, = ax.plot([], [], "ro", markersize=4, label="Peds")
 
         # Robot trail
         trail_line = None
@@ -726,7 +808,29 @@ class AcousticFieldRenderer(BasePlotRenderer):
         rows = df.rows(named=True)
         total_rows = len(df)
 
+        # Pre-compute pedestrian positions and collision flags per rendered frame
+        peds_per_frame = []
+        has_collision_col = "has_collision" in df.columns
+        collision_per_frame = []
+        for fidx, _ in valid:
+            row = rows[min(fidx, total_rows - 1)]
+            # Parse pedestrian positions
+            peds_raw = row.get("peds_positions", [])
+            peds = self._parse_pedestrian_positions(peds_raw)
+            peds_per_frame.append(peds)
+            # Collision flag
+            coll = bool(row.get("has_collision", False)) if has_collision_col else False
+            collision_per_frame.append(coll)
+
+        # Red flash rectangle for collision frames (hidden initially)
+        collision_flash = plt.Rectangle((0, 0), 1, 1, transform=ax.transAxes,
+                                         facecolor="red", alpha=0.0, zorder=10)
+        ax.add_patch(collision_flash)
+        # Store previous collision state to avoid redundant patch updates
+        prev_collision = [False]  # mutable container for nonlocal
+
         def update(frame_idx_tuple):
+            nonlocal open_door_contour
             fi, field_data = frame_idx_tuple
             frame_idx = valid[fi][0]  # original index in fields list
             field_dba, _, _, open_set, source_dba = field_data
@@ -736,8 +840,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             im.set_data(rg)
 
             # Update robot position
-            row_idx = frame_idx  # use the original frame index for position lookup
-            row = rows[min(row_idx, total_rows - 1)]
+            row = rows[min(frame_idx, total_rows - 1)]
             rx_m = float(row.get("pos_x_gt", 0) or 0)
             ry_m = float(row.get("pos_y_gt", 0) or 0)
             robot_dot.set_data([rx_m], [ry_m])
@@ -749,26 +852,38 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 trail_y = robot_ys[-robot_trail:] if len(robot_ys) > robot_trail else robot_ys
                 trail_line.set_data(trail, trail_y)
 
-            # Update door contours
-            if show_doors and open_door_masks[rg_idx].any():
-                for coll in (open_door_contour.collections if open_door_contour else []):
-                    for path in coll.get_paths():
-                        coll.collections.remove(path) if hasattr(coll, 'collections') else None
-                # Remove old open-door contours and redraw
-                if open_door_contour is not None:
-                    for coll in open_door_contour.collections:
-                        coll.remove()
-                open_vis = np.flipud(open_door_masks[rg_idx].astype(np.uint8))
-                open_door_contour_new = ax.contour(open_vis, levels=[0.5], colors=["#00ff00"],
-                                                   linewidths=2.0, alpha=0.9)
+            # Update pedestrian positions
+            peds = peds_per_frame[rg_idx]
+            if peds:
+                px = [p[0] for p in peds]
+                py = [p[1] for p in peds]
+                ped_dots.set_data(px, py)
+            else:
+                ped_dots.set_data([], [])
 
+            # Collision indicator
+            is_collision = collision_per_frame[rg_idx]
+            if is_collision != prev_collision[0]:
+                collision_flash.set_alpha(0.25 if is_collision else 0.0)
+                prev_collision[0] = is_collision
+
+            # Update door contours — remove old, redraw current
+            if show_doors and open_door_masks[rg_idx].any():
+                if open_door_contour is not None:
+                    open_door_contour.remove()
+                open_vis = np.flipud(open_door_masks[rg_idx].astype(np.uint8))
+                open_door_contour = ax.contour(cx, cy, open_vis, levels=[0.5], colors=["#00ff00"],
+                                               linewidths=2.0, alpha=0.9)
+
+            collision_label = " COLLISION 100dBA!" if is_collision else ""
             title_text.set_text(
                 f"t={row.get('time_ns', 0) / 1e9:.1f}s  |  "
                 f"source={source_dba:.0f} dBA  |  "
                 f"{len(open_set)} doors open"
+                f"{collision_label}"
             )
 
-            artists = [im, robot_dot, title_text]
+            artists = [im, robot_dot, ped_dots, title_text]
             if trail_line is not None:
                 artists.append(trail_line)
             return artists
@@ -801,12 +916,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
                     ax_frame.set_facecolor("black")
                     ax_frame.imshow(rg, cmap="inferno", origin="upper", extent=extent,
                                     vmin=vmin, vmax=vmax)
+                    ax_frame.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
+                                     linewidths=0.3, alpha=0.25)
                     ax_frame.plot(rx_m, ry_m, "g*", markersize=8)
                     if show_doors and door_mask_all.any():
-                        ax_frame.contour(np.flipud(door_mask_all.astype(np.uint8)), levels=[0.5],
+                        ax_frame.contour(cx, cy, np.flipud(door_mask_all.astype(np.uint8)), levels=[0.5],
                                          colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
                         if open_dm.any():
-                            ax_frame.contour(np.flipud(open_dm.astype(np.uint8)), levels=[0.5],
+                            ax_frame.contour(cx, cy, np.flipud(open_dm.astype(np.uint8)), levels=[0.5],
                                              colors=["#00ff00"], linewidths=2.0, alpha=0.9)
                     ax_frame.set_title(f"Frame {fi}", fontsize=9)
                     plt.savefig(frame_path, dpi=dpi, bbox_inches="tight")
@@ -863,7 +980,7 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         max_frames = int(self.spec.options.get("max_frames", 120))
         stride = int(self.spec.options.get("stride", 1))
         fmt = str(self.spec.options.get("format", "gif"))
-        vmin = float(self.spec.options.get("vmin", _HOSPITAL_AMBIENT_DBA))
+        vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
 
         doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
 
@@ -910,16 +1027,14 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         if fmt == "frames":
             gif_path = out_path.with_suffix("")
 
-        vmax = float(np.ceil(worst["ped_max_exposure_dba"] / 10.0) * 10.0)
-        if vmax <= vmin:
-            vmax = vmin + 20.0
-
+        # Let render_animation auto-compute vmax from actual field data
+        # so collision impulses (100 dBA) are correctly reflected in the scale.
         self.render_animation(
             episode_df, grid, resolution, ox, oy, doors,
             state_timeline=state_timeline,
             out_path=gif_path,
             downsample=downsample, stride=stride, max_frames=max_frames,
-            fps=fps, vmin=vmin, vmax=vmax,
+            fps=fps, vmin=vmin, vmax=None,
             show_doors=bool(doors),
             fmt=fmt,
         )
