@@ -63,6 +63,12 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
         if episode.data is not None and "time_ns" in episode.data.columns and len(episode.data) > 0:
             end_time_ns = int(episode.data["time_ns"].max())
 
+        import polars as _pl
+        if isinstance(episode.data, _pl.LazyFrame):
+            episode.data = episode.data.collect()
+        if isinstance(getattr(episode, 'semantic_snapshot', None), _pl.LazyFrame):
+            episode.semantic_snapshot = episode.semantic_snapshot.collect()
+
         return {
             "time_waiting_at_doors": self._time_waiting_at_doors(events, end_time_ns),
             "elevator_rides": self._elevator_rides(events),

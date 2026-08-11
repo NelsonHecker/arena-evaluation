@@ -21,7 +21,7 @@ try:
 except ImportError:
     compute_attenuations = None
 
-from ...acoustics.door_map import door_segments, build_pixel_tl
+from ...acoustics.door_map import door_segments, build_pixel_tl, _entity_matches_door
 from ...acoustics.door_state import DoorStateTimeline
 
 logger = logging.getLogger(__name__)
@@ -117,6 +117,9 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             map_val = episode.run.map
 
         map_name = prior_results.get("map", map_val)
+        if not map_name:
+            # registry seeds calc.world from the benchmark metadata
+            map_name = getattr(self, "world", None)
         if not map_name:
             logger.warning("No map name available for episode %s — skipping acoustics", episode.episode_id)
             return nulls
@@ -381,10 +384,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             "source_dba": float(source_dba[max_idx]),
             "pedestrians": [[float(p[0]), float(p[1])] for p in worst_pts],
             "door_states": {
-                name: ("open" if name in (
-                    state_timeline.open_doors_at(int(df["time_ns"][max_idx]))
-                    if state_timeline is not None else frozenset())
-                else "closed")
+                name: ("open" if state_timeline is not None and any(
+                    _entity_matches_door(name, e)
+                    for e in state_timeline.open_doors_at(int(df["time_ns"][max_idx]))
+                ) else "closed")
                 for name in doors
             },
         }

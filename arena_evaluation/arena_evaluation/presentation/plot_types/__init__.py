@@ -9,7 +9,7 @@ from .heatmap import HeatmapRenderer
 from .timeseries import TimeseriesRenderer
 from .line import LineRenderer
 from .table import TableRenderer
-from .acoustic_field import AcousticFieldRenderer
+from .acoustic_field import AcousticFieldRenderer, AcousticFieldAnimationRenderer
 
 __all__ = [
     "ViolinRenderer",
@@ -24,4 +24,5 @@ __all__ = [
     "LineRenderer",
     "TableRenderer",
     "AcousticFieldRenderer",
+    "AcousticFieldAnimationRenderer",
 ]

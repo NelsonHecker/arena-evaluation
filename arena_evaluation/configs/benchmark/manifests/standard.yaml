@@ -368,3 +368,16 @@ plots:
     layout_group: ecological
     options:
       downsample: 1
+
+  - id: acoustic_field_animation
+    type: acoustic_field_animation
+    title: "Acoustic Field Timeline (Animated)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: ecological
+    options:
+      downsample: 2
+      fps: 10
+      max_frames: 100
+      format: gif

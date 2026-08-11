@@ -102,17 +102,22 @@ class AcousticFieldRenderer(BasePlotRenderer):
         else:
             mask_grid = grid
 
-        render_grid = np.where((mask_grid == 1) | np.isinf(field_dba), np.nan, field_dba)
+        # Build door mask (all doors) and open-door mask (carved to 0 dB)
+        door_mask = np.zeros_like(mask_grid, dtype=bool)
+        open_door_mask = np.zeros_like(mask_grid, dtype=bool)
+        if doors:
+            for _name, (m, _tl) in doors.items():
+                m_ds = m[::downsample, ::downsample] if downsample > 1 else m
+                door_mask |= m_ds
+                if pixel_tl is not None:
+                    open_door_mask |= m_ds & (pixel_tl == 0.0)
+
+        # NaN walls and closed doors, but NOT open doors — they show free-space colour
+        wall_or_closed = (mask_grid == 1) & ~open_door_mask
+        render_grid = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
         render_grid = np.flipud(render_grid)
 
-        # Downsample the door mask to match the rendered grid, for visual marking
-        door_overlay = None
-        if doors:
-            door_mask = np.zeros_like(mask_grid, dtype=bool)
-            for _name, (m, _tl) in doors.items():
-                door_mask |= m[::downsample, ::downsample] if downsample > 1 else m
-            if door_mask.any():
-                door_overlay = np.ma.masked_where(~door_mask, door_mask)
+        door_overlay = door_mask if door_mask.any() else None
 
         plt.figure(figsize=_CELL_FIGSIZE)
         ax = plt.gca()
@@ -123,10 +128,16 @@ class AcousticFieldRenderer(BasePlotRenderer):
         im = plt.imshow(render_grid, cmap="inferno", origin="upper", extent=extent,
                         vmin=vmin, vmax=vmax)
         if door_overlay is not None:
-            # doors rendered distinctly (cyan hatch) so they are visually
-            # distinguishable from plain walls
-            ax.imshow(np.flipud(door_overlay.astype(np.float32)), cmap="Blues",
-                      origin="upper", extent=extent, vmin=0, vmax=1, alpha=0.45)
+            # Cyan contour outlines for ALL doors against the black background
+            door_vis = np.flipud(door_overlay.astype(np.uint8))
+            ax.contour(door_vis, levels=[0.5], colors=["#00ffd5"],
+                       linewidths=1.2, alpha=0.85)
+            # Brighter green contour for OPEN doors so open/closed state is
+            # immediately visible
+            if open_door_mask.any():
+                open_vis = np.flipud(open_door_mask.astype(np.uint8))
+                ax.contour(open_vis, levels=[0.5], colors=["#00ff00"],
+                           linewidths=2.0, alpha=0.9)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
         plt.plot(rx_m, ry_m, "g*", markersize=8, label="Robot")
@@ -425,4 +436,514 @@ class AcousticFieldRenderer(BasePlotRenderer):
             vmax=vmax,
             pixel_tl=pixel_tl,
             doors=doors if pixel_tl is not None else None,
+        )
+
+    # ── Animation / timeseries ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _load_episode_data(benchmark_dir: pathlib.Path, episode_id: str):
+        """Load the time-aligned episode DataFrame from cached topic parquets.
+
+        Returns a Polars DataFrame with columns ``time_ns``, ``pos_x_gt``,
+        ``pos_y_gt``, ``source_dba``, ``peds_positions``, or ``None`` when
+        the topic cache is missing.
+        """
+        topics_root = benchmark_dir / "episodes" / episode_id / "topics"
+        if not topics_root.is_dir():
+            logger.warning("No topics cache at %s — run 'evaluation extract' first.", topics_root)
+            return None
+
+        # Determine robot namespace from the first robot subdirectory
+        robot_dirs = [d for d in topics_root.iterdir() if d.is_dir() and (d / "odom.parquet").exists()]
+        if not robot_dirs:
+            logger.warning("No robot odom data found in %s", topics_root)
+            return None
+        robot_dir = robot_dirs[0]
+
+        frames = []
+        # Robot ground-truth position
+        odom_path = robot_dir / "odom.parquet"
+        if odom_path.exists():
+            frames.append(pl.scan_parquet(odom_path).select(["time_ns", "pos_x_gt", "pos_y_gt"]))
+        else:
+            return None
+
+        # Source level from acoustics topic
+        acoustics_path = robot_dir / "acoustics.parquet"
+        if acoustics_path.exists():
+            frames.append(
+                pl.scan_parquet(acoustics_path)
+                .select(["time_ns", pl.col("total_level_af_dba").alias("source_dba")])
+            )
+        else:
+            # Fallback: look for acoustics in a differently-named file
+            alt_path = robot_dir / "acoustic.parquet"
+            if alt_path.exists():
+                frames.append(
+                    pl.scan_parquet(alt_path)
+                    .select(["time_ns", pl.col("total_level_af_dba").alias("source_dba")])
+                )
+
+        # Pedestrian positions
+        peds_path = topics_root / "peds.parquet"
+        if peds_path.exists():
+            frames.append(
+                pl.scan_parquet(peds_path).select(["time_ns", "peds_positions"])
+            )
+
+        if not frames:
+            return None
+
+        # Align all topics on time_ns via forward-fill ASOF join
+        df = frames[0].collect()
+        for f in frames[1:]:
+            right = f.collect()
+            df = df.join_asof(right, on="time_ns", strategy="forward")
+
+        return df
+
+    def compute_field_timeseries(
+        self,
+        df: pl.DataFrame,
+        grid: np.ndarray,
+        resolution: float,
+        ox: float,
+        oy: float,
+        doors: dict,
+        state_timeline=None,
+        downsample: int = 1,
+        stride: int = 1,
+        max_frames: int = 120,
+    ):
+        """Compute the 2D acoustic field for a sequence of episode frames.
+
+        Returns a list of ``(field_dba, eff_res, (h, w), open_set_frozen, source_dba)``
+        tuples, one per rendered frame.
+        """
+        from ...processing.acoustics.door_state import DoorStateTimeline
+
+        if compute_attenuations is None:
+            logger.warning("C++ solver not available for timeseries.")
+            return []
+
+        if downsample > 1:
+            grid = downsample_occupancy(grid, downsample)
+            resolution = resolution * downsample
+
+        h, w = grid.shape
+        total_rows = len(df)
+
+        # Determine frame indices
+        indices = list(range(0, total_rows, stride))
+        if len(indices) > max_frames:
+            indices = indices[:max_frames]
+
+        logger.info(
+            "compute_field_timeseries: %d frames (stride=%d, max=%d) on %dx%d grid",
+            len(indices), stride, max_frames, w, h,
+        )
+
+        yy, xx = np.mgrid[0:h, 0:w]
+        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
+        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
+
+        tl_cache: dict[tuple, np.ndarray] = {}
+        results: list = []
+
+        rows = df.rows(named=True)
+        for frame_idx in indices:
+            row = rows[frame_idx]
+
+            rx_m = row.get("pos_x_gt")
+            ry_m = row.get("pos_y_gt")
+            source_dba = row.get("source_dba", _HOSPITAL_AMBIENT_DBA)
+            time_ns = int(row.get("time_ns", 0))
+
+            if rx_m is None or ry_m is None or np.isnan(rx_m) or np.isnan(ry_m):
+                results.append(None)
+                continue
+
+            rx_px = (float(rx_m) - ox) / resolution
+            ry_px = (float(ry_m) - oy) / resolution
+
+            # Look up door state at this timestamp
+            open_set: frozenset = frozenset()
+            if state_timeline is not None:
+                open_set = state_timeline.open_doors_at(time_ns)
+
+            tl_key = tuple(sorted(open_set))
+            pixel_tl = tl_cache.get(tl_key)
+            if pixel_tl is None:
+                pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
+                tl_cache[tl_key] = pixel_tl
+
+            if source_dba is None or np.isnan(source_dba):
+                source_dba = _HOSPITAL_AMBIENT_DBA
+
+            attenuations = compute_attenuations(
+                occupancy_grid=grid,
+                resolution=resolution,
+                start_x_px=rx_px,
+                start_y_px=ry_px,
+                target_xs_px=tx,
+                target_ys_px=ty,
+                wall_tl=47.0,
+                mic_distance=1.0,
+                pixel_tl=pixel_tl,
+            )
+
+            att_grid = attenuations.reshape((h, w))
+            field_dba = float(source_dba) - att_grid
+            field_dba = np.clip(field_dba, 0, None)
+            results.append((field_dba, resolution, (h, w), open_set, float(source_dba)))
+
+        logger.info("compute_field_timeseries: %d frames computed.", len([r for r in results if r is not None]))
+        return results
+
+    def render_animation(
+        self,
+        df: pl.DataFrame,
+        grid: np.ndarray,
+        resolution: float,
+        ox: float,
+        oy: float,
+        doors: dict,
+        state_timeline=None,
+        out_path: pathlib.Path | None = None,
+        downsample: int = 1,
+        stride: int = 1,
+        max_frames: int = 120,
+        fps: int = 10,
+        dpi: int = 150,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        robot_trail: int = 0,
+        show_doors: bool = True,
+        fmt: str = "gif",
+    ) -> pathlib.Path | None:
+        """Render an animated GIF/MP4/PNG-sequence of the acoustic field timeseries.
+
+        Returns the output path on success, ``None`` on failure.
+        """
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+
+        if vmin is None:
+            vmin = _HOSPITAL_AMBIENT_DBA
+
+        fields = self.compute_field_timeseries(
+            df, grid, resolution, ox, oy, doors,
+            state_timeline=state_timeline,
+            downsample=downsample, stride=stride, max_frames=max_frames,
+        )
+
+        # Filter out None frames (missing data)
+        valid = [(i, f) for i, f in enumerate(fields) if f is not None]
+        if not valid:
+            logger.warning("render_animation: no valid frames to animate.")
+            return None
+
+        # Determine vmax from data if not specified
+        if vmax is None:
+            all_max = max(np.nanmax(f[0]) for _, f in valid)
+            vmax = float(np.ceil(all_max / 10.0) * 10.0)
+            if vmax <= vmin:
+                vmax = vmin + 20.0
+
+        first_field, eff_res, (h, w), _, _ = valid[0][1]
+
+        # Build door mask for overlay
+        door_mask_all = np.zeros((h, w), dtype=bool)
+        if doors:
+            for _name, (m, _tl) in doors.items():
+                m_ds = m[::downsample, ::downsample] if downsample > 1 else m
+                door_mask_all |= m_ds
+
+        # Build mask_grid for NaN handling
+        if downsample > 1:
+            mask_grid = grid[::downsample, ::downsample]
+        else:
+            mask_grid = grid
+
+        fig, ax = plt.subplots(figsize=(5, 4))
+        ax.set_facecolor("black")
+        ax.grid(False)
+        extent = [ox, ox + w * eff_res, oy, oy + h * eff_res]
+
+        # Pre-compute per-frame render grids
+        render_grids = []
+        open_door_masks = []
+        for _, field_data in valid:
+            field_dba, _, _, open_set, _ = field_data
+
+            open_dm = np.zeros((h, w), dtype=bool)
+            if doors:
+                for _name, (m, _tl) in doors.items():
+                    m_ds = m[::downsample, ::downsample] if downsample > 1 else m
+                    open_dm |= m_ds & (build_pixel_tl(grid, doors, open_doors=set(open_set)) == 0.0)
+
+            wall_or_closed = (mask_grid == 1) & ~open_dm
+            rg = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
+            rg = np.flipud(rg)
+            render_grids.append(rg)
+            open_door_masks.append(open_dm)
+
+        # Plot the first frame
+        im = ax.imshow(render_grids[0], cmap="inferno", origin="upper", extent=extent,
+                       vmin=vmin, vmax=vmax)
+        plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
+
+        # Door contours — initial draw
+        door_contour = None
+        open_door_contour = None
+        if show_doors and door_mask_all.any():
+            door_vis = np.flipud(door_mask_all.astype(np.uint8))
+            door_contour = ax.contour(door_vis, levels=[0.5], colors=["#00ffd5"],
+                                      linewidths=1.2, alpha=0.85)
+            if open_door_masks[0].any():
+                open_vis = np.flipud(open_door_masks[0].astype(np.uint8))
+                open_door_contour = ax.contour(open_vis, levels=[0.5], colors=["#00ff00"],
+                                               linewidths=2.0, alpha=0.9)
+
+        # Robot marker
+        robot_dot, = ax.plot([], [], "g*", markersize=8, label="Robot")
+
+        # Robot trail
+        trail_line = None
+        if robot_trail > 0:
+            trail_line, = ax.plot([], [], "g-", linewidth=0.8, alpha=0.4)
+
+        title_text = ax.set_title("", fontsize=9)
+        ax.set_xlabel("X (m)", fontsize=8)
+        ax.set_ylabel("Y (m)", fontsize=8)
+        ax.tick_params(labelsize=7)
+
+        # Collect robot positions for trail
+        robot_xs = []
+        robot_ys = []
+        rows = df.rows(named=True)
+        total_rows = len(df)
+
+        def update(frame_idx_tuple):
+            fi, field_data = frame_idx_tuple
+            frame_idx = valid[fi][0]  # original index in fields list
+            field_dba, _, _, open_set, source_dba = field_data
+            rg_idx = fi  # index in render_grids list
+            rg = render_grids[rg_idx]
+
+            im.set_data(rg)
+
+            # Update robot position
+            row_idx = frame_idx  # use the original frame index for position lookup
+            row = rows[min(row_idx, total_rows - 1)]
+            rx_m = float(row.get("pos_x_gt", 0) or 0)
+            ry_m = float(row.get("pos_y_gt", 0) or 0)
+            robot_dot.set_data([rx_m], [ry_m])
+            robot_xs.append(rx_m)
+            robot_ys.append(ry_m)
+
+            if trail_line is not None:
+                trail = robot_xs[-robot_trail:] if len(robot_xs) > robot_trail else robot_xs
+                trail_y = robot_ys[-robot_trail:] if len(robot_ys) > robot_trail else robot_ys
+                trail_line.set_data(trail, trail_y)
+
+            # Update door contours
+            if show_doors and open_door_masks[rg_idx].any():
+                for coll in (open_door_contour.collections if open_door_contour else []):
+                    for path in coll.get_paths():
+                        coll.collections.remove(path) if hasattr(coll, 'collections') else None
+                # Remove old open-door contours and redraw
+                if open_door_contour is not None:
+                    for coll in open_door_contour.collections:
+                        coll.remove()
+                open_vis = np.flipud(open_door_masks[rg_idx].astype(np.uint8))
+                open_door_contour_new = ax.contour(open_vis, levels=[0.5], colors=["#00ff00"],
+                                                   linewidths=2.0, alpha=0.9)
+
+            title_text.set_text(
+                f"t={row.get('time_ns', 0) / 1e9:.1f}s  |  "
+                f"source={source_dba:.0f} dBA  |  "
+                f"{len(open_set)} doors open"
+            )
+
+            artists = [im, robot_dot, title_text]
+            if trail_line is not None:
+                artists.append(trail_line)
+            return artists
+
+        ani = animation.FuncAnimation(
+            fig, update, frames=valid, interval=1000 // fps, blit=True
+        )
+
+        if out_path is None:
+            out_path = pathlib.Path("plots") / "acoustic_animation.gif"
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            if fmt == "gif":
+                ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
+            elif fmt == "mp4":
+                ani.save(str(out_path), writer="ffmpeg", fps=fps, dpi=dpi)
+            elif fmt == "frames":
+                frames_dir = out_path.with_suffix("")
+                frames_dir.mkdir(parents=True, exist_ok=True)
+                for fi, (_, field_data) in enumerate(valid):
+                    frame_path = frames_dir / f"frame_{fi:04d}.png"
+                    field_dba, _, _, open_set, source_dba = field_data
+                    open_dm = open_door_masks[fi] if show_doors else np.zeros((h, w), dtype=bool)
+                    wall_or_closed = (mask_grid == 1) & ~open_dm
+                    rg = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
+                    rg = np.flipud(rg)
+                    fig_frame, ax_frame = plt.subplots(figsize=(5, 4))
+                    ax_frame.set_facecolor("black")
+                    ax_frame.imshow(rg, cmap="inferno", origin="upper", extent=extent,
+                                    vmin=vmin, vmax=vmax)
+                    ax_frame.plot(rx_m, ry_m, "g*", markersize=8)
+                    if show_doors and door_mask_all.any():
+                        ax_frame.contour(np.flipud(door_mask_all.astype(np.uint8)), levels=[0.5],
+                                         colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
+                        if open_dm.any():
+                            ax_frame.contour(np.flipud(open_dm.astype(np.uint8)), levels=[0.5],
+                                             colors=["#00ff00"], linewidths=2.0, alpha=0.9)
+                    ax_frame.set_title(f"Frame {fi}", fontsize=9)
+                    plt.savefig(frame_path, dpi=dpi, bbox_inches="tight")
+                    plt.close(fig_frame)
+                logger.info("Saved %d frames to %s", len(valid), frames_dir)
+            else:
+                logger.warning("Unknown format %r — falling back to gif.", fmt)
+                ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
+        except Exception as e:
+            logger.warning("Failed to save animation: %s", e)
+            plt.close(fig)
+            return None
+
+        plt.close(fig)
+        logger.info("Animation saved to %s (%d frames, %d fps)", out_path, len(valid), fps)
+        return out_path
+
+
+class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
+    """Manifest-driven acoustic field animation (GIF during report)."""
+
+    PLOT_TYPE = "acoustic_field_animation"
+
+    # ── Manifest-driven options (inherited + animation-specific) ──────────────
+    #  options.fps:         output frame rate (default 10)
+    #  options.max_frames:  cap on rendered frames (default 120)
+    #  options.stride:      render every Nth data frame (default auto)
+    #  options.downsample:  solver grid stride (default 2 for performance)
+    #  options.format:      "gif" (default) | "mp4" | "frames"
+
+    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+        """Generate an animated GIF of the worst episode's acoustic field."""
+        if compute_attenuations is None:
+            logger.warning("AcousticFieldAnimationRenderer: C++ solver not available.")
+            return
+
+        work_df = self._prepared_df(df)
+        if len(work_df) == 0:
+            return
+
+        map_name = work_df["map"][0] if "map" in work_df.columns else None
+        if not map_name:
+            return
+
+        result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
+        if result is None:
+            return
+        grid, meta = result
+        resolution = meta["resolution"]
+        ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
+
+        downsample = int(self.spec.options.get("downsample", 2))
+        fps = int(self.spec.options.get("fps", 10))
+        max_frames = int(self.spec.options.get("max_frames", 120))
+        stride = int(self.spec.options.get("stride", 1))
+        fmt = str(self.spec.options.get("format", "gif"))
+        vmin = float(self.spec.options.get("vmin", _HOSPITAL_AMBIENT_DBA))
+
+        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+
+        # Pick worst episode
+        worst = self._pick_worst_row(work_df)
+        if worst is None:
+            return
+
+        # Determine episode ID
+        episode_id = None
+        if "episode" in work_df.columns:
+            max_idx = work_df["ped_max_exposure_dba"].arg_max()
+            if max_idx is not None:
+                episode_id = f"episode_{work_df.row(max_idx, named=True).get('episode', 0):03d}"
+
+        if episode_id is None:
+            logger.warning("Cannot determine episode ID for animation.")
+            return
+
+        # Determine benchmark directory from run_dir
+        benchmark_dir = self.run_dir if self.run_dir else pathlib.Path(".")
+        if not (benchmark_dir / "episodes" / episode_id).is_dir():
+            # Try: run_dir might be the output_dir, benchmark might be a parent
+            for parent in benchmark_dir.parents:
+                if (parent / "episodes" / episode_id).is_dir():
+                    benchmark_dir = parent
+                    break
+
+        episode_df = self._load_episode_data(benchmark_dir, episode_id)
+        if episode_df is None:
+            logger.warning("No episode data for %s/%s", benchmark_dir, episode_id)
+            return
+
+        from ...processing.acoustics.door_state import DoorStateTimeline
+
+        semantic_path = benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
+        state_timeline = None
+        if semantic_path.exists():
+            semantic_df = pl.read_parquet(semantic_path)
+            state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
+
+        # Output path: replace .png extension
+        gif_path = out_path.with_suffix(f".{fmt}" if fmt != "frames" else "")
+        if fmt == "frames":
+            gif_path = out_path.with_suffix("")
+
+        vmax = float(np.ceil(worst["ped_max_exposure_dba"] / 10.0) * 10.0)
+        if vmax <= vmin:
+            vmax = vmin + 20.0
+
+        self.render_animation(
+            episode_df, grid, resolution, ox, oy, doors,
+            state_timeline=state_timeline,
+            out_path=gif_path,
+            downsample=downsample, stride=stride, max_frames=max_frames,
+            fps=fps, vmin=vmin, vmax=vmax,
+            show_doors=bool(doors),
+            fmt=fmt,
+        )
+
+    def render_plotly(self, df: pl.DataFrame) -> str:
+        """Return an HTML snippet embedding the animated GIF in the report."""
+        work_df = self._prepared_df(df)
+        if len(work_df) == 0 or compute_attenuations is None:
+            return ""
+
+        # The render_seaborn call already saved the GIF during the report build.
+        # We just need to reference it. The filename follows the spec.id convention
+        # from ReportBuilder: plots/{spec.id}.{fmt}
+        fmt = str(self.spec.options.get("format", "gif"))
+        ext = "gif" if fmt in ("gif", "mp4") else ""
+        if not ext:
+            return ""
+
+        gif_rel = f"plots/{self.spec.id}.{ext}"
+        return (
+            f'<div style="text-align:center;">'
+            f'<img src="{gif_rel}" style="max-width:100%;border-radius:4px;" '
+            f'alt="{self.spec.title}">'
+            f'<br><span style="font-size:0.78em;color:#475569;">'
+            f'{self.spec.title}'
+            f'</span></div>'
         )

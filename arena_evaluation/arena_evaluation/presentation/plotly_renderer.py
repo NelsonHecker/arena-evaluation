@@ -27,6 +27,7 @@ class PlotlyRenderer:
             LineRenderer,
             TableRenderer,
             AcousticFieldRenderer,
+            AcousticFieldAnimationRenderer,
         )
 
         self.renderers = {
@@ -42,6 +43,7 @@ class PlotlyRenderer:
             "line": LineRenderer,
             "table": TableRenderer,
             "acoustic_field": AcousticFieldRenderer,
+            "acoustic_field_animation": AcousticFieldAnimationRenderer,
         }
 
     def render(self, spec: PlotSpec, df: pl.DataFrame, run_dir: pathlib.Path | None = None) -> str | list[str] | None:

@@ -173,6 +173,24 @@ def door_segments(
         logger.info("Door geometry: %d doors from %s", len(result), world_path)
     return result
 
+def _entity_matches_door(door_key: str, entity: str) -> bool:
+    """Check whether a semantic entity name refers to a world.yaml door.
+
+    Semantic entities arrive with an env_N/ prefix (e.g.
+    env_0/door_main) while world.yaml doors are keyed as
+    {level}/{name} (e.g. 0/door_main).  This helper normalises
+    both sides so the door-state timeline can be wired to the geometry.
+    """
+    import re
+    # Strip the env_N/ prefix added by the simulator
+    normalized = re.sub(r"^env_\d+/", "", entity)
+    if normalized == door_key:
+        return True
+    # Fallback: match the leaf name (last path segment)
+    door_leaf = door_key.rsplit("/", 1)[-1]
+    entity_leaf = normalized.rsplit("/", 1)[-1]
+    return door_leaf == entity_leaf
+
 
 def build_pixel_tl(
     grid: np.ndarray,
@@ -192,7 +210,7 @@ def build_pixel_tl(
     tl = np.where(grid == 1, wall_tl_db, 0.0).astype(np.float32)
     open_doors = open_doors or set()
     for name, (mask, door_tl) in doors.items():
-        if name in open_doors:
+        if any(_entity_matches_door(name, e) for e in open_doors):
             tl[mask] = 0.0
         else:
             tl[mask] = float(door_tl)

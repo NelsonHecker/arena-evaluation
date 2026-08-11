@@ -31,7 +31,11 @@ class DoorStateTimeline:
     @classmethod
     def from_semantic_frame(cls, semantic: pl.DataFrame | None) -> "DoorStateTimeline | None":
         """Build the timeline from the flattened semantic snapshot table."""
-        if semantic is None or len(semantic) == 0:
+        if semantic is None:
+            return None
+        if hasattr(semantic, "collect") and not hasattr(semantic, "to_numpy"):
+            semantic = semantic.collect()  # lazy -> eager
+        if len(semantic) == 0:
             return None
 
         df = semantic

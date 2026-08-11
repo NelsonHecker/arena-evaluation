@@ -163,13 +163,33 @@ class ProcessingPipeline:
                     if len(peds) > 0:
                         num_pedestrians = int(peds.max())
 
+                semantic_snapshot_df = bundle.semantic_snapshot
+                if isinstance(semantic_snapshot_df, pl.LazyFrame):
+                    semantic_snapshot_df = semantic_snapshot_df.collect()
+
+                conditions = None
+                if bundle.episode_record is not None:
+                    er = bundle.episode_record
+                    if isinstance(er, pl.LazyFrame):
+                        er = er.collect()
+                    if len(er) > 0:
+                        import json
+                        try:
+                            cond_raw = er["conditions"][0] if "conditions" in er.columns else None
+                            if cond_raw:
+                                conditions = json.loads(cond_raw)
+                        except Exception:
+                            conditions = None
+
                 aligned_ep = AlignedEpisodeBundle(
                     episode_id=ep.episode_id,
                     data=aligned_df,
                     start_pos=start_pos,
                     goal_pos=goal_pos,
                     num_pedestrians=num_pedestrians,
-                    robot_name=robot_name
+                    robot_name=robot_name,
+                    semantic_snapshot=semantic_snapshot_df,
+                    conditions=conditions
                 )
                 episodes = [aligned_ep]
 

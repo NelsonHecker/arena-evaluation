@@ -23,6 +23,7 @@ class SeabornRenderer:
             HeatmapRenderer,
             LineRenderer,
             AcousticFieldRenderer,
+            AcousticFieldAnimationRenderer,
         )
 
         self.renderers = {
@@ -36,6 +37,7 @@ class SeabornRenderer:
             "heatmap": HeatmapRenderer,
             "line": LineRenderer,
             "acoustic_field": AcousticFieldRenderer,
+            "acoustic_field_animation": AcousticFieldAnimationRenderer,
         }
 
         from .color_utils import set_global_color_palette
