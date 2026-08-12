@@ -127,3 +127,90 @@ def test_report_builder_characterization_from_metrics():
         assert "W" in content               # unit-suffixed axis label
         note = (tmp_path / "report_manifest.yaml").read_text()
         assert "characterization" in note
+
+
+def test_summary_defaults_to_planner_grouping():
+    """Without summary_group_by the summary groups by PLANNER, not by
+    whichever dimension varies (stage-wise grouping was confusing)."""
+    from arena_evaluation.presentation.report_builder import (
+        ReportBuilder, _default_summary_group_cols,
+    )
+    from arena_evaluation.presentation.viz_manifest import SummarySpec
+
+    df = pl.DataFrame({
+        "local_planner": ["dwb", "dwb", "teb", "teb"],
+        "stage": ["a", "b", "a", "b"],
+        "success": [1.0, 0.9, 0.8, 0.6],
+    })
+    # Helper picks planner first.
+    assert _default_summary_group_cols(df) == ["local_planner"]
+    # Falls back to 'planner'.
+    df2 = df.rename({"local_planner": "planner"}).drop("stage")
+    assert _default_summary_group_cols(df2) == ["planner"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+        df.write_parquet(tmp_path / "combined_metrics.parquet")
+
+        manifest = VizManifest(
+            name="summary_test",
+            title="Summary Test",
+            data_source="metrics",
+            summary=[SummarySpec(metric="success", label="Success", format="{:.0%}")],
+            plots=[],
+        )
+        builder = ReportBuilder(benchmark_dir=tmp_path, manifest=manifest)
+        html = builder._generate_summary_table_manifest(df, manifest)
+        # Grouped by local_planner: two data rows (dwb, teb), header 'local_planner'.
+        assert "local_planner" in html
+        assert html.count("<tr") == 3  # header + dwb + teb (header has style attr)
+        assert ">dwb<" in html and ">teb<" in html
+        # Stage values must NOT appear as summary rows.
+        assert ">a<" not in html and ">b<" not in html
+
+
+def test_per_plot_note_rendered_below_plot():
+    """options.note (inline markdown) and options.notes_key (from notes.yaml)
+    render a note box under the plot."""
+    from arena_evaluation.presentation.viz_manifest import ManifestGroup
+    from arena_evaluation.presentation.report_builder import _render_markdown_light
+
+    # Markdown helper
+    assert "<strong>bold</strong>" in _render_markdown_light("**bold** insight")
+    assert "<a href=\"https://x\" target=\"_blank\">link</a>" in _render_markdown_light("[link](https://x)")
+    assert "<script>" not in _render_markdown_light("<script>alert(1)</script>")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+        df = pl.DataFrame({"local_planner": ["dwb"], "success": [1.0]})
+        df.write_parquet(tmp_path / "combined_metrics.parquet")
+        # notes.yaml for notes_key lookup
+        (tmp_path / "notes.yaml").write_text("- {label: Insight, value: '**Key** finding'}\n")
+
+        manifest = VizManifest(
+            name="note_test",
+            title="Note Test",
+            data_source="metrics",
+            plots=[
+                PlotSpec(
+                    id="p1", type="bar", title="P1", data_key="success",
+                    options={"note": "Inline **note**"},
+                    layout_group="overview",
+                ),
+                PlotSpec(
+                    id="p2", type="bar", title="P2", data_key="success",
+                    options={"notes_key": "Insight"},
+                    layout_group="overview",
+                ),
+            ],
+        )
+        with mock.patch("arena_evaluation.presentation.plotly_renderer.PlotlyRenderer.render",
+                        return_value="<div id='mock-plotly'></div>"), \
+             mock.patch("arena_evaluation.presentation.seaborn_renderer.SeabornRenderer.render"):
+            builder = ReportBuilder(benchmark_dir=tmp_path, manifest=manifest)
+            builder.build()
+
+        content = (tmp_path / "report.html").read_text()
+        assert content.count("class='plot-note'") == 2
+        assert "Inline <strong>note</strong>" in content
+        assert "<strong>Key</strong> finding" in content

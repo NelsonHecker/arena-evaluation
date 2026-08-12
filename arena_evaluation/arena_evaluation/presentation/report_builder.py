@@ -13,8 +13,6 @@ from .plotly_renderer import PlotlyRenderer
 from .seaborn_renderer import SeabornRenderer
 from ..processing.parquet_store import ParquetStore
 
-# Data source name → parquet filename. Any other data_source string ending in
-# ".parquet" is used verbatim as the filename in the benchmark/output dir.
 _DATA_FILES = {
     "metrics": None,
 }
@@ -43,10 +41,39 @@ def data_file_for(data_source: str | None) -> str | None:
     return None
 
 
+def _default_summary_group_cols(df: "pl.DataFrame") -> list[str]:
+    """Planner-first grouping for summary tables.
+
+    Prefers the explicit planner identity columns (local_planner, then
+    planner) so summaries compare PLANNERS by default, not whatever
+    dimension happens to vary (stage-wise grouping was confusing).
+    """
+    for col in ("local_planner", "planner"):
+        if col in df.columns:
+            return [col]
+    return []
+
+
+def _render_markdown_light(text: str) -> str:
+    """Minimal safe markdown → HTML for agent notes.
+
+    Escapes everything first, then applies: **bold**, *italic*, `code`,
+    [text](url) links, and newline → <br>.
+    """
+    import html as _html
+    import re as _re
+
+    out = _html.escape(text, quote=True)
+    out = _re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" target="_blank">\1</a>', out)
+    out = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
+    out = _re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", out)
+    out = _re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
+    out = out.replace("\n", "<br>")
+    return out
+
+
 class ReportBuilder:
-    """
-    Generates the final interactive HTML report and static PNG plots.
-    """
+    """Generates the final interactive HTML report and static PNG plots."""
 
     def __init__(
         self,
@@ -62,9 +89,6 @@ class ReportBuilder:
         self.report_path = self.output_dir / "report.html"
         self.manifest_path = self.benchmark_dir / "viz_manifest.yaml"
         self.generate_gifs = generate_gifs
-        # Explicit manifest object (from_dirs sets this); build() falls back to
-        # VizManifest.load(self.manifest_path) when None (keeps mock-based
-        # tests working).
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
         self._source_frames: dict[str, pl.DataFrame] = {}
 
@@ -78,9 +102,7 @@ class ReportBuilder:
         manifest: VizManifest | str | None = None,
         generate_gifs: bool = False,
     ) -> "ReportBuilder":
-        """
-        Build a ReportBuilder that merges data from multiple source directories.
-        """
+        """Build a ReportBuilder that merges data from multiple source directories."""
         instance = cls.__new__(cls)
         instance.benchmark_dir = source_dirs[0] if source_dirs else output_dir
         instance.output_dir = pathlib.Path(output_dir)
@@ -156,7 +178,6 @@ class ReportBuilder:
             return dfs[0]
         return pl.concat(dfs, how="diagonal_relaxed")
 
-    # ── Data source resolution ────────────────────────────────────────────────
 
     def _load_primary_frame(self, manifest: VizManifest) -> pl.DataFrame | None:
         """Load the manifest's primary data frame (from benchmark_dir)."""
@@ -211,7 +232,6 @@ class ReportBuilder:
             self._source_frames[src] = ParquetStore.read(p)[0]
         return self._source_frames[src]
 
-    # ── Build ─────────────────────────────────────────────────────────────────
 
     def build(self) -> None:
         """Execute the report building process."""
@@ -238,8 +258,6 @@ class ReportBuilder:
                     pl.Series("inter_planner", ip_list)
                 ])
 
-        # Separate contestant evaluation runs from reference runs (metrics only;
-        # characterization frames have no is_reference column → no-op).
         if "is_reference" in df.columns:
             df_contestants = df.filter(pl.col("is_reference").is_null() | (pl.col("is_reference") == False))
             if len(df_contestants) == 0:
@@ -280,12 +298,13 @@ class ReportBuilder:
 
             try:
                 html_chunk = plotly_renderer.render(spec, plot_df, run_dir=self.output_dir)
+                note_html = self._plot_note_html(spec)
                 if html_chunk:
                     if isinstance(html_chunk, list):
                         for chunk in html_chunk:
-                            html_plots.append((spec.layout_group, chunk, spec.title))
+                            html_plots.append((spec.layout_group, chunk + note_html, spec.title))
                     else:
-                        html_plots.append((spec.layout_group, html_chunk, spec.title))
+                        html_plots.append((spec.layout_group, html_chunk + note_html, spec.title))
             except Exception as e:
                 print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
 
@@ -310,6 +329,40 @@ class ReportBuilder:
         print(f"Report generated successfully: {self.report_path}")
         print(f"Static plots saved to: {self.plots_dir}")
 
+    def _plot_note_html(self, spec) -> str:
+        """Per-plot agent note, rendered under the plot.
+
+        Sources (in priority order):
+        - ``spec.options.note`` — inline markdown-ish string.
+        - ``spec.options.notes_key`` — a key into the benchmark's notes.yaml;
+          the matching note's value is shown. (Reads the same notes file the
+          table plot type consumes, so agents write one notes.yaml.)
+        Returns an empty string when neither is set.
+        """
+        opts = spec.options or {}
+        note = opts.get("note")
+        if note is None:
+            key = opts.get("notes_key")
+            if key:
+                try:
+                    import yaml as _yaml
+
+                    notes_path = self.benchmark_dir / "notes.yaml"
+                    if notes_path.is_file():
+                        data = _yaml.safe_load(notes_path.read_text())
+                        rows = data if isinstance(data, list) else (
+                            [{"label": str(k), "value": str(v)} for k, v in (data or {}).items()]
+                        )
+                        for row in rows:
+                            if isinstance(row, dict) and str(row.get("label", "")) == str(key):
+                                note = row.get("value")
+                                break
+                except Exception:
+                    note = None
+        if not note:
+            return ""
+        return f"<div class='plot-note'>{_render_markdown_light(str(note))}</div>"
+
     def _write_note_file(self, manifest: VizManifest) -> None:
         """Best-effort note recording which manifest produced this report."""
         if not manifest.name:
@@ -329,16 +382,16 @@ class ReportBuilder:
         except Exception as e:
             print(f"Warning: failed to write report_manifest.yaml note: {e}")
 
-    # ── Summary tables ────────────────────────────────────────────────────────
 
     def _generate_summary_table(self, df: pl.DataFrame) -> str:
-        """Legacy summary table (used when the manifest declares no summary)."""
-        if "planner" not in df.columns:
-            return ""
+        """Legacy summary table (used when the manifest declares no summary).
 
-        from .dimension_detector import detect_varying_dims, IDENTITY_COLS
-        varying = detect_varying_dims(df)
-        group_cols = varying if varying else ["planner"]
+        Groups by planner by default (local_planner when present), NOT by
+        whichever dimensions happen to vary (that caused stage-wise grouping).
+        """
+        group_cols = _default_summary_group_cols(df)
+        if not group_cols:
+            return ""
 
         group_cols = [c for c in group_cols if c in df.columns]
         if not group_cols:
@@ -380,22 +433,23 @@ class ReportBuilder:
         return summary.to_html(index=False, classes="dataframe")
 
     def _generate_summary_table_manifest(self, df: pl.DataFrame, manifest: VizManifest) -> str:
-        """Declarative summary table: one column per SummarySpec."""
+        """Declarative summary table: one column per SummarySpec.
+
+        Grouping: manifest.summary_group_by wins; when the manifest declares
+        none, group by planner (local_planner/planner) instead of whichever
+        dimensions vary — stage-wise grouping was confusing.
+        """
         group_by = manifest.summary_group_by
         if isinstance(group_by, str):
             group_by = [group_by]
         group_cols = [c for c in (group_by or []) if c in df.columns]
 
         if not group_cols:
-            from .dimension_detector import detect_varying_dims
-            varying = detect_varying_dims(df)
-            group_cols = [c for c in varying if c in df.columns]
+            group_cols = _default_summary_group_cols(df)
 
         if not group_cols:
             return ""
 
-        # Wide per-episode list columns (e.g. timeseries_char_*) are exploded
-        # in lockstep so per-sample metrics aggregate correctly per group.
         list_cols = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns and df.schema[c] == pl.List]
         if list_cols:
             df = df.explode(list_cols)

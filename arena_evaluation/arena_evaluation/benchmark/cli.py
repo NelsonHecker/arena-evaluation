@@ -292,6 +292,86 @@ def _cmd_tail(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ps(args: argparse.Namespace) -> int:
+    """List arena-related processes (benchmark runner, sim, nodes)."""
+    from .debug import running_processes
+
+    rows = running_processes()
+    if not rows:
+        print("no arena processes running")
+        return 0
+
+    def _elapsed(secs: float | None) -> str:
+        if secs is None:
+            return "?"
+        secs = int(secs)
+        if secs < 60:
+            return f"{secs}s"
+        if secs < 3600:
+            return f"{secs // 60}m{secs % 60:02d}s"
+        return f"{secs // 3600}h{(secs % 3600) // 60:02d}m"
+
+    w_pid = max(len("PID"), max(len(str(r["pid"])) for r in rows))
+    w_kind = max(len("KIND"), max(len(r["kind"]) for r in rows))
+    w_el = max(len("ELAPSED"), max(len(_elapsed(r["elapsed_s"])) for r in rows))
+
+    print(f"{'PID':<{w_pid}}  {'KIND':<{w_kind}}  {'ELAPSED':<{w_el}}  CMD")
+    for r in rows:
+        print(
+            f"{r['pid']:<{w_pid}}  {r['kind']:<{w_kind}}  "
+            f"{_elapsed(r['elapsed_s']):<{w_el}}  {r['command']}"
+        )
+    return 0
+
+
+def _cmd_console(args: argparse.Namespace) -> int:
+    """Tail a benchmark run's console log."""
+    from .debug import console_log_path, tail_console
+
+    run_id = args.run_id
+    if not run_id:
+        # Resolve the run id from the most recent run directory
+        run_path = _resolve_run(_data_root(), None)
+        manifest_path = run_path / "manifest.yaml"
+        from .state import Manifest
+
+        run_id = Manifest.from_yaml(manifest_path.read_text()).run_id
+
+    if args.follow:
+        seen = 0
+        printed_header = False
+        while True:
+            res = tail_console(run_id, lines=0)  # 0 = all lines
+            if not printed_header:
+                print(f"console log: {res['path']}")
+                printed_header = True
+            if res["exists"]:
+                for ln in res["lines"][seen:]:
+                    print(ln)
+                seen = len(res["lines"])
+            if not res["alive"]:
+                # Runner gone; flush anything new once more, then stop
+                if res["exists"]:
+                    for ln in res["lines"][seen:]:
+                        print(ln)
+                print("runner exited")
+                return 0
+            time.sleep(1)
+
+    res = tail_console(run_id, lines=args.lines)
+    if not res["exists"]:
+        print(f"no console log for run '{run_id}' (expected at {res['path']})")
+        print("hint: the benchmark writes runner.log as soon as it creates the run directory")
+        return 1
+    state = "running" if res["alive"] else "finished"
+    print(f"run: {run_id}  [{state}]  pid: {res['pid']}  log: {res['path']}")
+    if res.get("truncated"):
+        print(f"(last {args.lines} of {args.lines} lines — use --lines to see more)")
+    for ln in res["lines"]:
+        print(ln)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="evaluation_cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -308,6 +388,15 @@ def main(argv: list[str] | None = None) -> int:
     p_tail.add_argument("--data-root", default=None, metavar="PATH")
     p_tail.add_argument("run_id", nargs="?", default=None)
 
+    p_ps = sub.add_parser("ps", help="list running arena processes (benchmark runner, sim, nodes)")
+    p_ps.add_argument("--data-root", default=None, metavar="PATH")
+
+    p_console = sub.add_parser("console", help="tail a benchmark run's console log")
+    p_console.add_argument("--data-root", default=None, metavar="PATH")
+    p_console.add_argument("--lines", type=int, default=200, help="tail lines (default 200)")
+    p_console.add_argument("--follow", action="store_true", help="follow new output until the runner exits")
+    p_console.add_argument("run_id", nargs="?", default=None)
+
     args = parser.parse_args(argv)
 
     try:
@@ -317,6 +406,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_status(args)
         if args.command == "tail":
             return _cmd_tail(args)
+        if args.command == "ps":
+            return _cmd_ps(args)
+        if args.command == "console":
+            return _cmd_console(args)
     except SystemExit:
         raise
     except Exception as exc:

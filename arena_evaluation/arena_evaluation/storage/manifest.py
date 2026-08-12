@@ -8,9 +8,7 @@ from .exceptions import ManifestGenerationError
 
 
 class MetadataWriter:
-    """
-    Helper for reading and writing metadata.yaml files.
-    """
+    """Helper for reading and writing metadata.yaml files."""
     
     @staticmethod
     def write(metadata: RunMetadata, dest: pathlib.Path) -> None:

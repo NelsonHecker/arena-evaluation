@@ -57,6 +57,56 @@ def test_notes_inline_list():
     assert "20260808-x" in html and "3" in html
 
 
+def test_notes_render_as_standalone_callout_not_table_rows():
+    """Agent notes must appear in a callout section, never inside the
+    metric table rows (different column counts destroyed the layout)."""
+    spec = _spec(
+        group_by=["local_planner"],
+        columns=[{"metric": "success", "label": "Success", "format": "{:.0%}"}],
+        notes=[{"label": "Conclusion", "value": "DWB wins"}],
+    )
+    html = TableRenderer(spec).render_plotly(_df())
+    assert html is not None
+    assert "notes-callout" in html  # standalone callout section
+    assert "Analysis Notes" in html
+    # The note must NOT be a row of the data table — it appears inside the
+    # callout section, AFTER the data table (which comes first in the html).
+    assert "DWB wins" in html
+    assert html.index("DWB wins") > html.index("Analysis Notes")
+    assert html.index("DWB wins") > html.index("</table>")
+    # And the data table has exactly one header row with Success column.
+    assert "<th" in html and "Success" in html
+
+
+def test_agent_rows_rendered_cleanly():
+    """options.rows is an agent-authored table, exactly as given."""
+    spec = _spec(rows=[
+        {"label": "Key Finding", "value": "DWB wins on success"},
+        {"label": "Recommendation", "value": "Use DWB in corridors"},
+    ])
+    html = TableRenderer(spec).render_plotly(_df())
+    assert html is not None
+    assert "Key Finding" in html and "DWB wins on success" in html
+    assert "Recommendation" in html
+    assert "<table" in html
+    # Two-column label/value table (<th> with attribute; <thead> not counted)
+    assert html.count("<th ") == 2
+
+
+def test_rows_and_data_table_coexist():
+    spec = _spec(
+        group_by=["local_planner"],
+        columns=[{"metric": "success", "label": "Success", "format": "{:.0%}"}],
+        rows=[{"label": "Key Finding", "value": "DWB wins"}],
+        notes=[{"label": "Conclusion", "value": "Seen in the data"}],
+    )
+    html = TableRenderer(spec).render_plotly(_df())
+    assert html is not None
+    assert "88%" in html          # data table
+    assert "Key Finding" in html  # agent rows table
+    assert "notes-callout" in html and "Conclusion" in html
+
+
 def test_load_notes_text_lines():
     rows = _load_notes("First: 1\nSecond: two\n# comment\nplain line", None)
     assert {"label": "First", "value": "1"} in rows

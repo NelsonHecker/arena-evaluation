@@ -73,6 +73,7 @@
         /* Table styling */
         .table-responsive {
             overflow-x: auto;
+            overflow-y: visible;
             margin-bottom: 30px;
             background-color: #ffffff;
             border: 1px solid #cbd5e1;
@@ -126,14 +127,77 @@
             border-radius: 8px;
             padding: 20px;
             width: 100%;
+            overflow: visible;      /* never clip overflowing content */
         }
 
         .plot-wrapper {
             min-height: 500px;
-            height: auto;
+            height: auto;           /* expand with content — no fixed height */
             width: 100%;
             display: flex;
             flex-direction: column;
+            overflow: visible;
+        }
+
+        /* Agent notes — standalone callout (never inside table rows) */
+        .notes-callout {
+            margin: 14px 0 6px;
+            padding: 12px 16px;
+            background-color: #fffbeb;
+            border-left: 4px solid #f59e0b;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+
+        .notes-callout-title {
+            font-weight: 700;
+            color: #92400e;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+        }
+
+        .notes-callout-row {
+            display: flex;
+            gap: 12px;
+            padding: 4px 0;
+            border-bottom: 1px dashed #fde68a;
+        }
+
+        .notes-callout-row:last-child {
+            border-bottom: none;
+        }
+
+        .notes-callout-label {
+            flex: 0 0 30%;
+            font-weight: 600;
+            color: #78350f;
+        }
+
+        .notes-callout-value {
+            flex: 1;
+            color: #451a03;
+            white-space: normal;
+            overflow-wrap: break-word;
+        }
+
+        /* Per-plot agent note */
+        .plot-note {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background-color: #f0f9ff;
+            border-left: 3px solid #0ea5e9;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            color: #0c4a6e;
+            overflow-wrap: break-word;
+        }
+
+        .plot-note code {
+            background: #e0f2fe;
+            padding: 1px 4px;
+            border-radius: 3px;
         }
 
         /* Footer styling */
@@ -176,7 +240,7 @@
         <div class="plots-grid">
             {% for plot_html in overview_plots %}
             <div class="plot-container">
-                <div class="plot-wrapper" style="height: 600px;">
+                <div class="plot-wrapper">
                     {{ plot_html }}
                 </div>
             </div>

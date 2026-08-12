@@ -22,12 +22,7 @@ class SummarySpec(BaseModel):
 
 
 class VizManifest(BaseModel):
-    """
-    Declarative manifest configuring which plots to generate for a benchmark.
-
-    Mirrors the suite/contest declaration pattern: named YAML files in
-    ``configs/benchmark/manifests/*.yaml``, resolved by :func:`resolve_manifest`.
-    """
+    """Declarative manifest configuring which plots to generate for a benchmark."""
     manifest_version: str = "1.0"
     name: str | None = None
     title: str | None = None

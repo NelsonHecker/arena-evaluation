@@ -12,10 +12,6 @@ class FolderManager:
     """
     Manages the directory structure and paths for the Arena Evaluation Pipeline.
     Ensures all resolved paths stay within the designated data_root.
-
-    Supports two structures:
-    - Legacy: data_root / benchmark_id / recordings / planner / stage /
-    - New (flat): data_root / benchmark_id / episodes / episode_XXX /
     """
     def __init__(self, data_root: pathlib.Path | None = None):
         if data_root is None:
@@ -37,7 +33,7 @@ class FolderManager:
             raise ValueError(f"Path {resolved} is outside data_root {self.data_root}")
         return resolved
 
-    # ── New flat-episode API ───────────────────────────────────────────────────
+
 
     def episodes_dir(self, benchmark_id: str) -> pathlib.Path:
         """Return the episodes/ root for a benchmark."""

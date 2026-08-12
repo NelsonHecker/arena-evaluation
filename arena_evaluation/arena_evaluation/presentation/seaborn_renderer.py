@@ -1,5 +1,3 @@
-# SESSION SNAPSHOT (2026-08-10) — seaborn_renderer.py with unconditional run_dir.
-# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/presentation/seaborn_renderer.py
 from __future__ import annotations
 
 import pathlib

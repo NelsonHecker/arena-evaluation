@@ -26,8 +26,6 @@ class RunMetadata(BaseModel):
     local_planner: str = ""
     inter_planner: str = ""
     agent_name: str = ""
-    # Sim-side episode id (task_generator counter) for correlating with
-    # progress.csv / the runner's episode records.
     task_generator_episode_id: int | None = None
     # Terminal outcome written by the runner's stop_episode service call
     # (QUEUED=0, RUNNING=1, SUCCESS=2, FAILED=3, SKIPPED=4, FATAL=5).
@@ -70,6 +68,7 @@ class RobotParams:
     robot_radius: float = 0.25
     laser_min_range: float = 0.0
     laser_max_range: float = 30.0
+    mass: float = 14.0
 
     @classmethod
     def load(cls, model: str) -> "RobotParams":
@@ -164,6 +163,11 @@ class AlignedEpisodeBundle:
     folder_manager: typing.Any = None # FolderManager
     peds: pl.DataFrame | None = None # Raw pedestrian dataframe
     map: str | None = None  # map name (e.g. "hospital_1")
+    # Native-rate raw topic frames keyed by topic name (odom, tf_gt, peds,
+    # scan, cmd_vel, power, energy, acoustics, ...). Each frame keeps its own
+    # timestamps; metrics that are sensitive to sampling rate compute on the
+    # native time base instead of the odom-aligned `data` frame.
+    topics: dict[str, pl.DataFrame] | None = None
 
 
 class PlotSpec(BaseModel):
@@ -178,6 +182,4 @@ class PlotSpec(BaseModel):
     filter: dict[str, typing.Any] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
-    # Per-plot data source override (e.g. "characterization_summary" when the
-    # manifest default is "characterization_samples"). None = manifest default.
     data_source: str | None = None

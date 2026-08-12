@@ -32,6 +32,111 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
     result = pipeline.process_episode(ep, force_extract=force_extract)
     return ep.episode_id, result
+
+
+def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
+    """Filter null poses and slice to the longest consistent odom segment.
+
+    Mirrors ``BaseMetricCalculator.resolve_robot_pose`` but runs exactly once
+    per episode, BEFORE the registry executes, so every calculator sees the
+    identical frame (H1 fix: previously each calculator re-sliced in place,
+    which could leave timeseries from different calculators on different
+    frame ranges). Uses GT columns when present.
+    """
+    import polars as pl
+    import numpy as np
+
+    if aligned_df is None or len(aligned_df) == 0:
+        return aligned_df
+
+    if "pos_x_gt" in aligned_df.columns:
+        aligned_df = aligned_df.filter(
+            pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan()
+            & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan()
+            & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan()
+        )
+    else:
+        aligned_df = aligned_df.filter(
+            pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan()
+            & pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan()
+            & pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan()
+        )
+    if len(aligned_df) == 0:
+        return aligned_df
+
+    use_gt = "pos_x_gt" in aligned_df.columns
+    odom_x = aligned_df["pos_x_gt" if use_gt else "pos_x"].to_numpy()
+    odom_y = aligned_df["pos_y_gt" if use_gt else "pos_y"].to_numpy()
+    if len(odom_x) > 1:
+        dists = np.sqrt(np.diff(odom_x) ** 2 + np.diff(odom_y) ** 2)
+        jumps = np.where(dists > 0.5)[0]
+        if len(jumps) > 0:
+            split_indices = jumps + 1
+            segments_x = np.split(odom_x, split_indices)
+            segments_y = np.split(odom_y, split_indices)
+            best_seg_idx = -1
+            best_len = -1.0
+            for i in range(len(segments_x)):
+                seg_x, seg_y = segments_x[i], segments_y[i]
+                if len(seg_x) < 2:
+                    seg_len = 0.0
+                else:
+                    seg_len = float(np.sum(np.sqrt(np.diff(seg_x) ** 2 + np.diff(seg_y) ** 2)))
+                if seg_len >= 0.2 and seg_len > best_len:
+                    best_len = seg_len
+                    best_seg_idx = i
+            if best_seg_idx != -1:
+                start_idx = 0 if best_seg_idx == 0 else int(split_indices[best_seg_idx - 1])
+                end_idx = int(split_indices[best_seg_idx]) if best_seg_idx < len(split_indices) - 1 else len(odom_x)
+                aligned_df = aligned_df.slice(start_idx, end_idx - start_idx)
+    return aligned_df
+
+
+def _collect_native_topics(bundle) -> dict:
+    """Raw native-rate topic frames keyed by topic name (collected)."""
+    import polars as pl
+
+    topics: dict = {}
+    for field in (
+        "odom", "scan", "cmd_vel", "joint_states", "peds",
+        "collision_events", "collision_monitor_state", "power", "energy",
+        "acoustics", "tf_gt",
+    ):
+        df = getattr(bundle, field, None)
+        if df is None:
+            continue
+        if isinstance(df, pl.LazyFrame):
+            df = df.collect()
+        if df is not None and len(df) > 0:
+            topics[field] = df
+    return topics
+
+
+def _mean_warped_ped_error(actual_paths, ref_paths) -> float | None:
+    """Mean per-ped warped displacement error (m) via DTW.
+
+    Reference-based PFI: warped distance between each pedestrian's actual
+    trajectory and the unhindered_peds reference trajectory, averaged over
+    matched pedestrians.
+    """
+    import numpy as np
+
+    errors: list[float] = []
+    n = min(len(actual_paths), len(ref_paths))
+    for i in range(n):
+        a, r = actual_paths[i], ref_paths[i]
+        if a is None or r is None or len(a) < 2 or len(r) < 2:
+            continue
+        a_arr = np.asarray(a, dtype=float)
+        r_arr = np.asarray(r, dtype=float)
+        if a_arr.ndim != 2 or r_arr.ndim != 2 or a_arr.shape[1] < 2 or r_arr.shape[1] < 2:
+            continue
+        try:
+            from dtaidistance import dtw_ndim
+            errors.append(float(dtw_ndim.distance(a_arr[:, :2], r_arr[:, :2])))
+        except Exception:
+            continue
+    return float(np.mean(errors)) if errors else None
 from ..storage.manifest import MetadataWriter
 from ..benchmark.profiler import PipelineProfiler
 
@@ -140,7 +245,32 @@ class ProcessingPipeline:
                 if aligned_df is None or len(aligned_df) < 5:
                     print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid data found in MCAP after alignment")
                     continue
-                
+
+                # One-time pose resolution: filter nulls + slice to the
+                # longest consistent odom segment ONCE (H1 fix) so all
+                # calculators share the identical frame.
+                aligned_df = _resolve_odom_frame(aligned_df)
+                if aligned_df is None or len(aligned_df) < 5:
+                    print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid pose data after resolution")
+                    continue
+
+                # Native-rate topic frames (full multi-rate standard): raw
+                # per-topic parquets keep their own timestamps; rate-sensitive
+                # metrics compute on the native time base. Bounded to the
+                # episode's odom time range (+100 ms so asof joins match).
+                topics = _collect_native_topics(bundle)
+                if len(aligned_df) > 0:
+                    t0 = int(aligned_df["time_ns"][0])
+                    t1 = int(aligned_df["time_ns"][-1])
+                    tol = 100_000_000
+                    topics = {
+                        name: df.filter(
+                            (pl.col("time_ns") >= t0 - tol) & (pl.col("time_ns") <= t1 + tol)
+                        )
+                        for name, df in topics.items()
+                        if "time_ns" in df.columns
+                    }
+
                 start_pos, goal_pos = [], []
                 first_row = aligned_df.row(0, named=True)
                 last_row = aligned_df.row(-1, named=True)
@@ -191,6 +321,7 @@ class ProcessingPipeline:
                     semantic_snapshot=semantic_snapshot_df,
                     conditions=conditions,
                     map=ep.map,
+                    topics=topics,
                 )
                 episodes = [aligned_ep]
 
@@ -296,6 +427,7 @@ class ProcessingPipeline:
             print("No valid results were generated.")
             return
 
+        # ── Post-processing: ped_path_deflection_m ──────────────────
         ref_episodes_by_stage: dict[str, list[dict]] = {}
         for row in all_metrics:
             if row.get("is_reference") and row.get("reference_type") == "unhindered_peds":
@@ -323,6 +455,46 @@ class ProcessingPipeline:
                                     row["ped_path_deflection_m"] = round(float(deflect), 3)
                             except Exception:
                                 pass
+
+        # ── Post-processing: reference-based MAR / PFI (2026-08-12) ──────
+        # PFI (Pedestrian Frustration Integral) = mean per-ped warped
+        # displacement error between the actual trajectories and the
+        # unhindered_peds reference (DTW, meters).
+        # MAR (Mutual Accommodation Ratio) = that ped deviation divided by
+        # the robot's detour vs the unobstructed_robot reference path length.
+        ref_ped_by_stage: dict[str, list[dict]] = {}
+        ref_robot_by_stage: dict[str, list[dict]] = {}
+        for row in all_metrics:
+            if not row.get("is_reference"):
+                continue
+            stage = row.get("stage")
+            if row.get("reference_type") == "unhindered_peds":
+                ref_ped_by_stage.setdefault(stage, []).append(row)
+            elif row.get("reference_type") == "unobstructed_robot":
+                ref_robot_by_stage.setdefault(stage, []).append(row)
+
+        for row in all_metrics:
+            if row.get("is_reference"):
+                continue
+            stage = row.get("stage")
+            actual_paths = row.get("pedestrian_path")
+            pfi_val = None
+            if actual_paths and ref_ped_by_stage.get(stage):
+                ref_paths = ref_ped_by_stage[stage][0].get("pedestrian_path")
+                if ref_paths:
+                    try:
+                        pfi_val = _mean_warped_ped_error(actual_paths, ref_paths)
+                    except Exception:
+                        pfi_val = None
+            if pfi_val is not None:
+                row["pfi"] = round(float(pfi_val), 4)
+                ref_robots = ref_robot_by_stage.get(stage, [])
+                if row.get("path_length") is not None and ref_robots:
+                    ref_len = ref_robots[0].get("path_length")
+                    if ref_len is not None:
+                        robot_dev = max(float(row["path_length"]) - float(ref_len), 0.0)
+                        if robot_dev >= 0.01:
+                            row["mar"] = round(float(pfi_val / robot_dev), 4)
 
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
         df = pl.DataFrame(all_metrics)

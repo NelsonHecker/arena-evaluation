@@ -14,9 +14,6 @@ import pyarrow.parquet as pq
 from ..storage.schemas import TopicBundle
 
 
-# Topic → explicit PyArrow schema.  Only needed when RecordBatch.from_pydict
-# cannot infer column types from data (e.g. semantic_snapshot where each row
-# populates exactly one value_* column, leaving the rest None).
 _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
     "semantic_snapshot": pa.schema([
         ("time_ns", pa.int64()),
@@ -35,9 +32,7 @@ _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
 
 
 class MCAPReader:
-    """
-    Reads an MCAP file and produces a TopicBundle of raw DataFrames.
-    """
+    """Reads an MCAP file and produces a TopicBundle of raw DataFrames."""
     def __init__(self, data_path: pathlib.Path):
         self.data_path = data_path
 
@@ -278,6 +273,7 @@ class MCAPReader:
                             target["time_ns"].append(ts_ns)
                             target["scan_ranges"].append(list(ros_msg.ranges))
                             target["scan_min"].append(ros_msg.range_min)
+                            target["scan_range_max"].append(ros_msg.range_max)
                             appended = True
                         
                         # Cmd_vel

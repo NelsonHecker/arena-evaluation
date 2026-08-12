@@ -124,19 +124,6 @@ class DataCollector(Node):
         
         self.data = msg_scenario_reset.data
 
-    # def pedsim_callback(self, msg_pedsim: pedsim_msgs.PedsimAgentsDataframe):
-    #     self.data = [
-    #         Pedestrian(
-    #             id = agent.id,
-    #             type = agent.type,
-    #             social_state = agent.social_state,
-    #             position = [agent.pose.position.x, agent.pose.position.y],
-    #             theta = np.arctan2(agent.forces.force.y, agent.forces.force.x),
-    #             destination = [agent.destination.x, agent.destination.y]
-    #         )._asdict()
-    #         for agent
-    #         in msg_pedsim.agent_states
-    #     ]
 
 class Recorder(Node):
 
