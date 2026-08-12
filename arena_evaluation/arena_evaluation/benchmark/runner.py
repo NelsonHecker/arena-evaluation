@@ -383,9 +383,11 @@ class BenchmarkRunner(ArenaMixinNode):
         retry_failed: bool = False,
         arena_passthrough: dict[str, str] | None = None,
         noexit: bool = False,
+        suite_bundle_dir: pathlib.Path | None = None,
     ) -> None:
         super().__init__("arena_benchmark_runner")
         self._suite = suite
+        self._suite_bundle_dir = suite_bundle_dir
         self._contest = contest
         self._simulator = simulator
         self._scale_episodes = scale_episodes
@@ -1150,11 +1152,21 @@ class BenchmarkRunner(ArenaMixinNode):
         log_path = self._run_dir.path / "runner.log"
         self._arena_log_file = log_path.open("a")
 
+        # suite-bundle worlds resolve ahead of the canonical tree in every sim process
+        proc_env = None
+        if self._suite_bundle_dir is not None:
+            worlds_dir = self._suite_bundle_dir / "worlds"
+            if worlds_dir.is_dir():
+                proc_env = dict(os.environ)
+                outer = proc_env.get("ARENA_WORLD_PATH")
+                proc_env["ARENA_WORLD_PATH"] = f"{outer}:{worlds_dir}" if outer else str(worlds_dir)
+
         self._arena_proc = subprocess.Popen(
             cmd,
             stdout=self._arena_log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=proc_env,
         )
 
         await self._spawn.ensure(timeout_sec=300.0)
@@ -1270,16 +1282,42 @@ def _is_inline_suite(suite_name: str) -> bool:
     return stripped.startswith("[") or stripped.startswith("{")
 
 
-def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Contest, dict, list | dict]:
+def _resolve_suite_source(suites_dir: pathlib.Path, suite_name: str) -> tuple[pathlib.Path, pathlib.Path | None]:
+    """Resolve a suite name to (yaml path, bundle dir). Flat `<stem>.yaml` wins over
+    the directory-bundle form `<stem>/suite.yaml`; bundle dir is None for flat suites."""
+    stem = suite_name.removesuffix(".yaml")
+    flat = suites_dir / f"{stem}.yaml"
+    if flat.exists():
+        return flat, None
+    bundled = suites_dir / stem / "suite.yaml"
+    if bundled.exists():
+        return bundled, bundled.parent
+    raise FileNotFoundError(f"{flat} (or bundle {bundled})")
+
+
+def _suite_bundle_dir(suite_name: str) -> pathlib.Path | None:
+    """Re-derive the bundle dir for a suite name; None for inline or unresolvable names."""
+    if _is_inline_suite(suite_name):
+        return None
+    share = pathlib.Path(get_package_share_directory("arena_evaluation"))
+    try:
+        _, bundle_dir = _resolve_suite_source(share / "configs" / "benchmark" / "suites", suite_name)
+    except FileNotFoundError:
+        return None
+    return bundle_dir
+
+
+def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Contest, dict, list | dict, pathlib.Path | None]:
     share = pathlib.Path(get_package_share_directory("arena_evaluation"))
     bench_dir = share / "configs" / "benchmark"
 
+    suite_bundle_dir = None
     if _is_inline_suite(suite_name):
         suite_dict = yaml.safe_load(suite_name)
         suite = Suite.parse("inline", suite_dict)
     else:
         suite_stem = suite_name.removesuffix(".yaml")
-        suite_path = bench_dir / "suites" / f"{suite_stem}.yaml"
+        suite_path, suite_bundle_dir = _resolve_suite_source(bench_dir / "suites", suite_name)
         suite_dict = yaml.safe_load(suite_path.read_text())
         suite = Suite.parse(suite_stem, suite_dict)
 
@@ -1292,14 +1330,14 @@ def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Cont
         contest_dict = yaml.safe_load(contest_path.read_text())
         contest = Contest.parse(contest_stem, contest_dict)
 
-    return suite, contest, suite_dict, contest_dict
+    return suite, contest, suite_dict, contest_dict, suite_bundle_dir
 
 
 def _warn_config_drift(manifest: Manifest) -> None:
     """Non-fatal: note when the on-disk suite/contest for this run's names has drifted
     from the config the run was created with. Resume always replays the stored config."""
     try:
-        _, _, suite_dict, contest_dict = _load_suite_contest(manifest.suite_name, manifest.contest_name)
+        _, _, suite_dict, contest_dict, _ = _load_suite_contest(manifest.suite_name, manifest.contest_name)
     except FileNotFoundError:
         return
     if compute_config_hash(suite_dict, contest_dict) != manifest.config_hash:
@@ -1415,12 +1453,13 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
+            suite_bundle_dir = _suite_bundle_dir(man.suite_name)
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
             run_dir.progress.write_comment(f"resumed at {datetime.datetime.now(tz=datetime.UTC).isoformat()}")
         else:
-            suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
+            suite, contest, suite_dict, contest_dict, suite_bundle_dir = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
 
@@ -1506,6 +1545,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             retry_failed=args.retry_failed,
             arena_passthrough=arena_passthrough,
             noexit=args.noexit,
+            suite_bundle_dir=suite_bundle_dir,
         )
     except KeyboardInterrupt:
         return 130

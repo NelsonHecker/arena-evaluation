@@ -60,6 +60,15 @@ stages:
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
 | `timeout` | string | Per-episode timeout; defaults to `Constants.Robot.TIMEOUT` if absent |
 
+### Directory bundles
+
+A suite may also be a directory: `suites/<name>/suite.yaml`, with the same schema as a
+flat file. A flat `suites/<name>.yaml` takes precedence when both exist. If the bundle
+contains a `worlds/` subdirectory, the runner exports it via `ARENA_WORLD_PATH` to the
+launched runtime, so the bundled world directories resolve ahead of the canonical worlds
+tree in every sim process (an `ARENA_WORLD_PATH` already set in the outer environment
+keeps priority). See `suites/acoustics/` for an example that ships its own worlds.
+
 Suite-level `references: true` enables automatically generated reference steps
 (`unobstructed_robot` / `unhindered_peds`) per stage. The default is `false`. Enable it for
 suites whose report manifest consumes reference-episode data (e.g. pedestrian disturbance).
