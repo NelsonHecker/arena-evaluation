@@ -203,4 +203,4 @@ See the sub-package READMEs for details:
 - [processing/README.md](arena_evaluation/processing/README.md) — extraction, alignment, metrics
 - [presentation/README.md](arena_evaluation/presentation/README.md) — declarative manifests, plot types
 - [storage/README.md](arena_evaluation/storage/README.md) — schemas, paths, metadata
-- [configs/benchmark/README.md](../configs/benchmark/README.md) — suites, contests, characterization
+- [configs/benchmark/README.md](configs/benchmark/README.md) — suites, contests, characterization

@@ -60,9 +60,10 @@ stages:
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
 | `timeout` | string | Per-episode timeout; defaults to `Constants.Robot.TIMEOUT` if absent |
 
-Suite-level `references: false` disables the automatically generated reference steps
-(`unobstructed_robot` / `unhindered_peds`); characterization suites use it because the sweep
-itself is the reference.
+Suite-level `references: true` enables automatically generated reference steps
+(`unobstructed_robot` / `unhindered_peds`) per stage. The default is `false`. Enable it for
+suites whose report manifest consumes reference-episode data (e.g. pedestrian disturbance).
+Characterization suites leave it off because the sweep itself is the reference.
 
 ### Characterization suite
 

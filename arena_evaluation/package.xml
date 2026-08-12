@@ -21,6 +21,7 @@
   <depend>arena_simulation_setup</depend>
   <depend>hunav_msgs</depend>
 
+  <exec_depend>python3-shapely</exec_depend>
   <exec_depend>arena_runtime_msgs</exec_depend>
   <exec_depend>arena_rclpy_mixins</exec_depend>
   <exec_depend>task_generator</exec_depend>

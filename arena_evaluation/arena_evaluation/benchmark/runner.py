@@ -359,6 +359,7 @@ _LATCHED = QoSProfile(
 )
 
 _SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP)
+_MAX_CONSECUTIVE_SYSTEMIC = 3
 
 
 class _EnvDied(Exception):
@@ -861,6 +862,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
     async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
         env_id: int | None = None
+        systemic_streak = 0
         try:
             spawned = await self._spawn_and_setup_env(rep_step)
             if spawned is None:
@@ -1009,6 +1011,43 @@ class BenchmarkRunner(ArenaMixinNode):
                 abort = flush_cb(step_result)
                 if abort:
                     return True
+
+                # a systemic step failure means the env is likely wedged, and a dead env
+                # would otherwise eat every remaining queued step as spurious failures
+                if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
+                    systemic_streak += 1
+                    if q.empty():
+                        continue
+                    if systemic_streak >= _MAX_CONSECUTIVE_SYSTEMIC:
+                        _log.error(f"env {env_id} hit {systemic_streak} consecutive systemic failures, failing {q.qsize()} remaining step(s) without respawn")
+                        respawn_msg = "aborted after repeated systemic failures"
+                    else:
+                        _log.warning(f"env {env_id} unusable after {step.key} ({step_result.error_kind}), respawning a fresh env for {q.qsize()} remaining step(s)")
+                        await self._despawn_env(env_id)
+                        env_id = None
+                        spawned = await self._spawn_and_setup_env(rep_step)
+                        if spawned is not None:
+                            env_id, env_ns_root = spawned
+                            continue
+                        respawn_msg = "env respawn failed after a wedged env"
+                    while not q.empty():
+                        try:
+                            rem_step = q.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        if flush_cb(StepResult(
+                            rem_step.key,
+                            "failed",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.ENV_SETUP,
+                            respawn_msg,
+                            episodes_total=rem_step.episodes,
+                        )):
+                            return True
+                else:
+                    systemic_streak = 0
 
         finally:
             self._completed_groups += 1

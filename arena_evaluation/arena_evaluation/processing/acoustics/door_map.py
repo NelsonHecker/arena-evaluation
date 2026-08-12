@@ -53,10 +53,9 @@ def _find_world_yaml(map_name: str, run_dir: typing.Any = None) -> pathlib.Path 
     except Exception:
         pass
 
-    ws_roots = [
-        pathlib.Path("/opt/arena_ws/src/Arena/arena_simulation_setup/worlds"),
-        pathlib.Path("/home/nelson/arena_ws/src/Arena/arena_simulation_setup/worlds"),
-    ]
+    ws_roots = []
+    if arena_dir := os.environ.get("ARENA_DIR"):
+        ws_roots.append(pathlib.Path(arena_dir) / "arena_simulation_setup" / "worlds")
     for root in ws_roots:
         candidates.append(root / map_name / "0" / "world.yaml")
         candidates.append(root / map_name / "world.yaml")

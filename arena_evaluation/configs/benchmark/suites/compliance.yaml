@@ -1,3 +1,4 @@
+references: true
 stages:
 - name: hospital_1_conditions
   map: hospital_1

@@ -1,6 +1,3 @@
-# SESSION SNAPSHOT (2026-08-10) — current acoustic_exposure.py as of end of session.
-# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/processing/metrics/ecological/acoustic_exposure.py
-# NOTE: this is the version WITH today's fixes (ffill positions+source, per-pedestrian collision impulse).
 from __future__ import annotations
 import typing
 import logging
