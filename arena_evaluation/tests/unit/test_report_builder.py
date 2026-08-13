@@ -11,7 +11,6 @@ def test_report_builder_jinja2_rendering():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = pathlib.Path(tmpdir)
 
-        # Create dummy metrics dataframe
         df = pl.DataFrame({
             "planner": ["dwa", "mppi"],
             "success": [1.0, 0.5],
@@ -20,11 +19,9 @@ def test_report_builder_jinja2_rendering():
             "collision_amount": [0.0, 1.0],
         })
 
-        # Save dummy combined_metrics.parquet
         combined_path = tmp_path / "combined_metrics.parquet"
         df.write_parquet(combined_path)
 
-        # Setup mock manifest
         manifest = VizManifest(plots=[
             PlotSpec(
                 id="plot_1",
@@ -56,12 +53,10 @@ def test_report_builder_jinja2_rendering():
             builder = ReportBuilder(benchmark_dir=tmp_path)
             builder.build()
 
-            # Verify outputs
             report_file = tmp_path / "report.html"
             assert report_file.exists()
             assert (tmp_path / "plotly.min.js").exists()
 
-            # Read report contents and verify structure
             content = report_file.read_text()
             assert "Arena Evaluation Report" in content
             assert "Performance Summary" in content
@@ -85,7 +80,6 @@ def test_report_builder_characterization_from_metrics():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = pathlib.Path(tmpdir)
 
-        # Metrics frame: one episode row with per-sample char columns.
         df = pl.DataFrame({
             "planner": ["characterization"],
             "episode": [1],

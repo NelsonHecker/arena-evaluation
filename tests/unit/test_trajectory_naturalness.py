@@ -8,7 +8,6 @@ from arena_evaluation.processing.parquet_store import TopicParquetStore, Parquet
 from arena_evaluation.storage.folder_manager import FolderManager
 
 def test_trajectory_metrics_basic_and_irregularity():
-    # Straight line trajectory
     pos_x = np.array([0.0, 1.0, 2.0])
     pos_y = np.array([0.0, 0.0, 0.0])
     yaw = np.array([0.0, 0.0, 0.0])

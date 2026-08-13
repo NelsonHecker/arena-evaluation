@@ -219,7 +219,6 @@ class Recorder(Node):
             self.qos
         )
 
-        # Define the service for changing directory
         self.change_directory_service = self.create_service(
             arena_evaluation_srvs.ChangeDirectory,
             'change_directory',
@@ -346,6 +345,7 @@ class BagRecorder(Node):
         self.world = self.get_parameter("world").value
 
         self.base_dir = get_package_share_directory("arena_evaluation")
+        self.config = self.read_config()
         self.result_dir = os.path.join(self.base_dir, "data", self.result_dir)
         os.makedirs(self.result_dir, exist_ok=True)
         
@@ -405,8 +405,6 @@ class BagRecorder(Node):
             'change_directory',
             self.change_directory_callback
         )
-
-        # --- Setup rosbag2 writer ---
 
         bag_uri = os.path.join(self.result_dir, "my_rosbag")
         storage_options = StorageOptions(uri=bag_uri, storage_id='sqlite3')
@@ -498,8 +496,6 @@ class BagRecorder(Node):
         # Record at the configured frequency (in ms) from the configuration file
         time_diff = (current_simulation_action_time - self.current_time) / 1e6  # in ms
         # Read record frequency from config (assuming key "record_frequency" exists)
-        if not hasattr(self, 'config'):
-            self.config = self.read_config()
         if time_diff < self.config["record_frequency"]:
             return
 
@@ -536,12 +532,10 @@ class BagRecorder(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    
-    # Create an instance of BagRecorder with your desired directory (e.g., "auto:/")
+
     bag_recorder = BagRecorder("auto:/")
-    
+
     try:
-        # Spin the node so that it keeps listening to topics and recording data
         rclpy.spin(bag_recorder)
     except KeyboardInterrupt:
         print("Shutting down rosbag recorder...")

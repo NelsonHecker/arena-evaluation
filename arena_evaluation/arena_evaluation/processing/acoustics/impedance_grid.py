@@ -1,5 +1,4 @@
-# impedance_grid.py — v2 wrapper for the per-pixel TL solver.
-# Path: processing/acoustics/impedance_grid.py
+# Wrapper for the per-pixel TL solver.
 import ctypes
 import subprocess
 from pathlib import Path
@@ -13,7 +12,6 @@ _SO_FILE = _SRC_DIR / "solver.so"
 
 def _compile_solver():
     if _SO_FILE.exists():
-        # Check if cpp is newer
         if _CPP_FILE.stat().st_mtime <= _SO_FILE.stat().st_mtime:
             return
 
@@ -119,7 +117,7 @@ def compute_attenuations(
         pixel_tl = np.ascontiguousarray(pixel_tl, dtype=np.float32)
     else:
         # ctypes requires a concrete array; pass a zero buffer and let C++ use
-        # NULL semantics via a size-0 check is not possible — instead pass None
+        # NULL semantics via a size-0 check is not possible - instead pass None
         # converted below.
         pixel_tl_arr = None
 

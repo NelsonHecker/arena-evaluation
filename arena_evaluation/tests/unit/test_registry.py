@@ -34,9 +34,9 @@ def test_registry_ordering(monkeypatch):
         "calc1": Calc1(self.robot_params),
         "calc2": Calc2(self.robot_params),
     }))
-    
+
     params = RobotParams(0.2, 0.0, 10.0)
     registry = MetricRegistry(params)
-    
+
     stages = registry.execution_order()
     assert stages == [["calc1"], ["calc2"], ["calc3"]]

@@ -33,7 +33,7 @@ class DoorStateTimeline:
         """Build the timeline from the flattened semantic snapshot table."""
         if semantic is None:
             return None
-        if hasattr(semantic, "collect") and not hasattr(semantic, "to_numpy"):
+        if isinstance(semantic, pl.LazyFrame):
             semantic = semantic.collect()  # lazy -> eager
         if len(semantic) == 0:
             return None

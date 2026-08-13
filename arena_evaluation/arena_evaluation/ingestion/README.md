@@ -1,4 +1,4 @@
-# ingestion — Layer 1: Live Data Recording
+# ingestion - Layer 1: Live Data Recording
 
 This package contains the ROS 2 node that records a live simulation run into a structured MCAP file.
 
@@ -9,7 +9,7 @@ It is the **only** component that requires a running ROS 2 environment. Everythi
 ## Responsibilities
 
 - Subscribe to all relevant ROS 2 topics during a simulation run.
-- Write a **single continuous MCAP file** for the entire step (one planner × one stage × N episodes).
+- Write a **single continuous MCAP file** for the entire step (one planner x one stage x N episodes).
 - Embed `EpisodeRecord` messages directly into the MCAP stream so the processing layer can use them as episode boundary markers.
 - Write and continuously update `metadata.yaml` with run-level context.
 - Flush and close the MCAP cleanly on SIGTERM / SIGINT.
@@ -20,13 +20,13 @@ It is the **only** component that requires a running ROS 2 environment. Everythi
 
 | File | Purpose |
 |---|---|
-| `recorder.py` | `DataRecorderNode` — the main ROS 2 recording node |
-| `metadata.py` | `IngestionMetadata` helper — builds initial `RunMetadata` from environment |
+| `recorder.py` | `DataRecorderNode` - the main ROS 2 recording node |
+| `metadata.py` | `IngestionMetadata` helper - builds initial `RunMetadata` from environment |
 | `topics.py` | Topic name constants and canonical type-string mapping |
 
 ---
 
-## recorder.py — DataRecorderNode
+## recorder.py - DataRecorderNode
 
 ### How It Is Launched
 
@@ -46,28 +46,28 @@ ros2 run arena_evaluation record \
 
 The `record_data_dir` parameter is resolved in priority order:
 
-1. **ROS parameter** `record_data_dir` — set by the benchmark runner launch args.
-2. **Command-line arg** `--dir` / `-d` — for manual invocation.
-3. **Default** `auto:/` — generates a timestamped folder automatically.
+1. **ROS parameter** `record_data_dir` - set by the benchmark runner launch args.
+2. **Command-line arg** `--dir` / `-d` - for manual invocation.
+3. **Default** `auto:/` - generates a timestamped folder automatically.
 
 If the resolved path ends in a bare root directory name (`data` or `recordings`), a timestamp subdirectory is automatically appended so recordings are never written directly into the root.
 
 **Benchmark run structure:**
 ```
 data/<benchmark_id>/recordings/<planner>/<stage>/
-├── metadata.yaml
-├── params.yaml
-└── recording/
-    └── recording_0.mcap
+|-- metadata.yaml
+|-- params.yaml
+`-- recording/
+    `-- recording_0.mcap
 ```
 
 **Ad-hoc run structure:**
 ```
 data/recordings/<YYYYMMDD-HHMMSS>/
-├── metadata.yaml
-├── params.yaml
-└── recording/
-    └── recording_0.mcap
+|-- metadata.yaml
+|-- params.yaml
+`-- recording/
+    `-- recording_0.mcap
 ```
 
 ### Recorded Topics
@@ -105,7 +105,7 @@ The node installs `SIGTERM` and `SIGINT` handlers that trigger `finalize()`:
 
 ---
 
-## metadata.py — IngestionMetadata
+## metadata.py - IngestionMetadata
 
 Static helper that builds the initial `RunMetadata` object written to `metadata.yaml` at node startup.
 
@@ -122,17 +122,17 @@ metadata = IngestionMetadata.create_initial_metadata(
 ```
 
 Fields populated at startup:
-- `recording_started_at` — UTC ISO timestamp
-- `arena_git_sha` / `arena_git_dirty` — from `git rev-parse HEAD` in the workspace
-- `python_version` — from `sys.version`
-- `ros_distro` — from `$ROS_DISTRO`
-- `map` — from the world/map parameter
-- `inter_planner` — parsed from the planner/contestant name
-- `agent_name` — the agent/robot name
+- `recording_started_at` - UTC ISO timestamp
+- `arena_git_sha` / `arena_git_dirty` - from `git rev-parse HEAD` in the workspace
+- `python_version` - from `sys.version`
+- `ros_distro` - from `$ROS_DISTRO`
+- `map` - from the world/map parameter
+- `inter_planner` - parsed from the planner/contestant name
+- `agent_name` - the agent/robot name
 
 ---
 
-## topics.py — Topic Definitions
+## topics.py - Topic Definitions
 
 Provides the canonical list of topic names and their expected ROS message type strings (used when registering topics with rosbag2).
 
@@ -151,9 +151,9 @@ Edit `config/data_recorder_config.yaml` to control sampling rates:
 
 ```yaml
 record_frequencies:
-  default: 20.0   # ms — fallback
-  lidar:  100.0   # ms — 10 Hz
-  odom:    20.0   # ms — 50 Hz
+  default: 20.0   # ms - fallback
+  lidar:  100.0   # ms - 10 Hz
+  odom:    20.0   # ms - 50 Hz
 ```
 
-Keys are matched as **substrings** of the full topic name, so `"lidar"` matches both `…/lidar` and `…/gpu_lidar/scan`.
+Keys are matched as **substrings** of the full topic name, so `"lidar"` matches both `.../lidar` and `.../gpu_lidar/scan`.

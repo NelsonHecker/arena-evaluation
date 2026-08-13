@@ -26,7 +26,7 @@ def test_collision_adversarial_overlapping_hitboxes():
     calc = CollisionMetricsCalculator(params)
     prior = {"time_to_goal": 10.0}
     results = calc.calculate(episode, prior)
-    
+
     # Should robustly count valid consecutive groups
     assert "collision_amount" in results
     assert not np.isnan(results["collision_amount"])
@@ -37,20 +37,18 @@ def test_efficiency_adversarial_zero_length():
     episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[0.0, 0.0, 0.0], goal_pos=[0.0, 0.0, 0.0])
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PathEfficiencyCalculator(params)
-    
-    # 1. True zero
+
     prior = {"path_length": 0.0}
     results = calc.calculate(episode, prior)
     assert results["path_efficiency"] == 0.0
-    
-    # 2. Near-zero (subnormal floats) that might explode during division
+
+    # Near-zero (subnormal floats) that might explode during division
     prior = {"path_length": 1e-320}
     episode.start_pos = [0.0, 0.0, 0.0]
     episode.goal_pos = [1.0, 1.0, 0.0]
     results = calc.calculate(episode, prior)
     assert not np.isnan(results["path_efficiency"])
-    
-    # 3. NaNs and Infs in start/goal
+
     episode.start_pos = [float('inf'), float('inf'), 0.0]
     episode.goal_pos = [float('nan'), float('nan'), 0.0]
     prior = {"path_length": 10.0}
@@ -75,7 +73,7 @@ def test_pedestrian_disturbance_adversarial_chaotic():
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PedestrianDisturbanceCalculator(params)
     prior = {}
-    
+
     # This should not raise ValueError or TypeError, and should not return NaN/Inf metrics
     results = calc.calculate(episode, prior)
     assert not np.isnan(results["ped_path_deflection_m"])
@@ -84,7 +82,6 @@ def test_pedestrian_disturbance_adversarial_chaotic():
     assert not np.isinf(results["ped_path_deflection_m"])
 
 def test_gaze_adversarial_chaotic():
-    # Test gaze metrics with NaNs and Infs in ped positions
     df = pl.DataFrame({
         "time_ns": [0, 1000000000, 2000000000],
         "pos_x": [0.0, 0.0, 0.0],
@@ -105,13 +102,12 @@ def test_gaze_adversarial_chaotic():
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
     params = RobotParams(0.2, 0.0, 10.0)
     calc = GazeMetricsCalculator(params)
-    
+
     # Must run without crashing
     results = calc.calculate(episode, {})
     assert "time_looking_at_pedestrians" in results
 
 def test_proxemics_adversarial_chaotic():
-    # Proxemics should handle extreme velocities and positions
     df = pl.DataFrame({
         "time_ns": [0, 1000000000, 2000000000],
         "pos_x": [0.0, 0.0, 0.0],
@@ -128,9 +124,9 @@ def test_proxemics_adversarial_chaotic():
     episode.num_pedestrians = 1
     params = RobotParams(0.2, 0.0, 10.0)
     calc = ProxemicsCalculator(params)
-    
+
     prior = {"velocity": [1.0, float('inf'), float('nan')]}
     results = calc.calculate(episode, prior)
-    
+
     assert not np.isnan(results["avg_velocity_in_personal_space"])
     assert not np.isinf(results["avg_velocity_in_personal_space"])

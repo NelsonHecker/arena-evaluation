@@ -1,6 +1,3 @@
-# SESSION SNAPSHOT (2026-08-10) — standard.yaml manifest (full), including the
-# acoustic field spec with manifest-configurable options.
-# Path: src/Arena/arena_evaluation/arena_evaluation/configs/benchmark/manifests/standard.yaml
 # Standard benchmark report — the default layout for arena_evaluation.
 # Mirrors the previous hardcoded presentation/viz_manifest.py default.
 manifest_version: "1.0"

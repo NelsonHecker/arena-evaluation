@@ -142,7 +142,7 @@ class TestSimulationProfiler:
 
         data = yaml.safe_load((tmp_output / "simulation_profile.yaml").read_text())
         profile = data["simulation_profile"]
-        
+
         ram = profile["ram"]
         assert "MB_max" in ram
         assert "MB_max" in ram

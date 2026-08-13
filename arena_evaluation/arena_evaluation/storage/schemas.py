@@ -11,9 +11,7 @@ import typing
 
 
 class RunMetadata(BaseModel):
-    """
-    Metadata for a single episode, serialized to episode_XXX.yaml.
-    """
+    """Metadata for a single episode, serialized to episode_XXX.yaml."""
     benchmark_id: str
     planner: str
     robot_model: list[str] = Field(default_factory=list)

@@ -1,6 +1,4 @@
-"""
-Arena Evaluation Pipeline Profiler.
-"""
+"""Arena Evaluation Pipeline Profiler."""
 
 from __future__ import annotations
 
@@ -41,7 +39,7 @@ def _ensure_nvml() -> bool:
             _log.debug("pynvml initialised successfully")
         except Exception:
             _nvml_available = False
-            _log.debug("pynvml not available — GPU metrics will be null")
+            _log.debug("pynvml not available - GPU metrics will be null")
         _nvml_initialised = True
     return _nvml_available
 
@@ -519,7 +517,7 @@ class _PhaseStats:
             "ram_MB_max": ram["max"],
             "ram_MB_mean": ram["mean"],
         }
-        
+
         disk_r = self.disk_read_mbps.snapshot()
         disk_w = self.disk_write_mbps.snapshot()
         if disk_r["max"] is not None:
@@ -569,7 +567,7 @@ class PipelineProfiler:
         if name not in self._phases:
             self._phases[name] = _PhaseStats()
         stats = self._phases[name]
-        
+
         self._active_phases.add(name)
         sampler = SystemSampler()
         stop_event = threading.Event()
@@ -579,7 +577,7 @@ class PipelineProfiler:
             prev_disk_r = snap.process_read_bytes
             prev_disk_w = snap.process_write_bytes
             prev_disk_ts = snap.timestamp
-            
+
             while not stop_event.is_set():
                 try:
                     snap = sampler.sample()
@@ -590,14 +588,14 @@ class PipelineProfiler:
                         stats.gpu_util.update(snap.gpu.util_percent)
                         stats.vram_mb.update(snap.gpu.vram_used_mb)
                         stats._has_gpu = True
-                        
+
                     dt = snap.timestamp - prev_disk_ts
                     if dt > 0:
                         read_rate = (snap.process_read_bytes - prev_disk_r) / dt / (1024 * 1024)
                         write_rate = (snap.process_write_bytes - prev_disk_w) / dt / (1024 * 1024)
                         stats.disk_read_mbps.update(max(0.0, read_rate))
                         stats.disk_write_mbps.update(max(0.0, write_rate))
-                        
+
                     prev_disk_r = snap.process_read_bytes
                     prev_disk_w = snap.process_write_bytes
                     prev_disk_ts = snap.timestamp

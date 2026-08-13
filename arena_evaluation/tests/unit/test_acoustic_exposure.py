@@ -1,5 +1,3 @@
-# RECREATED 2026-08-10 from session context.
-# Path: src/Arena/arena_evaluation/arena_evaluation/tests/unit/test_acoustic_exposure.py
 import numpy as np
 import pytest
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations

@@ -23,8 +23,7 @@ def test_run_metadata_serialization():
     dumped = meta.model_dump(exclude_none=True)
     assert dumped["benchmark_id"] == "test_bench"
     assert "recording_ended_at" not in dumped
-    
-    # Reload
+
     reloaded = RunMetadata.model_validate(dumped)
     assert reloaded.planner == "teb"
     assert reloaded.robot_model == ["jackal"]

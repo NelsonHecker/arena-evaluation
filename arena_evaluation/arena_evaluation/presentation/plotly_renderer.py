@@ -1,5 +1,3 @@
-# SESSION SNAPSHOT (2026-08-10) — plotly_renderer.py with unconditional run_dir.
-# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/presentation/plotly_renderer.py
 from __future__ import annotations
 
 import pathlib

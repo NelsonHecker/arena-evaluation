@@ -108,7 +108,7 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
                 results["path_irregularity"] = float(pi)
                 
         # Calculate Topological Complexity (Winding Number around pedestrians)
-        ep_peds = getattr(episode, "peds", None)
+        ep_peds = episode.peds
         if ep_peds is not None and len(ep_peds) > 0 and len(pos_x) > 1:
             try:
                 # peds dataframe has ts_iso, ped_id, pos_x, pos_y
@@ -123,7 +123,6 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
                 
                 df_robot = episode.data.drop_nulls(subset=[x_col, y_col, ts_col]).sort(ts_col)
                 
-                # Join exact or asof
                 joined = df_peds.join_asof(df_robot, on=ts_col, strategy="nearest")
                 
                 total_winding = 0.0

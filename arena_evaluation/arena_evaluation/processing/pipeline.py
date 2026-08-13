@@ -53,7 +53,7 @@ class ProcessingPipeline:
         # -1 (or None) = auto-detect the CPU count; any value < 1 falls back to it.
         self.workers = (os.cpu_count() or 1) if (workers is None or workers < 1) else workers
 
-    # ── New flat-episode API ───────────────────────────────────────────────────
+    # New flat-episode API
 
     def extract_episode(self, ep: EpisodeDescriptor, force_extract: bool = False) -> dict[str, TopicBundle] | None:
         """Extract topics from a single episode MCAP into episode_dir/topics/."""
@@ -73,7 +73,7 @@ class ProcessingPipeline:
 
         _ctx = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx:
-            print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) → {topics_dir}...")
+            print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) -> {topics_dir}...")
             if topics_dir.exists():
                 import shutil
                 shutil.rmtree(topics_dir)
@@ -98,7 +98,6 @@ class ProcessingPipeline:
             except Exception as e:
                 print(f"  [warn] Could not read metadata for episode_{ep.episode_id:03d}: {e}")
 
-        # Extract topics
         bundles = self.extract_episode(ep, force_extract=force_extract)
         if bundles is None or len(bundles) == 0:
             return None
@@ -327,4 +326,4 @@ class ProcessingPipeline:
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
         df = pl.DataFrame(all_metrics)
         ParquetStore.write(df, combined_path)
-        print(f"Done. {len(all_metrics)} episode rows → {combined_path}")
+        print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")

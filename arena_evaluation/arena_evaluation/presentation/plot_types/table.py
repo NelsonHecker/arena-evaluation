@@ -2,15 +2,13 @@
 
 Renders a table in the report from two manifest-declared sources:
 
-1. **Data-derived columns** — ``options.columns`` aggregates the metrics frame
+1. **Data-derived columns** - ``options.columns`` aggregates the metrics frame
    per ``group_by`` (mean of each column, formatted), like the summary table
    but as a standalone plot.
 
-2. **Agent-written notes** — ``options.notes`` pulls in free-form rows written
+2. **Agent-written notes** - ``options.notes`` pulls in free-form rows written
    by an agent (e.g. through MCP tools) into ``notes.yaml`` in the benchmark
-   dir, or inline YAML / ``"key: value"`` text lines. This lets an agent
-   inspect the metrics data and write dynamic overviews, conclusions, or
-   parsed values straight into the report.
+   dir, or inline YAML / ``"key: value"`` text lines.
 
 Example manifest spec:
 

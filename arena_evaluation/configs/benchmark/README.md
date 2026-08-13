@@ -9,20 +9,20 @@ Invocation: `arena evaluation benchmark --suite <name> --contest <name> [--scale
 
 ```
 configs/benchmark/
-├── suites/           — stage sequences (maps, episodes, task modes)
-│   ├── basic.yaml
-│   ├── meta_suite.yaml
-│   ├── all_maps_random.yaml
-│   ├── arena_corridor.yaml
-│   ├── arena_hospital_small.yaml
-│   ├── map_empty.yaml
-│   └── characterization.yaml   — open-loop energy/acoustic sweep
-└── contests/         — planner lineups
-    ├── basic.yaml
-    ├── allplanners.yaml
-    ├── inter.yaml
-    ├── planners.yaml
-    └── characterization.yaml  — dummy contestant (the task mode drives, not a planner)
+|-- suites/           - stage sequences (maps, episodes, task modes)
+|   |-- basic.yaml
+|   |-- meta_suite.yaml
+|   |-- all_maps_random.yaml
+|   |-- arena_corridor.yaml
+|   |-- arena_hospital_small.yaml
+|   |-- map_empty.yaml
+|   `-- characterization.yaml   - open-loop energy/acoustic sweep
+`-- contests/         - planner lineups
+    |-- basic.yaml
+    |-- allplanners.yaml
+    |-- inter.yaml
+    |-- planners.yaml
+    `-- characterization.yaml  - dummy contestant (the task mode drives, not a planner)
 ```
 
 ## Suite files
@@ -40,9 +40,9 @@ stages:
     episodes: 1               # number of episodes at this stage
     config:                   # per-mode params, leaf-keyed (see task_generator/tasks/obstacles/README.md)
       scenario:               # top-level key matches tm_robots / tm_obstacles
-        file: 4.json          # → task.scenario.file
+        file: 4.json          # -> task.scenario.file
       random:
-        dynamic:  {min: 3, max: 5, models: [arenian]}  # → task.random.dynamic.{min,max,models}
+        dynamic:  {min: 3, max: 5, models: [arenian]}  # -> task.random.dynamic.{min,max,models}
         static:   {min: 5, max: 10, models: [shelf]}
 ```
 
@@ -82,7 +82,7 @@ stages:
   - name: characterization
     map: map_empty
     robot: jackal
-    episodes: 3            # repetitions → cross-episode confidence bands
+    episodes: 3            # repetitions -> cross-episode confidence bands
     tm_robots: characterization   # TM_Robots mode that drives the open-loop sweep
     tm_obstacles: random
     config:
@@ -94,8 +94,8 @@ stages:
 ```
 
 The `characterization` robot task mode (in `task_generator`) drives `cmd_vel` directly through the
-robot's rated envelope — idle blocks, 0.25→vx_max linear steps with 5 s out-and-back dwells,
-transient ramps, pivot rates — tagging every maneuver with `characterization_phase` markers. Run it
+robot's rated envelope - idle blocks, 0.25->vx_max linear steps with 5 s out-and-back dwells,
+transient ramps, pivot rates - tagging every maneuver with `characterization_phase` markers. Run it
 like any benchmark and analyse with the characterization report manifest:
 
 ```bash
@@ -108,7 +108,7 @@ arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 A contest defines the set of planner configurations (contestants) to evaluate.
 The runner iterates over all contestants at each suite stage.
 
-Contestant args use **cap-scoped dicts** — each capability (e.g. `mobile`,
+Contestant args use **cap-scoped dicts** - each capability (e.g. `mobile`,
 `arm`) is a dict with a `driver` key identifying the driver and any extra
 kwargs forwarded as launch args:
 
@@ -185,12 +185,12 @@ to `Robot.parse`.
 The old flat dot-notation format is still accepted in both list and sweep forms:
 
 ```yaml
-# Old flat list form — still works
+# Old flat list form - still works
 - name: teb
   mobile.local_planner: teb
   mobile.inter_planner: bypass
 
-# Old flat sweep form — still works
+# Old flat sweep form - still works
 mobile.local_planner: [teb, dwa]
 mobile.inter_planner: bypass
 ```
@@ -210,7 +210,7 @@ arena evaluation benchmark --suite basic --contest '{mobile: {driver: nav2, loca
 Contestant `args` keys are forwarded verbatim as launch args to the env on
 spawn (so nav2, the controller, the agent, etc. come up correctly from the
 start). See
-[BRINGUP.md → Cap-scoped overrides](../../../../arena_bringup/BRINGUP.md#cap-scoped-overrides)
+[BRINGUP.md -> Cap-scoped overrides](../../../../arena_bringup/BRINGUP.md#cap-scoped-overrides)
 for the recommended key shapes.
 
 The runner drops keys that collide with stage-owned launch args (`sim`,
@@ -223,7 +223,7 @@ A useful passthrough example: `fail_on_collision: true` makes the env abort
 an episode as FAILED (`outcome_info='collision'`) the moment the robot
 footprint contacts a wall, static obstacle, or pedestrian, instead of the
 default run-to-goal-or-timeout. See
-[BRINGUP.md → Common options](../../../../arena_bringup/BRINGUP.md#common-options).
+[BRINGUP.md -> Common options](../../../../arena_bringup/BRINGUP.md#common-options).
 
 ## How the runner consumes these files
 
@@ -238,8 +238,8 @@ robots, the runner splits into multiple groups per contestant. Authoring
 suggestion: keep one robot per contestant for fastest runs.
 
 `env_n` caps how many groups (parallel contestants) run at once, with the rest
-queued. Run time scales as `bringup_time × num_groups + episode_time ×
-total_episodes` spread across the `env_n` workers, not `bringup_time ×
+queued. Run time scales as `bringup_time x num_groups + episode_time x
+total_episodes` spread across the `env_n` workers, not `bringup_time x
 num_steps`, since steps within a group reuse one env.
 
 For each group the runner:
@@ -287,30 +287,30 @@ Override with `--data-root`. Inside Docker: `/opt/arena_ws/data/benchmarks/<run_
 
 ```
 $ARENA_DATA_DIR/benchmarks/<run_id>/
-├── manifest.yaml              # requested config snapshot (never overwritten)
-├── progress.csv               # append-only, one row per episode
-├── runner.log
-├── .benchmark_state.json      # per-step status, atomic write
-├── episodes/                  # recorder output — one MCAP per episode
-│   ├── episode_000/
-│   │   ├── episode_000.mcap
-│   │   └── episode_000.yaml
-│   └── ...
-├── combined_metrics.parquet   # after arena evaluation run
-└── report_manifest.yaml       # note: which manifest produced the last report
+|-- manifest.yaml              # requested config snapshot (never overwritten)
+|-- progress.csv               # append-only, one row per episode
+|-- runner.log
+|-- .benchmark_state.json      # per-step status, atomic write
+|-- episodes/                  # recorder output - one MCAP per episode
+|   |-- episode_000/
+|   |   |-- episode_000.mcap
+|   |   `-- episode_000.yaml
+|   `-- ...
+|-- combined_metrics.parquet   # after arena evaluation run
+`-- report_manifest.yaml       # note: which manifest produced the last report
 ```
 
 The recorder is spawned per step and writes one MCAP per episode into `episodes/`; its episode
 lifecycle is driven by the `start_episode` service (see the [ingestion README](../../arena_evaluation/ingestion/README.md)).
 `arena evaluation run --report-manifest <name>` performs extraction + metrics, then renders
-`report.html`. Characterization is a regular metric calculator — the report derives the
+`report.html`. Characterization is a regular metric calculator - the report derives the
 per-working-point curves from its `timeseries_char_*` columns, with no separate analysis step.
 
 Inspection helpers:
 
-- `arena evaluation evaluation_cli list` — table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
-- `arena evaluation evaluation_cli status [run_id] [--watch]` — snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
-- `arena evaluation evaluation_cli tail [run_id]` — tail -F on `progress.csv` of the most recent (or named) run.
+- `arena evaluation evaluation_cli list` - table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
+- `arena evaluation evaluation_cli status [run_id] [--watch]` - snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
+- `arena evaluation evaluation_cli tail [run_id]` - tail -F on `progress.csv` of the most recent (or named) run.
 
 `progress.csv` schema: `ts_iso, run_id, step_key, contestant, stage, env_id, episode_id, world, seed, tm_robots, tm_obstacles, tm_modules, robots, outcome_state, outcome_info, started_at, ended_at, runtime_s, robots_params_json, obstacles_params_json, error_kind, error_detail`
 

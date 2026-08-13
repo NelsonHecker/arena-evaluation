@@ -3,7 +3,7 @@
 Per-episode calculator: attaches the recorded ``characterization_phase`` markers
 to every sample, computes per-sample power / mechanical power / acoustic level /
 energy intensity, and exposes them as ``timeseries_char_*`` list columns in the
-metrics row — the same wide per-episode shape as the energy calculator's
+metrics row, the same wide per-episode shape as the energy calculator's
 ``timeseries_power_*`` columns. The report layer derives long-format frames and
 per-working-point aggregates from these columns (see the ``line`` plot type and
 the ``characterization`` report manifest).
@@ -11,6 +11,7 @@ the ``characterization`` report manifest).
 
 from __future__ import annotations
 
+import logging
 import typing
 
 import polars as pl
@@ -22,6 +23,9 @@ if typing.TYPE_CHECKING:
     from ....storage.schemas import RobotParams
 
 
+logger = logging.getLogger(__name__)
+
+# Last-resort constants, mirroring config/acoustic_profile.yaml.
 _ACOUSTIC_DEFAULTS = {
     "L_base_0": 42.0,
     "beta_0": 45.0,
@@ -34,7 +38,7 @@ _ACOUSTIC_DEFAULTS = {
 
 
 def _leq_power(dba: pl.Series) -> pl.Series:
-    """Linear acoustic power proxy 10^(L/10) — L_Aeq = 10·log10(mean(·))."""
+    """Linear acoustic power proxy 10^(L/10), L_Aeq = 10*log10(mean(x))."""
     return 10.0 ** (dba / 10.0)
 
 
@@ -72,10 +76,8 @@ class CharacterizationCalculator(BaseMetricCalculator):
     def output_keys(self) -> list[str]:
         return list(self._TIMESERIES_KEYS)
 
-    # ── Phase labelling ──────────────────────────────────────────────────────
-
     def _phase_map(self) -> pl.DataFrame:
-        """Schedule name → (kind, vx_target, wz_target) for this robot's envelope."""
+        """Schedule name to (kind, vx_target, wz_target) for this robot's envelope."""
         from task_generator.tasks.robots.characterization.schedule import (
             build_schedule,
             resolve_envelope,
@@ -118,30 +120,38 @@ class CharacterizationCalculator(BaseMetricCalculator):
             pl.col("wz_target").fill_null(pl.when(cmd_wz != 0.0).then(cmd_wz).otherwise(0.0)).alias("wz_target"),
         )
 
-    # ── Acoustic fallback (mirrors acoustics_publisher.py) ────────────────────
-
     def _acoustic_model(self) -> dict:
+        """Profile backing the fallback model: per-robot, then shared, then built-in."""
+        from pathlib import Path
+
+        import yaml
+        from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+
         try:
-            import yaml
-            from ament_index_python.packages import get_package_share_directory
-            from pathlib import Path
-
             share = Path(get_package_share_directory("arena_robots"))
-            for cand in (
-                share / "robots" / self.robot_params.model / "acoustic_profile.yaml",
-                share / "config" / "acoustic_profile.yaml",
-            ):
-                if cand.is_file():
-                    cfg = yaml.safe_load(cand.read_text())
-                    return {
-                        k: float(cfg.get(k, _ACOUSTIC_DEFAULTS[k]))
-                        for k in _ACOUSTIC_DEFAULTS
-                    }
-        except Exception:
-            pass
-        return dict(_ACOUSTIC_DEFAULTS)
+        except PackageNotFoundError:
+            logger.warning("arena_robots not installed, using built-in acoustic constants")
+            return dict(_ACOUSTIC_DEFAULTS)
 
-    # ── Per-sample enrichment ────────────────────────────────────────────────
+        per_robot = share / "robots" / self.robot_params.model / "telemetry" / "acoustics.yaml"
+        for cand in (per_robot, share / "config" / "acoustic_profile.yaml"):
+            if not cand.is_file():
+                continue
+            try:
+                cfg = yaml.safe_load(cand.read_text())
+            except (OSError, yaml.YAMLError) as e:
+                logger.warning(f"unreadable acoustic profile {cand}: {e!r}")
+                continue
+            missing = sorted(k for k in _ACOUSTIC_DEFAULTS if k not in cfg)
+            if missing:
+                logger.warning(f"acoustic profile {cand} lacks {missing}, using built-in values for those")
+            return {k: float(cfg.get(k, _ACOUSTIC_DEFAULTS[k])) for k in _ACOUSTIC_DEFAULTS}
+
+        logger.warning(
+            f"no acoustic profile for {self.robot_params.model!r} at {per_robot}, "
+            "using built-in acoustic constants"
+        )
+        return dict(_ACOUSTIC_DEFAULTS)
 
     def _enrich(self, df: pl.DataFrame) -> pl.DataFrame:
         out = df.with_columns(
@@ -151,7 +161,6 @@ class CharacterizationCalculator(BaseMetricCalculator):
                 + (pl.col("pos_y").diff().fill_null(0.0).cast(pl.Float64) ** 2)
             ).sqrt().clip(lower_bound=0.0).alias("_ds"),
         )
-        # P_mech = Σ |τ·ω| over the joints (list columns, unprefixed).
         if "effort" in out.columns and "velocity" in out.columns:
             out = out.with_columns(
                 (pl.col("effort") * pl.col("velocity")).list.eval(pl.element().abs()).list.sum()
