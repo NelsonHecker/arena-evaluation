@@ -14,6 +14,7 @@ from ...processing.map_registry import MapRegistry
 
 class TrajectoryRenderer(BasePlotRenderer):
     PLOT_TYPE = "trajectory"
+    generate_gifs: bool = False
 
     def _load_map_image(self, map_name: str, run_dir: pathlib.Path | None = None):
         return MapRegistry.get_map(map_name, run_dir=run_dir)
@@ -413,7 +414,7 @@ class TrajectoryRenderer(BasePlotRenderer):
         if data_key not in df_filtered.columns:
             return None
             
-        run_dir = getattr(self, "run_dir", None)
+        run_dir = self.run_dir
             
         if self.spec.group_by:
             group_cols = self.spec.group_by
@@ -454,7 +455,7 @@ class TrajectoryRenderer(BasePlotRenderer):
         if data_key not in df_filtered.columns:
             return
             
-        run_dir = getattr(self, "run_dir", None)
+        run_dir = self.run_dir
             
         if self.spec.group_by:
             group_cols = self.spec.group_by
@@ -687,7 +688,7 @@ class TrajectoryRenderer(BasePlotRenderer):
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)
         
-        if getattr(self, "generate_gifs", False):
+        if self.generate_gifs:
             markers_info = None
             if overlay_markers:
                 markers_info = {

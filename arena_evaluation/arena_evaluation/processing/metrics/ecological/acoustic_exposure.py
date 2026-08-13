@@ -39,6 +39,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         "timeseries_acoustic_attenuation_db": "dB",
     }
 
+    world: str | None = None
+
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
@@ -93,7 +95,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         nulls = {k: None for k in self.output_keys()}
 
         # Skip heavy calculation for reference runs
-        if getattr(episode.run, "is_reference", False):
+        if episode.run is not None and episode.run.is_reference:
             logger.info("Skipping acoustic calculation for reference episode %s", episode.episode_id)
             return nulls
 
@@ -106,23 +108,19 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             logger.debug("No episode data for episode %s", episode.episode_id)
             return nulls
 
-        map_val = None
-        if hasattr(episode, "map"):
-            map_val = episode.map
-        elif hasattr(episode, "run") and hasattr(episode.run, "map"):
-            map_val = episode.run.map
+        map_val = episode.map
 
         map_name = prior_results.get("map", map_val)
         if not map_name:
             # registry seeds calc.world from the benchmark metadata
-            map_name = getattr(self, "world", None)
+            map_name = self.world
         if not map_name:
             logger.warning("No map name available for episode %s - skipping acoustics", episode.episode_id)
             return nulls
 
         run_dir = None
-        if hasattr(episode, "folder_manager") and episode.folder_manager:
-            if hasattr(episode.run, "benchmark_id") and episode.run.benchmark_id:
+        if episode.folder_manager:
+            if episode.run is not None and episode.run.benchmark_id:
                 run_dir = episode.folder_manager.data_root / episode.run.benchmark_id
 
         map_data = self._get_map_occupancy(map_name, run_dir=run_dir)
@@ -138,7 +136,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         doors = door_segments(map_name, grid, resolution, origin, run_dir=run_dir)
         tl_cache: dict[tuple, np.ndarray] = {}
         state_timeline = DoorStateTimeline.from_semantic_frame(
-            getattr(episode, "semantic_snapshot", None)
+            episode.semantic_snapshot
         )
         if doors:
             logger.info(

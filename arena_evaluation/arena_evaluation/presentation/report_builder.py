@@ -65,6 +65,7 @@ class ReportBuilder:
         # tests working).
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
         self._source_frames: dict[str, pl.DataFrame] = {}
+        self._merged_df: pl.DataFrame | None = None
 
     @classmethod
     def from_dirs(
@@ -211,7 +212,7 @@ class ReportBuilder:
         """Execute the report building process."""
         manifest = self._manifest_obj if self._manifest_obj is not None else VizManifest.load(self.manifest_path)
 
-        if hasattr(self, "_merged_df") and self._merged_df is not None:
+        if self._merged_df is not None:
             df = self._merged_df
         else:
             df = self._load_primary_frame(manifest)

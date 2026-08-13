@@ -50,25 +50,25 @@ class MCAPReader:
 
     @staticmethod
     def _param_value_to_py(val) -> typing.Any:
-        p_type = getattr(val, "type", 0)
+        p_type = val.type
         if p_type == 1:
-            return getattr(val, "bool_value", False)
+            return val.bool_value
         elif p_type == 2:
-            return getattr(val, "integer_value", 0)
+            return val.integer_value
         elif p_type == 3:
-            return getattr(val, "double_value", 0.0)
+            return val.double_value
         elif p_type == 4:
-            return getattr(val, "string_value", "")
+            return val.string_value
         elif p_type == 5:
-            return list(getattr(val, "byte_array_value", []))
+            return list(val.byte_array_value)
         elif p_type == 6:
-            return list(getattr(val, "bool_array_value", []))
+            return list(val.bool_array_value)
         elif p_type == 7:
-            return list(getattr(val, "integer_array_value", []))
+            return list(val.integer_array_value)
         elif p_type == 8:
-            return list(getattr(val, "double_array_value", []))
+            return list(val.double_array_value)
         elif p_type == 9:
-            return list(getattr(val, "string_array_value", []))
+            return list(val.string_array_value)
         return str(val)
 
     @staticmethod
@@ -308,11 +308,11 @@ class MCAPReader:
                             target = env_data[env_key]["peds"]
                             target["time_ns"].append(ts_ns)
                             
-                            if hasattr(ros_msg, "pedestrians"):
+                            if schema.name == "arena_people_msgs/msg/Pedestrians":
                                 agents = ros_msg.pedestrians
                                 is_pose2d = False
                             else:
-                                agents = [a for a in ros_msg.agents if getattr(a, "kind", 0) == 0]
+                                agents = [a for a in ros_msg.agents if a.kind == 0]
                                 is_pose2d = True
     
                             target["num_pedestrians"].append(len(agents))
@@ -353,12 +353,12 @@ class MCAPReader:
                             robot_name = get_robot_name(parts, env_key)
                             target = robot_data[robot_name]["acoustics"]
                             target["time_ns"].append(ts_ns)
-                            target["total_level_af_dba"].append(getattr(ros_msg, "total_level_af_dba", None))
-                            target["total_level_zf_db"].append(getattr(ros_msg, "total_level_zf_db", None))
-                            target["baseline_level_dba"].append(getattr(ros_msg, "baseline_level_dba", None))
-                            target["drivetrain_level_dba"].append(getattr(ros_msg, "drivetrain_level_dba", None))
-                            target["uncertainty_1sigma_dba"].append(getattr(ros_msg, "uncertainty_1sigma_dba", None))
-                            target["validity_flags"].append(getattr(ros_msg, "validity_flags", 0))
+                            target["total_level_af_dba"].append(ros_msg.total_level_af_dba)
+                            target["total_level_zf_db"].append(ros_msg.total_level_zf_db)
+                            target["baseline_level_dba"].append(ros_msg.baseline_level_dba)
+                            target["drivetrain_level_dba"].append(ros_msg.drivetrain_level_dba)
+                            target["uncertainty_1sigma_dba"].append(ros_msg.uncertainty_1sigma_dba)
+                            target["validity_flags"].append(ros_msg.validity_flags)
                             appended = True
 
                         # Characterization phase markers (open-loop sweeps)
@@ -366,7 +366,7 @@ class MCAPReader:
                             robot_name = get_robot_name(parts, env_key)
                             target = robot_data[robot_name]["characterization_phase"]
                             target["time_ns"].append(ts_ns)
-                            target["label"].append(str(getattr(ros_msg, "data", "")))
+                            target["label"].append(str(ros_msg.data))
                             appended = True
 
                         # Episode records
@@ -606,7 +606,7 @@ class MCAPReader:
         
         # Calculate env offsets
         env_offsets = {}
-        if hasattr(global_bundle, "tf_static") and global_bundle.tf_static is not None:
+        if global_bundle.tf_static is not None:
             try:
                 tf_df = global_bundle.tf_static.collect()
                 for row in tf_df.iter_rows(named=True):
@@ -621,7 +621,7 @@ class MCAPReader:
             except Exception:
                 pass
                 
-        if hasattr(global_bundle, "tf") and global_bundle.tf is not None:
+        if global_bundle.tf is not None:
             try:
                 tf_df = global_bundle.tf.collect()
                 for row in tf_df.iter_rows(named=True):

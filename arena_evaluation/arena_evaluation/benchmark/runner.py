@@ -1485,8 +1485,8 @@ def cli_main(argv: list[str] | None = None) -> int:
                     "contestant": attrs.asdict(c.contestant),
                     "stage": {k: v.value if isinstance(v, (Constants.TaskMode.TM_Robots, Constants.TaskMode.TM_Obstacles)) else v for k, v in c.stage._asdict().items()},
                     "episodes_planned": c.episodes,
-                    "is_reference": getattr(c, "is_reference", False),
-                    "reference_type": getattr(c, "reference_type", None),
+                    "is_reference": c.is_reference,
+                    "reference_type": c.reference_type,
                 }
                 for c in steps
             ]

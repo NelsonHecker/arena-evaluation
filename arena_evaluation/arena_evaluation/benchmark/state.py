@@ -10,6 +10,7 @@ import pathlib
 import subprocess
 import typing
 
+import numpy as np
 import yaml
 from rclpy.parameter import Parameter
 
@@ -158,7 +159,7 @@ def _params_to_json(params: list) -> str:
     for p in params:
         try:
             value = Parameter.from_parameter_msg(p).value
-            if hasattr(value, "tolist"):
+            if isinstance(value, np.ndarray):
                 value = value.tolist()
         except Exception:
             value = str(p.value)

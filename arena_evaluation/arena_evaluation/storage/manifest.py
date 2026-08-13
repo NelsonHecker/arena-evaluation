@@ -43,10 +43,9 @@ class MetadataWriter:
         metadata = MetadataWriter.read(source)
 
         for key, value in kwargs.items():
-            if hasattr(metadata, key):
-                setattr(metadata, key, value)
-            else:
+            if key not in RunMetadata.model_fields:
                 raise ManifestGenerationError(f"Invalid metadata field: {key}")
+            setattr(metadata, key, value)
 
         MetadataWriter.write(metadata, source)
         return metadata

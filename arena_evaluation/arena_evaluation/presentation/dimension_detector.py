@@ -42,7 +42,7 @@ def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
 
 def resolve_differentiate(spec: "PlotSpec", df: pl.DataFrame) -> tuple[str, pl.DataFrame]:
     """Determine the effective differentiation column for spec given df."""
-    auto = getattr(spec, "auto_differentiate", True)
+    auto = spec.auto_differentiate
     requested = spec.differentiate
 
     if not auto:

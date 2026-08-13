@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import pkgutil
 import typing
 from collections import defaultdict, deque
@@ -45,7 +46,7 @@ class MetricRegistry:
     def _register_calculators(self) -> None:
         """Register all non-abstract subclasses"""
         for calc_cls in BaseMetricCalculator.__subclasses__():
-            if not getattr(calc_cls, "__abstractmethods__", None):
+            if not inspect.isabstract(calc_cls):
                 if not calc_cls.NAME:
                     raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
                 if calc_cls.NAME in self.calculators:
@@ -60,8 +61,8 @@ class MetricRegistry:
         cls.discover_calculators_cls()
         units = {}
         for calc_cls in BaseMetricCalculator.__subclasses__():
-            if not getattr(calc_cls, "__abstractmethods__", None):
-                units.update(getattr(calc_cls, "UNITS", {}))
+            if not inspect.isabstract(calc_cls):
+                units.update(calc_cls.UNITS)
         return units
 
     def _compute_execution_order(self) -> list[list[str]]:
@@ -112,10 +113,10 @@ class MetricRegistry:
                 "category": calc.CATEGORY,
                 "requires_pedsim": calc.REQUIRES_PEDSIM,
                 "depends_on": calc.DEPENDS_ON,
-                "required_topics": getattr(calc, "REQUIRED_TOPICS", []),
+                "required_topics": calc.REQUIRED_TOPICS,
                 "outputs": calc.output_keys(),
-                "primary_outputs": list(getattr(calc, "PRIMARY_OUTPUTS", [])),
-                "output_directions": dict(getattr(calc, "OUTPUT_DIRECTIONS", {})),
+                "primary_outputs": list(calc.PRIMARY_OUTPUTS),
+                "output_directions": dict(calc.OUTPUT_DIRECTIONS),
             }
             for name, calc in self.calculators.items()
         ]
@@ -158,7 +159,7 @@ class MetricRegistry:
                 
                 # Check topic dependencies
                 skip_due_to_topics = False
-                for req in getattr(calc, "REQUIRED_TOPICS", []):
+                for req in calc.REQUIRED_TOPICS:
                     if isinstance(req, str):
                         if req not in available_topics:
                             skip_due_to_topics = True

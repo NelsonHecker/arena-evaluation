@@ -66,7 +66,7 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
         import polars as _pl
         if isinstance(episode.data, _pl.LazyFrame):
             episode.data = episode.data.collect()
-        if isinstance(getattr(episode, 'semantic_snapshot', None), _pl.LazyFrame):
+        if isinstance(episode.semantic_snapshot, _pl.LazyFrame):
             episode.semantic_snapshot = episode.semantic_snapshot.collect()
 
         return {

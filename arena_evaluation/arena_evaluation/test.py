@@ -345,6 +345,7 @@ class BagRecorder(Node):
         self.world = self.get_parameter("world").value
 
         self.base_dir = get_package_share_directory("arena_evaluation")
+        self.config = self.read_config()
         self.result_dir = os.path.join(self.base_dir, "data", self.result_dir)
         os.makedirs(self.result_dir, exist_ok=True)
         
@@ -495,8 +496,6 @@ class BagRecorder(Node):
         # Record at the configured frequency (in ms) from the configuration file
         time_diff = (current_simulation_action_time - self.current_time) / 1e6  # in ms
         # Read record frequency from config (assuming key "record_frequency" exists)
-        if not hasattr(self, 'config'):
-            self.config = self.read_config()
         if time_diff < self.config["record_frequency"]:
             return
 

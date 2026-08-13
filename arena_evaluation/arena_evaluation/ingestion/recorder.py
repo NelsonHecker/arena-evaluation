@@ -64,10 +64,10 @@ except ImportError:
 
 _OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
 _TERMINAL_OUTCOMES = {
-    getattr(EpisodeRecord, "SUCCESS", 2),
-    getattr(EpisodeRecord, "FAILED", 3),
-    getattr(EpisodeRecord, "SKIPPED", 4),
-    getattr(EpisodeRecord, "FATAL", 5),
+    EpisodeRecord.SUCCESS,
+    EpisodeRecord.FAILED,
+    EpisodeRecord.SKIPPED,
+    EpisodeRecord.FATAL,
 }
 
 import arena_evaluation_msgs.srv as arena_evaluation_srvs
@@ -173,7 +173,8 @@ class DataRecorderNode(Node):
         self.current_metadata_path: pathlib.Path | None = None
         self.current_metadata = None
 
-
+        self.log_file = None
+        self.log_file_path: pathlib.Path | None = None
         self._open_log_file()
 
         self.config = self.read_config()
@@ -239,7 +240,7 @@ class DataRecorderNode(Node):
         self._log_info(f"Topic subscriptions ready. Waiting for first episode to open MCAP writer...")
 
     def _open_log_file(self):
-        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+        if self.log_file is not None and not self.log_file.closed:
             try:
                 self.log_file.close()
             except Exception:
@@ -305,7 +306,7 @@ class DataRecorderNode(Node):
                 self.topics_metadata = {}
                 self.last_recorded_times = {}
 
-                if hasattr(self, '_pre_episode_buffer') and self._pre_episode_buffer:
+                if self._pre_episode_buffer:
                     self._log_info(f"Flushing {len(self._pre_episode_buffer)} pre-episode buffered messages to writer")
                     for topic_name, serialized_msg, timestamp_ns in self._pre_episode_buffer:
                         self._ensure_topic_in_bag(topic_name)
@@ -439,7 +440,7 @@ class DataRecorderNode(Node):
                                 and "velocity_controller" not in part \
                                 and not part.startswith("env_"):
                             self.robot_model = part
-                            if hasattr(self, 'current_metadata') and self.current_metadata is not None:
+                            if self.current_metadata is not None:
                                 self.current_metadata.robot_model = [part]
                                 MetadataWriter.write(self.current_metadata, self.current_metadata_path)
                             break
@@ -463,12 +464,11 @@ class DataRecorderNode(Node):
 
         self.current_time = new_time
 
-        if hasattr(self, '_pre_clock_buffer') and self._pre_clock_buffer:
+        if self._pre_clock_buffer:
             self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
             for topic, buffered_msg in self._pre_clock_buffer:
                 self._write_to_bag_at(topic, buffered_msg, self.current_time)
             self._pre_clock_buffer.clear()
-            del self._pre_clock_buffer
 
     def _begin_episode(self, episode_id: int, source: str = "episode_record") -> bool:
         """Open a writer for a new episode unless one was already started for it."""
@@ -493,19 +493,18 @@ class DataRecorderNode(Node):
             except Exception as e:
                 self._log_error(f"Failed to write outcome metadata: {e}")
         self._close_current_writer()
-        if hasattr(self, '_pre_episode_buffer'):
-            self._pre_episode_buffer.clear()
+        self._pre_episode_buffer.clear()
 
     def _start_episode_service_callback(self, request, response):
         """Authoritative episode lifecycle: START opens the writer, STOP closes it."""
         episode_id = int(request.episode_id)
-        command = int(getattr(request, "command", 1))
-        if command == int(getattr(request, "COMMAND_START", 1)):
+        command = request.command
+        if command == request.COMMAND_START:
             self._log_info(f"start_episode service called: episode_id={episode_id}")
             self._begin_episode(episode_id, source="runner")
             response.success = True
             response.message = f"recording episode {self.current_episode_id}"
-        elif command == int(getattr(request, "COMMAND_STOP", 2)):
+        elif command == request.COMMAND_STOP:
             self._log_info(f"stop_episode service called: episode_id={episode_id} outcome={request.outcome_state}")
             self._stop_episode(episode_id, outcome_state=int(request.outcome_state), outcome_info=str(request.outcome_info))
             response.success = True
@@ -516,11 +515,11 @@ class DataRecorderNode(Node):
         return response
 
     def episode_record_callback(self, msg: EpisodeRecord):
-        outcome_state = getattr(msg, 'outcome_state', 0)
+        outcome_state = msg.outcome_state
         outcome_label = _OUTCOME_LABELS.get(outcome_state, f"UNKNOWN({outcome_state})")
         self._log_info(
             f"EpisodeRecord received: episode_id={msg.episode_id} "
-            f"outcome={outcome_state} ({outcome_label}) info={getattr(msg, 'outcome_info', '')!r}"
+            f"outcome={outcome_state} ({outcome_label}) info={msg.outcome_info!r}"
         )
 
         if msg.episode_id not in self._seen_episodes and outcome_state in (0, 1):
@@ -547,7 +546,7 @@ class DataRecorderNode(Node):
 
         from .topics import get_topics
 
-        for state in getattr(msg, 'robots', []):
+        for state in msg.robots:
             robot = state.descriptor
             robot_ns = robot.ns.strip('/')
 
@@ -593,7 +592,7 @@ class DataRecorderNode(Node):
                 if self.robot_model == "unknown":
                     self.robot_model = robot.model
 
-                if hasattr(self, 'current_metadata') and self.current_metadata is not None:
+                if self.current_metadata is not None:
                     if "unknown" in self.current_metadata.robot_model:
                         self.current_metadata.robot_model = []
 
@@ -620,8 +619,7 @@ class DataRecorderNode(Node):
 
         def callback(msg):
             if self.current_time is None:
-                if hasattr(self, '_pre_clock_buffer'):
-                    self._pre_clock_buffer.append((topic_name, msg))
+                self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
             last_time = self.last_recorded_times.get(topic_name, 0)
@@ -633,8 +631,7 @@ class DataRecorderNode(Node):
     def _create_unthrottled_callback(self, topic_name: str):
         def callback(msg):
             if self.current_time is None:
-                if hasattr(self, '_pre_clock_buffer'):
-                    self._pre_clock_buffer.append((topic_name, msg))
+                self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
             self._write_to_bag_at(topic_name, msg, now)
@@ -642,7 +639,7 @@ class DataRecorderNode(Node):
 
     def _log_info(self, msg: str):
         full_msg = f"[DataRecorder] [INFO] {msg}"
-        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+        if self.log_file is not None and not self.log_file.closed:
             self.log_file.write(f"[{datetime.now().isoformat()}] {full_msg}\n")
         try:
             if rclpy.ok():
@@ -654,7 +651,7 @@ class DataRecorderNode(Node):
 
     def _log_warn(self, msg: str):
         full_msg = f"[DataRecorder] [WARN] {msg}"
-        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+        if self.log_file is not None and not self.log_file.closed:
             self.log_file.write(f"[{datetime.now().isoformat()}] {full_msg}\n")
         try:
             if rclpy.ok():
@@ -666,7 +663,7 @@ class DataRecorderNode(Node):
 
     def _log_error(self, msg: str):
         full_msg = f"[DataRecorder] [ERROR] {msg}"
-        if hasattr(self, 'log_file') and self.log_file is not None and not self.log_file.closed:
+        if self.log_file is not None and not self.log_file.closed:
             self.log_file.write(f"[{datetime.now().isoformat()}] {full_msg}\n")
         try:
             if rclpy.ok():
@@ -689,11 +686,8 @@ class DataRecorderNode(Node):
 
         with self.writer_lock:
             if self.writer is None:
-                if not hasattr(self, '_pre_episode_buffer'):
-                    self._pre_episode_buffer = []
-
                 topic_stripped = topic_name.strip('/')
-                if topic_stripped in getattr(self, 'latched_topic_names', set()):
+                if topic_stripped in self.latched_topic_names:
                     if len(self._pre_episode_buffer) < 10000:
                         self._pre_episode_buffer.append((topic_name, serialized_msg, timestamp_ns))
                         return
