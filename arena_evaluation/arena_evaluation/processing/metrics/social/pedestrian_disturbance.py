@@ -81,30 +81,12 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         # Extract pedestrian positions per agent
         agent_paths: dict[int, list[tuple[float, float]]] = {}
         for row in peds_pos:
-            if not row:
-                continue
-            if isinstance(row, str):
-                import ast
-                try:
-                    row = ast.literal_eval(row)
-                except Exception:
-                    continue
-
-            pts = []
-            if isinstance(row, (list, tuple, np.ndarray)):
-                arr = np.array(row)
-                if arr.size == 0:
-                    continue
-                if arr.ndim == 1:
-                    if len(arr) % 3 == 0:
-                        arr = arr.reshape(-1, 3)
-                    elif len(arr) % 2 == 0:
-                        arr = arr.reshape(-1, 2)
-                    else:
-                        continue
-                for item in arr:
-                    if len(item) >= 2 and not np.isnan(item[0]) and not np.isnan(item[1]):
-                        pts.append((float(item[0]), float(item[1])))
+            arr = self._parse_peds(row)
+            pts = [
+                (float(item[0]), float(item[1]))
+                for item in arr
+                if not np.isnan(item[0]) and not np.isnan(item[1])
+            ]
 
             for agent_idx, (px, py) in enumerate(pts):
                 if agent_idx not in agent_paths:

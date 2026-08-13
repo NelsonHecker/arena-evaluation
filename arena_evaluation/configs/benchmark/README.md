@@ -311,6 +311,14 @@ Inspection helpers:
 - `arena evaluation evaluation_cli list` - table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
 - `arena evaluation evaluation_cli status [run_id] [--watch]` - snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
 - `arena evaluation evaluation_cli tail [run_id]` - tail -F on `progress.csv` of the most recent (or named) run.
+- `arena evaluation evaluation_cli ps` - table of arena-related OS processes currently running
+  (benchmark runner, arena CLI wrapper, Gazebo sim, arena/recorder nodes, world generators)
+  with PID, kind, elapsed time, and command line. Same data as the MCP
+  `list_running_processes` tool.
+- `arena evaluation evaluation_cli console [run_id] [--lines N] [--follow]` - tail the console
+  log of a benchmark run: `benchmarks/<run_id>/runner.log` (the runner's own log: Python
+  logging plus launch output, written for every run, however it was launched). run_id omitted
+  = most recent run. Same data as the MCP `get_benchmark_console` tool.
 
 `progress.csv` schema: `ts_iso, run_id, step_key, contestant, stage, env_id, episode_id, world, seed, tm_robots, tm_obstacles, tm_modules, robots, outcome_state, outcome_info, started_at, ended_at, runtime_s, robots_params_json, obstacles_params_json, error_kind, error_detail`
 

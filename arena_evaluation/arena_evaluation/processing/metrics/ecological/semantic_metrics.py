@@ -1,5 +1,6 @@
 from __future__ import annotations
 import typing
+
 import polars as pl
 
 from ..base import BaseMetricCalculator
@@ -63,10 +64,9 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
         if episode.data is not None and "time_ns" in episode.data.columns and len(episode.data) > 0:
             end_time_ns = int(episode.data["time_ns"].max())
 
-        import polars as _pl
-        if isinstance(episode.data, _pl.LazyFrame):
+        if isinstance(episode.data, pl.LazyFrame):
             episode.data = episode.data.collect()
-        if isinstance(episode.semantic_snapshot, _pl.LazyFrame):
+        if isinstance(episode.semantic_snapshot, pl.LazyFrame):
             episode.semantic_snapshot = episode.semantic_snapshot.collect()
 
         return {

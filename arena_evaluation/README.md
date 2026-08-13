@@ -66,6 +66,7 @@ arena_evaluation/
 |   |   |-- folder_manager.py  <- Path resolution and run discovery
 |   |   |-- manifest.py        <- MetadataWriter (YAML read/write)
 |   |   |-- planner_names.py   <- split_planner_name (shared by ingestion + presentation)
+|   |   |-- data_root.py       <- benchmarks_root() and latest_benchmark() helpers
 |   |   `-- exceptions.py      <- Domain-specific exceptions
 |   |-- processing/            <- Layer 3: Offline metric computation
 |   |   |-- mcap_reader.py     <- Reads MCAP -> TopicBundle (incl. acoustics, characterization_phase)
@@ -89,8 +90,11 @@ arena_evaluation/
 |   |   |-- config.py          <- Suite/Contest parsing
 |   |   |-- state.py           <- Run manifest, progress, resume
 |   |   |-- step.py            <- Step grid model
+|   |   |-- debug.py           <- Process introspection (ps, console)
+|   |   |-- profiler.py        <- PipelineProfiler (CPU/GPU/RAM per phase)
 |   |   `-- cli.py             <- Benchmark management CLI (argparse)
-|   `-- cli.py                 <- Evaluation pipeline CLI (argparse)
+|   |-- cli.py                 <- Evaluation pipeline CLI (argparse)
+|   `-- cli_acoustic.py        <- Acoustic analysis subcommands (list, animate, snapshot)
 |-- config/
 |   |-- data_recorder_config.yaml  <- Topic throttle frequencies
 |   |-- mcap_writer_options.yaml   <- MCAP writer tuning
@@ -101,7 +105,12 @@ arena_evaluation/
 |   `-- manifests/             <- Declarative report manifests (standard, ecological, social, safety, characterization)
 `-- tests/
     |-- unit/                  <- Pure Python unit tests (no ROS required)
-    `-- integration/           <- Full-pipeline tests with fixture data
+    |-- integration/           <- Full-pipeline tests with fixture data
+    `-- test_benchmark_*.py    <- Benchmark runner tests (top-level, no ROS required)
+
+arena_evaluation_msgs/         <- sibling package: ROS 2 message and service definitions
+|-- msg/BenchmarkState.msg     <- live benchmark progress (TRANSIENT_LOCAL on /arena/benchmark/state)
+`-- srv/                       <- RecordEpisode, ChangeDirectory services
 ```
 
 ---
@@ -169,6 +178,7 @@ Commands:
   run       Full pipeline: extract -> process -> (characterization analysis) -> report + plots
   report    Layer 5: Generate report.html from existing metrics.parquet
   plot      Layer 5: Generate static PNG plots only (no HTML)
+  acoustic  Acoustic analysis: list episodes, animate field snapshots, export single-frame PNG
 ```
 
 | Flag | Description |
@@ -183,11 +193,12 @@ Commands:
 
 ## Running Tests
 
-All unit tests are pure Python - no running ROS environment required.
+Unit tests are pure Python - no running ROS environment required.
 
 ```bash
 cd /opt/arena_ws/src/Arena/arena_evaluation/arena_evaluation
 pytest tests/unit -v
+pytest tests/ -v                # Includes benchmark runner and integration tests
 ```
 
 ---
@@ -201,6 +212,9 @@ arena build arena_evaluation
 See the sub-package READMEs for details:
 - [ingestion/README.md](arena_evaluation/ingestion/README.md) - recording, topics, episode lifecycle
 - [processing/README.md](arena_evaluation/processing/README.md) - extraction, alignment, metrics
+- [processing/metrics/README.md](arena_evaluation/processing/metrics/README.md) - metric calculator framework
 - [presentation/README.md](arena_evaluation/presentation/README.md) - declarative manifests, plot types
 - [storage/README.md](arena_evaluation/storage/README.md) - schemas, paths, metadata
+- [benchmark/README.md](arena_evaluation/benchmark/README.md) - runner, state, CLI, profiler
 - [configs/benchmark/README.md](configs/benchmark/README.md) - suites, contests, characterization
+- [arena_evaluation_msgs/README.md](../arena_evaluation_msgs/README.md) - ROS 2 message and service definitions

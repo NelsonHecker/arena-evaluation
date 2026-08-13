@@ -73,8 +73,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_leq_power",
     ]
 
-    def output_keys(self) -> list[str]:
-        return list(self._TIMESERIES_KEYS)
+    @classmethod
+    def output_keys(cls) -> list[str]:
+        return list(cls._TIMESERIES_KEYS)
 
     def _phase_map(self) -> pl.DataFrame:
         """Schedule name to (kind, vx_target, wz_target) for this robot's envelope."""

@@ -24,8 +24,6 @@ class RunMetadata(BaseModel):
     local_planner: str = ""
     inter_planner: str = ""
     agent_name: str = ""
-    # Sim-side episode id (task_generator counter) for correlating with
-    # progress.csv / the runner's episode records.
     task_generator_episode_id: int | None = None
     # Terminal outcome written by the runner's stop_episode service call
     # (QUEUED=0, RUNNING=1, SUCCESS=2, FAILED=3, SKIPPED=4, FATAL=5).
@@ -63,42 +61,72 @@ class RunMetadata(BaseModel):
 
 @dataclass(frozen=True)
 class RobotParams:
-    """Robot physical parameters loaded at runtime."""
+    """Robot physical parameters loaded at runtime.
+
+    Mass splits the way power does: the platform declares a base in
+    ``model_params.yaml`` and each attached component adds its own on top.
+    A mass of 0 means undeclared, and metrics that need one skip rather
+    than invent a number.
+    """
     model: str = "unknown"
     robot_radius: float = 0.25
     laser_min_range: float = 0.0
     laser_max_range: float = 30.0
+    base_mass: float = 0.0
+    component_masses: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def mass(self) -> float:
+        """Total mass in kg, 0.0 when the robot declares none."""
+        return self.base_mass + sum(self.component_masses.values())
 
     @classmethod
     def load(cls, model: str) -> "RobotParams":
-        """Load parameters from arena_robots caps or fallback to safe defaults."""
+        """Load parameters from the arena_robots share dir, defaults on failure."""
         import os
         import yaml
         from ament_index_python.packages import get_package_share_directory
 
-        radius = 0.25
-        min_range = 0.0
-        max_range = 30.0
+        defaults = cls()
+        radius = defaults.robot_radius
+        base_mass = defaults.base_mass
+        component_masses: dict[str, float] = {}
 
         try:
-            caps_file = os.path.join(
-                get_package_share_directory("arena_robots"),
-                "robots",
-                model,
-                "caps",
-                "mobile.yaml"
+            robot_dir = os.path.join(
+                get_package_share_directory("arena_robots"), "robots", model
             )
-            with open(caps_file, "r") as file:
-                caps_content = yaml.safe_load(file)
-                radius = float(caps_content.get("radius", radius))
         except Exception:
-            pass
+            return cls(model=model)
+
+        def _read(path: str) -> dict:
+            try:
+                with open(path, "r") as file:
+                    return yaml.safe_load(file) or {}
+            except Exception:
+                return {}
+
+        radius = float(_read(os.path.join(robot_dir, "caps", "mobile.yaml")).get("radius", radius))
+        base_mass = float(_read(os.path.join(robot_dir, "model_params.yaml"))
+                          .get("mass", {}).get("base_kg", base_mass))
+
+        components_root = os.path.join(os.path.dirname(os.path.dirname(robot_dir)), "components")
+        for kind, entries in _read(os.path.join(robot_dir, "assembly.yaml")).get("defaults", {}).items():
+            for entry in entries or []:
+                variant = (entry or {}).get("variant")
+                if not variant:
+                    continue
+                kg = _read(os.path.join(components_root, kind, variant, "component.yaml")).get("mass", {}).get("kg")
+                if kg:
+                    component_masses[f"{kind}/{variant}"] = float(kg)
 
         return cls(
             model=model,
             robot_radius=radius,
-            laser_min_range=min_range,
-            laser_max_range=max_range,
+            laser_min_range=defaults.laser_min_range,
+            laser_max_range=defaults.laser_max_range,
+            base_mass=base_mass,
+            component_masses=component_masses,
         )
 
 
@@ -162,6 +190,11 @@ class AlignedEpisodeBundle:
     folder_manager: typing.Any = None # FolderManager
     peds: pl.DataFrame | None = None # Raw pedestrian dataframe
     map: str | None = None  # map name (e.g. "hospital_1")
+    # Native-rate raw topic frames keyed by topic name (odom, tf_gt, peds,
+    # scan, cmd_vel, power, energy, acoustics, ...). Each frame keeps its own
+    # timestamps; metrics that are sensitive to sampling rate compute on the
+    # native time base instead of the odom-aligned `data` frame.
+    topics: dict[str, pl.DataFrame] | None = None
 
 
 class PlotSpec(BaseModel):
@@ -176,6 +209,4 @@ class PlotSpec(BaseModel):
     filter: dict[str, typing.Any] | None = None
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
-    # Per-plot data source override (e.g. "characterization_summary" when the
-    # manifest default is "characterization_samples"). None = manifest default.
     data_source: str | None = None

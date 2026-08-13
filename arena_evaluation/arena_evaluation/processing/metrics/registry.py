@@ -137,12 +137,12 @@ class MetricRegistry:
         if available_topics is None:
             available_topics = set(["odom"])
             if episode.data is not None:
-                cols = episode.data.columns
-                if "scan_ranges" in cols:
+                cols = set(episode.data.columns)
+                if "scan_ranges" in cols or "scan_min" in cols:
                     available_topics.add("scan")
-                if "cmd_linear" in cols or "cmd_vel" in cols:
+                if "linear_x" in cols or "cmd_linear" in cols or "cmd_vel" in cols:
                     available_topics.add("cmd_vel")
-                if "joint_vel_left" in cols or "joint_vel_right" in cols:
+                if "joint_vel_left" in cols or "joint_vel_right" in cols or "joint_velocities" in cols:
                     available_topics.add("joint_states")
                 if "peds_positions" in cols:
                     available_topics.add("peds")
@@ -152,6 +152,12 @@ class MetricRegistry:
                     available_topics.add("collision_monitor_state")
                 if "pos_x_gt" in cols:
                     available_topics.add("tf_gt")
+                if "total_power_w" in cols:
+                    available_topics.add("power")
+                if "total_energy_consumed_wh" in cols or "battery_soc_percent" in cols:
+                    available_topics.add("energy")
+                if "total_level_af_dba" in cols:
+                    available_topics.add("acoustics")
         
         for stage in self.execution_stages:
             for calc_name in stage:

@@ -128,20 +128,17 @@ class AcousticFieldRenderer(BasePlotRenderer):
         # Subtle wall outline so room structure is always visible (even when field is dark)
         cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
         cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
-        wall_outline = np.flipud((mask_grid == 1).astype(np.uint8))
+        wall_outline = (mask_grid == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                    linewidths=0.3, alpha=0.25)
         if door_overlay is not None:
-            # Cyan contour outlines for ALL doors - use meter coords so axis stays in meters
-            door_vis = np.flipud(door_overlay.astype(np.uint8))
-            ax.contour(cx, cy, door_vis, levels=[0.5], colors=["#00ffd5"],
-                       linewidths=1.2, alpha=0.85)
-            # Brighter green contour for OPEN doors so open/closed state is
-            # immediately visible
+            # Cyan contour outlines for ALL doors, in meter coords
+            ax.contour(cx, cy, door_overlay.astype(np.uint8), levels=[0.5],
+                       colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
+            # Brighter green contour for OPEN doors
             if open_door_mask.any():
-                open_vis = np.flipud(open_door_mask.astype(np.uint8))
-                ax.contour(cx, cy, open_vis, levels=[0.5], colors=["#00ff00"],
-                           linewidths=2.0, alpha=0.9)
+                ax.contour(cx, cy, open_door_mask.astype(np.uint8), levels=[0.5],
+                           colors=["#00ff00"], linewidths=2.0, alpha=0.9)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
         plt.plot(rx_m, ry_m, "g*", markersize=8, label="Robot")
@@ -188,6 +185,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             "robot_y": float(wf["robot_y"]),
             "source_dba": float(wf.get("source_dba", 60.0)),
             "pedestrians": wf.get("pedestrians", []),
+            "door_states": wf.get("door_states", {}),
             "ped_max_exposure_dba": float(row["ped_max_exposure_dba"]),
             "planner": row.get("planner", row.get("local_planner", "")),
             "stage": row.get("stage", ""),
@@ -761,19 +759,18 @@ class AcousticFieldRenderer(BasePlotRenderer):
         # Subtle wall outline so room structure is always visible
         cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
         cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
-        wall_outline = np.flipud((mask_grid == 1).astype(np.uint8))
+        wall_outline = (mask_grid == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                    linewidths=0.3, alpha=0.25)
 
         door_contour = None
         open_door_contour = None
         if show_doors and door_mask_all.any():
-            door_vis = np.flipud(door_mask_all.astype(np.uint8))
-            door_contour = ax.contour(cx, cy, door_vis, levels=[0.5], colors=["#00ffd5"],
-                                      linewidths=1.2, alpha=0.85)
+            door_contour = ax.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5],
+                                      colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
             if open_door_masks[0].any():
-                open_vis = np.flipud(open_door_masks[0].astype(np.uint8))
-                open_door_contour = ax.contour(cx, cy, open_vis, levels=[0.5], colors=["#00ff00"],
+                open_door_contour = ax.contour(cx, cy, open_door_masks[0].astype(np.uint8),
+                                               levels=[0.5], colors=["#00ff00"],
                                                linewidths=2.0, alpha=0.9)
 
         robot_dot, = ax.plot([], [], "g*", markersize=8, label="Robot")
@@ -851,8 +848,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             if show_doors and open_door_masks[rg_idx].any():
                 if open_door_contour is not None:
                     open_door_contour.remove()
-                open_vis = np.flipud(open_door_masks[rg_idx].astype(np.uint8))
-                open_door_contour = ax.contour(cx, cy, open_vis, levels=[0.5], colors=["#00ff00"],
+                open_door_contour = ax.contour(cx, cy, open_door_masks[rg_idx].astype(np.uint8),
+                                               levels=[0.5], colors=["#00ff00"],
                                                linewidths=2.0, alpha=0.9)
 
             collision_label = " COLLISION 100dBA!" if is_collision else ""
@@ -900,10 +897,10 @@ class AcousticFieldRenderer(BasePlotRenderer):
                                      linewidths=0.3, alpha=0.25)
                     ax_frame.plot(rx_m, ry_m, "g*", markersize=8)
                     if show_doors and door_mask_all.any():
-                        ax_frame.contour(cx, cy, np.flipud(door_mask_all.astype(np.uint8)), levels=[0.5],
+                        ax_frame.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5],
                                          colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
                         if open_dm.any():
-                            ax_frame.contour(cx, cy, np.flipud(open_dm.astype(np.uint8)), levels=[0.5],
+                            ax_frame.contour(cx, cy, open_dm.astype(np.uint8), levels=[0.5],
                                              colors=["#00ff00"], linewidths=2.0, alpha=0.9)
                     ax_frame.set_title(f"Frame {fi}", fontsize=9)
                     plt.savefig(frame_path, dpi=dpi, bbox_inches="tight")

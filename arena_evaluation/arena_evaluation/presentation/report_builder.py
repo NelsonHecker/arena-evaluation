@@ -43,6 +43,67 @@ def data_file_for(data_source: str | None) -> str | None:
     return None
 
 
+def _has_values(df: "pl.DataFrame", col: str) -> bool:
+    """True when the column exists and holds at least one non-null value."""
+    return col in df.columns and bool(df[col].is_not_null().any())
+
+
+def _default_summary_group_cols(df: "pl.DataFrame") -> list[str]:
+    """Planner-led grouping, widened by whatever else actually varies.
+
+    The planner columns lead so a summary reads as a planner comparison; the
+    remaining varying identity columns follow so a single-planner sweep across
+    robots or worlds keeps its breakdown. An empty result means the frame
+    carries no usable identity, and the caller aggregates every run into one
+    row rather than dropping the table.
+    """
+    from .dimension_detector import detect_varying_dims
+
+    lead = next((c for c in ("local_planner", "planner") if _has_values(df, c)), None)
+    rest = [c for c in detect_varying_dims(df) if c != lead and _has_values(df, c)]
+    return ([lead] if lead else []) + rest
+
+
+def _aggregate(df: "pl.DataFrame", group_cols: list[str], agg_exprs: list) -> "pd.DataFrame":
+    """Grouped aggregate, or a single ``All runs`` row when nothing identifies a run."""
+    if group_cols:
+        return df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
+    out = df.select(agg_exprs).to_pandas()
+    out.insert(0, "runs", "All runs")
+    return out
+
+
+def _labelled(df: "pl.DataFrame", group_cols: list[str]) -> "pl.DataFrame":
+    """Make grouping keys renderable: nulls become an explicit label.
+
+    List columns are left alone; they are exploded before they are grouped on.
+    """
+    scalar = [c for c in group_cols if c in df.columns and df.schema[c] != pl.List]
+    if not scalar:
+        return df
+    return df.with_columns([
+        pl.col(c).cast(pl.Utf8).fill_null("unknown") for c in scalar
+    ])
+
+
+def _render_markdown_light(text: str) -> str:
+    """Minimal safe markdown -> HTML for agent notes.
+
+    Escapes everything first, then applies: **bold**, *italic*, `code`,
+    [text](url) links, and newline -> <br>.
+    """
+    import html as _html
+    import re as _re
+
+    out = _html.escape(text, quote=True)
+    out = _re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" target="_blank">\1</a>', out)
+    out = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
+    out = _re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", out)
+    out = _re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
+    out = out.replace("\n", "<br>")
+    return out
+
+
 class ReportBuilder:
     """Generates the final interactive HTML report and static PNG plots."""
 
@@ -60,9 +121,6 @@ class ReportBuilder:
         self.report_path = self.output_dir / "report.html"
         self.manifest_path = self.benchmark_dir / "viz_manifest.yaml"
         self.generate_gifs = generate_gifs
-        # Explicit manifest object (from_dirs sets this); build() falls back to
-        # VizManifest.load(self.manifest_path) when None (keeps mock-based
-        # tests working).
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
         self._source_frames: dict[str, pl.DataFrame] = {}
         self._merged_df: pl.DataFrame | None = None
@@ -275,12 +333,13 @@ class ReportBuilder:
 
             try:
                 html_chunk = plotly_renderer.render(spec, plot_df, run_dir=self.output_dir)
+                note_html = self._plot_note_html(spec)
                 if html_chunk:
                     if isinstance(html_chunk, list):
                         for chunk in html_chunk:
-                            html_plots.append((spec.layout_group, chunk, spec.title))
+                            html_plots.append((spec.layout_group, chunk + note_html, spec.title))
                     else:
-                        html_plots.append((spec.layout_group, html_chunk, spec.title))
+                        html_plots.append((spec.layout_group, html_chunk + note_html, spec.title))
             except Exception as e:
                 print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
 
@@ -305,6 +364,40 @@ class ReportBuilder:
         print(f"Report generated successfully: {self.report_path}")
         print(f"Static plots saved to: {self.plots_dir}")
 
+    def _plot_note_html(self, spec) -> str:
+        """Per-plot agent note, rendered under the plot.
+
+        Sources (in priority order):
+        - ``spec.options.note`` - inline markdown-ish string.
+        - ``spec.options.notes_key`` - a key into the benchmark's notes.yaml;
+          the matching note's value is shown. (Reads the same notes file the
+          table plot type consumes, so agents write one notes.yaml.)
+        Returns an empty string when neither is set.
+        """
+        opts = spec.options or {}
+        note = opts.get("note")
+        if note is None:
+            key = opts.get("notes_key")
+            if key:
+                try:
+                    import yaml as _yaml
+
+                    notes_path = self.benchmark_dir / "notes.yaml"
+                    if notes_path.is_file():
+                        data = _yaml.safe_load(notes_path.read_text())
+                        rows = data if isinstance(data, list) else (
+                            [{"label": str(k), "value": str(v)} for k, v in (data or {}).items()]
+                        )
+                        for row in rows:
+                            if isinstance(row, dict) and str(row.get("label", "")) == str(key):
+                                note = row.get("value")
+                                break
+                except Exception:
+                    note = None
+        if not note:
+            return ""
+        return f"<div class='plot-note'>{_render_markdown_light(str(note))}</div>"
+
     def _write_note_file(self, manifest: VizManifest) -> None:
         """Best-effort note recording which manifest produced this report."""
         if not manifest.name:
@@ -326,17 +419,12 @@ class ReportBuilder:
 
 
     def _generate_summary_table(self, df: pl.DataFrame) -> str:
-        """Legacy summary table (used when the manifest declares no summary)."""
-        if "planner" not in df.columns:
-            return ""
+        """Legacy summary table (used when the manifest declares no summary).
 
-        from .dimension_detector import detect_varying_dims, IDENTITY_COLS
-        varying = detect_varying_dims(df)
-        group_cols = varying if varying else ["planner"]
-
-        group_cols = [c for c in group_cols if c in df.columns]
-        if not group_cols:
-            group_cols = ["planner"]
+        Groups planner-first, then by the other varying identity columns.
+        """
+        group_cols = _default_summary_group_cols(df)
+        df = _labelled(df, group_cols)
 
         agg_exprs = []
         if "success" in df.columns and not df["success"].is_null().all():
@@ -351,7 +439,7 @@ class ReportBuilder:
         if not agg_exprs:
             return ""
 
-        summary = df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
+        summary = _aggregate(df, group_cols, agg_exprs)
 
         import pandas as pd
         if "success_rate" in summary.columns:
@@ -374,25 +462,23 @@ class ReportBuilder:
         return summary.to_html(index=False, classes="dataframe")
 
     def _generate_summary_table_manifest(self, df: pl.DataFrame, manifest: VizManifest) -> str:
-        """Declarative summary table: one column per SummarySpec."""
+        """Declarative summary table: one column per SummarySpec.
+
+        Grouping: manifest.summary_group_by wins, otherwise planner-first plus
+        the other varying identity columns.
+        """
         group_by = manifest.summary_group_by
         if isinstance(group_by, str):
             group_by = [group_by]
         group_cols = [c for c in (group_by or []) if c in df.columns]
 
         if not group_cols:
-            from .dimension_detector import detect_varying_dims
-            varying = detect_varying_dims(df)
-            group_cols = [c for c in varying if c in df.columns]
+            group_cols = _default_summary_group_cols(df)
 
-        if not group_cols:
-            return ""
-
-        # Wide per-episode list columns (e.g. timeseries_char_*) are exploded
-        # in lockstep so per-sample metrics aggregate correctly per group.
         list_cols = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns and df.schema[c] == pl.List]
         if list_cols:
             df = df.explode(list_cols)
+        df = _labelled(df, group_cols)
 
         agg_exprs = []
         for spec in manifest.summary:
@@ -401,7 +487,7 @@ class ReportBuilder:
         if not agg_exprs:
             return ""
 
-        summary = df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
+        summary = _aggregate(df, group_cols, agg_exprs)
 
         import pandas as pd
         spec_by_metric = {s.metric: s for s in manifest.summary}

@@ -1,14 +1,18 @@
 """Declarative HTML table plot type.
 
-Renders a table in the report from two manifest-declared sources:
+Renders up to three independent pieces inside the plot block:
 
-1. **Data-derived columns** - ``options.columns`` aggregates the metrics frame
-   per ``group_by`` (mean of each column, formatted), like the summary table
-   but as a standalone plot.
+1. **Data-derived table** - ``options.columns`` aggregates the metrics frame
+   per ``group_by`` (mean of each column, formatted).
 
-2. **Agent-written notes** - ``options.notes`` pulls in free-form rows written
+2. **Agent-authored rows** - ``options.rows`` is a list of ``{label, value}``
+   entries rendered as a two-column table, exactly as given.
+
+3. **Agent-written notes** - ``options.notes`` pulls in free-form rows written
    by an agent (e.g. through MCP tools) into ``notes.yaml`` in the benchmark
-   dir, or inline YAML / ``"key: value"`` text lines.
+   dir, or inline YAML / ``"key: value"`` text lines. Notes render in a
+   standalone callout below the tables, never appended into the metric table
+   rows (the column counts differ).
 
 Example manifest spec:
 
@@ -23,12 +27,21 @@ Example manifest spec:
     columns:
       - {metric: success, label: Success, format: "{:.0%}"}
       - {metric: time_to_goal, label: Avg Time, format: "{:.1f}"}
-    notes: notes.yaml          # or inline [{label: ..., value: ...}]
-```
+    notes: notes.yaml          # -> standalone callout section
+
+- id: agent_table
+  type: table
+  title: Agent Conclusions
+  data_key: "*"
+  options:
+    rows:                      # agent-defined, exactly as given
+      - {label: Key Finding, value: "DWB wins on success"}
+      - {label: Recommendation, value: "Use DWB in corridors"}
 """
 
 from __future__ import annotations
 
+import html as html_escape
 import pathlib
 import typing
 
@@ -100,6 +113,33 @@ def _load_notes(notes, benchmark_dir: pathlib.Path | None) -> list[dict[str, str
     return rows
 
 
+def _render_notes_callout(notes_rows: list[dict[str, str]]) -> str:
+    """Render agent notes as a standalone callout section (never table rows)."""
+    if not notes_rows:
+        return ""
+    parts = [
+        "<div class='notes-callout'>",
+        "<div class='notes-callout-title'>Analysis Notes</div>",
+    ]
+    for note in notes_rows:
+        label = html_escape.escape(note.get("label", ""), quote=True)
+        value = html_escape.escape(note.get("value", ""), quote=True).replace("\n", "<br>")
+        if label:
+            parts.append(
+                f"<div class='notes-callout-row'>"
+                f"<span class='notes-callout-label'>{label}</span>"
+                f"<span class='notes-callout-value'>{value}</span>"
+                f"</div>"
+            )
+        else:
+            parts.append(
+                f"<div class='notes-callout-row notes-callout-row-plain'>"
+                f"<span class='notes-callout-value'>{value}</span></div>"
+            )
+    parts.append("</div>")
+    return "".join(parts)
+
+
 class TableRenderer(BasePlotRenderer):
     PLOT_TYPE = "table"
     run_dir: pathlib.Path | None = None  # set by the renderer dispatcher (notes resolution)
@@ -112,6 +152,18 @@ class TableRenderer(BasePlotRenderer):
             for c in cols
             if isinstance(c, dict) and c.get("metric")
         ]
+
+    def _agent_rows(self) -> list[dict[str, str]]:
+        """Agent-authored rows: exactly as given, no predefined layout."""
+        rows = (self.spec.options or {}).get("rows") or []
+        out: list[dict[str, str]] = []
+        for item in rows:
+            if isinstance(item, dict):
+                out.append({
+                    "label": str(item.get("label", item.get("key", ""))),
+                    "value": str(item.get("value", "")),
+                })
+        return out
 
     def _data_rows(self, df: pl.DataFrame) -> list[list[str]]:
         """Aggregate the metrics frame per group_by into label/value rows."""
@@ -149,7 +201,7 @@ class TableRenderer(BasePlotRenderer):
             rows.append([key, *values])
         return rows
 
-    def _render_html(self, df: pl.DataFrame, benchmark_dir: pathlib.Path | None) -> str | None:
+    def _render_data_table(self, df: pl.DataFrame) -> str | None:
         opts = self.spec.options or {}
         cols = self._columns()
         group_cols = opts.get("group_by") or []
@@ -159,15 +211,8 @@ class TableRenderer(BasePlotRenderer):
 
         header = [*[g.replace("_", " ").title() for g in group_cols], *[c["label"] for c in cols]]
         if not header:
-            header = ["Label", "Value"]
+            return None
         rows = self._data_rows(df)
-
-        note_rows = _load_notes(opts.get("notes"), benchmark_dir)
-        if note_rows:
-            if rows:
-                rows.append(["—" * max(len(h), 1) for h in header])
-            rows.extend([[n["label"], n["value"]] for n in note_rows])
-
         if not rows:
             return None
 
@@ -179,6 +224,35 @@ class TableRenderer(BasePlotRenderer):
             html.append("<tr>" + "".join(f"<td style='border:1px solid #ccc; padding:4px 10px;'>{c}</td>" for c in cells) + "</tr>")
         html.append("</tbody></table>")
         return "".join(html)
+
+    def _render_agent_table(self) -> str | None:
+        """Agent-authored rows as a clean two-column table."""
+        rows = self._agent_rows()
+        if not rows:
+            return None
+        parts = ["<table class='dataframe' style='border-collapse: collapse; margin: 8px 0;'>",
+                 "<thead><tr><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Label</th>"
+                 "<th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Value</th></tr></thead>",
+                 "<tbody>"]
+        for row in rows:
+            label = html_escape.escape(row.get("label", ""), quote=True)
+            value = html_escape.escape(row.get("value", ""), quote=True).replace("\n", "<br>")
+            parts.append(f"<tr><td style='border:1px solid #ccc; padding:4px 10px;'>{label}</td>"
+                         f"<td style='border:1px solid #ccc; padding:4px 10px;'>{value}</td></tr>")
+        parts.append("</tbody></table>")
+        return "".join(parts)
+
+    def _render_html(self, df: pl.DataFrame, benchmark_dir: pathlib.Path | None) -> str | None:
+        opts = self.spec.options or {}
+        data_table = self._render_data_table(df)
+        agent_table = self._render_agent_table()
+        note_rows = _load_notes(opts.get("notes"), benchmark_dir)
+        notes_callout = _render_notes_callout(note_rows)
+
+        pieces = [p for p in (data_table, agent_table, notes_callout) if p]
+        if not pieces:
+            return None
+        return "".join(pieces)
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)

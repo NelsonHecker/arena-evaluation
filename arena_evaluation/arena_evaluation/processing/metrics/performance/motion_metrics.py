@@ -1,6 +1,7 @@
 from __future__ import annotations
 import typing
 import numpy as np
+import polars as pl
 
 from ..base import BaseMetricCalculator
 
@@ -60,7 +61,6 @@ class MotionMetricsCalculator(BaseMetricCalculator):
         if episode.data is None or "vel_linear" not in episode.data.columns:
             return {k: None for k in self.output_keys()}
             
-        import polars as pl
         if len(episode.data) > 0:
             episode.data = episode.data.filter(
                 pl.col("vel_linear").is_not_null() & ~pl.col("vel_linear").is_nan() &
