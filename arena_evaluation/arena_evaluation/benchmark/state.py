@@ -243,13 +243,7 @@ class ProgressLog:
         self._fh.close()
 
     def dedupe_in_place(self) -> None:
-        """Remove duplicate (step_key, episode_id) rows, keeping the latest by ts_iso.
-
-        Writes non-comment rows back atomically (write-tmp + os.replace), sorted
-        by ts_iso ascending so the file reads chronologically after repair.
-        Comment lines (starting with #) are discarded; they are resume annotations
-        that belong to the old run and would confuse future readers.
-        """
+        """Remove duplicate (step_key, episode_id) rows, keeping the latest by ts_iso; drops old comment lines."""
         self._fh.flush()
         path = self._path
 
@@ -264,7 +258,6 @@ class ProgressLog:
         if not raw_rows:
             return
 
-        # First row is the header; remaining rows are data.
         header_line = raw_rows[0]
         header = next(csv.reader([header_line]))
         data_lines = raw_rows[1:]
@@ -273,7 +266,6 @@ class ProgressLog:
         episode_id_idx = header.index("episode_id")
         ts_iso_idx = header.index("ts_iso")
 
-        # Keep latest ts_iso per (step_key, episode_id).
         best: dict[tuple[str, str], list[str]] = {}
         for line in data_lines:
             row = next(csv.reader([line]))

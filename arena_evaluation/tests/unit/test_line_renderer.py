@@ -36,7 +36,7 @@ def test_line_with_confidence_band():
     assert html is not None
     # Band mode renders a filled region (toself) + a line per group.
     assert "toself" in html
-    assert html.count("scatter") >= 4  # 2 groups × (line + band)
+    assert html.count("scatter") >= 4  # 2 groups x (line + band)
 
 
 def test_line_without_error_band():
@@ -49,7 +49,7 @@ def test_line_without_error_band():
 def test_line_missing_columns_returns_none():
     assert LineRenderer(_spec(y="missing")).render_plotly(_samples_df()) is None
     assert LineRenderer(_spec(y="p_total_w")).render_plotly(pl.DataFrame()) is None
-    # No group_by columns → falls back to differentiate, which may be absent.
+    # No group_by columns -> falls back to differentiate, which may be absent.
     spec = PlotSpec(id="t", type="line", title="T", data_key="time_ns", options={"y": "p_total_w"})
     assert spec is not None
     html = LineRenderer(spec).render_plotly(_samples_df())

@@ -66,5 +66,5 @@ def test_load_notes_text_lines():
 
 def test_empty_df_no_crash():
     assert TableRenderer(_spec()).render_plotly(pl.DataFrame()) is None
-    # No group_by/columns → no data rows, no notes → None.
+    # No group_by/columns -> no data rows, no notes -> None.
     assert TableRenderer(_spec()).render_plotly(_df()) is None

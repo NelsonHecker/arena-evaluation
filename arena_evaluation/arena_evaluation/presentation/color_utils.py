@@ -4,11 +4,7 @@ import yaml
 _PALETTE_CACHE = None
 
 def get_color_palette() -> list[str]:
-    """
-    Load the accessibility color palette from config/color_palette.yaml.
-    Returns a list of hex color codes in the exact order they are defined, 
-    excluding pure white and black.
-    """
+    """Hex colors from config/color_palette.yaml, in file order, minus pure white and black."""
     global _PALETTE_CACHE
     if _PALETTE_CACHE is not None:
         return _PALETTE_CACHE
@@ -42,9 +38,7 @@ def get_color_palette() -> list[str]:
     return _PALETTE_CACHE
 
 def set_global_color_palette() -> None:
-    """
-    Apply the accessibility color palette to Plotly and Seaborn globally.
-    """
+    """Apply the accessibility color palette to Plotly and Seaborn globally."""
     palette = get_color_palette()
     
     try:

@@ -687,7 +687,6 @@ class TrajectoryRenderer(BasePlotRenderer):
         plt.tight_layout()
         plt.savefig(out_path, dpi=300)
         
-        # Generate GIF
         if getattr(self, "generate_gifs", False):
             markers_info = None
             if overlay_markers:

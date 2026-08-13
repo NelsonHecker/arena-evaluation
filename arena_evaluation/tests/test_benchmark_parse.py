@@ -388,7 +388,7 @@ def test_contest_parse_sweep_dict_cap_one_inner_axis():
 
 
 def test_contest_parse_sweep_dict_cap_two_inner_axes():
-    """Dict-form cap with two sweep axes → cartesian product."""
+    """Dict-form cap with two sweep axes -> cartesian product."""
     from arena_evaluation.benchmark.config import Contest
 
     obj = {"mobile": {"driver": "nav2", "local_planner": ["teb", "dwa"], "inter_planner": ["polite", "aggressive"]}}
@@ -400,7 +400,7 @@ def test_contest_parse_sweep_dict_cap_two_inner_axes():
 
 
 def test_contest_parse_sweep_dict_cap_no_axes():
-    """Dict-form cap with no list values → single contestant."""
+    """Dict-form cap with no list values -> single contestant."""
     from arena_evaluation.benchmark.config import Contest
 
     obj = {"mobile": {"driver": "nav2", "local_planner": "teb"}}

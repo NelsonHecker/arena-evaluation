@@ -16,9 +16,7 @@ COMPOUND_LABEL_COL = "__label__"
 
 
 def detect_varying_dims(df: pl.DataFrame) -> list[str]:
-    """
-    Return identity columns that have more than one unique value in df.
-    """
+    """Return identity columns that have more than one unique value in df."""
     varying: list[str] = []
     for col in IDENTITY_COLS:
         if col not in df.columns:
@@ -30,10 +28,7 @@ def detect_varying_dims(df: pl.DataFrame) -> list[str]:
 
 
 def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
-    """
-    Add (or replace) a __label__ column whose value is a human-readable
-    compound of the given dims.
-    """
+    """Add (or replace) a __label__ column holding a readable compound of dims."""
     if not dims:
         return df
 
@@ -46,9 +41,7 @@ def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
 
 
 def resolve_differentiate(spec: "PlotSpec", df: pl.DataFrame) -> tuple[str, pl.DataFrame]:
-    """
-    Determine the effective differentiation column for spec given df.
-    """
+    """Determine the effective differentiation column for spec given df."""
     auto = getattr(spec, "auto_differentiate", True)
     requested = spec.differentiate
 

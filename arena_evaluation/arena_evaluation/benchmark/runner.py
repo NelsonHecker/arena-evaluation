@@ -953,7 +953,6 @@ class BenchmarkRunner(ArenaMixinNode):
                         episodes_total=step.episodes,
                     )
                     flush_cb(step_result)
-                    # if cancelled, drain the queue and mark skipped
                     while not q.empty():
                         try:
                             rem_step = q.get_nowait()

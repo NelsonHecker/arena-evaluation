@@ -104,7 +104,7 @@ def door_segments(
     """
     world_path = _find_world_yaml(map_name, run_dir=run_dir)
     if world_path is None:
-        logger.debug("No world.yaml found for map %r — no door geometry", map_name)
+        logger.debug("No world.yaml found for map %r, no door geometry", map_name)
         return {}
 
     try:
@@ -155,7 +155,7 @@ def door_segments(
                 n_on_wall = int(np.sum(mask & (grid == 1)))
                 if n_on_wall == 0:
                     logger.warning(
-                        "Door %r (%s) lands on no wall pixels — skipping (map/world mismatch?)",
+                        "Door %r (%s) lands on no wall pixels - skipping (map/world mismatch?)",
                         name, world_path,
                     )
                     continue
@@ -204,7 +204,7 @@ def build_pixel_tl(
     - free space: 0 dB
     - walls: wall_tl_db
     - closed doors: their door TL (25 dB default)
-    - open doors (in *open_doors*): 0 dB (carved — sound passes)
+    - open doors (in *open_doors*): 0 dB (carved, sound passes)
 
     Open doors take precedence: a door pixel that is open behaves as free.
     """

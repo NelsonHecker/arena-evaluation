@@ -832,8 +832,7 @@ def test_build_pending_record_dir_set_from_record_root(tmp_path: pathlib.Path):
     contest = _make_contest("pa")
     run_dir = _fake_run_dir({})
     steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
-    # All steps now share the flat episodes/ directory under record_root.
-    # Wait, they are now under recordings/contestant/stage
+    # All steps share the flat episodes/ directory under record_root.
     assert steps[0].record_dir == tmp_path / "episodes"
 
 
@@ -990,7 +989,7 @@ def test_default_run_id_lex_sort_is_chronological():
     assert run_id_a <= run_id_b
 
 
-# test_data_root_uses_env_var: skipped — verifying that the resolution function
+# test_data_root_uses_env_var: skipped, verifying that the resolution function
 # reads ARENA_DATA_DIR from the environment requires monkeypatching os.environ,
 # which is prohibited by the project no-mock rule. Follow-up: refactor
 # _resolve_data_root to accept an optional env-dict argument so it can be
@@ -1063,9 +1062,6 @@ def test_group_pending_preserves_suite_order():
 def test_group_pending_empty():
     from arena_evaluation.benchmark.runner import group_pending
     assert group_pending([], "gazebo") == []
-
-
-
 
 
 def test_env_key_components():

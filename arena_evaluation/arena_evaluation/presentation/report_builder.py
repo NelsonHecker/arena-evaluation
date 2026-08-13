@@ -13,7 +13,7 @@ from .plotly_renderer import PlotlyRenderer
 from .seaborn_renderer import SeabornRenderer
 from ..processing.parquet_store import ParquetStore
 
-# Data source name → parquet filename. Any other data_source string ending in
+# Data source name -> parquet filename. Any other data_source string ending in
 # ".parquet" is used verbatim as the filename in the benchmark/output dir.
 _DATA_FILES = {
     "metrics": None,
@@ -44,9 +44,7 @@ def data_file_for(data_source: str | None) -> str | None:
 
 
 class ReportBuilder:
-    """
-    Generates the final interactive HTML report and static PNG plots.
-    """
+    """Generates the final interactive HTML report and static PNG plots."""
 
     def __init__(
         self,
@@ -78,9 +76,7 @@ class ReportBuilder:
         manifest: VizManifest | str | None = None,
         generate_gifs: bool = False,
     ) -> "ReportBuilder":
-        """
-        Build a ReportBuilder that merges data from multiple source directories.
-        """
+        """Build a ReportBuilder that merges data from multiple source directories."""
         instance = cls.__new__(cls)
         instance.benchmark_dir = source_dirs[0] if source_dirs else output_dir
         instance.output_dir = pathlib.Path(output_dir)
@@ -156,7 +152,6 @@ class ReportBuilder:
             return dfs[0]
         return pl.concat(dfs, how="diagonal_relaxed")
 
-    # ── Data source resolution ────────────────────────────────────────────────
 
     def _load_primary_frame(self, manifest: VizManifest) -> pl.DataFrame | None:
         """Load the manifest's primary data frame (from benchmark_dir)."""
@@ -211,7 +206,6 @@ class ReportBuilder:
             self._source_frames[src] = ParquetStore.read(p)[0]
         return self._source_frames[src]
 
-    # ── Build ─────────────────────────────────────────────────────────────────
 
     def build(self) -> None:
         """Execute the report building process."""
@@ -239,7 +233,7 @@ class ReportBuilder:
                 ])
 
         # Separate contestant evaluation runs from reference runs (metrics only;
-        # characterization frames have no is_reference column → no-op).
+        # characterization frames have no is_reference column -> no-op).
         if "is_reference" in df.columns:
             df_contestants = df.filter(pl.col("is_reference").is_null() | (pl.col("is_reference") == False))
             if len(df_contestants) == 0:
@@ -329,7 +323,6 @@ class ReportBuilder:
         except Exception as e:
             print(f"Warning: failed to write report_manifest.yaml note: {e}")
 
-    # ── Summary tables ────────────────────────────────────────────────────────
 
     def _generate_summary_table(self, df: pl.DataFrame) -> str:
         """Legacy summary table (used when the manifest declares no summary)."""

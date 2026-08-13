@@ -63,13 +63,12 @@ class MockOdomMsg:
 
 
 def test_mcap_reader_lazy_chunking():
-    # Setup temporary directory for output parquet files
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = pathlib.Path(tmpdir)
         mcap_file = tmp_path / "dummy.mcap"
         mcap_file.touch()
 
-        # Generate 10,005 mock odom messages to trigger a chunk flush (threshold 10,000)
+        # 10,005 messages to cross the 10,000-message chunk flush threshold
         mock_messages = []
         for i in range(10005):
             channel = MockChannel("/env_0/odom")
@@ -86,15 +85,12 @@ def test_mcap_reader_lazy_chunking():
             bundles = reader.read()
             bundle = bundles["env_0"]
 
-            # Verify that the Parquet file was created in the inferred topics folder
             odom_parquet = tmp_path / "topics" / "env_0" / "odom.parquet"
             assert odom_parquet.exists()
 
-            # Verify it returns a TopicBundle of LazyFrames
             assert isinstance(bundle, TopicBundle)
             assert isinstance(bundle.odom, pl.LazyFrame)
 
-            # Collect lazy frame and verify contents
             odom_df = bundle.odom.collect()
             assert len(odom_df) == 10005
             assert odom_df["pos_x"][0] == 0.0

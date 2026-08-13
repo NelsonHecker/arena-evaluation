@@ -9,13 +9,13 @@ def test_motion_constant_velocity():
         "vel_linear": [1.0, 1.0, 1.0, 1.0],
         "vel_angular": [0.0, 0.0, 0.0, 0.0]
     })
-    
+
     episode = AlignedEpisodeBundle(episode_id=1, data=odom_df, start_pos=[], goal_pos=[])
     params = RobotParams(0.2, 0.0, 10.0)
     calc = MotionMetricsCalculator(params)
-    
+
     results = calc.calculate(episode, {})
-    
+
     assert np.isclose(results["velocity_mean"], 1.0)
     assert np.isclose(results["velocity_max"], 1.0)
     assert np.isclose(results["acceleration_mean"], 0.0)
@@ -27,13 +27,13 @@ def test_motion_linear_acceleration():
         "vel_linear": [0.0, 1.0, 2.0, 3.0], # accel is 1.0 per step
         "vel_angular": [0.0, 0.0, 0.0, 0.0]
     })
-    
+
     episode = AlignedEpisodeBundle(episode_id=1, data=odom_df, start_pos=[], goal_pos=[])
     params = RobotParams(0.2, 0.0, 10.0)
     calc = MotionMetricsCalculator(params)
-    
+
     results = calc.calculate(episode, {})
-    
+
     assert np.isclose(results["velocity_mean"], 1.5)
     assert np.isclose(results["velocity_max"], 3.0)
     assert np.isclose(results["acceleration_mean"], 1.0)

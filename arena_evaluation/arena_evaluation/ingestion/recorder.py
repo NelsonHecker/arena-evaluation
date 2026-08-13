@@ -259,7 +259,7 @@ class DataRecorderNode(Node):
         self.current_sim_episode_id = episode_id
 
         self._close_current_writer()
-        
+
         self._write_success_count = 0
         self._write_drop_count = 0
         self.recorded_topics = set()
@@ -283,7 +283,7 @@ class DataRecorderNode(Node):
 
         mcap_config_path = os.path.join(self.base_dir, "config", "mcap_writer_options.yaml")
         if not os.path.exists(mcap_config_path):
-            self._log_warn(f"mcap_writer_options.yaml not found — recording without compression")
+            self._log_warn(f"mcap_writer_options.yaml not found - recording without compression")
             mcap_config_path = ""
 
         storage_options = rosbag2_py.StorageOptions(
@@ -304,7 +304,7 @@ class DataRecorderNode(Node):
                 self.writer.open(storage_options, converter_options)
                 self.topics_metadata = {}
                 self.last_recorded_times = {}
-                
+
                 if hasattr(self, '_pre_episode_buffer') and self._pre_episode_buffer:
                     self._log_info(f"Flushing {len(self._pre_episode_buffer)} pre-episode buffered messages to writer")
                     for topic_name, serialized_msg, timestamp_ns in self._pre_episode_buffer:
@@ -319,7 +319,7 @@ class DataRecorderNode(Node):
 
     def _close_current_writer(self):
         """Flush, close the current writer, and flatten the rosbag2 subdirectory."""
-            
+
         with self.writer_lock:
             if self.writer is None:
                 return
@@ -340,22 +340,22 @@ class DataRecorderNode(Node):
                         dest = self.current_episode_dir / f"{ep_name}_{mcap_file.stem}.mcap"
                     try:
                         shutil.move(str(mcap_file), str(dest))
-                        self._log_info(f"Flattened {mcap_file.name} → {dest.name}")
+                        self._log_info(f"Flattened {mcap_file.name} -> {dest.name}")
                     except Exception as e:
                         self._log_error(f"Failed to flatten {mcap_file}: {e}")
-                
+
                 rosbag_meta = inner_dir / "metadata.yaml"
                 if rosbag_meta.exists():
                     try:
                         import yaml
                         with open(rosbag_meta, 'r') as f:
                             bag_info = yaml.safe_load(f).get("rosbag2_bagfile_information", {})
-                        
+
                         if self.current_metadata is not None:
                             self.current_metadata.rosbag2_message_count = bag_info.get("message_count")
                             self.current_metadata.rosbag2_topics = bag_info.get("topics_with_message_count")
                             self._log_info(f"Merged rosbag2 metadata into episode metadata.")
-                        
+
                         rosbag_meta.unlink()
                     except Exception as e:
                         self._log_error(f"Failed to merge rosbag metadata: {e}")
@@ -379,7 +379,7 @@ class DataRecorderNode(Node):
         for key, t_def in topics_dict.items():
             if key not in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot"):
                 continue
-                
+
             topic_name = t_def.name_template
             msg_type = t_def.msg_type
 
@@ -456,13 +456,13 @@ class DataRecorderNode(Node):
         self._clock_received_count += 1
         if self._clock_received_count <= 5:
             self._log_info(f"/clock tick #{self._clock_received_count}: sim_time_ns={new_time} ({new_time/1e9:.3f}s)")
-            
+
         if self.current_time is not None and new_time < self.current_time:
             self._log_warn(f"Backward time jump detected: {self.current_time} -> {new_time}")
             self.last_recorded_times.clear()
-            
+
         self.current_time = new_time
-        
+
         if hasattr(self, '_pre_clock_buffer') and self._pre_clock_buffer:
             self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
             for topic, buffered_msg in self._pre_clock_buffer:
@@ -527,12 +527,12 @@ class DataRecorderNode(Node):
             self._begin_episode(msg.episode_id, source="episode_record")
 
         self._update_metadata_from_episode(msg)
-        
+
         env_namespace = self.get_namespace().strip('/')
         now = self.current_time or self.get_clock().now().nanoseconds
         topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
         self._write_to_bag_at(topic, msg, now)
-        
+
     def semantic_snapshot_callback(self, msg: SemanticSnapshot):
         env_namespace = self.get_namespace().strip('/')
         now = self.current_time or self.get_clock().now().nanoseconds
@@ -546,21 +546,21 @@ class DataRecorderNode(Node):
         self._write_to_bag_at(topic, msg, now)
 
         from .topics import get_topics
-        
+
         for state in getattr(msg, 'robots', []):
             robot = state.descriptor
             robot_ns = robot.ns.strip('/')
-            
+
             if robot_ns not in self.known_robots:
                 self.get_logger().info(f"Discovered new robot from RobotFleet: {robot_ns} (Model: {robot.model})")
                 self.known_robots.add(robot_ns)
-                
+
                 topics_dict = get_topics(namespace=robot_ns, parent_namespace=env_namespace)
-                
+
                 for key, t_def in topics_dict.items():
                     if key in ("episode_record", "robots_fleet", "peds", "agent_states"):
                         continue
-                        
+
                     topic_name = t_def.name_template
                     msg_type = t_def.msg_type
 
@@ -581,7 +581,7 @@ class DataRecorderNode(Node):
                     sub = self.create_subscription(msg_type, topic_name, callback, qos_profile)
                     self.subs.append(sub)
                     self.get_logger().info(f"Subscribed to robot topic: {topic_name}")
-                    
+
                 robot_name = robot_ns.split('/')[-1] if robot_ns else ""
                 ns_prefix = f"/{robot_ns}" if robot_ns else ""
                 if robot_name:
@@ -589,10 +589,10 @@ class DataRecorderNode(Node):
                     self._register_topic(odom_topic, Odometry)
                     sub = self.create_subscription(Odometry, odom_topic, self._create_throttled_callback(odom_topic), self.qos)
                     self.subs.append(sub)
-                    
+
                 if self.robot_model == "unknown":
                     self.robot_model = robot.model
-                    
+
                 if hasattr(self, 'current_metadata') and self.current_metadata is not None:
                     if "unknown" in self.current_metadata.robot_model:
                         self.current_metadata.robot_model = []
@@ -691,13 +691,13 @@ class DataRecorderNode(Node):
             if self.writer is None:
                 if not hasattr(self, '_pre_episode_buffer'):
                     self._pre_episode_buffer = []
-                
+
                 topic_stripped = topic_name.strip('/')
                 if topic_stripped in getattr(self, 'latched_topic_names', set()):
                     if len(self._pre_episode_buffer) < 10000:
                         self._pre_episode_buffer.append((topic_name, serialized_msg, timestamp_ns))
                         return
-                
+
                 self._write_drop_count += 1
                 if self._write_drop_count <= 10 or self._write_drop_count % 100 == 0:
                     self._log_warn(f"DROP (writer=None) topic={topic_name} drop_count={self._write_drop_count}")
@@ -859,7 +859,7 @@ class DataRecorderNode(Node):
             f"episodes={self.episodes_recorded}",
             flush=True,
         )
-        self._log_info("Finalizing recording — closing last episode writer...")
+        self._log_info("Finalizing recording - closing last episode writer...")
 
         self._close_current_writer()
 

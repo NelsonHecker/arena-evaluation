@@ -492,7 +492,7 @@ Examples:
     subparsers.add_parser(
         "run",
         parents=[run_parent],
-        help="Full pipeline: Extract MCAP (overwrite) → Process → Parquet → HTML report.",
+        help="Full pipeline: Extract MCAP (overwrite) -> Process -> Parquet -> HTML report.",
     )
     process_parser = subparsers.add_parser(
         "process",
@@ -515,19 +515,16 @@ Examples:
         help="Layer 5: Generate static PNG plots only (no HTML report).",
     )
 
-    # ── acoustic subcommand group ──────────────────────────────────────────
     acoustic_parser = subparsers.add_parser(
         "acoustic",
         help="Acoustic field visualization: list episodes, animate fields, render snapshots.",
     )
     acoustic_sub = acoustic_parser.add_subparsers(dest="acoustic_command", required=True)
 
-    # acoustic list
     acoustic_list = acoustic_sub.add_parser("list", help="List episodes with acoustic metrics.")
     acoustic_list.add_argument("--benchmark-dir", type=pathlib.Path, required=True,
                                metavar="DIR", help="Path to benchmark directory.")
 
-    # acoustic animate
     acoustic_anim = acoustic_sub.add_parser("animate", help="Generate animated GIF/MP4 of acoustic field.")
     acoustic_anim.add_argument("--benchmark-dir", type=pathlib.Path, required=True,
                                metavar="DIR", help="Path to benchmark directory.")
@@ -547,7 +544,6 @@ Examples:
     acoustic_anim.add_argument("--output", type=pathlib.Path, default=None, metavar="PATH",
                                help="Override output path (default: plots/{episode}_acoustic.{format}).")
 
-    # acoustic snapshot
     acoustic_snap = acoustic_sub.add_parser("snapshot", help="Render a single acoustic field frame.")
     acoustic_snap.add_argument("--benchmark-dir", type=pathlib.Path, required=True,
                                metavar="DIR", help="Path to benchmark directory.")
@@ -584,7 +580,7 @@ Examples:
             print(f"Error: directory does not exist: {d}")
             sys.exit(1)
 
-    # ── acoustic subcommand handler ────────────────────────────────────────
+    # acoustic subcommand handler
     if args.command == "acoustic":
         _handle_acoustic(args)
         return 0
@@ -615,7 +611,7 @@ Examples:
                     if out:
                         print(f"Metrics written to: {out}")
                     else:
-                        print(f"Processing failed for {run_dir} — see errors above.")
+                        print(f"Processing failed for {run_dir} - see errors above.")
 
         else:
             for benchmark_dir in args.benchmark_dir:

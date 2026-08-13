@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 from ..storage.schemas import TopicBundle
 
 
-# Topic → explicit PyArrow schema.  Only needed when RecordBatch.from_pydict
+# Topic -> explicit PyArrow schema.  Only needed when RecordBatch.from_pydict
 # cannot infer column types from data (e.g. semantic_snapshot where each row
 # populates exactly one value_* column, leaving the rest None).
 _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
@@ -391,7 +391,6 @@ class MCAPReader:
                             target["robots_params"].append(robots_yaml)
                             appended = True
     
-                        # Collision Events (Taskgen simulation)
                         # Semantic snapshot (latched, one row per annotated entity)
                         elif topic.endswith("/state/semantics"):
                             target = global_data["semantic_snapshot"]

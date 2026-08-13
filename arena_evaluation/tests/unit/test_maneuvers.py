@@ -1,6 +1,6 @@
 """Unit tests for the open-loop characterization maneuver schedule.
 
-Pure Python — no ROS, no Gazebo required. The schedule lives in
+Pure Python, no ROS, no Gazebo required. The schedule lives in
 task_generator (owned by the TM_Characterization robot task mode); the offline
 calculator imports the same module so labels never drift.
 """
@@ -34,7 +34,7 @@ def test_schedule_structure():
 
 def test_linear_sweep_coverage_up_to_2mps():
     phases = build_schedule()
-    # The ramp-apex settles are also kind=LINEAR — match the sweep steps only.
+    # The ramp-apex settles are also kind=LINEAR - match the sweep steps only.
     linear = [p for p in phases if p.name.startswith("linear_vx_")]
     targets = sorted({p.vx_target for p in linear if p.vx_target > 0.0})
     assert targets == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -54,7 +54,7 @@ def test_ramp_tests():
     ramps_back = [p for p in phases if p.kind == PhaseKind.RAMP_UP and p.vx_target < 0.0]
     assert [p.ramp_s for p in ramps_up] == [0.5, 1.0, 2.0]
     assert all(p.vx_target == VX_MAX for p in ramps_up)
-    # Ramps return the robot to its start by accelerating backward to −vx_max.
+    # Ramps return the robot to its start by accelerating backward to -vx_max.
     assert [p.ramp_s for p in ramps_back] == [0.5, 1.0, 2.0]
     assert all(p.vx_target == -VX_MAX for p in ramps_back)
     # Each ramp is followed by a settle at the apex.
@@ -111,7 +111,7 @@ def test_resolve_envelope_from_caps(tmp_path: pathlib.Path):
 
 
 def test_resolve_envelope_fallback(tmp_path: pathlib.Path):
-    # Unknown robot with no caps file → generic defaults.
+    # Unknown robot with no caps file -> generic defaults.
     env = resolve_envelope("ghost_robot", caps_dir=tmp_path)
     assert env == {"vx_max": VX_MAX, "wz_max": 2.5}
 

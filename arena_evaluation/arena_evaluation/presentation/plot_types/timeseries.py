@@ -29,7 +29,6 @@ class TimeseriesRenderer(BasePlotRenderer):
         if x_col not in df_filtered.columns:
             return None
 
-        # Check if all needed metrics are in the dataframe
         valid_metrics = [m for m in metrics if m in df_filtered.columns]
         if not valid_metrics:
             return None
@@ -43,7 +42,6 @@ class TimeseriesRenderer(BasePlotRenderer):
         planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
         colors = px.colors.qualitative.Plotly
         
-        # Build traces
         for planner_idx, planner in enumerate(planners):
             planner_df = pdf[pdf[diff_col] == planner] if diff_col in pdf.columns else pdf
             
@@ -55,7 +53,6 @@ class TimeseriesRenderer(BasePlotRenderer):
                 if x_data is None or not isinstance(x_data, (list, tuple)):
                     continue
                     
-                # Base color for this planner
                 base_color = colors[planner_idx % len(colors)]
                 
                 for m_idx, metric in enumerate(valid_metrics):

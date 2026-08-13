@@ -12,7 +12,6 @@ from ..ecological.characterization import _ACOUSTIC_DEFAULTS
 if typing.TYPE_CHECKING:
     from ....storage.schemas import AlignedEpisodeBundle
 
-# Import the C++ solver wrapper
 try:
     from ...acoustics.impedance_grid import compute_attenuations
 except ImportError:
@@ -118,7 +117,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             # registry seeds calc.world from the benchmark metadata
             map_name = getattr(self, "world", None)
         if not map_name:
-            logger.warning("No map name available for episode %s — skipping acoustics", episode.episode_id)
+            logger.warning("No map name available for episode %s - skipping acoustics", episode.episode_id)
             return nulls
 
         run_dir = None
@@ -276,7 +275,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
                 tl_cache[tl_key] = pixel_tl
 
-            # Run C++ solver
             attenuations = compute_attenuations(
                 occupancy_grid=grid,
                 resolution=resolution,
@@ -322,7 +320,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             episode.episode_id, eval_count,
         )
 
-        # ── Post-process for scalar metrics ──────────────────────────────────────
+        # Post-process for scalar metrics
 
         all_exp: list[float] = []
         for frame_exps in ts_exposure:
@@ -341,7 +339,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         all_exp = np.array(all_exp)
 
-        # Max exposure
         max_exp = float(np.max(all_exp))
 
         # Leq (Equivalent Continuous Sound Level)
@@ -390,7 +387,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         }
 
         logger.info(
-            "AcousticExposureCalculator: episode %s — max_exp=%.1f dBA, leq=%.1f dBA, startle=%.2f dBA/s",
+            "AcousticExposureCalculator: episode %s, max_exp=%.1f dBA, leq=%.1f dBA, startle=%.2f dBA/s",
             episode.episode_id, max_exp, leq_exp, max_startle,
         )
 

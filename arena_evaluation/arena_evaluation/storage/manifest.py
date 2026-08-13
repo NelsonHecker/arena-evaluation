@@ -8,10 +8,8 @@ from .exceptions import ManifestGenerationError
 
 
 class MetadataWriter:
-    """
-    Helper for reading and writing metadata.yaml files.
-    """
-    
+    """Helper for reading and writing metadata.yaml files."""
+
     @staticmethod
     def write(metadata: RunMetadata, dest: pathlib.Path) -> None:
         """Write RunMetadata to a YAML file."""
@@ -31,7 +29,7 @@ class MetadataWriter:
         """Read RunMetadata from a YAML file."""
         if not source.exists():
             raise ManifestGenerationError(f"Metadata file not found: {source}")
-            
+
         try:
             with open(source, "r") as f:
                 data = yaml.safe_load(f)
@@ -43,12 +41,12 @@ class MetadataWriter:
     def update(source: pathlib.Path, **kwargs) -> RunMetadata:
         """Update existing metadata with new fields and save."""
         metadata = MetadataWriter.read(source)
-        
+
         for key, value in kwargs.items():
             if hasattr(metadata, key):
                 setattr(metadata, key, value)
             else:
                 raise ManifestGenerationError(f"Invalid metadata field: {key}")
-                
+
         MetadataWriter.write(metadata, source)
         return metadata

@@ -55,7 +55,7 @@ def _los_db(start_m, target_m, mic=MIC_DIST) -> float:
     return 20.0 * np.log10(d + mic)
 
 
-# ── Inverse-square law (the 3 dB / 6 dB doubling rules) ───────────────────────
+# Inverse-square law (the 3 dB / 6 dB doubling rules)
 
 def test_free_field_six_db_per_doubling():
     """Point-source spherical spreading: 2x distance = +6.02 dB (2x pressure, 4x energy)."""
@@ -84,7 +84,7 @@ def test_free_field_matches_closed_form():
         assert np.isclose(att, _los_db((1.0, 20.0), (1.0 + d_m, 20.0)), atol=0.15)
 
 
-# ── Two rooms, door middle ────────────────────────────────────────────────────
+# Two rooms, door middle
 
 def test_open_door_middle_is_line_of_sight():
     spec = scenarios()["two_rooms_door_open_middle"]
@@ -108,7 +108,7 @@ def test_closed_door_middle_adds_wall_tl():
     assert att > att_open + 25.0, f"closed vs open door: {att:.1f} vs {att_open:.1f}"
 
 
-# ── Two rooms, door side ──────────────────────────────────────────────────────
+# Two rooms, door side
 
 def test_side_door_is_detour():
     """Side-placed door forces a longer path: attenuation between LOS and blocked."""
@@ -130,7 +130,7 @@ def test_side_door_closed_blocks_like_wall():
     assert att >= los + 30.0
 
 
-# ── Two rooms, wall only ──────────────────────────────────────────────────────
+# Two rooms, wall only
 
 def test_wall_only_blocks():
     spec = scenarios()["two_rooms_wall_only"]
@@ -150,7 +150,7 @@ def test_wall_only_harder_than_open_door():
     assert a_wall > a_door + 25.0, f"{a_wall:.1f} vs {a_door:.1f}"
 
 
-# ── Corridors ─────────────────────────────────────────────────────────────────
+# Corridors
 
 def test_corridor_line_of_sight():
     spec = scenarios()["long_corridor"]
@@ -178,7 +178,7 @@ def test_corridor_closed_door_blocks():
     assert att >= los + 30.0, f"closed corridor door must block: {att:.1f}"
 
 
-# ── Door vs wall dB distinction (per-pixel TL) ────────────────────────────────
+# Door vs wall dB distinction (per-pixel TL)
 
 def test_closed_door_cheaper_than_wall():
     """A closed door (25 dB) attenuates LESS than a solid wall (47 dB)."""
@@ -212,7 +212,7 @@ def test_door_state_flips_attenuation():
     assert np.isclose(a_closed - a_open, DOOR_TL, atol=2.0), f"{a_closed - a_open:.1f}"
 
 
-# ── Wall TL sensitivity ───────────────────────────────────────────────────────
+# Wall TL sensitivity
 
 def test_wall_tl_scales_linearly():
     """A single wall crossing should scale 1:1 with the wall_tl parameter."""
@@ -226,7 +226,7 @@ def test_wall_tl_scales_linearly():
     assert np.isclose(a60 - a47, 13.0, atol=1.5), f"{a60 - a47:.1f}"
 
 
-# ── Semantic-door integration (see plan): carve door pixels per state ─────────
+# Semantic-door integration (see plan): carve door pixels per state
 
 def test_door_carving_open_vs_closed():
     """Semantic door integration: door state flips the per-pixel TL in place."""

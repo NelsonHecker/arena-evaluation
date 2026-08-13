@@ -37,7 +37,7 @@ class FolderManager:
             raise ValueError(f"Path {resolved} is outside data_root {self.data_root}")
         return resolved
 
-    # ── New flat-episode API ───────────────────────────────────────────────────
+    # New flat-episode API
 
     def episodes_dir(self, benchmark_id: str) -> pathlib.Path:
         """Return the episodes/ root for a benchmark."""

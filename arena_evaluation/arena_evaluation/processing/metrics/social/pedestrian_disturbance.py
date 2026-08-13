@@ -53,13 +53,11 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         if len(actual_coords) == 0 or len(reference_coords) == 0:
             return 0.0
 
-        # Filter out rows containing NaN values
         valid_act = actual_coords[~np.isnan(actual_coords).any(axis=1)]
         valid_ref = reference_coords[~np.isnan(reference_coords).any(axis=1)]
         if len(valid_act) == 0 or len(valid_ref) == 0:
             return 0.0
 
-        # Extract 2D (x, y) coordinates
         valid_act = valid_act[:, :2]
         valid_ref = valid_ref[:, :2]
 

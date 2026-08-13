@@ -25,13 +25,11 @@ class ParquetStore:
         table = df.to_arrow()
         
         if metadata is not None:
-            # Add custom metadata to existing schema metadata
             meta_dict = table.schema.metadata or {}
             meta_dict[ParquetStore.METADATA_KEY.encode()] = json.dumps(
                 metadata.model_dump(exclude_none=True)
             ).encode()
-            
-            # Replace schema with new metadata
+
             table = table.replace_schema_metadata(meta_dict)
             
         import pyarrow.parquet as pq
@@ -164,8 +162,7 @@ class TopicParquetStore:
                 
         # Load robot specific topics
         robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
-        
-        # Load robot specific topics
+
         robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
             
         for robot_dir in robot_dirs:

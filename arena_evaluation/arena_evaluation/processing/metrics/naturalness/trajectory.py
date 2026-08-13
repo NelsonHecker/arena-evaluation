@@ -123,7 +123,6 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
                 
                 df_robot = episode.data.drop_nulls(subset=[x_col, y_col, ts_col]).sort(ts_col)
                 
-                # Join exact or asof
                 joined = df_peds.join_asof(df_robot, on=ts_col, strategy="nearest")
                 
                 total_winding = 0.0

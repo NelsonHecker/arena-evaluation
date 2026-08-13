@@ -45,7 +45,6 @@ class MetricRegistry:
     def _register_calculators(self) -> None:
         """Register all non-abstract subclasses"""
         for calc_cls in BaseMetricCalculator.__subclasses__():
-            # Check if it's not an abstract class (doesn't have abstract methods)
             if not getattr(calc_cls, "__abstractmethods__", None):
                 if not calc_cls.NAME:
                     raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
