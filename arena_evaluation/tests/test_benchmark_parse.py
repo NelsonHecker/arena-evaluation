@@ -71,10 +71,10 @@ def test_suite_parse_launch_args_defaults_empty():
 def test_suite_parse_launch_args_from_launch_mapping():
     from arena_evaluation.benchmark.config import Suite
 
-    obj = {"stages": [_make_stage_dict()], "launch": {"isaac.physics": "newton", "headless": True}}
+    obj = {"stages": [_make_stage_dict()], "launch": {"sim.isaac.physics": "newton", "headless": True}}
     result = Suite.parse("test_suite", obj)
 
-    assert result.launch_args == {"isaac.physics": "newton", "headless": "True"}
+    assert result.launch_args == {"sim.isaac.physics": "newton", "headless": "True"}
 
 
 # ---------------------------------------------------------------------------

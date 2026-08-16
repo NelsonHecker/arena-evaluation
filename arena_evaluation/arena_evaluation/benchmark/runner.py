@@ -67,6 +67,14 @@ class _HasStateSteps(typing.Protocol):
 
 _log = logging.getLogger(__name__)
 
+_CAP_KEYS = ("mobile", "arm", "planner")
+
+
+def _launch_key(k: str) -> str:
+    """Contest cap keys stay bare (`mobile`, `arm.<x>`, `planner`), launch args live under `robot.`."""
+    head = k.split(".", 1)[0]
+    return f"robot.{k}" if head in _CAP_KEYS else k
+
 
 def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, str] | None = None) -> list[str]:
     """Return the arena launch argument list for a step, given the simulator name."""
@@ -75,20 +83,21 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
         *([f"sim:={simulator}"] if simulator is not None else []),
         f"robot:={s.robot}",
         f"world:={s.map}",
-        f"tm_robots:={s.tm_robots.value}",
-        f"tm_obstacles:={s.tm_obstacles.value}",
+        f"task.robots:={s.tm_robots.value}",
+        f"task.obstacles:={s.tm_obstacles.value}",
         f"run_seed:={s.seed}",
-        "auto_reset:=false",
-        "tm_modules:=",
+        "task.auto_reset:=false",
+        "task.modules:=",
     ]
     if s.optim:
         for k, v in s.optim.items():
             args.append(f"optim.{k}:={v}")
     if step.record_dir is not None:
-        args.append(f"record_data_dir:={step.record_dir}")
-        args.append("disable_auto_recorder:=true")
+        args.append(f"record.dir:={step.record_dir}")
+        args.append("record.auto:=false")
     own_keys = {a.split(":=", 1)[0] for a in args}
-    for k, v in step.contestant.args.items():
+    for raw_k, v in step.contestant.args.items():
+        k = _launch_key(raw_k)
         if isinstance(v, dict):
             driver = v.get("driver")
             if driver:
@@ -129,7 +138,7 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
             
     if passthrough:
         for k, v in passthrough.items():
-            if k in ("headless", "env_n"):
+            if k in ("headless", "env_n", "env.n"):
                 continue
             if k not in own_keys:
                 args.append(f"{k}:={v}")
@@ -1417,7 +1426,10 @@ def cli_main(argv: list[str] | None = None) -> int:
         k, v = arg.split(":=", 1)
         arena_passthrough[k] = v
 
-    env_n = int(arena_passthrough.get("env_n", "1"))
+    if "env_n" in arena_passthrough:
+        print("benchmark: env_n:= is deprecated, use env.n:=", file=sys.stderr)
+        arena_passthrough.setdefault("env.n", arena_passthrough.pop("env_n"))
+    env_n = int(arena_passthrough.get("env.n", "1"))
     headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
     simulator = arena_passthrough.get("sim", None)
 
