@@ -115,7 +115,7 @@ class TestRunBenchmark:
         args = _benchmark_cmd_args({"suite": "s", "contest": "c"})
         assert "sim:=gazebo" in args
         assert "headless:=true" in args
-        assert "env_n:=2" in args
+        assert "env.n:=2" in args
         assert "optim.obstacles:=bbox" in args
 
     def test_launch_config_overridable(self):
@@ -128,7 +128,7 @@ class TestRunBenchmark:
         })
         assert "sim:=isaac" in args
         assert "headless:=false" in args
-        assert "env_n:=4" in args
+        assert "env.n:=4" in args
         assert "optim.obstacles:=full" in args
 
     def test_extra_passthrough(self):
@@ -136,9 +136,9 @@ class TestRunBenchmark:
 
         args = _benchmark_cmd_args({
             "suite": "s", "contest": "c",
-            "extra_passthrough": {"fail_on_collision": True, "complexity": 2},
+            "extra_passthrough": {"task.fail_on_collision": True, "complexity": 2},
         })
-        assert "fail_on_collision:=True" in args
+        assert "task.fail_on_collision:=True" in args
         assert "complexity:=2" in args
 
     def test_command_shape(self):

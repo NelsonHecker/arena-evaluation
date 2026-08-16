@@ -282,7 +282,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "ARG NAMESPACES: cap keys are mobile / arm / lift. Valid mobile drivers: nav2, "
                 "rosnav_rl, none, external. Inside a cap: local_planner, inter_planner, "
                 "global_planner, plus any key from the robot's caps YAML (e.g. velocity limits). "
-                "Common passthroughs: fail_on_collision: true, complexity: 1|2|3. "
+                "Common passthroughs: task.fail_on_collision: true, complexity: 1|2|3. "
                 "See list_available_planners for valid names; get_config_template(kind='contest') "
                 "for examples. Validated via Contest.parse() before writing."
             ),
@@ -381,8 +381,8 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "Start a benchmark simulation in the BACKGROUND and return immediately with "
                 "the run_id. Spawns 'arena evaluation benchmark --suite <S> --contest <C>' "
                 "with the recommended launch configuration by default: sim:=gazebo, "
-                "headless:=true, env_n:=2, optim.obstacles:=bbox. All are overridable, and "
-                "arbitrary extra passthrough args (e.g. fail_on_collision:=true) can be "
+                "headless:=true, env.n:=2, optim.obstacles:=bbox. All are overridable, and "
+                "arbitrary extra passthrough args (e.g. task.fail_on_collision:=true) can be "
                 "passed via extra_passthrough. Use read_benchmark_status(run_id) to poll."
             ),
             inputSchema={
@@ -410,7 +410,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                     },
                     "env_n": {
                         "type": "integer", "default": 2,
-                        "description": "Number of parallel envs (env_n:=...). "
+                        "description": "Number of parallel envs (env.n:=...). "
                                        "Defaults to 2.",
                     },
                     "optim_obstacles": {
@@ -424,8 +424,8 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                         "type": "object",
                         "description": "Additional launch args as {key: value} - "
                                        "each becomes key:=value, e.g. "
-                                       "{\"fail_on_collision\": true} -> "
-                                       "fail_on_collision:=true.",
+                                       "{\"task.fail_on_collision\": true} -> "
+                                       "task.fail_on_collision:=true.",
                     },
                 },
                 "required": ["suite", "contest"],
@@ -1047,7 +1047,7 @@ def _benchmark_cmd_args(args: dict) -> list[str]:
 
     cmd_args.append(f"sim:={args.get('sim', 'gazebo')}")
     cmd_args.append(f"headless:={str(bool(args.get('headless', True))).lower()}")
-    cmd_args.append(f"env_n:={int(args.get('env_n', 2))}")
+    cmd_args.append(f"env.n:={int(args.get('env_n', 2))}")
     cmd_args.append(f"optim.obstacles:={args.get('optim_obstacles', 'bbox')}")
 
     for key, value in (args.get("extra_passthrough") or {}).items():

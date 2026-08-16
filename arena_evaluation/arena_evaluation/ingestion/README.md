@@ -30,11 +30,11 @@ It is the **only** component that requires a running ROS 2 environment. Everythi
 
 ### How It Is Launched
 
-The node is registered as the `record` console script entry point in `setup.py` and is spawned automatically by the `task_generator` launch system when `record_data_dir` is passed.
+The node is registered as the `record` console script entry point in `setup.py` and is spawned automatically by the `task_generator` launch system when `record.dir` is passed (and `record.auto` is not false).
 
 ```bash
 # Manual launch (auto-timestamped output folder)
-arena launch sim:=gazebo task_mode:=random record_data_dir:=data \
+arena launch sim:=gazebo task.robots:=random record.dir:=data \
     world:=map_empty robot:=jackal
 
 # The recorder is started internally with something equivalent to:
@@ -46,7 +46,7 @@ ros2 run arena_evaluation record \
 
 The `record_data_dir` parameter is resolved in priority order:
 
-1. **ROS parameter** `record_data_dir` - set by the benchmark runner launch args.
+1. **ROS parameter** `record_data_dir` - set by the task_generator launch (from the `record.dir` launch arg) or by the benchmark runner.
 2. **Command-line arg** `--dir` / `-d` - for manual invocation.
 3. **Default** `auto:/` - generates a timestamped folder automatically.
 

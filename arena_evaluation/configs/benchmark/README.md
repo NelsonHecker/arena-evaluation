@@ -3,7 +3,7 @@
 The `arena evaluation benchmark` runner reads all benchmark configuration from
 `arena_evaluation/configs/benchmark/` at startup.
 
-Invocation: `arena evaluation benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env_n:=...]` (Arena meta-repo shortcut: `arena evaluation benchmark ...`).
+Invocation: `arena evaluation benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env.n:=...]` (Arena meta-repo shortcut: `arena evaluation benchmark ...`).
 
 ## Directory layout
 
@@ -110,7 +110,7 @@ The runner iterates over all contestants at each suite stage.
 
 Contestant args use **cap-scoped dicts** - each capability (e.g. `mobile`,
 `arm`) is a dict with a `driver` key identifying the driver and any extra
-kwargs forwarded as launch args:
+kwargs forwarded as launch args under the `robot.` prefix:
 
 ```yaml
 mobile:
@@ -119,7 +119,7 @@ mobile:
   inter_planner: polite
 ```
 
-This produces launch args: `mobile:=nav2 mobile.local_planner:=teb mobile.inter_planner:=polite`
+This produces launch args: `robot.mobile:=nav2 robot.mobile.local_planner:=teb robot.mobile.inter_planner:=polite`
 
 There are two forms: **list** and **sweep**.
 
@@ -214,12 +214,12 @@ start). See
 for the recommended key shapes.
 
 The runner drops keys that collide with stage-owned launch args (`sim`,
-`robot`, `world`, `tm_robots`, `tm_obstacles`, `run_seed`, `auto_reset`,
-`tm_modules`, `record_data_dir`) and logs a warning, since those are
+`robot`, `world`, `task.robots`, `task.obstacles`, `run_seed`, `task.auto_reset`,
+`task.modules`, `record.dir`, `record.auto`) and logs a warning, since those are
 controlled by the suite stage. Anything else is passed through to the launch
 layer, which binds it if declared or raises an error if not.
 
-A useful passthrough example: `fail_on_collision: true` makes the env abort
+A useful passthrough example: `task.fail_on_collision: true` makes the env abort
 an episode as FAILED (`outcome_info='collision'`) the moment the robot
 footprint contacts a wall, static obstacle, or pedestrian, instead of the
 default run-to-goal-or-timeout. See
@@ -237,18 +237,19 @@ across groups. Robot is fixed within a group. If a contestant's stages mix
 robots, the runner splits into multiple groups per contestant. Authoring
 suggestion: keep one robot per contestant for fastest runs.
 
-`env_n` caps how many groups (parallel contestants) run at once, with the rest
+`env.n` caps how many groups (parallel contestants) run at once, with the rest
 queued. Run time scales as `bringup_time x num_groups + episode_time x
-total_episodes` spread across the `env_n` workers, not `bringup_time x
+total_episodes` spread across the `env.n` workers, not `bringup_time x
 num_steps`, since steps within a group reuse one env.
 
 For each group the runner:
 
 1. Calls `/arena/spawn_env` once with the first step's launch args: `sim`,
-   `robot`, `world`, `tm_robots`, `tm_obstacles`, `run_seed`,
-   `auto_reset:=false`, `tm_modules:=` (empty), and any contestant args of
-   shape `mobile`, `arm`, `mobile.<key>`, or `arm.<key>`. `record_data_dir`
-   is added when recording is enabled.
+   `robot`, `world`, `task.robots`, `task.obstacles`, `run_seed`,
+   `task.auto_reset:=false`, `task.modules:=` (empty), and any contestant args of
+   shape `mobile`, `arm`, `mobile.<key>`, or `arm.<key>` (emitted as
+   `robot.mobile...` / `robot.arm...`). `record.dir` and `record.auto:=false`
+   are added when recording is enabled.
    Per-mode params (`task.scenario.file`, `task.random.*`, ...) are not passed
    as launch args; the runner sets them via QueueEpisode in step 3.
 2. Waits for the env to publish on `/arena/state/envs` and resolves the env

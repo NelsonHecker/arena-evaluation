@@ -420,8 +420,8 @@ def test_resume_replays_stored_config_hash():
 
 def test_manifest_round_trips_launch_args():
     man = _make_resume_manifest()
-    man.launch_args = {"isaac.physics": "newton", "headless": "true"}
-    assert Manifest.from_yaml(man.to_yaml()).launch_args == {"isaac.physics": "newton", "headless": "true"}
+    man.launch_args = {"sim.isaac.physics": "newton", "headless": "true"}
+    assert Manifest.from_yaml(man.to_yaml()).launch_args == {"sim.isaac.physics": "newton", "headless": "true"}
 
 
 def test_manifest_without_launch_args_defaults_empty():
@@ -508,24 +508,24 @@ def test_build_launch_args_required_fields():
     assert "sim:=gazebo" in args
     assert "robot:=turtlebot3_burger" in args
     assert "world:=map1" in args
-    assert f"tm_robots:={Constants.TaskMode.TM_Robots.RANDOM.value}" in args
-    assert f"tm_obstacles:={Constants.TaskMode.TM_Obstacles.RANDOM.value}" in args
-    assert not any(a.startswith("episodes:=") for a in args)
+    assert f"task.robots:={Constants.TaskMode.TM_Robots.RANDOM.value}" in args
+    assert f"task.obstacles:={Constants.TaskMode.TM_Obstacles.RANDOM.value}" in args
+    assert not any(a.startswith("task.episodes:=") for a in args)
     assert "run_seed:=42" in args
-    assert "auto_reset:=false" in args
-    assert "tm_modules:=" in args
+    assert "task.auto_reset:=false" in args
+    assert "task.modules:=" in args
 
 
 def test_build_launch_args_no_record_dir_by_default():
     cell = _make_cell(record_dir=None)
     args = build_launch_args(cell, "gazebo")
-    assert not any(a.startswith("record_data_dir:=") for a in args)
+    assert not any(a.startswith("record.dir:=") for a in args)
 
 
 def test_build_launch_args_record_dir_appended(tmp_path: pathlib.Path):
     cell = _make_cell(record_dir=tmp_path / "out")
     args = build_launch_args(cell, "gazebo")
-    assert any(a.startswith("record_data_dir:=") for a in args)
+    assert any(a.startswith("record.dir:=") for a in args)
 
 
 def test_build_launch_args_simulator_propagated():
@@ -538,13 +538,13 @@ def test_build_launch_args_scenario_not_in_launch():
     """scenario_file is set via QueueEpisode, not as a launch arg."""
     cell = _make_cell(stage_config={"scenario": {"file": "/some/path/my_scenario.yaml"}})
     args = build_launch_args(cell, "gazebo")
-    assert not any(a.startswith("scenario_file:=") for a in args)
+    assert not any(a.startswith("task.scenario:=") for a in args)
 
 
 def test_build_launch_args_cap_scoped_planner_forwarded():
     cell = _make_cell(contestant_args={"mobile.local_planner": "teb"})
     args = build_launch_args(cell, "gazebo")
-    assert "mobile.local_planner:=teb" in args
+    assert "robot.mobile.local_planner:=teb" in args
 
 
 def test_build_launch_args_unknown_contestant_arg_forwarded():
@@ -590,23 +590,23 @@ def test_build_launch_args_empty_value_skipped():
     """Empty-string values are skipped without forwarding or warning."""
     cell = _make_cell(contestant_args={"mobile.local_planner": ""})
     args = build_launch_args(cell, "gazebo")
-    assert not any(a.startswith("mobile.local_planner") for a in args)
+    assert not any(a.startswith("robot.mobile.local_planner") for a in args)
 
 
 def test_build_launch_args_arm_cap_forwarded():
     cell = _make_cell(contestant_args={"arm": "moveit", "arm.controller": "ompl"})
     args = build_launch_args(cell, "gazebo")
-    assert "arm:=moveit" in args
-    assert "arm.controller:=ompl" in args
+    assert "robot.arm:=moveit" in args
+    assert "robot.arm.controller:=ompl" in args
 
 
 def test_build_launch_args_passthrough_cli_args_forwarded():
-    passthrough = {"optim.obstacles": "bbox", "headless": "true", "env_n": "1"}
+    passthrough = {"optim.obstacles": "bbox", "headless": "true", "env.n": "1"}
     cell = _make_cell(contestant_args=passthrough)
     args = build_launch_args(cell, "gazebo")
     assert "optim.obstacles:=bbox" in args
     assert "headless:=true" in args
-    assert "env_n:=1" in args
+    assert "env.n:=1" in args
 
 
 def test_build_launch_args_multiple_cap_keys_all_pass():
@@ -616,22 +616,22 @@ def test_build_launch_args_multiple_cap_keys_all_pass():
         "mobile.global_planner": "smac",
     })
     args = build_launch_args(cell, "gazebo")
-    assert "mobile.local_planner:=teb" in args
-    assert "mobile.inter_planner:=bypass" in args
-    assert "mobile.global_planner:=smac" in args
+    assert "robot.mobile.local_planner:=teb" in args
+    assert "robot.mobile.inter_planner:=bypass" in args
+    assert "robot.mobile.global_planner:=smac" in args
 
 
 def test_build_launch_args_mobile_adapter_forwarded():
     cell = _make_cell(contestant_args={"mobile": "rosnav_rl", "mobile.agent": "best"})
     args = build_launch_args(cell, "gazebo")
-    assert "mobile:=rosnav_rl" in args
-    assert "mobile.agent:=best" in args
+    assert "robot.mobile:=rosnav_rl" in args
+    assert "robot.mobile.agent:=best" in args
 
 
 def test_build_launch_args_no_mobile_when_absent():
     cell = _make_cell(contestant_args={"mobile.local_planner": "dwa"})
     args = build_launch_args(cell, "gazebo")
-    assert not any(a == "mobile:=" or a.startswith("mobile:=") for a in args)
+    assert not any(a == "robot.mobile:=" or a.startswith("robot.mobile:=") for a in args)
 
 
 def test_build_launch_args_no_sim_when_simulator_none():
@@ -646,17 +646,17 @@ def test_build_launch_args_dict_cap_driver_and_kwargs():
     """Dict-form cap emits driver as top-level and kwargs as dot-joined args."""
     cell = _make_cell(contestant_args={"mobile": {"driver": "nav2", "local_planner": "teb", "inter_planner": "bypass"}})
     args = build_launch_args(cell, "gazebo")
-    assert "mobile:=nav2" in args
-    assert "mobile.local_planner:=teb" in args
-    assert "mobile.inter_planner:=bypass" in args
+    assert "robot.mobile:=nav2" in args
+    assert "robot.mobile.local_planner:=teb" in args
+    assert "robot.mobile.inter_planner:=bypass" in args
 
 
 def test_build_launch_args_dict_cap_no_driver():
     """Dict-form cap without driver: only sub-keys are emitted."""
     cell = _make_cell(contestant_args={"mobile": {"local_planner": "dwa"}})
     args = build_launch_args(cell, "gazebo")
-    assert not any(a == "mobile:=" or a == "mobile:=None" for a in args)
-    assert "mobile.local_planner:=dwa" in args
+    assert not any(a == "robot.mobile:=" or a == "robot.mobile:=None" for a in args)
+    assert "robot.mobile.local_planner:=dwa" in args
 
 
 def test_build_launch_args_dict_cap_stage_collision_dropped():
@@ -665,8 +665,8 @@ def test_build_launch_args_dict_cap_stage_collision_dropped():
     args = build_launch_args(cell, "gazebo")
     assert "sim:=gazebo" in args
     assert "sim:=isaac" not in args
-    assert "mobile:=nav2" in args
-    assert "mobile.local_planner:=teb" in args
+    assert "robot.mobile:=nav2" in args
+    assert "robot.mobile.local_planner:=teb" in args
 
 
 # ---------------------------------------------------------------------------
