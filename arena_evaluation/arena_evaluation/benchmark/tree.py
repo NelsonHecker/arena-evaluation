@@ -4,6 +4,7 @@ every other asset in :mod:`arena_simulation_setup.tree`."""
 
 from __future__ import annotations
 
+import typing
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,12 +19,14 @@ from arena_simulation_setup.tree import (
 
 from ..presentation.manifest_registry import share_dir, source_tree_dir
 from ..presentation.viz_manifest import VizManifest
-from .config import Contest, Suite
+
+if typing.TYPE_CHECKING:
+    from .config import Contest, Suite
 
 _BENCH_TTL_S = 365 * 86400
 
 
-class SuiteIdentifier(AssetIdentifier[Suite]):
+class SuiteIdentifier(AssetIdentifier["Suite"]):
     _asset_type = 'suites'
 
     def __hash__(self) -> int:
@@ -34,10 +37,12 @@ class SuiteIdentifier(AssetIdentifier[Suite]):
 
     def load(self, path: Path, /, **kwargs: object) -> Suite:
         del kwargs
+        from .config import Suite
+
         return Suite.parse(self.name, yaml.safe_load(path.read_text()))
 
 
-class ContestIdentifier(AssetIdentifier[Contest]):
+class ContestIdentifier(AssetIdentifier["Contest"]):
     _asset_type = 'contests'
 
     def __hash__(self) -> int:
@@ -48,6 +53,8 @@ class ContestIdentifier(AssetIdentifier[Contest]):
 
     def load(self, path: Path, /, **kwargs: object) -> Contest:
         del kwargs
+        from .config import Contest
+
         return Contest.parse(self.name, yaml.safe_load(path.read_text()))
 
 
