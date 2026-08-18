@@ -28,8 +28,10 @@ class ScatterRenderer(BasePlotRenderer):
             return None
 
         if df_filtered.schema[x_col] == pl.List or df_filtered.schema[y_col] == pl.List:
-            cols_to_explode = [col for col in [x_col, y_col] if df_filtered.schema[col] == pl.List]
-            df_filtered = df_filtered.explode(cols_to_explode)
+            cols_to_explode = [c for c in [x_col, y_col, diff_col] if df_filtered.schema[c] == pl.List]
+            # Explode only the needed columns (see line renderer note: the
+            # full frame carries other list columns of differing lengths).
+            df_filtered = df_filtered.select([x_col, y_col, diff_col]).explode(cols_to_explode)
             pdf = df_filtered.to_pandas()
 
         if pdf.empty:
@@ -71,8 +73,10 @@ class ScatterRenderer(BasePlotRenderer):
             return
 
         if df_filtered.schema[x_col] == pl.List or df_filtered.schema[y_col] == pl.List:
-            cols_to_explode = [col for col in [x_col, y_col] if df_filtered.schema[col] == pl.List]
-            df_filtered = df_filtered.explode(cols_to_explode)
+            cols_to_explode = [c for c in [x_col, y_col, diff_col] if df_filtered.schema[c] == pl.List]
+            # Explode only the needed columns (see line renderer note: the
+            # full frame carries other list columns of differing lengths).
+            df_filtered = df_filtered.select([x_col, y_col, diff_col]).explode(cols_to_explode)
             pdf = df_filtered.to_pandas()
 
         if pdf.empty:

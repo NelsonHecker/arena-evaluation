@@ -179,7 +179,10 @@ class TableRenderer(BasePlotRenderer):
 
         list_cols = [c for c in [*group_cols, *(c["metric"] for c in cols)] if c in df.columns and df.schema[c] == pl.List]
         if list_cols:
-            df = df.explode(list_cols)
+            # Explode only the needed columns (see line renderer note: the
+            # full frame carries other list columns of differing lengths).
+            need = [c for c in [*group_cols, *(c["metric"] for c in cols)] if c in df.columns]
+            df = df.select(need).explode(list_cols)
 
         agg = [
             pl.col(c["metric"]).mean().alias(f"__m{i}__")

@@ -88,11 +88,11 @@ class TopicAligner:
         df = join_topic(df, bundle.tf_gt, "tf_gt")
 
         if bundle.characterization_phase is not None and not is_empty(bundle.characterization_phase):
-            markers = (
-                bundle.characterization_phase
-                if isinstance(bundle.characterization_phase, pl.DataFrame)
-                else bundle.characterization_phase.collect()
-            ).select(["time_ns", "label"]).sort("time_ns")
+            markers = bundle.characterization_phase
+            if isinstance(markers, pl.LazyFrame):
+                markers = markers.select(["time_ns", "label"]).sort("time_ns")
+            else:
+                markers = markers.select(["time_ns", "label"]).sort("time_ns").lazy()
             df = df.join_asof(markers, on="time_ns", strategy="backward")
 
         if should_collect:

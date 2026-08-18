@@ -60,7 +60,11 @@ class LineRenderer(BasePlotRenderer):
         keep = [c for c in [x_col, y_col, *group_cols, error_col] if c]
         list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
         if list_cols:
-            df_filtered = df_filtered.explode(list_cols)
+            # Explode only the needed columns: the full frame carries other
+            # list columns of differing lengths (odom-rate vs peds-rate
+            # timeseries); exploding it together with them grows
+            # combinatorially (polars 1.x) and OOMs.
+            df_filtered = df_filtered.select(keep).explode(list_cols)
 
         # aggregate: true → reduce per (x, group) combo so per-working-point
         # curves (e.g. power vs vx_target) can be derived from the long frame.

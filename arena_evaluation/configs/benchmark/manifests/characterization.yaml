@@ -11,6 +11,7 @@ data_source: metrics
 groups:
   - {id: power_curves, title: Power vs. Velocity Curves}
   - {id: acoustic_curves, title: Acoustic Levels vs. Velocity}
+  - {id: acoustic_images, title: Rendered Acoustic Images & Field Animations}
   - {id: time_traces, title: Power & Noise Over Time}
   - {id: overview, title: Overview & Baselines}
 units:
@@ -82,6 +83,59 @@ plots:
     group_by: [timeseries_char_phase_kind]
     options: {y: timeseries_char_dba, aggregate: true, reduce: max, mode: "lines+markers"}
     layout_group: acoustic_curves
+
+  # ── Rendered Acoustic Images & Field Animations ─────────────────────────────
+  - id: acoustic_field_animation_episodes
+    type: acoustic_field_animation
+    title: Acoustic Field Timeline per Episode (High Frame Count & Rate)
+    data_key: ped_max_exposure_dba
+    differentiate: episode
+    group_by: [stage]
+    layout_group: acoustic_images
+    options:
+      downsample: 1
+      fps: 25
+      max_frames: 300
+      stride: 1
+      format: gif
+
+  # One GIF per episode (per_episode: true). Gated on the characterization
+  # timeseries so it renders for open-loop runs (no pedestrians); the
+  # ped-exposure animation above covers pedestrian scenarios.
+  - id: acoustic_field_animation_per_episode
+    type: acoustic_field_animation
+    title: Acoustic Field Timeline per Episode (Characterization)
+    data_key: timeseries_char_dba
+    differentiate: episode
+    group_by: [stage]
+    layout_group: acoustic_images
+    options:
+      per_episode: true
+      downsample: 2
+      fps: 20
+      max_frames: 200
+      stride: 2
+      format: gif
+
+  - id: acoustic_field_highest_states
+    type: acoustic_field
+    title: Acoustic Field — Highest Exposure States by Phase
+    data_key: ped_max_exposure_dba
+    differentiate: timeseries_char_phase_kind
+    group_by: [stage]
+    layout_group: acoustic_images
+    options:
+      mode: grid
+      downsample: 1
+
+  - id: acoustic_field_peak_state
+    type: acoustic_field
+    title: Acoustic Field — Peak Noise State (Worst Case)
+    data_key: ped_max_exposure_dba
+    layout_group: acoustic_images
+    options:
+      mode: single
+      downsample: 1
 
   # ── Time traces (per episode, time-relative so episodes overlay) ───────────
   - id: line_power_over_time

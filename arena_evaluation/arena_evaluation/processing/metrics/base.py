@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import typing
+import numpy as np
 
 if typing.TYPE_CHECKING:
     from ...storage.schemas import AlignedEpisodeBundle, RobotParams

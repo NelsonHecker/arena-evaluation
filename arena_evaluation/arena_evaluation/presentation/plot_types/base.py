@@ -52,6 +52,8 @@ class BasePlotRenderer(ABC):
 
         Scalar values match equality; list/tuple/set values match membership
         (e.g. ``filter: {planner: [dwb, teb]}`` selects only those runs).
+        List columns (per-sample timeseries, e.g. ``timeseries_char_phase_kind``)
+        match rows whose list CONTAINS the value (or any value for a value list).
         """
         if not self.spec.filter:
             return df
@@ -60,7 +62,14 @@ class BasePlotRenderer(ABC):
         for k, v in self.spec.filter.items():
             if k not in res_df.columns:
                 continue
-            if isinstance(v, (list, tuple, set)):
+            if res_df.schema[k] == pl.List:
+                if isinstance(v, (list, tuple, set)):
+                    res_df = res_df.filter(
+                        pl.col(k).list.eval(pl.element().is_in(list(v)).any())
+                    )
+                else:
+                    res_df = res_df.filter(pl.col(k).list.contains(v))
+            elif isinstance(v, (list, tuple, set)):
                 res_df = res_df.filter(pl.col(k).is_in(list(v)))
             else:
                 res_df = res_df.filter(pl.col(k) == v)
