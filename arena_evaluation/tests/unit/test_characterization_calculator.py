@@ -1,6 +1,6 @@
 """Unit tests for the CharacterizationCalculator (ecological metric).
 
-Pure Python + Polars — no ROS, no Gazebo required.
+Pure Python + Polars, no ROS, no Gazebo required.
 """
 
 import polars as pl
@@ -61,9 +61,9 @@ def test_calculate_produces_timeseries():
     assert out["timeseries_char_power_total_w"] == [50.0, 55.0, 60.0, 65.0]
     assert out["timeseries_char_phase_kind"] == ["linear", "linear", "linear", "linear"]
     assert out["timeseries_char_vx_target"] == [0.25, 0.25, 0.5, 0.5]
-    # P_mech = Σ|τ·ω|: 2.0*0.5 + 2.0*0.5 = 2.0 at t=1s
+    # P_mech = Sigma|tau*omega|: 2.0*0.5 + 2.0*0.5 = 2.0 at t=1s
     assert out["timeseries_char_power_mech_w"][1] == 2.0
-    # Energy intensity = p·dt/ds: 55 W * 1s / 0.25 m = 220 J/m at t=1s
+    # Energy intensity = p*dt/ds: 55 W * 1s / 0.25 m = 220 J/m at t=1s
     assert out["timeseries_char_energy_intensity"][1] == 220.0
     assert len(out["timeseries_char_dba"]) == 4
 

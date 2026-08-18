@@ -3,7 +3,7 @@ from __future__ import annotations
 
 def split_planner_name(planner_name: str | None) -> tuple[str, str]:
     """Split the contestant/planner name into local_planner and inter_planner."""
-    
+
     if not planner_name:
         return "unknown", "unknown"
 

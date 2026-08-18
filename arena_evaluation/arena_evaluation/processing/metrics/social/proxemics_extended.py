@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import ast
 import typing
 import numpy as np
 
@@ -9,32 +11,25 @@ if typing.TYPE_CHECKING:
 
 
 class ProxemicsExtendedCalculator(BaseMetricCalculator):
-    """
-    Extended proxemic metrics, computed on the NATIVE peds time base
-    (full multi-rate standard, 2026-08-12). Robot pose / velocity is sampled
-    onto the peds time axis by backward-asof join (100 ms tolerance) and is
-    ground truth (tf_gt) when recorded, odom otherwise.
+    """Extended proxemic metrics on the native peds time base.
 
-    Zone standard (Arena Evaluation 3.0, 2026-08-12): all proxemic metrics
-    evaluate the EFFECTIVE EDGE-TO-EDGE DISTANCE
-        d_eff = d_center - (r_robot + r_ped)
-    against Hall's (1966) zones — intimate < 0.45 m, personal 0.45-1.2 m,
-    social 1.2-3.6 m, public >= 3.6 m. This normalizes across robot
-    footprints (TurtleBot vs Jackal) and keeps the zones comparable.
+    Zones are evaluated on the edge-to-edge distance
+    ``d_eff = d_center - (r_robot + r_ped)`` against Hall's (1966) bands
+    (intimate < 0.45 m, personal 0.45-1.2 m, social 1.2-3.6 m, public
+    >= 3.6 m), so they stay comparable across robot footprints. The legacy
+    ``proxemics`` calculator measures center-to-center instead, hence the
+    ``_zone`` suffix here.
 
     Metrics:
-    - Time in each Hall zone (intimate / personal / social / public)
-    - PSI event counts per zone band (contiguous interactions, gap-merge 2 s)
-    - Max robot speed in each zone (GT-derived speed)
-    - Movement-towards-pedestrians ratio (GT velocity, frames with peds)
-    - TTI min/mean: time-to-interaction from GT relative velocity,
-      d_eff / |v_rel| (time to contact), 5 s horizon
-    - PSII: Personal Space Intrusion Integral = integral of the continuous
-      edge-to-edge distance while inside personal space (d_eff < 1.2 m)
-    - timeseries_min_ped_clearance: per-frame minimum d_eff (None = no peds)
+    - Time and max robot speed per zone.
+    - PSI event counts per zone (contiguous blocks, 2 s gap-merge).
+    - Movement-towards-pedestrians ratio over frames that have peds.
+    - TTI min/mean: d_eff / |v_rel| when closing, 5 s horizon.
+    - PSII: integral of d_eff while inside personal space.
+    - timeseries_min_ped_clearance: per-frame min d_eff (None = no peds).
 
-    MAR and PFI are computed post-hoc against the reference runs (see
-    pipeline.process_benchmark) — they are reference-based by construction.
+    Robot pose and velocity are sampled onto the peds axis by backward-asof
+    join (100 ms), ground truth when recorded and odom otherwise.
     """
 
     NAME = "proxemics_extended"
@@ -49,21 +44,21 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
     _SOCIAL_R = 3.6
 
     _PED_RADIUS = 0.3  # m
-    _TTI_LOOKAHEAD = 5.0  # s — max TTI horizon
-    _EVENT_GAP_S = 2.0  # s — min gap between distinct interactions
+    _TTI_LOOKAHEAD = 5.0  # s
+    _EVENT_GAP_S = 2.0  # s, min gap between distinct interactions
 
     UNITS = {
-        "time_in_intimate_space": "s",
-        "time_in_personal_space": "s",
-        "time_in_social_space": "s",
-        "time_in_public_space": "s",
+        "time_in_intimate_zone": "s",
+        "time_in_personal_zone": "s",
+        "time_in_social_zone": "s",
+        "time_in_public_zone": "s",
         "psi_intimate_events": "",
         "psi_personal_events": "",
         "psi_social_events": "",
-        "max_speed_intimate_space": "m/s",
-        "max_speed_personal_space": "m/s",
-        "max_speed_social_space": "m/s",
-        "max_speed_public_space": "m/s",
+        "max_speed_intimate_zone": "m/s",
+        "max_speed_personal_zone": "m/s",
+        "max_speed_social_zone": "m/s",
+        "max_speed_public_zone": "m/s",
         "movement_towards_peds_ratio": "",
         "tti_min": "s",
         "tti_mean": "s",
@@ -72,15 +67,15 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
     }
 
     PRIMARY_OUTPUTS = [
-        "time_in_intimate_space",
+        "time_in_intimate_zone",
         "psi_intimate_events",
         "tti_min",
     ]
     OUTPUT_DIRECTIONS = {
-        "time_in_intimate_space": "lower",
-        "time_in_personal_space": "lower",
-        "max_speed_intimate_space": "lower",
-        "max_speed_personal_space": "lower",
+        "time_in_intimate_zone": "lower",
+        "time_in_personal_zone": "lower",
+        "max_speed_intimate_zone": "lower",
+        "max_speed_personal_zone": "lower",
         "tti_min": "higher",
         "personal_space_intrusion_integral": "lower",
     }
@@ -88,17 +83,17 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
-            "time_in_intimate_space",
-            "time_in_personal_space",
-            "time_in_social_space",
-            "time_in_public_space",
+            "time_in_intimate_zone",
+            "time_in_personal_zone",
+            "time_in_social_zone",
+            "time_in_public_zone",
             "psi_intimate_events",
             "psi_personal_events",
             "psi_social_events",
-            "max_speed_intimate_space",
-            "max_speed_personal_space",
-            "max_speed_social_space",
-            "max_speed_public_space",
+            "max_speed_intimate_zone",
+            "max_speed_personal_zone",
+            "max_speed_social_zone",
+            "max_speed_public_zone",
             "movement_towards_peds_ratio",
             "tti_min",
             "tti_mean",
@@ -135,7 +130,6 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
         if N == 0:
             return {k: None for k in self.output_keys()}
 
-        # ── GT pose / velocity sampled onto the peds time axis ──
         rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom)
         vx_full, vy_full = self.velocity_from_pose(pos_x, pos_y, t_odom)
         speed_full = self.speed_from_pose(pos_x, pos_y, t_odom)
@@ -193,7 +187,6 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             d_eff = min_dist - d_combined
             min_clearances.append(float(d_eff))
 
-            # ── Hall zone classification (edge-to-edge) ──
             z = band(d_eff)
             time_zone[z] += dt[i]
             zone_mask["intimate"].append(d_eff < self._INTIMATE_R)
@@ -201,7 +194,6 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             zone_mask["social"].append(self._PERSONAL_R <= d_eff < self._SOCIAL_R)
             max_speed_zone[z] = max(max_speed_zone[z], float(rspeed[i]))
 
-            # ── Movement towards pedestrians (GT velocity) ──
             min_idx = int(np.argmin(dists))
             r_to_ped = np.array(
                 [peds_arr[min_idx, 0] - rx, peds_arr[min_idx, 1] - ry]
@@ -210,17 +202,14 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             if np.dot(v_robot, r_to_ped) > 0:
                 approaching_count += 1
 
-            # ── PSII: continuous edge distance inside personal space ──
             if d_eff < self._PERSONAL_R:
                 psii_sum += max(d_eff, 0.0) * dt[i]
 
-            # ── TTI from GT relative velocity (time to contact) ──
             ped_vels = None
             if peds_twists_list is not None and i < len(peds_twists_list):
                 tw_raw = peds_twists_list[i]
                 if tw_raw and len(tw_raw) > 0:
                     if isinstance(tw_raw, str):
-                        import ast
                         try:
                             tw_raw = ast.literal_eval(tw_raw)
                         except Exception:
@@ -244,7 +233,6 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
                         if 0 < tti_val < self._TTI_LOOKAHEAD:
                             all_tti.append(float(tti_val))
 
-        # ── PSI event counts per zone band (gap-merged blocks) ──
         def count_events(mask: list[bool]) -> int:
             if not any(mask):
                 return 0
@@ -253,15 +241,16 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             edges = np.diff(padded.astype(np.int8))
             starts = np.where(edges == 1)[0]
             ends = np.where(edges == -1)[0]
+            gap_ns = int(self._EVENT_GAP_S * 1e9)
             events = 0
-            prev_end_ns = -int(self._EVENT_GAP_S * 1e9) - 1
+            prev_end_ns = 0
             for s, e in zip(starts, ends):
                 start_ns = int(peds_time_ns[s]) if s < len(peds_time_ns) else 0
-                if start_ns - prev_end_ns < int(self._EVENT_GAP_S * 1e9) and events > 0:
-                    pass  # merge — same event
-                else:
+                # Blocks closer together than the gap belong to one interaction.
+                if events == 0 or start_ns - prev_end_ns >= gap_ns:
                     events += 1
-                prev_end_ns = int(peds_time_ns[e - 1]) if e > 0 and e <= len(peds_time_ns) else prev_end_ns
+                if e > 0 and e <= len(peds_time_ns):
+                    prev_end_ns = int(peds_time_ns[e - 1])
             return events
 
         if all_tti:
@@ -272,17 +261,17 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             tti_mean = None
 
         return {
-            "time_in_intimate_space": float(time_zone["intimate"]),
-            "time_in_personal_space": float(time_zone["personal"]),
-            "time_in_social_space": float(time_zone["social"]),
-            "time_in_public_space": float(time_zone["public"]),
+            "time_in_intimate_zone": float(time_zone["intimate"]),
+            "time_in_personal_zone": float(time_zone["personal"]),
+            "time_in_social_zone": float(time_zone["social"]),
+            "time_in_public_zone": float(time_zone["public"]),
             "psi_intimate_events": count_events(zone_mask["intimate"]),
             "psi_personal_events": count_events(zone_mask["personal"]),
             "psi_social_events": count_events(zone_mask["social"]),
-            "max_speed_intimate_space": float(max_speed_zone["intimate"]),
-            "max_speed_personal_space": float(max_speed_zone["personal"]),
-            "max_speed_social_space": float(max_speed_zone["social"]),
-            "max_speed_public_space": float(max_speed_zone["public"]),
+            "max_speed_intimate_zone": float(max_speed_zone["intimate"]),
+            "max_speed_personal_zone": float(max_speed_zone["personal"]),
+            "max_speed_social_zone": float(max_speed_zone["social"]),
+            "max_speed_public_zone": float(max_speed_zone["public"]),
             "movement_towards_peds_ratio": (
                 float(approaching_count / peds_frames) if peds_frames > 0 else None
             ),
@@ -291,32 +280,3 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             "personal_space_intrusion_integral": float(psii_sum),
             "timeseries_min_ped_clearance": min_clearances,
         }
-
-    @staticmethod
-    def _parse_peds(peds_raw, num_peds_hint=None):
-        """Parse flat ped position list into (N, 2) or (N, 3) array."""
-        if not peds_raw or len(peds_raw) == 0:
-            return np.empty((0, 2))
-        if isinstance(peds_raw, str):
-            import ast
-            try:
-                peds_raw = ast.literal_eval(peds_raw)
-            except Exception:
-                return np.empty((0, 2))
-        arr = np.array(peds_raw, dtype=np.float64)
-        if arr.size == 0:
-            return np.empty((0, 2))
-        if arr.ndim == 1:
-            if num_peds_hint and num_peds_hint > 0:
-                if num_peds_hint * 3 == len(arr):
-                    arr = arr.reshape(-1, 3)
-                elif num_peds_hint * 2 == len(arr):
-                    arr = arr.reshape(-1, 2)
-            else:
-                if len(arr) % 3 == 0:
-                    arr = arr.reshape(-1, 3)
-                elif len(arr) % 2 == 0:
-                    arr = arr.reshape(-1, 2)
-        if arr.ndim != 2 or arr.shape[1] < 2:
-            return np.empty((0, 2))
-        return arr

@@ -67,6 +67,14 @@ class _HasStateSteps(typing.Protocol):
 
 _log = logging.getLogger(__name__)
 
+_CAP_KEYS = ("mobile", "arm", "planner")
+
+
+def _launch_key(k: str) -> str:
+    """Contest cap keys stay bare (`mobile`, `arm.<x>`, `planner`), launch args live under `robot.`."""
+    head = k.split(".", 1)[0]
+    return f"robot.{k}" if head in _CAP_KEYS else k
+
 
 def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, str] | None = None) -> list[str]:
     """Return the arena launch argument list for a step, given the simulator name."""
@@ -75,20 +83,21 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
         *([f"sim:={simulator}"] if simulator is not None else []),
         f"robot:={s.robot}",
         f"world:={s.map}",
-        f"tm_robots:={s.tm_robots.value}",
-        f"tm_obstacles:={s.tm_obstacles.value}",
+        f"task.robots:={s.tm_robots.value}",
+        f"task.obstacles:={s.tm_obstacles.value}",
         f"run_seed:={s.seed}",
-        "auto_reset:=false",
-        "tm_modules:=",
+        "task.auto_reset:=false",
+        "task.modules:=",
     ]
     if s.optim:
         for k, v in s.optim.items():
             args.append(f"optim.{k}:={v}")
     if step.record_dir is not None:
-        args.append(f"record_data_dir:={step.record_dir}")
-        args.append("disable_auto_recorder:=true")
+        args.append(f"record.dir:={step.record_dir}")
+        args.append("record.auto:=false")
     own_keys = {a.split(":=", 1)[0] for a in args}
-    for k, v in step.contestant.args.items():
+    for raw_k, v in step.contestant.args.items():
+        k = _launch_key(raw_k)
         if isinstance(v, dict):
             driver = v.get("driver")
             if driver:
@@ -129,7 +138,7 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
             
     if passthrough:
         for k, v in passthrough.items():
-            if k in ("headless", "env_n"):
+            if k in ("headless", "env_n", "env.n"):
                 continue
             if k not in own_keys:
                 args.append(f"{k}:={v}")
@@ -359,6 +368,7 @@ _LATCHED = QoSProfile(
 )
 
 _SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP)
+_MAX_CONSECUTIVE_SYSTEMIC = 3
 
 
 class _EnvDied(Exception):
@@ -382,9 +392,11 @@ class BenchmarkRunner(ArenaMixinNode):
         retry_failed: bool = False,
         arena_passthrough: dict[str, str] | None = None,
         noexit: bool = False,
+        suite_bundle_dir: pathlib.Path | None = None,
     ) -> None:
         super().__init__("arena_benchmark_runner")
         self._suite = suite
+        self._suite_bundle_dir = suite_bundle_dir
         self._contest = contest
         self._simulator = simulator
         self._scale_episodes = scale_episodes
@@ -861,6 +873,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
     async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
         env_id: int | None = None
+        systemic_streak = 0
         try:
             spawned = await self._spawn_and_setup_env(rep_step)
             if spawned is None:
@@ -949,7 +962,6 @@ class BenchmarkRunner(ArenaMixinNode):
                         episodes_total=step.episodes,
                     )
                     flush_cb(step_result)
-                    # if cancelled, drain the queue and mark skipped
                     while not q.empty():
                         try:
                             rem_step = q.get_nowait()
@@ -1009,6 +1021,43 @@ class BenchmarkRunner(ArenaMixinNode):
                 abort = flush_cb(step_result)
                 if abort:
                     return True
+
+                # a systemic step failure means the env is likely wedged, and a dead env
+                # would otherwise eat every remaining queued step as spurious failures
+                if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
+                    systemic_streak += 1
+                    if q.empty():
+                        continue
+                    if systemic_streak >= _MAX_CONSECUTIVE_SYSTEMIC:
+                        _log.error(f"env {env_id} hit {systemic_streak} consecutive systemic failures, failing {q.qsize()} remaining step(s) without respawn")
+                        respawn_msg = "aborted after repeated systemic failures"
+                    else:
+                        _log.warning(f"env {env_id} unusable after {step.key} ({step_result.error_kind}), respawning a fresh env for {q.qsize()} remaining step(s)")
+                        await self._despawn_env(env_id)
+                        env_id = None
+                        spawned = await self._spawn_and_setup_env(rep_step)
+                        if spawned is not None:
+                            env_id, env_ns_root = spawned
+                            continue
+                        respawn_msg = "env respawn failed after a wedged env"
+                    while not q.empty():
+                        try:
+                            rem_step = q.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        if flush_cb(StepResult(
+                            rem_step.key,
+                            "failed",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.ENV_SETUP,
+                            respawn_msg,
+                            episodes_total=rem_step.episodes,
+                        )):
+                            return True
+                else:
+                    systemic_streak = 0
 
         finally:
             self._completed_groups += 1
@@ -1111,11 +1160,21 @@ class BenchmarkRunner(ArenaMixinNode):
         log_path = self._run_dir.path / "runner.log"
         self._arena_log_file = log_path.open("a")
 
+        # suite-bundle worlds resolve ahead of the canonical tree in every sim process
+        proc_env = None
+        if self._suite_bundle_dir is not None:
+            worlds_dir = self._suite_bundle_dir / "worlds"
+            if worlds_dir.is_dir():
+                proc_env = dict(os.environ)
+                outer = proc_env.get("ARENA_WORLD_PATH")
+                proc_env["ARENA_WORLD_PATH"] = f"{outer}:{worlds_dir}" if outer else str(worlds_dir)
+
         self._arena_proc = subprocess.Popen(
             cmd,
             stdout=self._arena_log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=proc_env,
         )
 
         await self._spawn.ensure(timeout_sec=300.0)
@@ -1231,16 +1290,42 @@ def _is_inline_suite(suite_name: str) -> bool:
     return stripped.startswith("[") or stripped.startswith("{")
 
 
-def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Contest, dict, list | dict]:
+def _resolve_suite_source(suites_dir: pathlib.Path, suite_name: str) -> tuple[pathlib.Path, pathlib.Path | None]:
+    """Resolve a suite name to (yaml path, bundle dir). Flat `<stem>.yaml` wins over
+    the directory-bundle form `<stem>/suite.yaml`; bundle dir is None for flat suites."""
+    stem = suite_name.removesuffix(".yaml")
+    flat = suites_dir / f"{stem}.yaml"
+    if flat.exists():
+        return flat, None
+    bundled = suites_dir / stem / "suite.yaml"
+    if bundled.exists():
+        return bundled, bundled.parent
+    raise FileNotFoundError(f"{flat} (or bundle {bundled})")
+
+
+def _suite_bundle_dir(suite_name: str) -> pathlib.Path | None:
+    """Re-derive the bundle dir for a suite name; None for inline or unresolvable names."""
+    if _is_inline_suite(suite_name):
+        return None
+    share = pathlib.Path(get_package_share_directory("arena_evaluation"))
+    try:
+        _, bundle_dir = _resolve_suite_source(share / "configs" / "benchmark" / "suites", suite_name)
+    except FileNotFoundError:
+        return None
+    return bundle_dir
+
+
+def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Contest, dict, list | dict, pathlib.Path | None]:
     share = pathlib.Path(get_package_share_directory("arena_evaluation"))
     bench_dir = share / "configs" / "benchmark"
 
+    suite_bundle_dir = None
     if _is_inline_suite(suite_name):
         suite_dict = yaml.safe_load(suite_name)
         suite = Suite.parse("inline", suite_dict)
     else:
         suite_stem = suite_name.removesuffix(".yaml")
-        suite_path = bench_dir / "suites" / f"{suite_stem}.yaml"
+        suite_path, suite_bundle_dir = _resolve_suite_source(bench_dir / "suites", suite_name)
         suite_dict = yaml.safe_load(suite_path.read_text())
         suite = Suite.parse(suite_stem, suite_dict)
 
@@ -1253,14 +1338,14 @@ def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Cont
         contest_dict = yaml.safe_load(contest_path.read_text())
         contest = Contest.parse(contest_stem, contest_dict)
 
-    return suite, contest, suite_dict, contest_dict
+    return suite, contest, suite_dict, contest_dict, suite_bundle_dir
 
 
 def _warn_config_drift(manifest: Manifest) -> None:
     """Non-fatal: note when the on-disk suite/contest for this run's names has drifted
     from the config the run was created with. Resume always replays the stored config."""
     try:
-        _, _, suite_dict, contest_dict = _load_suite_contest(manifest.suite_name, manifest.contest_name)
+        _, _, suite_dict, contest_dict, _ = _load_suite_contest(manifest.suite_name, manifest.contest_name)
     except FileNotFoundError:
         return
     if compute_config_hash(suite_dict, contest_dict) != manifest.config_hash:
@@ -1341,7 +1426,10 @@ def cli_main(argv: list[str] | None = None) -> int:
         k, v = arg.split(":=", 1)
         arena_passthrough[k] = v
 
-    env_n = int(arena_passthrough.get("env_n", "1"))
+    if "env_n" in arena_passthrough:
+        print("benchmark: env_n:= is deprecated, use env.n:=", file=sys.stderr)
+        arena_passthrough.setdefault("env.n", arena_passthrough.pop("env_n"))
+    env_n = int(arena_passthrough.get("env.n", "1"))
     headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
     simulator = arena_passthrough.get("sim", None)
 
@@ -1376,12 +1464,13 @@ def cli_main(argv: list[str] | None = None) -> int:
             run_dir = RunDir.open(data_root, resume_id)
             man = run_dir.manifest
             suite, contest, scale_episodes, simulator = _resolve_resume_config(man)
+            suite_bundle_dir = _suite_bundle_dir(man.suite_name)
             if simulator is not None:
                 arena_passthrough["sim"] = simulator
             _warn_config_drift(man)
             run_dir.progress.write_comment(f"resumed at {datetime.datetime.now(tz=datetime.UTC).isoformat()}")
         else:
-            suite, contest, suite_dict, contest_dict = _load_suite_contest(args.suite, args.contest)
+            suite, contest, suite_dict, contest_dict, suite_bundle_dir = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
 
@@ -1408,8 +1497,8 @@ def cli_main(argv: list[str] | None = None) -> int:
                     "contestant": attrs.asdict(c.contestant),
                     "stage": {k: v.value if isinstance(v, (Constants.TaskMode.TM_Robots, Constants.TaskMode.TM_Obstacles)) else v for k, v in c.stage._asdict().items()},
                     "episodes_planned": c.episodes,
-                    "is_reference": getattr(c, "is_reference", False),
-                    "reference_type": getattr(c, "reference_type", None),
+                    "is_reference": c.is_reference,
+                    "reference_type": c.reference_type,
                 }
                 for c in steps
             ]
@@ -1467,6 +1556,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             retry_failed=args.retry_failed,
             arena_passthrough=arena_passthrough,
             noexit=args.noexit,
+            suite_bundle_dir=suite_bundle_dir,
         )
     except KeyboardInterrupt:
         return 130

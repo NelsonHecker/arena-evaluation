@@ -1,6 +1,3 @@
-# SESSION SNAPSHOT (2026-08-10) — current acoustic_exposure.py as of end of session.
-# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/processing/metrics/ecological/acoustic_exposure.py
-# NOTE: this is the version WITH today's fixes (ffill positions+source, per-pedestrian collision impulse).
 from __future__ import annotations
 import typing
 import logging
@@ -15,7 +12,6 @@ from ..ecological.characterization import _ACOUSTIC_DEFAULTS
 if typing.TYPE_CHECKING:
     from ....storage.schemas import AlignedEpisodeBundle
 
-# Import the C++ solver wrapper
 try:
     from ...acoustics.impedance_grid import compute_attenuations
 except ImportError:
@@ -42,6 +38,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         "timeseries_acoustic_exposure_dba": "dBA",
         "timeseries_acoustic_attenuation_db": "dB",
     }
+
+    world: str | None = None
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -97,7 +95,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         nulls = {k: None for k in self.output_keys()}
 
         # Skip heavy calculation for reference runs
-        if getattr(episode.run, "is_reference", False):
+        if episode.run is not None and episode.run.is_reference:
             logger.info("Skipping acoustic calculation for reference episode %s", episode.episode_id)
             return nulls
 
@@ -110,23 +108,19 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             logger.debug("No episode data for episode %s", episode.episode_id)
             return nulls
 
-        map_val = None
-        if hasattr(episode, "map"):
-            map_val = episode.map
-        elif hasattr(episode, "run") and hasattr(episode.run, "map"):
-            map_val = episode.run.map
+        map_val = episode.map
 
         map_name = prior_results.get("map", map_val)
         if not map_name:
             # registry seeds calc.world from the benchmark metadata
-            map_name = getattr(self, "world", None)
+            map_name = self.world
         if not map_name:
-            logger.warning("No map name available for episode %s — skipping acoustics", episode.episode_id)
+            logger.warning("No map name available for episode %s - skipping acoustics", episode.episode_id)
             return nulls
 
         run_dir = None
-        if hasattr(episode, "folder_manager") and episode.folder_manager:
-            if hasattr(episode.run, "benchmark_id") and episode.run.benchmark_id:
+        if episode.folder_manager:
+            if episode.run is not None and episode.run.benchmark_id:
                 run_dir = episode.folder_manager.data_root / episode.run.benchmark_id
 
         map_data = self._get_map_occupancy(map_name, run_dir=run_dir)
@@ -142,7 +136,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         doors = door_segments(map_name, grid, resolution, origin, run_dir=run_dir)
         tl_cache: dict[tuple, np.ndarray] = {}
         state_timeline = DoorStateTimeline.from_semantic_frame(
-            getattr(episode, "semantic_snapshot", None)
+            episode.semantic_snapshot
         )
         if doors:
             logger.info(
@@ -279,7 +273,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
                 tl_cache[tl_key] = pixel_tl
 
-            # Run C++ solver
             attenuations = compute_attenuations(
                 occupancy_grid=grid,
                 resolution=resolution,
@@ -325,7 +318,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             episode.episode_id, eval_count,
         )
 
-        # ── Post-process for scalar metrics ──────────────────────────────────────
+        # Post-process for scalar metrics
 
         all_exp: list[float] = []
         for frame_exps in ts_exposure:
@@ -344,7 +337,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         all_exp = np.array(all_exp)
 
-        # Max exposure
         max_exp = float(np.max(all_exp))
 
         # Leq (Equivalent Continuous Sound Level)
@@ -393,7 +385,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         }
 
         logger.info(
-            "AcousticExposureCalculator: episode %s — max_exp=%.1f dBA, leq=%.1f dBA, startle=%.2f dBA/s",
+            "AcousticExposureCalculator: episode %s, max_exp=%.1f dBA, leq=%.1f dBA, startle=%.2f dBA/s",
             episode.episode_id, max_exp, leq_exp, max_startle,
         )
 

@@ -1,4 +1,4 @@
-# storage — Layer 2: Shared Schemas and Path Management
+# storage - Layer 2: Shared Schemas and Path Management
 
 This package contains the shared data types and infrastructure used by **all** other layers in the pipeline. It has no external dependencies beyond `pydantic` and `PyYAML`, and it does not import from `ingestion`, `processing`, or `presentation`.
 
@@ -9,13 +9,13 @@ This package contains the shared data types and infrastructure used by **all** o
 | File | Purpose |
 |---|---|
 | `schemas.py` | Pydantic and dataclass type definitions (the data model) |
-| `folder_manager.py` | `FolderManager` — resolves and validates all output paths |
-| `manifest.py` | `MetadataWriter` — reads and writes `metadata.yaml` |
+| `folder_manager.py` | `FolderManager` - resolves and validates all output paths |
+| `manifest.py` | `MetadataWriter` - reads and writes `metadata.yaml` |
 | `exceptions.py` | Domain-specific exceptions for the whole pipeline |
 
 ---
 
-## schemas.py — Data Models
+## schemas.py - Data Models
 
 ### `RunMetadata`
 
@@ -41,13 +41,13 @@ meta = RunMetadata(
 )
 ```
 
-**Write-on-startup fields** — known at recording start: `benchmark_id`, `planner`, `robot_model`, `map`, `stage`, `suite_name`, `contest_name`, `recording_started_at`, `arena_git_sha`, `arena_git_dirty`, `python_version`, `ros_distro`.
+**Write-on-startup fields** - known at recording start: `benchmark_id`, `planner`, `robot_model`, `map`, `stage`, `suite_name`, `contest_name`, `recording_started_at`, `arena_git_sha`, `arena_git_dirty`, `python_version`, `ros_distro`.
 
-**Write-on-episode fields** — populated from `EpisodeRecord` messages: `tm_obstacles`, `tm_robots`, `tm_modules`, `obstacles_params`, `robots_params`.
+**Write-on-episode fields** - populated from `EpisodeRecord` messages: `tm_obstacles`, `tm_robots`, `tm_modules`, `obstacles_params`, `robots_params`.
 
-**Write-on-shutdown fields** — finalized on clean exit: `recording_ended_at`, `episodes_recorded`, `pedsim_available`, `recorded_topics`.
+**Write-on-shutdown fields** - finalized on clean exit: `recording_ended_at`, `episodes_recorded`, `pedsim_available`, `recorded_topics`.
 
-**Write-on-processing fields** — added by the processing pipeline: `processing_completed_at`, `episodes_valid`, `pipeline_version`.
+**Write-on-processing fields** - added by the processing pipeline: `processing_completed_at`, `episodes_valid`, `pipeline_version`.
 
 ### `RunDescriptor`
 
@@ -109,7 +109,7 @@ Pydantic model for entries in `viz_manifest.yaml`. Supports `auto_differentiate:
 
 ---
 
-## folder_manager.py — FolderManager
+## folder_manager.py - FolderManager
 
 Resolves all output paths relative to a `data_root`. Ensures no path escapes the root (path traversal protection).
 
@@ -121,20 +121,20 @@ fm = FolderManager(data_root=Path("/opt/arena_ws/data"))
 
 # Resolve paths
 run_dir   = fm.run_dir("my_benchmark", "dwa", "stage_1")
-# → /opt/arena_ws/data/my_benchmark/recordings/dwa/stage_1
+# -> /opt/arena_ws/data/my_benchmark/recordings/dwa/stage_1
 
 mcap_path = fm.mcap_path(run_dir)
-# → /opt/arena_ws/data/my_benchmark/recordings/dwa/stage_1/recording.mcap
+# -> /opt/arena_ws/data/my_benchmark/recordings/dwa/stage_1/recording.mcap
 
 metrics   = fm.metrics_path(run_dir)
-# → /opt/arena_ws/data/my_benchmark/recordings/dwa/stage_1/metrics.parquet
+# -> /opt/arena_ws/data/my_benchmark/recordings/dwa/stage_1/metrics.parquet
 
 combined  = fm.combined_metrics_path("my_benchmark")
-# → /opt/arena_ws/data/my_benchmark/combined_metrics.parquet
+# -> /opt/arena_ws/data/my_benchmark/combined_metrics.parquet
 
 # Discover all valid runs in a benchmark
 runs = fm.discover_runs("my_benchmark")
-# → list[RunDescriptor]
+# -> list[RunDescriptor]
 ```
 
 **Path traversal protection:** every resolved path is checked with `resolved.relative_to(data_root)`. If the path escapes `data_root`, a `ValueError` is raised.
@@ -143,7 +143,7 @@ runs = fm.discover_runs("my_benchmark")
 
 ---
 
-## manifest.py — MetadataWriter
+## manifest.py - MetadataWriter
 
 Static helper for reading and writing `metadata.yaml` files.
 
@@ -163,7 +163,7 @@ metadata = MetadataWriter.read(dest)
 MetadataWriter.update(dest, episodes_recorded=10, recording_ended_at="2026-05-28T22:00:00+00:00")
 ```
 
-All YAML is loaded with `yaml.safe_load()` — no arbitrary code execution. Written files are `chmod 0o666` to ensure they are readable/writable by any user in the Docker environment.
+All YAML is loaded with `yaml.safe_load()` - no arbitrary code execution. Written files are `chmod 0o666` to ensure they are readable/writable by any user in the Docker environment.
 
 ---
 

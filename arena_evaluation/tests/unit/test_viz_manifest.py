@@ -22,7 +22,7 @@ def test_standard_manifest_loads_and_roundtrips():
     ids = [spec.id for spec in manifest.plots]
     assert len(ids) == len(set(ids))
 
-    # YAML round-trip: dump → re-validate
+    # YAML round-trip: dump -> re-validate
     dumped = yaml.safe_dump(manifest.model_dump(exclude_none=True), sort_keys=False)
     again = VizManifest.model_validate(yaml.safe_load(dumped))
     assert again.name == manifest.name

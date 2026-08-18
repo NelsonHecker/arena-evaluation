@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import ast
 import typing
 import numpy as np
 
@@ -9,29 +11,21 @@ if typing.TYPE_CHECKING:
 
 
 class SocialForcesCalculator(BaseMetricCalculator):
-    """
-    Social force metrics, computed on the NATIVE peds time base (full
-    multi-rate standard, 2026-08-12). Robot pose is sampled onto the peds
-    time axis by backward-asof join (100 ms tolerance).
+    """Social force metrics on the native peds time base.
 
     Metrics:
-    - SFM (Helbing & Molnár 1995): cumulative / peak / mean repulsive force
-      of pedestrians on the robot (A = 2.1 N, B = 0.3 m, cutoff 5 m,
-      clamp 100 N). Distances are center-to-center, per the original model.
-    - ESFM (Moussaïd et al. 2010): anisotropy-weighted SFM. In the original
-      model the anisotropy w(phi) applies to the RECEIVER of the force; the
-      headline variant therefore weights by the ROBOT's heading (the force
-      the robot experiences — receiver-correct). The ped-heading variant
-      (force the robot exerts on pedestrians) is reported separately as
-      esfm_ped_*.
-    - CI / SII: the Collision Index / Social Individual Index of the cited
-      survey (Eq. 5) — a Gaussian personal-space violation index with
-      sigma_px0 = sigma_py0 = 0.28 m (empirically set). The paper states the
-      sigmas are equal "thus assuming that personal space is a perfect
-      circle", which requires the squared (Gaussian) kernel; they may be
-      adapted for cultures / relationships / contexts by changing the sigmas.
+    - SFM (Helbing & Molnar 1995): cumulative / peak / mean repulsive force
+      of pedestrians on the robot, center-to-center per the original model.
+    - ESFM (Moussaid et al. 2010): anisotropy-weighted SFM. The anisotropy
+      w(phi) applies to the receiver of the force, so the headline variant
+      weights by the robot heading (the force the robot experiences); the
+      ped-heading variant is reported separately as esfm_ped_*.
+    - CI / SII: Gaussian personal-space violation index with equal sigmas
+      (0.28 m), i.e. a circular personal space. Adapt the sigmas for other
+      cultures, relationships or contexts.
 
-    Robot pose is ground truth (tf_gt) when recorded, odom otherwise.
+    Robot pose is sampled onto the peds axis by backward-asof join (100 ms),
+    ground truth when recorded and odom otherwise.
     """
 
     NAME = "social_forces"
@@ -59,15 +53,15 @@ class SocialForcesCalculator(BaseMetricCalculator):
     PRIMARY_OUTPUTS = ["sfm_mean_force", "ci_mean"]
     OUTPUT_DIRECTIONS = {"sfm_mean_force": "lower", "ci_mean": "lower"}
 
-    # SFM constants (Helbing & Molnár)
+    # SFM constants (Helbing & Molnar)
     _A = 2.1       # interaction strength (N)
     _B = 0.3       # interaction range (m)
     _PED_RADIUS = 0.3  # m
-    _CUTOFF = 5.0  # m — only consider pedestrians within this radius
-    _MAX_FORCE = 100.0  # N — clamp to prevent overflow when d_ij ≈ 0
-    _LAMBDA_ESFM = 0.5  # anisotropy parameter (0.5 = moderate rear de-weighting)
+    _CUTOFF = 5.0  # m, ignore pedestrians beyond this radius
+    _MAX_FORCE = 100.0  # N, clamp so near-zero d_ij cannot overflow
+    _LAMBDA_ESFM = 0.5  # anisotropy, 0.5 = moderate rear de-weighting
 
-    # CI / SII personal-space sigmas (paper Eq. 5, empirically 0.28 m)
+    # CI / SII personal-space sigmas
     _SIGMA_PX0 = 0.28  # m
     _SIGMA_PY0 = 0.28  # m
 
@@ -94,7 +88,6 @@ class SocialForcesCalculator(BaseMetricCalculator):
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
-        # Guard: missing data
         peds_df = self.native_ped_frame(episode)
         if peds_df is None or "peds_positions" not in peds_df.columns:
             return {k: None for k in self.output_keys()}
@@ -150,13 +143,12 @@ class SocialForcesCalculator(BaseMetricCalculator):
                 ci_values.append(0.0)
                 continue
 
-            # Pedestrian headings (may be missing → isotropic fallback)
+            # Missing headings fall back to isotropic
             headings = None
             if peds_headings_list is not None and i < len(peds_headings_list):
                 h_raw = peds_headings_list[i]
                 if h_raw and len(h_raw) > 0:
                     if isinstance(h_raw, str):
-                        import ast
                         try:
                             h_raw = ast.literal_eval(h_raw)
                         except Exception:
@@ -175,12 +167,10 @@ class SocialForcesCalculator(BaseMetricCalculator):
                 dy = py - ry
                 d_ij = np.sqrt(dx**2 + dy**2)
 
-                # ── CI / SII (paper Eq. 5, anisotropic Gaussian) ──
                 # CI = max_i exp(-((xr-xpi)^2/(2 sx0^2) + (yr-ypi)^2/(2 sy0^2)))
                 ci_val = np.exp(-((dx**2) / sx2 + (dy**2) / sy2))
                 max_ci = max(max_ci, float(ci_val))
 
-                # Skip SFM/ESFM beyond cutoff
                 if d_ij > self._CUTOFF:
                     continue
 
@@ -191,14 +181,13 @@ class SocialForcesCalculator(BaseMetricCalculator):
                     force_mag = 0.0
                 total_sfm += force_mag
 
-                # ── ESFM — robot-heading anisotropy (receiver-correct) ──
                 # phi = angle between robot facing and direction to the ped
                 phi = robot_yaw_i - np.arctan2(py - ry, px - rx)
                 w_robot = self._LAMBDA_ESFM + (1.0 - self._LAMBDA_ESFM) * (1.0 + np.cos(phi)) / 2.0
                 w_robot = max(0.0, min(1.0, w_robot))
                 total_esfm += force_mag * w_robot
 
-                # ── ESFM — ped-heading anisotropy (force the robot exerts) ──
+                # Ped-heading anisotropy: the force the robot exerts
                 w_ped = 1.0
                 if headings is not None and j < len(headings):
                     ped_heading = float(headings[j])
@@ -237,32 +226,3 @@ class SocialForcesCalculator(BaseMetricCalculator):
             "timeseries_sfm_force": sfm_forces,
             "timeseries_ci": ci_values,
         }
-
-    @staticmethod
-    def _parse_peds(peds_raw, num_peds_hint=None):
-        """Parse flat ped position list into (N, 2) or (N, 3) array."""
-        if not peds_raw or len(peds_raw) == 0:
-            return np.empty((0, 2))
-        if isinstance(peds_raw, str):
-            import ast
-            try:
-                peds_raw = ast.literal_eval(peds_raw)
-            except Exception:
-                return np.empty((0, 2))
-        arr = np.array(peds_raw, dtype=np.float64)
-        if arr.size == 0:
-            return np.empty((0, 2))
-        if arr.ndim == 1:
-            if num_peds_hint and num_peds_hint > 0:
-                if num_peds_hint * 3 == len(arr):
-                    arr = arr.reshape(-1, 3)
-                elif num_peds_hint * 2 == len(arr):
-                    arr = arr.reshape(-1, 2)
-            else:
-                if len(arr) % 3 == 0:
-                    arr = arr.reshape(-1, 3)
-                elif len(arr) % 2 == 0:
-                    arr = arr.reshape(-1, 2)
-        if arr.ndim != 2 or arr.shape[1] < 2:
-            return np.empty((0, 2))
-        return arr

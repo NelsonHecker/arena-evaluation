@@ -13,9 +13,7 @@ class TopicDefinition:
 
 
 def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDefinition]:
-    """
-    Returns the dictionary of topics to subscribe to.
-    """
+    """Return the dictionary of topics to subscribe to."""
     from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
     from sensor_msgs.msg import JointState
     from nav_msgs.msg import Path

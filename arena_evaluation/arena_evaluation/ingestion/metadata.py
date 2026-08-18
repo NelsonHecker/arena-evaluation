@@ -12,7 +12,7 @@ from ..storage.planner_names import split_planner_name
 
 class IngestionMetadata:
     """Helper to generate metadata during ingestion (recording)."""
-    
+
     @staticmethod
     def get_git_sha(workspace_dir: str) -> str | None:
         try:
@@ -26,7 +26,7 @@ class IngestionMetadata:
             return result.stdout.strip()
         except Exception:
             return None
-            
+
     @staticmethod
     def is_git_dirty(workspace_dir: str) -> bool:
         try:
@@ -40,7 +40,7 @@ class IngestionMetadata:
             return len(result.stdout.strip()) > 0
         except Exception:
             return False
-            
+
     @staticmethod
     def create_episode_metadata(
         benchmark_id: str,
@@ -62,7 +62,7 @@ class IngestionMetadata:
         agent_name: str = "",
     ) -> RunMetadata:
         """Create metadata for a single episode (new flat structure)."""
-        
+
         fallback_lp, fallback_ip = split_planner_name(planner)
         return RunMetadata(
             benchmark_id=benchmark_id,

@@ -71,10 +71,10 @@ def test_suite_parse_launch_args_defaults_empty():
 def test_suite_parse_launch_args_from_launch_mapping():
     from arena_evaluation.benchmark.config import Suite
 
-    obj = {"stages": [_make_stage_dict()], "launch": {"isaac.physics": "newton", "headless": True}}
+    obj = {"stages": [_make_stage_dict()], "launch": {"sim.isaac.physics": "newton", "headless": True}}
     result = Suite.parse("test_suite", obj)
 
-    assert result.launch_args == {"isaac.physics": "newton", "headless": "True"}
+    assert result.launch_args == {"sim.isaac.physics": "newton", "headless": "True"}
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +388,7 @@ def test_contest_parse_sweep_dict_cap_one_inner_axis():
 
 
 def test_contest_parse_sweep_dict_cap_two_inner_axes():
-    """Dict-form cap with two sweep axes → cartesian product."""
+    """Dict-form cap with two sweep axes -> cartesian product."""
     from arena_evaluation.benchmark.config import Contest
 
     obj = {"mobile": {"driver": "nav2", "local_planner": ["teb", "dwa"], "inter_planner": ["polite", "aggressive"]}}
@@ -400,7 +400,7 @@ def test_contest_parse_sweep_dict_cap_two_inner_axes():
 
 
 def test_contest_parse_sweep_dict_cap_no_axes():
-    """Dict-form cap with no list values → single contestant."""
+    """Dict-form cap with no list values -> single contestant."""
     from arena_evaluation.benchmark.config import Contest
 
     obj = {"mobile": {"driver": "nav2", "local_planner": "teb"}}

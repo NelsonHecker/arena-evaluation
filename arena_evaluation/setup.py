@@ -41,7 +41,6 @@ setup(
             'evaluation = arena_evaluation.cli:main',
             'benchmark = arena_evaluation.benchmark.runner:cli_main',
             'evaluation_cli = arena_evaluation.benchmark.cli:main',
-            'characterize = arena_evaluation.characterization.characterization_node:main',
         ],
     },
     package_data={

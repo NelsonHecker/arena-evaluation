@@ -8,6 +8,7 @@ from ..storage.planner_names import split_planner_name
 if TYPE_CHECKING:
     from ..storage.schemas import PlotSpec
 
+# Ordered priority list of identity columns
 IDENTITY_COLS: list[str] = ["local_planner", "inter_planner", "robot", "stage", "map", "benchmark_id"]
 
 COMPOUND_LABEL_COL = "__label__"
@@ -27,7 +28,7 @@ def detect_varying_dims(df: pl.DataFrame) -> list[str]:
 
 
 def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
-    """Add a __label__ column whose value is a human-readable compound of the given dims."""
+    """Add (or replace) a __label__ column holding a readable compound of dims."""
     if not dims:
         return df
 
@@ -41,7 +42,7 @@ def build_label_column(df: pl.DataFrame, dims: list[str]) -> pl.DataFrame:
 
 def resolve_differentiate(spec: "PlotSpec", df: pl.DataFrame) -> tuple[str, pl.DataFrame]:
     """Determine the effective differentiation column for spec given df."""
-    auto = getattr(spec, "auto_differentiate", True)
+    auto = spec.auto_differentiate
     requested = spec.differentiate
 
     if not auto:

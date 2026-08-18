@@ -49,8 +49,8 @@ Authoritative episode lifecycle control for the `DataRecorderNode`. Driven by th
 
 Service to update the recorder's output directory at runtime.
 
-**Request:** `data` (`string`) — new directory path
-**Response:** `result` (`bool`) — success flag
+**Request:** `data` (`string`), the new directory path
+**Response:** `result` (`bool`), success flag
 
 ## Build
 
@@ -61,5 +61,5 @@ arena build arena_evaluation
 
 ## Dependencies
 
-- `builtin_interfaces` — for `Time` stamp
-- `rosidl_default_generators` — message code generation
+- `builtin_interfaces` for the `Time` stamp
+- `rosidl_default_generators` for message code generation

@@ -366,7 +366,7 @@ def _cmd_console(args: argparse.Namespace) -> int:
     state = "running" if res["alive"] else "finished"
     print(f"run: {run_id}  [{state}]  pid: {res['pid']}  log: {res['path']}")
     if res.get("truncated"):
-        print(f"(last {args.lines} of {args.lines} lines — use --lines to see more)")
+        print(f"(last {args.lines} of {args.lines} lines, use --lines to see more)")
     for ln in res["lines"]:
         print(ln)
     return 0

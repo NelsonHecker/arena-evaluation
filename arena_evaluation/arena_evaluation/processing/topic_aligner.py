@@ -20,12 +20,7 @@ class TopicAligner:
         start_time_ns: int | None = None,
         end_time_ns: int | None = None,
     ) -> pl.DataFrame | pl.LazyFrame | None:
-        """
-        Align all available topics in the bundle onto the odom time axis.
-        Optionally filter by start and end times (inclusive).
-        
-        Uses join_asof with strategy="backward" (match exact or previous within tolerance).
-        """
+        """Align all available topics onto the odom time axis, optionally filtered to [start_time_ns, end_time_ns]."""
         if bundle.odom is None:
             return None
 

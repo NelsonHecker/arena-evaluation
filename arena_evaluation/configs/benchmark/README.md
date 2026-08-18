@@ -3,26 +3,26 @@
 The `arena evaluation benchmark` runner reads all benchmark configuration from
 `arena_evaluation/configs/benchmark/` at startup.
 
-Invocation: `arena evaluation benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env_n:=...]` (Arena meta-repo shortcut: `arena evaluation benchmark ...`).
+Invocation: `arena evaluation benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env.n:=...]` (Arena meta-repo shortcut: `arena evaluation benchmark ...`).
 
 ## Directory layout
 
 ```
 configs/benchmark/
-├── suites/           — stage sequences (maps, episodes, task modes)
-│   ├── basic.yaml
-│   ├── meta_suite.yaml
-│   ├── all_maps_random.yaml
-│   ├── arena_corridor.yaml
-│   ├── arena_hospital_small.yaml
-│   ├── map_empty.yaml
-│   └── characterization.yaml   — open-loop energy/acoustic sweep
-└── contests/         — planner lineups
-    ├── basic.yaml
-    ├── allplanners.yaml
-    ├── inter.yaml
-    ├── planners.yaml
-    └── characterization.yaml  — dummy contestant (the task mode drives, not a planner)
+|-- suites/           - stage sequences (maps, episodes, task modes)
+|   |-- basic.yaml
+|   |-- meta_suite.yaml
+|   |-- all_maps_random.yaml
+|   |-- arena_corridor.yaml
+|   |-- arena_hospital_small.yaml
+|   |-- map_empty.yaml
+|   `-- characterization.yaml   - open-loop energy/acoustic sweep
+`-- contests/         - planner lineups
+    |-- basic.yaml
+    |-- allplanners.yaml
+    |-- inter.yaml
+    |-- planners.yaml
+    `-- characterization.yaml  - dummy contestant (the task mode drives, not a planner)
 ```
 
 ## Suite files
@@ -40,9 +40,9 @@ stages:
     episodes: 1               # number of episodes at this stage
     config:                   # per-mode params, leaf-keyed (see task_generator/tasks/obstacles/README.md)
       scenario:               # top-level key matches tm_robots / tm_obstacles
-        file: 4.json          # → task.scenario.file
+        file: 4.json          # -> task.scenario.file
       random:
-        dynamic:  {min: 3, max: 5, models: [arenian]}  # → task.random.dynamic.{min,max,models}
+        dynamic:  {min: 3, max: 5, models: [arenian]}  # -> task.random.dynamic.{min,max,models}
         static:   {min: 5, max: 10, models: [shelf]}
 ```
 
@@ -60,9 +60,19 @@ stages:
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
 | `timeout` | string | Per-episode timeout; defaults to `Constants.Robot.TIMEOUT` if absent |
 
-Suite-level `references: false` disables the automatically generated reference steps
-(`unobstructed_robot` / `unhindered_peds`); characterization suites use it because the sweep
-itself is the reference.
+### Directory bundles
+
+A suite may also be a directory: `suites/<name>/suite.yaml`, with the same schema as a
+flat file. A flat `suites/<name>.yaml` takes precedence when both exist. If the bundle
+contains a `worlds/` subdirectory, the runner exports it via `ARENA_WORLD_PATH` to the
+launched runtime, so the bundled world directories resolve ahead of the canonical worlds
+tree in every sim process (an `ARENA_WORLD_PATH` already set in the outer environment
+keeps priority). See `suites/acoustics/` for an example that ships its own worlds.
+
+Suite-level `references: true` enables automatically generated reference steps
+(`unobstructed_robot` / `unhindered_peds`) per stage. The default is `false`. Enable it for
+suites whose report manifest consumes reference-episode data (e.g. pedestrian disturbance).
+Characterization suites leave it off because the sweep itself is the reference.
 
 ### Characterization suite
 
@@ -72,7 +82,7 @@ stages:
   - name: characterization
     map: map_empty
     robot: jackal
-    episodes: 3            # repetitions → cross-episode confidence bands
+    episodes: 3            # repetitions -> cross-episode confidence bands
     tm_robots: characterization   # TM_Robots mode that drives the open-loop sweep
     tm_obstacles: random
     config:
@@ -84,8 +94,8 @@ stages:
 ```
 
 The `characterization` robot task mode (in `task_generator`) drives `cmd_vel` directly through the
-robot's rated envelope — idle blocks, 0.25→vx_max linear steps with 5 s out-and-back dwells,
-transient ramps, pivot rates — tagging every maneuver with `characterization_phase` markers. Run it
+robot's rated envelope - idle blocks, 0.25->vx_max linear steps with 5 s out-and-back dwells,
+transient ramps, pivot rates - tagging every maneuver with `characterization_phase` markers. Run it
 like any benchmark and analyse with the characterization report manifest:
 
 ```bash
@@ -98,9 +108,9 @@ arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 A contest defines the set of planner configurations (contestants) to evaluate.
 The runner iterates over all contestants at each suite stage.
 
-Contestant args use **cap-scoped dicts** — each capability (e.g. `mobile`,
+Contestant args use **cap-scoped dicts** - each capability (e.g. `mobile`,
 `arm`) is a dict with a `driver` key identifying the driver and any extra
-kwargs forwarded as launch args:
+kwargs forwarded as launch args under the `robot.` prefix:
 
 ```yaml
 mobile:
@@ -109,7 +119,7 @@ mobile:
   inter_planner: polite
 ```
 
-This produces launch args: `mobile:=nav2 mobile.local_planner:=teb mobile.inter_planner:=polite`
+This produces launch args: `robot.mobile:=nav2 robot.mobile.local_planner:=teb robot.mobile.inter_planner:=polite`
 
 There are two forms: **list** and **sweep**.
 
@@ -175,12 +185,12 @@ to `Robot.parse`.
 The old flat dot-notation format is still accepted in both list and sweep forms:
 
 ```yaml
-# Old flat list form — still works
+# Old flat list form - still works
 - name: teb
   mobile.local_planner: teb
   mobile.inter_planner: bypass
 
-# Old flat sweep form — still works
+# Old flat sweep form - still works
 mobile.local_planner: [teb, dwa]
 mobile.inter_planner: bypass
 ```
@@ -200,20 +210,20 @@ arena evaluation benchmark --suite basic --contest '{mobile: {driver: nav2, loca
 Contestant `args` keys are forwarded verbatim as launch args to the env on
 spawn (so nav2, the controller, the agent, etc. come up correctly from the
 start). See
-[BRINGUP.md → Cap-scoped overrides](../../../../arena_bringup/BRINGUP.md#cap-scoped-overrides)
+[BRINGUP.md -> Cap-scoped overrides](../../../../arena_bringup/BRINGUP.md#cap-scoped-overrides)
 for the recommended key shapes.
 
 The runner drops keys that collide with stage-owned launch args (`sim`,
-`robot`, `world`, `tm_robots`, `tm_obstacles`, `run_seed`, `auto_reset`,
-`tm_modules`, `record_data_dir`) and logs a warning, since those are
+`robot`, `world`, `task.robots`, `task.obstacles`, `run_seed`, `task.auto_reset`,
+`task.modules`, `record.dir`, `record.auto`) and logs a warning, since those are
 controlled by the suite stage. Anything else is passed through to the launch
 layer, which binds it if declared or raises an error if not.
 
-A useful passthrough example: `fail_on_collision: true` makes the env abort
+A useful passthrough example: `task.fail_on_collision: true` makes the env abort
 an episode as FAILED (`outcome_info='collision'`) the moment the robot
 footprint contacts a wall, static obstacle, or pedestrian, instead of the
 default run-to-goal-or-timeout. See
-[BRINGUP.md → Common options](../../../../arena_bringup/BRINGUP.md#common-options).
+[BRINGUP.md -> Common options](../../../../arena_bringup/BRINGUP.md#common-options).
 
 ## How the runner consumes these files
 
@@ -227,18 +237,19 @@ across groups. Robot is fixed within a group. If a contestant's stages mix
 robots, the runner splits into multiple groups per contestant. Authoring
 suggestion: keep one robot per contestant for fastest runs.
 
-`env_n` caps how many groups (parallel contestants) run at once, with the rest
-queued. Run time scales as `bringup_time × num_groups + episode_time ×
-total_episodes` spread across the `env_n` workers, not `bringup_time ×
+`env.n` caps how many groups (parallel contestants) run at once, with the rest
+queued. Run time scales as `bringup_time x num_groups + episode_time x
+total_episodes` spread across the `env.n` workers, not `bringup_time x
 num_steps`, since steps within a group reuse one env.
 
 For each group the runner:
 
 1. Calls `/arena/spawn_env` once with the first step's launch args: `sim`,
-   `robot`, `world`, `tm_robots`, `tm_obstacles`, `run_seed`,
-   `auto_reset:=false`, `tm_modules:=` (empty), and any contestant args of
-   shape `mobile`, `arm`, `mobile.<key>`, or `arm.<key>`. `record_data_dir`
-   is added when recording is enabled.
+   `robot`, `world`, `task.robots`, `task.obstacles`, `run_seed`,
+   `task.auto_reset:=false`, `task.modules:=` (empty), and any contestant args of
+   shape `mobile`, `arm`, `mobile.<key>`, or `arm.<key>` (emitted as
+   `robot.mobile...` / `robot.arm...`). `record.dir` and `record.auto:=false`
+   are added when recording is enabled.
    Per-mode params (`task.scenario.file`, `task.random.*`, ...) are not passed
    as launch args; the runner sets them via QueueEpisode in step 3.
 2. Waits for the env to publish on `/arena/state/envs` and resolves the env
@@ -277,37 +288,37 @@ Override with `--data-root`. Inside Docker: `/opt/arena_ws/data/benchmarks/<run_
 
 ```
 $ARENA_DATA_DIR/benchmarks/<run_id>/
-├── manifest.yaml              # requested config snapshot (never overwritten)
-├── progress.csv               # append-only, one row per episode
-├── runner.log
-├── .benchmark_state.json      # per-step status, atomic write
-├── episodes/                  # recorder output — one MCAP per episode
-│   ├── episode_000/
-│   │   ├── episode_000.mcap
-│   │   └── episode_000.yaml
-│   └── ...
-├── combined_metrics.parquet   # after arena evaluation run
-└── report_manifest.yaml       # note: which manifest produced the last report
+|-- manifest.yaml              # requested config snapshot (never overwritten)
+|-- progress.csv               # append-only, one row per episode
+|-- runner.log
+|-- .benchmark_state.json      # per-step status, atomic write
+|-- episodes/                  # recorder output - one MCAP per episode
+|   |-- episode_000/
+|   |   |-- episode_000.mcap
+|   |   `-- episode_000.yaml
+|   `-- ...
+|-- combined_metrics.parquet   # after arena evaluation run
+`-- report_manifest.yaml       # note: which manifest produced the last report
 ```
 
 The recorder is spawned per step and writes one MCAP per episode into `episodes/`; its episode
 lifecycle is driven by the `start_episode` service (see the [ingestion README](../../arena_evaluation/ingestion/README.md)).
 `arena evaluation run --report-manifest <name>` performs extraction + metrics, then renders
-`report.html`. Characterization is a regular metric calculator — the report derives the
+`report.html`. Characterization is a regular metric calculator - the report derives the
 per-working-point curves from its `timeseries_char_*` columns, with no separate analysis step.
 
 Inspection helpers:
 
-- `arena evaluation evaluation_cli list` — table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
-- `arena evaluation evaluation_cli status [run_id] [--watch]` — snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
-- `arena evaluation evaluation_cli tail [run_id]` — tail -F on `progress.csv` of the most recent (or named) run.
-- `arena evaluation evaluation_cli ps` — table of arena-related OS processes currently running
+- `arena evaluation evaluation_cli list` - table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
+- `arena evaluation evaluation_cli status [run_id] [--watch]` - snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
+- `arena evaluation evaluation_cli tail [run_id]` - tail -F on `progress.csv` of the most recent (or named) run.
+- `arena evaluation evaluation_cli ps` - table of arena-related OS processes currently running
   (benchmark runner, arena CLI wrapper, Gazebo sim, arena/recorder nodes, world generators)
   with PID, kind, elapsed time, and command line. Same data as the MCP
   `list_running_processes` tool.
-- `arena evaluation evaluation_cli console [run_id] [--lines N] [--follow]` — tail the console
-  log of a benchmark run: `benchmarks/<run_id>/runner.log` (the runner's own log — Python
-  logging plus launch output — written for every run, however it was launched). run_id omitted
+- `arena evaluation evaluation_cli console [run_id] [--lines N] [--follow]` - tail the console
+  log of a benchmark run: `benchmarks/<run_id>/runner.log` (the runner's own log: Python
+  logging plus launch output, written for every run, however it was launched). run_id omitted
   = most recent run. Same data as the MCP `get_benchmark_console` tool.
 
 `progress.csv` schema: `ts_iso, run_id, step_key, contestant, stage, env_id, episode_id, world, seed, tm_robots, tm_obstacles, tm_modules, robots, outcome_state, outcome_info, started_at, ended_at, runtime_s, robots_params_json, obstacles_params_json, error_kind, error_detail`

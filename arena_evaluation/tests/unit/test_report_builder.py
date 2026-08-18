@@ -11,7 +11,6 @@ def test_report_builder_jinja2_rendering():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = pathlib.Path(tmpdir)
 
-        # Create dummy metrics dataframe
         df = pl.DataFrame({
             "planner": ["dwa", "mppi"],
             "success": [1.0, 0.5],
@@ -20,11 +19,9 @@ def test_report_builder_jinja2_rendering():
             "collision_amount": [0.0, 1.0],
         })
 
-        # Save dummy combined_metrics.parquet
         combined_path = tmp_path / "combined_metrics.parquet"
         df.write_parquet(combined_path)
 
-        # Setup mock manifest
         manifest = VizManifest(plots=[
             PlotSpec(
                 id="plot_1",
@@ -56,12 +53,10 @@ def test_report_builder_jinja2_rendering():
             builder = ReportBuilder(benchmark_dir=tmp_path)
             builder.build()
 
-            # Verify outputs
             report_file = tmp_path / "report.html"
             assert report_file.exists()
             assert (tmp_path / "plotly.min.js").exists()
 
-            # Read report contents and verify structure
             content = report_file.read_text()
             assert "Arena Evaluation Report" in content
             assert "Performance Summary" in content
@@ -85,7 +80,6 @@ def test_report_builder_characterization_from_metrics():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = pathlib.Path(tmpdir)
 
-        # Metrics frame: one episode row with per-sample char columns.
         df = pl.DataFrame({
             "planner": ["characterization"],
             "episode": [1],
@@ -129,9 +123,8 @@ def test_report_builder_characterization_from_metrics():
         assert "characterization" in note
 
 
-def test_summary_defaults_to_planner_grouping():
-    """Without summary_group_by the summary groups by PLANNER, not by
-    whichever dimension varies (stage-wise grouping was confusing)."""
+def test_summary_leads_with_planner_then_other_varying_dims():
+    """Planner leads the grouping; dimensions that also vary follow it."""
     from arena_evaluation.presentation.report_builder import (
         ReportBuilder, _default_summary_group_cols,
     )
@@ -142,9 +135,8 @@ def test_summary_defaults_to_planner_grouping():
         "stage": ["a", "b", "a", "b"],
         "success": [1.0, 0.9, 0.8, 0.6],
     })
-    # Helper picks planner first.
-    assert _default_summary_group_cols(df) == ["local_planner"]
-    # Falls back to 'planner'.
+    assert _default_summary_group_cols(df) == ["local_planner", "stage"]
+
     df2 = df.rename({"local_planner": "planner"}).drop("stage")
     assert _default_summary_group_cols(df2) == ["planner"]
 
@@ -161,12 +153,83 @@ def test_summary_defaults_to_planner_grouping():
         )
         builder = ReportBuilder(benchmark_dir=tmp_path, manifest=manifest)
         html = builder._generate_summary_table_manifest(df, manifest)
-        # Grouped by local_planner: two data rows (dwb, teb), header 'local_planner'.
-        assert "local_planner" in html
-        assert html.count("<tr") == 3  # header + dwb + teb (header has style attr)
+        assert "local_planner" in html and "stage" in html
+        assert html.count("<tr") == 5  # header + one row per (planner, stage)
         assert ">dwb<" in html and ">teb<" in html
-        # Stage values must NOT appear as summary rows.
-        assert ">a<" not in html and ">b<" not in html
+
+
+def test_summary_keeps_the_breakdown_of_a_single_planner_sweep():
+    """One planner across three worlds must not collapse into one row."""
+    from arena_evaluation.presentation.report_builder import _default_summary_group_cols
+
+    df = pl.DataFrame({
+        "local_planner": ["dwb"] * 3,
+        "map": ["a", "b", "c"],
+        "success": [1.0, 0.5, 0.0],
+    })
+    assert _default_summary_group_cols(df) == ["local_planner", "map"]
+
+
+def test_all_null_identity_columns_are_not_grouped_on():
+    """A column can exist and still carry nothing to group by."""
+    from arena_evaluation.presentation.report_builder import _default_summary_group_cols
+
+    df = pl.DataFrame({
+        "local_planner": [None, None],
+        "robot": ["jackal", "husky"],
+        "success": [1.0, 0.5],
+    }, schema_overrides={"local_planner": pl.Utf8})
+    assert _default_summary_group_cols(df) == ["robot"]
+
+
+def test_summary_without_any_identity_aggregates_all_runs():
+    """No usable identity yields one honest row, never a vanished table."""
+    from arena_evaluation.presentation.report_builder import (
+        ReportBuilder, _default_summary_group_cols,
+    )
+    from arena_evaluation.presentation.viz_manifest import SummarySpec
+
+    df = pl.DataFrame({"success": [1.0, 0.5]})
+    assert _default_summary_group_cols(df) == []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+        df.write_parquet(tmp_path / "combined_metrics.parquet")
+        manifest = VizManifest(
+            name="summary_test",
+            title="Summary Test",
+            data_source="metrics",
+            summary=[SummarySpec(metric="success", label="Success", format="{:.0%}")],
+            plots=[],
+        )
+        builder = ReportBuilder(benchmark_dir=tmp_path, manifest=manifest)
+        html = builder._generate_summary_table_manifest(df, manifest)
+        assert "All runs" in html
+        assert html.count("<tr") == 2  # header + the aggregate row
+        assert "75%" in html
+
+
+def test_partially_null_grouping_keys_render_as_unknown():
+    from arena_evaluation.presentation.viz_manifest import SummarySpec
+
+    df = pl.DataFrame({
+        "local_planner": ["dwb", None],
+        "success": [1.0, 0.5],
+    })
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+        df.write_parquet(tmp_path / "combined_metrics.parquet")
+        manifest = VizManifest(
+            name="summary_test",
+            title="Summary Test",
+            data_source="metrics",
+            summary=[SummarySpec(metric="success", label="Success", format="{:.0%}")],
+            plots=[],
+        )
+        builder = ReportBuilder(benchmark_dir=tmp_path, manifest=manifest)
+        html = builder._generate_summary_table_manifest(df, manifest)
+        assert ">unknown<" in html
+        assert ">None<" not in html
 
 
 def test_per_plot_note_rendered_below_plot():

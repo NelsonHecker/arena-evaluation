@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
 
 
 def _median_filter_window3(arr: np.ndarray) -> np.ndarray:
-    """Apply a 3-sample moving median filter to reject single-frame outliers."""
+    """3-sample moving median, to reject single-frame outliers."""
     n = len(arr)
     if n < 3:
         return arr.copy()
@@ -65,29 +65,13 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
         episode: "AlignedEpisodeBundle",
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
-        """Calculate extended energy metrics from prior results.
-
-        Parameters
-        ----------
-        episode : AlignedEpisodeBundle
-            The aligned episode bundle (data, start_pos, etc.).
-        prior_results : dict
-            Results from upstream calculators: energy, path_metrics, motion_metrics.
-
-        Returns
-        -------
-        dict
-            All four output keys — scalar floats or None on failure.
-        """
         if episode.data is None:
             return {k: None for k in self.output_keys()}
 
-        # ── Physical constants ──
-        g = 9.81                # gravitational acceleration [m/s²]
-        v_thresh = 0.01         # standstill velocity threshold [m/s]
-        mass = max(self.robot_params.mass, 0.1)  # clamp misconfigured-zero mass
+        g = 9.81         # m/s^2
+        v_thresh = 0.01  # m/s, standstill threshold
+        mass = self.robot_params.mass
 
-        # ── Prior results ──
         path_length: float | None = prior_results.get("path_length")
         energy_total_wh: float | None = prior_results.get("energy_total_wh")
         velocity_list: list | None = prior_results.get("velocity")
@@ -96,14 +80,13 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
 
         result: dict[str, typing.Any] = {}
 
-        # =====================================================================
-        # 1. Specific Cost of Transport  (dimensionless)
-        #    Uses TOTAL energy consumed (including static/compute overhead) —
-        #    the cost of the whole navigation task, not just locomotion.
-        # =====================================================================
+        # Cost of transport over total energy, i.e. the whole navigation
+        # task including static and compute overhead, not just locomotion.
+        # An undeclared mass leaves it unreported rather than guessed.
         cot = None
         if (
-            energy_total_wh is not None
+            mass > 0
+            and energy_total_wh is not None
             and path_length is not None
             and path_length > 0.1
             and energy_total_wh > 0
@@ -115,9 +98,6 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
                     cot = None
         result["specific_cost_of_transport"] = float(cot) if cot is not None else None
 
-        # =====================================================================
-        # 2. Energy per Meter  [Wh/m]
-        # =====================================================================
         epm = None
         if (
             energy_total_wh is not None
@@ -131,13 +111,9 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
                     epm = None
         result["energy_per_meter"] = float(epm) if epm is not None else None
 
-        # =====================================================================
-        # 3. Peak-to-Mean Power Ratio  (dimensionless)
-        # =====================================================================
         pmpr = None
         if power_ts is not None and len(power_ts) > 0:
             p_arr = np.array(power_ts, dtype=float)
-            # Median filter rejects single-frame physics glitches
             p_filt = _median_filter_window3(p_arr)
             p_mean = float(np.mean(p_filt))
             if p_mean > 0.01:
@@ -148,9 +124,6 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
                         pmpr = None
         result["peak_to_mean_power_ratio"] = float(pmpr) if pmpr is not None else None
 
-        # =====================================================================
-        # 4. Standstill Energy Penalty  [Wh]
-        # =====================================================================
         vel = (
             np.array(velocity_list, dtype=float)
             if velocity_list is not None and len(velocity_list) > 0
@@ -167,7 +140,6 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
             else np.array([])
         )
 
-        # Truncate all timeseries to the shortest common length
         lengths = [len(vel), len(p_ts), len(t_ts)]
         min_len = min(lengths) if lengths else 0
 
@@ -176,23 +148,20 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
             p_ts = p_ts[:min_len]
             t_ts = t_ts[:min_len]
 
-            # Time deltas consistent with energy calculator (np.diff with prepend)
             dt = np.diff(t_ts, prepend=0.0)
-            # Clamp negative dt (should never happen) to zero
             dt[dt < 0] = 0.0
 
-            is_stationary = np.abs(vel) < v_thresh  # boolean mask per frame
+            is_stationary = np.abs(vel) < v_thresh
             sep_wh = 0.0
             if np.any(is_stationary):
-                # Find contiguous stationary blocks via edge detection
                 padded = np.concatenate([[False], is_stationary, [False]])
                 edges = np.diff(padded.astype(np.int8))
-                starts = np.where(edges == 1)[0]  # transition into stationary
-                ends = np.where(edges == -1)[0]   # transition out of stationary
+                starts = np.where(edges == 1)[0]
+                ends = np.where(edges == -1)[0]
 
                 for s, e in zip(starts, ends):
                     block_duration = float(np.sum(dt[s:e]))
-                    if block_duration >= 0.5:  # hysteresis: ignore sub-0.5 s micro-jitter blocks
+                    if block_duration >= 0.5:  # ignore micro-jitter blocks
                         sep_wh += float(np.sum(p_ts[s:e] * dt[s:e])) / 3600.0
 
             result["standstill_energy_penalty_wh"] = float(sep_wh)

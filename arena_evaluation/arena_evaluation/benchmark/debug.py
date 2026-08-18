@@ -1,13 +1,9 @@
-"""Debugging helpers: process introspection and benchmark console logs.
+"""Process introspection and benchmark console logs.
 
-Shared by the arena evaluation CLI (``benchmark ps`` / ``benchmark console``)
-and the ``arena_evaluation_mcp`` server (``list_running_processes`` /
-``get_benchmark_console``).
-
-The console log is the benchmark's own ``runner.log``, written by the
-benchmark runner inside its run directory (``benchmarks/<run_id>/runner.log``)
-for every run — Python logging plus launch/arena_runtime output. It is
-tailed in place; no separate log tree is used.
+Shared by the evaluation CLI (``benchmark ps`` / ``benchmark console``) and
+the ``arena_evaluation_mcp`` server (``list_running_processes`` /
+``get_benchmark_console``). The console log is the runner's own
+``benchmarks/<run_id>/runner.log``, tailed in place.
 """
 from __future__ import annotations
 
@@ -179,15 +175,8 @@ def running_pids_by_run_id() -> dict[str, int]:
     return result
 
 
-# ── Console logs ─────────────────────────────────────────────────────────
-
 def console_log_path(run_id: str) -> pathlib.Path:
-    """Path of the console log for a benchmark run.
-
-    The benchmark runner already writes ``runner.log`` inside the run
-    directory (the runner's Python logging plus the launch/arena_runtime
-    output) — that is the authoritative console log, no separate tree.
-    """
+    """Path of the console log for a benchmark run."""
     from ..storage.data_root import benchmarks_root
 
     return benchmarks_root() / run_id / "runner.log"

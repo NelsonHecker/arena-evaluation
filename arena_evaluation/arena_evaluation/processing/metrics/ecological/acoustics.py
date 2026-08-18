@@ -1,6 +1,7 @@
 from __future__ import annotations
 import typing
 import numpy as np
+import polars as pl
 
 from ..base import BaseMetricCalculator
 
@@ -9,21 +10,17 @@ if typing.TYPE_CHECKING:
 
 
 class AcousticsCalculator(BaseMetricCalculator):
-    """
-    Ecological acoustic metrics, computed on the NATIVE /acoustics time base
-    (full multi-rate standard, 2026-08-12) — no odom-frame quantization.
+    """Ecological acoustic metrics on the native /acoustics time base.
 
     Metrics:
-    - L_Aeq,T (ISO 1996-1:2016): equivalent continuous A-weighted level
-    - L_A10 / L_A50 / L_A90: statistical levels (exceeded 10/50/90 % of time)
-    - ASF / LTR: level-gated Loudness Transition Rate — max positive rise
-      rate of the (3-sample median filtered) A-weighted Fast level, gated on
-      L_AF >= 65 dBA. A proxy for sudden acoustic transients from jerky motor
-      torque bursts (Fastl & Zwicker 2007 temporal loudness integration;
-      IEC 61672-1 Fast weighting tau=125 ms), NOT the biological startle
-      reflex (which requires >80 dBA and ms rise times).
-    - ASI: variance of 1-second Leq windows
-    - acoustic_cost: linearized acoustic energy per meter (s/m) — novel index
+    - L_Aeq,T (ISO 1996-1:2016): equivalent continuous A-weighted level.
+    - L_A10 / L_A50 / L_A90: levels exceeded 10/50/90 % of the time.
+    - ASF / LTR: max positive rise rate of the 3-sample median filtered
+      A-weighted Fast level, gated on L_AF >= 65 dBA. A proxy for transients
+      from jerky torque bursts, not the biological startle reflex (which
+      needs >80 dBA and millisecond rise times).
+    - ASI: variance of 1 s Leq windows.
+    - acoustic_cost: linearized acoustic energy per meter.
     """
 
     NAME = "acoustics"
@@ -53,9 +50,9 @@ class AcousticsCalculator(BaseMetricCalculator):
         "l_a90": "lower",
     }
 
-    _DEFAULT_DBA = 42.0  # idle noise floor baseline (dBA)
-    _MIN_DBA = 1.0       # clamp minimum before log operations
-    _L_GATE_DBA = 65.0   # ASF absolute level gate (dBA)
+    _DEFAULT_DBA = 42.0  # dBA, idle noise floor
+    _MIN_DBA = 1.0       # dBA, clamp before log
+    _L_GATE_DBA = 65.0   # dBA, ASF level gate
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -83,9 +80,6 @@ class AcousticsCalculator(BaseMetricCalculator):
         ):
             return {k: None for k in self.output_keys()}
 
-        import polars as pl
-
-        # Clean and sort on the native time base
         acous = acous.sort("time_ns")
         try:
             dba = (
@@ -106,7 +100,6 @@ class AcousticsCalculator(BaseMetricCalculator):
         if len(time_ns) < 2:
             return {k: None for k in self.output_keys()}
 
-        # Native-rate time deltas (monotonic by construction after sort)
         dt = np.diff(time_ns) / 1e9
         dt = np.append(dt, dt[-1] if len(dt) > 0 else 0.01)
         dt = np.where(dt <= 0.0, 1e-6, dt)
@@ -114,7 +107,6 @@ class AcousticsCalculator(BaseMetricCalculator):
         linear_energy = 10.0 ** (dba / 10.0)
         T = float(np.sum(dt))
 
-        # ── 1. L_Aeq,T — ISO 1996-1 trapezoidal integration ──
         with np.errstate(divide="ignore", invalid="ignore"):
             l_aeq_t = 10.0 * np.log10(np.sum(linear_energy * dt) / T)
         if np.isnan(l_aeq_t) or np.isinf(l_aeq_t):
@@ -122,12 +114,11 @@ class AcousticsCalculator(BaseMetricCalculator):
         else:
             l_aeq_t = float(l_aeq_t)
 
-        # ── 2. Statistical noise levels (L_AN convention) ──
+        # L_AN convention: L_A10 is the level exceeded 10 % of the time
         l_a10 = float(np.percentile(dba, 90))
         l_a50 = float(np.percentile(dba, 50))
         l_a90 = float(np.percentile(dba, 10))
 
-        # ── 3. ASF / LTR — level-gated onset rise-rate ──
         dba_filt = self._median_filter_3(dba)
         dL = np.diff(dba_filt)
         dt_diff = np.diff(time_ns) / 1e9
@@ -135,13 +126,11 @@ class AcousticsCalculator(BaseMetricCalculator):
         with np.errstate(divide="ignore", invalid="ignore"):
             rates = dL / dt_diff
 
-        # Gate: only rises whose endpoint is at/above the absolute level gate
-        # count as transients (I(L_AF(t_{k+1}) >= L_gate)).
+        # Only rises ending at or above the gate count as transients
         gated = np.where(dba_filt[1:] >= self._L_GATE_DBA, rates, 0.0)
         positive_rates = gated[gated > 0]
         acoustic_startle_factor = float(np.max(positive_rates)) if len(positive_rates) > 0 else 0.0
 
-        # ── 4. ASI — variance of 1 s Leq windows (native timestamps) ──
         window_s = 1.0
         if T >= window_s and len(dba) >= 2:
             cumsum_t = np.cumsum(dt)
@@ -159,7 +148,6 @@ class AcousticsCalculator(BaseMetricCalculator):
         else:
             acoustic_surge_index = 0.0
 
-        # ── 5. Acoustic cost — linearized acoustic energy per meter ──
         path_length = prior_results.get("path_length")
         if path_length is not None and path_length >= 0.1:
             tee_acoustic = float(np.sum(linear_energy * dt))
@@ -179,7 +167,7 @@ class AcousticsCalculator(BaseMetricCalculator):
 
     @staticmethod
     def _median_filter_3(signal: np.ndarray) -> np.ndarray:
-        """Apply a 3-sample median filter. Handles edges by mirroring."""
+        """3-sample median filter, edges mirrored."""
         if len(signal) < 3:
             return signal.copy()
         result = np.zeros_like(signal)

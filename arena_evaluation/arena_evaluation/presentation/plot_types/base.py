@@ -1,5 +1,3 @@
-# SESSION SNAPSHOT (2026-08-10) — base.py with run_dir attr + list-filter support.
-# Path: src/Arena/arena_evaluation/arena_evaluation/arena_evaluation/presentation/plot_types/base.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -11,9 +9,8 @@ from ..dimension_detector import resolve_differentiate
 
 
 class BasePlotRenderer(ABC):
-    """
-    Abstract Base Class for all plot renderers.
-    """
+    """Base class for all plot renderers."""
+
     PLOT_TYPE: str = ""
 
     def __init__(self, spec: PlotSpec, units: dict[str, str] | None = None):
@@ -30,18 +27,12 @@ class BasePlotRenderer(ABC):
 
     @abstractmethod
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
-        """
-        Render interactive plot using Plotly.
-        Returns the HTML string representation of the plot, or a list of HTML strings.
-        """
+        """Render an interactive Plotly plot as an HTML string, or a list of them."""
         pass
 
     @abstractmethod
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        """
-        Render static plot using Seaborn/Matplotlib.
-        Saves the PNG to out_path.
-        """
+        """Render a static Seaborn/Matplotlib plot, saving the PNG to out_path."""
         pass
 
     def resolve_diff_col(self, df: pl.DataFrame) -> tuple[str, pl.DataFrame]:

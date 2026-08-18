@@ -10,11 +10,10 @@ episode.
 
 | Folder | Focus |
 |---|---|
-| [`social/`](social/README.md) | Robot–pedestrian interaction: social forces, proxemics, gaze, disturbance |
-| [`ecological/`](ecological/README.md) | Energy, acoustics, world-condition compliance |
-| [`performance/`](performance/README.md) | Path, motion, time, collision, efficiency, clearance |
-| [`naturalness/`](naturalness/README.md) | Trajectory naturalness against the unobstructed baseline |
-| [`holistic/`](holistic/README.md) | Composite scores (not implemented) |
+| `social/` | Robot/pedestrian interaction: social forces, proxemics, gaze, disturbance |
+| `ecological/` | Energy, acoustics, world-condition compliance |
+| `performance/` | Path, motion, time, collision, efficiency, clearance |
+| `naturalness/` | Trajectory naturalness against the unobstructed baseline |
 
 ## Calculator contract
 
@@ -24,8 +23,8 @@ Each calculator declares:
   `REQUIRED_TOPICS` (topic gates; list/tuple entries mean "any of"),
   `UNITS`, `PRIMARY_OUTPUTS` (headline keys for default comparisons),
   `OUTPUT_DIRECTIONS` ("lower" / "higher" per output)
-- `output_keys()` — exhaustive list of produced keys
-- `calculate(episode, prior_results)` — returns every key, `None`-filled on
+- `output_keys()` - exhaustive list of produced keys
+- `calculate(episode, prior_results)` - returns every key, `None`-filled on
   error or missing data; `prior_results` contains the accumulated outputs of
   all upstream calculators
 
@@ -38,9 +37,10 @@ Each calculator declares:
 - **Ground truth first:** `resolve_native_pose` prefers the tf_gt world pose;
   odom is the fallback. Ground-truth velocity is derived by differentiating
   GT positions.
-- **Proxemic distances:** zone metrics use the effective edge-to-edge distance
-  `d_eff = d_center − (r_robot + r_ped)` against Hall's zones (0.45 / 1.2 /
-  3.6 m) — comparable across robot footprints.
+- **Proxemic distances:** the `*_zone` metrics use the edge-to-edge distance
+  `d_eff = d_center - (r_robot + r_ped)` against Hall's zones (0.45 / 1.2 /
+  3.6 m), comparable across robot footprints. The legacy `proxemics`
+  calculator measures center-to-center, hence the separate key names.
 - **Energy:** reported in watt-hours; `specific_cost_of_transport` uses the
   total energy consumed.
 - **Reference-based metrics** (`pfi`, `mar`, `ped_path_deflection_m`) are
@@ -51,7 +51,7 @@ Each calculator declares:
 
 Per-topic parquets (`topics/<topic>.parquet`) are extracted by `MCAPReader`
 and aligned by `TopicAligner` (backward asof, 100 ms tolerance, onto the odom
-axis). See the per-category READMEs for the topics each metric consumes.
+axis).
 
 ## Invocation
 

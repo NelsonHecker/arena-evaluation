@@ -9,11 +9,9 @@ from arena_evaluation.storage.folder_manager import FolderManager
 def test_end_to_end_pipeline():
     fixtures_dir = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_benchmark"
     fm = FolderManager(data_root=fixtures_dir)
-    
+
     pipeline = ProcessingPipeline(fm)
-    
-    # Process the benchmark
+
     pipeline.process_benchmark("sample_benchmark")
-    
-    # Check outputs
+
     assert fm.combined_metrics_path("sample_benchmark").exists()

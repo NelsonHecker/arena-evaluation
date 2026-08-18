@@ -4,7 +4,7 @@ import yaml
 _PALETTE_CACHE = None
 
 def get_color_palette() -> list[str]:
-    """Load the accessibility color palette from config/color_palette.yaml."""
+    """Hex colors from config/color_palette.yaml, in file order, minus pure white and black."""
     global _PALETTE_CACHE
     if _PALETTE_CACHE is not None:
         return _PALETTE_CACHE

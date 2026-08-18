@@ -1,13 +1,13 @@
 """Long-format line chart renderer (per-sample / per-working-point frames).
 
 Unlike ``timeseries`` (wide per-episode list columns), this renders one trace
-per ``group_by`` combination from a long dataframe — the shape produced by the
+per ``group_by`` combination from a long dataframe - the shape produced by the
 characterization pipeline (``characterization_samples.parquet``) and the
 per-working-point summary (``characterization_summary.parquet``).
 
 Options:
     y (str, required):           y-axis column
-    error_y (str, optional):     std column → confidence band (default) or bars
+    error_y (str, optional):     std column -> confidence band (default) or bars
     error_style (str):           "band" (fill) | "bars" (error bars), default "band"
     mode (str):                  "lines" | "lines+markers" | "markers", default "lines"
     time_to_s (bool):            divide x by 1e9 (ns timestamps), default false
@@ -16,7 +16,7 @@ Options:
     max_traces (int):            cap on the number of traces, default 40
 
 ``data_key`` is the x column. ``group_by`` (PlotSpec field) selects the trace
-grouping columns; ``differentiate`` is used as fallback when ``group_by`` is
+grouping columns. ``differentiate`` is used as fallback when ``group_by`` is
 absent (must exist in the frame, else single color).
 """
 
@@ -56,7 +56,7 @@ class LineRenderer(BasePlotRenderer):
 
         # Wide per-episode list columns (e.g. the metrics frame's
         # timeseries_char_* columns) are exploded in lockstep into a long
-        # per-sample frame — the shape this renderer plots.
+        # per-sample frame, the shape this renderer plots.
         keep = [c for c in [x_col, y_col, *group_cols, error_col] if c]
         list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
         if list_cols:
@@ -66,9 +66,9 @@ class LineRenderer(BasePlotRenderer):
             # combinatorially (polars 1.x) and OOMs.
             df_filtered = df_filtered.select(keep).explode(list_cols)
 
-        # aggregate: true → reduce per (x, group) combo so per-working-point
+        # aggregate: true -> reduce per (x, group) combo so per-working-point
         # curves (e.g. power vs vx_target) can be derived from the long frame.
-        # reduce: "mean" (default, with ±std band) | "leq" (10·log10 of the
+        # reduce: "mean" (default, with +/-std band) | "leq" (10*log10 of the
         # mean linear acoustic power) | "max" (peak, no band).
         if opts.get("aggregate") and len(df_filtered) > 0:
             agg_cols = [x_col, *group_cols]
@@ -98,7 +98,7 @@ class LineRenderer(BasePlotRenderer):
 
     @staticmethod
     def _trace_data(pdf, x_col, y_col, error_col, opts, time_to_s, time_relative):
-        """Downsample + transform one trace's frame → (x, y, err) arrays."""
+        """Downsample + transform one trace's frame -> (x, y, err) arrays."""
         max_points = int(opts.get("max_points_per_trace", 5000))
         if len(pdf) > max_points and max_points > 0:
             stride = max(1, len(pdf) // max_points)

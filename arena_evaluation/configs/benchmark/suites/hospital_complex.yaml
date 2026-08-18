@@ -1,3 +1,4 @@
+references: true
 stages:
 # ── Jackal ───────────────────────────────────────────────────────────────────
 - name: hospital_stage_1_jackal

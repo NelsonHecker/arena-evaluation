@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import ast
 import typing
 import numpy as np
 
@@ -100,33 +102,8 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             
             n_peds = num_pedestrians_col[i] if num_pedestrians_col is not None else None
 
-            if isinstance(peds, str):
-                import ast
-                try:
-                    peds_arr = np.array(ast.literal_eval(peds))
-                except:
-                    peds_arr = np.array([])
-            else:
-                peds_arr = np.array(peds)
-
-            if peds_arr.ndim == 1:
-                if n_peds is not None and n_peds > 0:
-                    if n_peds * 2 == len(peds_arr):
-                        peds_arr = peds_arr.reshape(-1, 2)
-                    elif n_peds * 3 == len(peds_arr):
-                        peds_arr = peds_arr.reshape(-1, 3)
-                    else:
-                        if len(peds_arr) % 2 == 0:
-                            peds_arr = peds_arr.reshape(-1, 2)
-                        elif len(peds_arr) % 3 == 0:
-                            peds_arr = peds_arr.reshape(-1, 3)
-                else:
-                    if len(peds_arr) % 2 == 0:
-                        peds_arr = peds_arr.reshape(-1, 2)
-                    elif len(peds_arr) % 3 == 0:
-                        peds_arr = peds_arr.reshape(-1, 3)
-
-            n_resolved_peds = len(peds_arr) if peds_arr.ndim == 2 else 0
+            peds_arr = self._parse_peds(peds, n_peds)
+            n_resolved_peds = peds_arr.shape[0]
 
             if isinstance(peds, str):
                 try:

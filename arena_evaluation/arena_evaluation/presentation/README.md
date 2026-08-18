@@ -1,6 +1,6 @@
-# presentation — Layer 5: Report and Plot Generation
+# presentation - Layer 5: Report and Plot Generation
 
-This package reads processed metric data (Parquet files) and produces human-readable output: an interactive HTML report, static PNG plots, and optional animated GIFs. It operates entirely **offline** — no running ROS 2 environment is required.
+This package reads processed metric data (Parquet files) and produces human-readable output: an interactive HTML report, static PNG plots, and optional animated GIFs. It operates entirely **offline** - no running ROS 2 environment is required.
 
 ---
 
@@ -8,7 +8,7 @@ This package reads processed metric data (Parquet files) and produces human-read
 
 | File | Purpose |
 |---|---|
-| `report_builder.py` | `ReportBuilder` — resolves the manifest, loads the right data source, renders `report.html` + `plots/` |
+| `report_builder.py` | `ReportBuilder` - resolves the manifest, loads the right data source, renders `report.html` + `plots/` |
 | `manifest_registry.py` | Resolves report manifests by name/path/inline YAML (mirrors suite/contest resolution) |
 | `viz_manifest.py` | `VizManifest` / `PlotSpec` models + default (`standard`) manifest loader |
 | `plotly_renderer.py` | Dispatches `PlotSpec` to the correct interactive chart renderer |
@@ -69,7 +69,7 @@ Report layouts are **declarative named YAML files** in
 
 1. Inline YAML (reference starts with `{` or `[`)
 2. Explicit path to an existing YAML file
-3. Name → `configs/benchmark/manifests/<name>.yaml` (share dir, then source tree)
+3. Name -> `configs/benchmark/manifests/<name>.yaml` (share dir, then source tree)
 4. Legacy `benchmark_dir/viz_manifest.yaml` (only when no reference is given)
 5. The `report_manifest.yaml` note file in the benchmark dir (records which manifest produced the last report)
 6. Default `standard`
@@ -81,7 +81,7 @@ manifest_version: "1.0"
 name: characterization
 title: Open-Loop Characterization Report
 data_source: characterization_samples   # metrics | characterization_samples | characterization_summary
-groups:                                  # report sections (id → heading)
+groups:                                  # report sections (id -> heading)
   - {id: power_curves, title: Power vs. Velocity Curves}
 summary:                                 # declarative summary table columns
   - {metric: mean_power_total_w, label: Mean Power, format: "{:.1f}"}
@@ -93,8 +93,8 @@ plots: [ ... ]                           # list of PlotSpec
 ```
 
 - **`data_source`** selects the Parquet the report reads: `metrics`
-  (`combined_metrics.parquet` → `metrics.parquet`) or any `<file>.parquet` name. Per-plot
-  `data_source` overrides are supported. The `characterization` manifest uses `metrics` — the
+  (`combined_metrics.parquet` -> `metrics.parquet`) or any `<file>.parquet` name. Per-plot
+  `data_source` overrides are supported. The `characterization` manifest uses `metrics` - the
   per-sample data lives in the metric row's `timeseries_char_*` list columns (from the
   `CharacterizationCalculator`), which the `line` renderer explodes into a long frame and
   aggregates per working point.
@@ -124,9 +124,9 @@ plots: [ ... ]                           # list of PlotSpec
 | `overlay_markers`, `show_map` | `trajectory` | Markers / map background |
 | `metrics` | `radar`, `bar` (stacked) | Column list |
 | `x`, `y` | `heatmap`, `scatter`, `line` | Axis columns |
-| `error_y` | `line` | Std column → confidence band (default) or error bars (`error_style: bars`) |
+| `error_y` | `line` | Std column -> confidence band (default) or error bars (`error_style: bars`) |
 | `mode` | `line` | `lines` \| `lines+markers` \| `markers` |
-| `time_to_s` | `line` | x is `time_ns` → divide by 1e9, label "Time [s]" |
+| `time_to_s` | `line` | x is `time_ns` -> divide by 1e9, label "Time [s]" |
 | `time_relative` | `line` | subtract per-trace x minimum so episodes overlay at t=0 |
 | `max_points_per_trace`, `max_traces` | `line` | Downsampling / trace caps for long frames |
 | `group_by`, `columns`, `notes` | `table` | see *Tables & agent notes* below |
@@ -135,22 +135,22 @@ plots: [ ... ]                           # list of PlotSpec
 
 ## Plot Types
 
-- **`violin` / `box`** — distribution of a metric per group.
-- **`bar`** — mean ± std bar chart (optionally `stacked: true` with a `metrics` list for
+- **`violin` / `box`** - distribution of a metric per group.
+- **`bar`** - mean +/- std bar chart (optionally `stacked: true` with a `metrics` list for
   percentage splits, e.g. energy breakdown).
-- **`histogram`** — smooth area distribution per group.
-- **`scatter`** — X-Y scatter (auto-explodes List columns).
-- **`timeseries`** — wide-format per-episode list columns against a time axis (e.g.
+- **`histogram`** - smooth area distribution per group.
+- **`scatter`** - X-Y scatter (auto-explodes List columns).
+- **`timeseries`** - wide-format per-episode list columns against a time axis (e.g.
   `timeseries_power_total_w` vs `timeseries_time_s`).
-- **`line`** — **long-format** line charts: one trace per `group_by` combination from per-sample or
-  per-working-point frames (the characterization data shape), with optional mean±std confidence
+- **`line`** - **long-format** line charts: one trace per `group_by` combination from per-sample or
+  per-working-point frames (the characterization data shape), with optional mean+/-std confidence
   bands (`error_y`), `time_to_s`/`time_relative` transforms, and trace/point caps.
-- **`table`** — a declarative HTML table combining **data-derived columns** and **agent-written
+- **`table`** - a declarative HTML table combining **data-derived columns** and **agent-written
   notes** (see below). Renders as a styled `<table>` directly in the report.
-- **`trajectory`** — (x, y) paths with map overlay, time slider, dynamic markers, spawn-jump
+- **`trajectory`** - (x, y) paths with map overlay, time slider, dynamic markers, spawn-jump
   detection, multi-agent support, optional GIF export.
-- **`radar`** — normalized multi-metric profile per group.
-- **`heatmap`** — correlation matrix (`data_key="*"`) or pivot grid (options `x`/`y`).
+- **`radar`** - normalized multi-metric profile per group.
+- **`heatmap`** - correlation matrix (`data_key="*"`) or pivot grid (options `x`/`y`).
 
 ---
 
@@ -192,7 +192,7 @@ notes:
 The manifest's `columns` also accept list-valued metrics (they are exploded before aggregating), so
 tables can summarize the `timeseries_char_*` characterization columns too.
 
-## dimension_detector.py — Auto-Differentiation
+## dimension_detector.py - Auto-Differentiation
 
 Scans identity columns (`local_planner`, `inter_planner`, `robot`, `stage`, `map`, `benchmark_id`)
 for columns with >1 unique value; when multiple vary, builds a compound `__label__` column.
@@ -202,10 +202,10 @@ ingestion so episode yamls and reports agree.
 
 ---
 
-## report_builder.py — ReportBuilder
+## report_builder.py - ReportBuilder
 
 Produces a self-contained `report.html` via the Jinja2 template, plus `plots/<id>.png` static
-exports at 300 DPI. Structure: header → (declarative) summary table → overview section →
+exports at 300 DPI. Structure: header -> (declarative) summary table -> overview section ->
 grouped plot sections. `--generate-gifs` also saves animated trajectory GIFs.
 
 Units for axis labels come from `MetricRegistry.get_all_units()` merged with the manifest's
@@ -218,6 +218,6 @@ Units for axis labels come from `MetricRegistry.get_all_units()` merged with the
 1. Create `plot_types/<mytype>.py`, subclass `BasePlotRenderer`, set `PLOT_TYPE`.
 2. Implement `render_plotly(df)` and `render_seaborn(df, out_path)`.
 3. Register the class in `plot_types/__init__.py` **and** in both dispatchers
-   (`plotly_renderer.py`, `seaborn_renderer.py`) — dispatch is by explicit registry, not auto-discovery.
+   (`plotly_renderer.py`, `seaborn_renderer.py`) - dispatch is by explicit registry, not auto-discovery.
 4. All renderers must tolerate empty/missing-column frames (the adversarial test suite iterates
    every registered type).

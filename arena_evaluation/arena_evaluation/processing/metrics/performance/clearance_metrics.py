@@ -10,25 +10,21 @@ if typing.TYPE_CHECKING:
 
 
 class ClearanceMetricsCalculator(BaseMetricCalculator):
-    """
-    Clearance metrics: minimum distance to obstacles and pedestrians.
+    """Minimum distance to obstacles and pedestrians.
 
-    - Obstacle clearance from the NATIVE scan topic (full multi-rate
-      standard): scan_min minus the robot radius. Frames where nothing is
-      within the sensor's range (scan_min >= range_max) are treated as NO
-      DETECTION, not as far-away obstacles (range sentinel fix, 2026-08-12).
-    - Pedestrian clearance is the effective edge-to-edge distance
-      d_eff = min_dist - (r_robot + r_ped) (Arena Evaluation 3.0 zone
-      standard).
+    - Obstacle clearance is the native scan_min minus the robot radius.
+      Frames reading at or beyond the sensor max range are no detection,
+      not a far-away obstacle.
+    - Pedestrian clearance is edge-to-edge: min_dist - (r_robot + r_ped).
     - clearance_timeseries is the per-frame combined minimum on the odom
-      frame axis (native scan/peds sampled by backward-asof, 100 ms).
+      axis, with native scan and peds sampled by backward-asof (100 ms).
     """
 
     NAME = "clearance_metrics"
     CATEGORY = "performance"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = [("scan", "peds")]  # At least one of scan or peds required
+    REQUIRED_TOPICS = [("scan", "peds")]  # at least one of the two
 
     UNITS = {
         "min_obstacle_clearance": "m",
@@ -84,7 +80,6 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
         odom_times_ns = episode.data["time_ns"].to_numpy()
         tol = 100_000_000
 
-        # ── Native scan sampled onto the odom axis ──
         scan_min_arr = None
         scan_max_arr = None
         if has_scan:
@@ -106,7 +101,6 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
                 else None
             )
 
-        # ── Native peds sampled onto the odom axis ──
         peds_positions_list = None
         num_peds_col = None
         if has_peds:
@@ -133,7 +127,6 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
         combined_clearances: list[float | None] = []
 
         for i in range(N):
-            # ── Obstacle clearance (native scan; sentinel-aware) ──
             obs_clear = None
             if scan_min_arr is not None and i < len(scan_min_arr):
                 sm = scan_min_arr[i]
@@ -148,12 +141,11 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
                         if scan_max_arr is not None and i < len(scan_max_arr)
                         else None
                     )
-                    # No detection: scan reads at/beyond the sensor max range
+                    # At or beyond max range means nothing was detected
                     if r_max is None or np.isnan(r_max) or sm < float(r_max) - 1e-6:
                         obs_clear = max(0.0, float(sm) - robot_radius)
             obstacle_clearances.append(obs_clear)
 
-            # ── Pedestrian clearance (edge-to-edge) ──
             ped_clear = None
             if peds_positions_list is not None and i < len(peds_positions_list):
                 peds_raw = peds_positions_list[i]
@@ -170,7 +162,6 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
                     ped_clear = max(0.0, min_dist - robot_radius - self._PED_RADIUS)
             ped_clearances.append(ped_clear)
 
-            # ── Combined ──
             if obs_clear is not None and ped_clear is not None:
                 combined_clearances.append(float(min(obs_clear, ped_clear)))
             elif obs_clear is not None:
@@ -190,32 +181,3 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
             "mean_pedestrian_clearance": float(np.mean(valid_ped)) if valid_ped else None,
             "clearance_timeseries": combined_clearances,
         }
-
-    @staticmethod
-    def _parse_peds(peds_raw, num_peds_hint=None):
-        """Parse flat ped position list into (N, 2) or (N, 3) array."""
-        if not peds_raw or len(peds_raw) == 0:
-            return np.empty((0, 2))
-        if isinstance(peds_raw, str):
-            import ast
-            try:
-                peds_raw = ast.literal_eval(peds_raw)
-            except Exception:
-                return np.empty((0, 2))
-        arr = np.array(peds_raw, dtype=np.float64)
-        if arr.size == 0:
-            return np.empty((0, 2))
-        if arr.ndim == 1:
-            if num_peds_hint and num_peds_hint > 0:
-                if num_peds_hint * 3 == len(arr):
-                    arr = arr.reshape(-1, 3)
-                elif num_peds_hint * 2 == len(arr):
-                    arr = arr.reshape(-1, 2)
-            else:
-                if len(arr) % 3 == 0:
-                    arr = arr.reshape(-1, 3)
-                elif len(arr) % 2 == 0:
-                    arr = arr.reshape(-1, 2)
-        if arr.ndim != 2 or arr.shape[1] < 2:
-            return np.empty((0, 2))
-        return arr

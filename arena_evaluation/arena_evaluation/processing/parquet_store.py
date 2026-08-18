@@ -9,7 +9,9 @@ from ..storage.exceptions import SchemaViolationError
 
 
 class ParquetStore:
-    """Reads and writes metric DataFrames to Parquet format, embedding metadata in the footer."""
+    """
+    Reads and writes metric DataFrames to Parquet format, embedding metadata in the footer.
+    """
     METADATA_KEY = "arena_evaluation_metadata"
     
     @staticmethod
@@ -19,6 +21,7 @@ class ParquetStore:
         """
         dest.parent.mkdir(parents=True, exist_ok=True)
         
+        # We need PyArrow to embed custom metadata
         table = df.to_arrow()
         
         if metadata is not None:
@@ -26,7 +29,7 @@ class ParquetStore:
             meta_dict[ParquetStore.METADATA_KEY.encode()] = json.dumps(
                 metadata.model_dump(exclude_none=True)
             ).encode()
-            
+
             table = table.replace_schema_metadata(meta_dict)
             
         import pyarrow.parquet as pq
@@ -34,7 +37,10 @@ class ParquetStore:
 
     @staticmethod
     def read(source: pathlib.Path) -> tuple[pl.DataFrame, dict | None]:
-        """Read a Parquet file and extract its embedded metadata if any."""
+        """
+        Read a Parquet file and extract its embedded metadata if any.
+        Returns (DataFrame, metadata_dict).
+        """
         if not source.exists():
             raise FileNotFoundError(f"Parquet file not found: {source}")
             
@@ -52,7 +58,9 @@ class ParquetStore:
 
     @staticmethod
     def combine(sources: list[pathlib.Path], dest: pathlib.Path) -> None:
-        """Combine multiple metrics.parquet files into a single combined_metrics.parquet."""
+        """
+        Combine multiple metrics.parquet files into a single combined_metrics.parquet.
+        """
         if not sources:
             return
             
@@ -77,10 +85,14 @@ class ParquetStore:
 
 
 class TopicParquetStore:
-    """Reads and writes a TopicBundle to individual Parquet files per topic."""
+    """
+    Reads and writes a TopicBundle to individual Parquet files per topic.
+    """
     @staticmethod
     def write(bundles: dict[str, TopicBundle], dest_dir: pathlib.Path, overwrite: bool = False) -> None:
-        """Write non-None DataFrames/LazyFrames in a dict of TopicBundles to Parquet files using zstd compression."""
+        """
+        Write non-None DataFrames/LazyFrames in a dict of TopicBundles to Parquet files using zstd compression.
+        """
         dest_dir.mkdir(parents=True, exist_ok=True)
         import dataclasses
         
@@ -116,7 +128,10 @@ class TopicParquetStore:
 
     @staticmethod
     def read(source_dir: pathlib.Path) -> dict[str, TopicBundle] | None:
-        """Read Parquet files from source_dir to reconstruct a dict of TopicBundles."""
+        """
+        Read Parquet files from source_dir to reconstruct a dict of TopicBundles.
+        Returns None if no parquet files exist.
+        """
         if not source_dir.exists() or not source_dir.is_dir():
             return None
             
@@ -147,8 +162,7 @@ class TopicParquetStore:
                 
         # Load robot specific topics
         robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
-        
-        # Load robot specific topics
+
         robot_dirs = [d for d in source_dir.iterdir() if d.is_dir()]
             
         for robot_dir in robot_dirs:

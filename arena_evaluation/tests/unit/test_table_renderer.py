@@ -69,7 +69,7 @@ def test_notes_render_as_standalone_callout_not_table_rows():
     assert html is not None
     assert "notes-callout" in html  # standalone callout section
     assert "Analysis Notes" in html
-    # The note must NOT be a row of the data table — it appears inside the
+    # The note is not a row of the data table, it appears inside the
     # callout section, AFTER the data table (which comes first in the html).
     assert "DWB wins" in html
     assert html.index("DWB wins") > html.index("Analysis Notes")
@@ -116,5 +116,5 @@ def test_load_notes_text_lines():
 
 def test_empty_df_no_crash():
     assert TableRenderer(_spec()).render_plotly(pl.DataFrame()) is None
-    # No group_by/columns → no data rows, no notes → None.
+    # No group_by/columns -> no data rows, no notes -> None.
     assert TableRenderer(_spec()).render_plotly(_df()) is None

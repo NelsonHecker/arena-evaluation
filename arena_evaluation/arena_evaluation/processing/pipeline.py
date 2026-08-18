@@ -37,11 +37,9 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
 def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
     """Filter null poses and slice to the longest consistent odom segment.
 
-    Mirrors ``BaseMetricCalculator.resolve_robot_pose`` but runs exactly once
-    per episode, BEFORE the registry executes, so every calculator sees the
-    identical frame (H1 fix: previously each calculator re-sliced in place,
-    which could leave timeseries from different calculators on different
-    frame ranges). Uses GT columns when present.
+    Mirrors ``BaseMetricCalculator.resolve_robot_pose`` but runs once per
+    episode, before the registry executes, so every calculator sees the same
+    frame range. Uses GT columns when present.
     """
     import polars as pl
     import numpy as np
@@ -115,9 +113,8 @@ def _collect_native_topics(bundle) -> dict:
 def _mean_warped_ped_error(actual_paths, ref_paths) -> float | None:
     """Mean per-ped warped displacement error (m) via DTW.
 
-    Reference-based PFI: warped distance between each pedestrian's actual
-    trajectory and the unhindered_peds reference trajectory, averaged over
-    matched pedestrians.
+    Warped distance between each pedestrian's actual trajectory and its
+    unhindered_peds reference, averaged over matched pedestrians.
     """
     import numpy as np
 
@@ -158,7 +155,7 @@ class ProcessingPipeline:
         # -1 (or None) = auto-detect the CPU count; any value < 1 falls back to it.
         self.workers = (os.cpu_count() or 1) if (workers is None or workers < 1) else workers
 
-    # ── New flat-episode API ───────────────────────────────────────────────────
+    # New flat-episode API
 
     def extract_episode(self, ep: EpisodeDescriptor, force_extract: bool = False) -> dict[str, TopicBundle] | None:
         """Extract topics from a single episode MCAP into episode_dir/topics/."""
@@ -178,7 +175,7 @@ class ProcessingPipeline:
 
         _ctx = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx:
-            print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) → {topics_dir}...")
+            print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) -> {topics_dir}...")
             if topics_dir.exists():
                 import shutil
                 shutil.rmtree(topics_dir)
@@ -203,7 +200,6 @@ class ProcessingPipeline:
             except Exception as e:
                 print(f"  [warn] Could not read metadata for episode_{ep.episode_id:03d}: {e}")
 
-        # Extract topics
         bundles = self.extract_episode(ep, force_extract=force_extract)
         if bundles is None or len(bundles) == 0:
             return None
@@ -246,18 +242,15 @@ class ProcessingPipeline:
                     print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid data found in MCAP after alignment")
                     continue
 
-                # One-time pose resolution: filter nulls + slice to the
-                # longest consistent odom segment ONCE (H1 fix) so all
-                # calculators share the identical frame.
+                # Resolve the pose frame once so all calculators share it
                 aligned_df = _resolve_odom_frame(aligned_df)
                 if aligned_df is None or len(aligned_df) < 5:
                     print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid pose data after resolution")
                     continue
 
-                # Native-rate topic frames (full multi-rate standard): raw
-                # per-topic parquets keep their own timestamps; rate-sensitive
-                # metrics compute on the native time base. Bounded to the
-                # episode's odom time range (+100 ms so asof joins match).
+                # Raw per-topic frames keep their own timestamps so
+                # rate-sensitive metrics can use the native time base.
+                # Bounded to the odom range +100 ms so asof joins match.
                 topics = _collect_native_topics(bundle)
                 if len(aligned_df) > 0:
                     t0 = int(aligned_df["time_ns"][0])
@@ -427,7 +420,6 @@ class ProcessingPipeline:
             print("No valid results were generated.")
             return
 
-        # ── Post-processing: ped_path_deflection_m ──────────────────
         ref_episodes_by_stage: dict[str, list[dict]] = {}
         for row in all_metrics:
             if row.get("is_reference") and row.get("reference_type") == "unhindered_peds":
@@ -456,12 +448,10 @@ class ProcessingPipeline:
                             except Exception:
                                 pass
 
-        # ── Post-processing: reference-based MAR / PFI (2026-08-12) ──────
-        # PFI (Pedestrian Frustration Integral) = mean per-ped warped
-        # displacement error between the actual trajectories and the
+        # PFI: mean per-ped warped displacement error vs the
         # unhindered_peds reference (DTW, meters).
-        # MAR (Mutual Accommodation Ratio) = that ped deviation divided by
-        # the robot's detour vs the unobstructed_robot reference path length.
+        # MAR: that deviation over the robot's detour vs the
+        # unobstructed_robot reference path length.
         ref_ped_by_stage: dict[str, list[dict]] = {}
         ref_robot_by_stage: dict[str, list[dict]] = {}
         for row in all_metrics:
@@ -499,4 +489,4 @@ class ProcessingPipeline:
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
         df = pl.DataFrame(all_metrics)
         ParquetStore.write(df, combined_path)
-        print(f"Done. {len(all_metrics)} episode rows → {combined_path}")
+        print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")

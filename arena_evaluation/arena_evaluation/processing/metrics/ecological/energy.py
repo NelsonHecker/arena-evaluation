@@ -26,7 +26,8 @@ class EnergyMetricCalculator(BaseMetricCalculator):
 
     PRIMARY_OUTPUTS = ["energy_total_wh", "energy_mechanical_wh"]
 
-    def output_keys(self) -> list[str]:
+    @classmethod
+    def output_keys(cls) -> list[str]:
         return [
             # Scalars (aggregates for the episode)
             "energy_static_wh",

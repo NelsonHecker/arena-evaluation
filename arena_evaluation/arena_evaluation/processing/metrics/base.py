@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import ast
 import typing
 import numpy as np
+
+import numpy as np
+import polars as pl
 
 if typing.TYPE_CHECKING:
     from ...storage.schemas import AlignedEpisodeBundle, RobotParams
@@ -26,9 +30,6 @@ class BaseMetricCalculator(ABC):
 
     def resolve_robot_pose(self, episode: "AlignedEpisodeBundle") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame."""
-        import numpy as np
-        import polars as pl
-        
         if episode.data is not None and len(episode.data) > 0:
             use_gt = "pos_x_gt" in episode.data.columns
             if use_gt:
@@ -133,14 +134,9 @@ class BaseMetricCalculator(ABC):
             
         return pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans
 
-    # ------------------------------------------------------------------
-    # Native-rate helpers (full multi-rate standard, 2026-08-12)
-    # ------------------------------------------------------------------
-
     def native_topics(self, episode: "AlignedEpisodeBundle") -> dict:
         """Raw native-rate topic frames keyed by topic name; {} when absent."""
-        topics = getattr(episode, "topics", None)
-        return topics if isinstance(topics, dict) else {}
+        return episode.topics if isinstance(episode.topics, dict) else {}
 
     def resolve_native_pose(
         self, episode: "AlignedEpisodeBundle"
@@ -148,14 +144,11 @@ class BaseMetricCalculator(ABC):
         """Ground-truth-first robot pose on the native odom time axis.
 
         Returns (pos_x, pos_y, yaw, time_ns) float64 arrays.
-        - tf_gt (world frame, offset-corrected at extraction) is used when
-          recorded — it is the trusted pose source.
-        - Fallback: raw odom transformed from the robot-local odom origin to
-          the world frame via the episode start pose (same transform as
-          ``resolve_robot_pose``).
+        tf_gt is the trusted source when recorded (world frame,
+        offset-corrected at extraction). Otherwise raw odom is transformed
+        from the robot-local origin via the episode start pose, the same
+        transform ``resolve_robot_pose`` applies.
         """
-        import polars as pl
-
         topics = self.native_topics(episode)
         odom = topics.get("odom")
         tf_gt = topics.get("tf_gt")
@@ -182,8 +175,6 @@ class BaseMetricCalculator(ABC):
         oyaw = o_df["yaw"].to_numpy().astype(np.float64)
         time_ns = o_df["time_ns"].to_numpy().astype(np.int64)
 
-        # Transform odom frame (robot-local origin) to the world frame using
-        # the episode start pose, mirroring resolve_robot_pose.
         if episode.start_pos and len(episode.start_pos) >= 2:
             start_x, start_y = float(episode.start_pos[0]), float(episode.start_pos[1])
             start_yaw = float(episode.start_pos[2]) if len(episode.start_pos) >= 3 else 0.0
@@ -216,13 +207,11 @@ class BaseMetricCalculator(ABC):
         time_ns: np.ndarray,
         tolerance_ns: int = 100_000_000,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Backward-asof sample pose arrays onto ``times_ns`` (native-rate join).
+        """Backward-asof sample pose arrays onto ``times_ns``.
 
         Returns (pos_x, pos_y, yaw) at the query times; 0/0/0 for query times
         with no pose within tolerance.
         """
-        import polars as pl
-
         if len(time_ns) == 0:
             return np.zeros(len(times_ns)), np.zeros(len(times_ns)), np.zeros(len(times_ns))
         q = pl.DataFrame({"time_ns": times_ns}).lazy()
@@ -263,8 +252,6 @@ class BaseMetricCalculator(ABC):
 
         Returns NaN where no value within tolerance (caller decides fill).
         """
-        import polars as pl
-
         if len(values_time_ns) == 0 or len(query_times_ns) == 0:
             return np.full(len(query_times_ns), np.nan)
         q = pl.DataFrame({"time_ns": query_times_ns}).lazy()
@@ -289,8 +276,6 @@ class BaseMetricCalculator(ABC):
         if n < 2:
             return speed
         dt = np.diff(time_ns) / 1e9
-        with np.errstate(divide="ignore", invalid="ignore"):
-            speed[1:] = np.sqrt(np.diff(pos_x) ** 2 + np.diff(pos_y) ** 2) / dt
         dt_safe = np.where(dt <= 0.0, 1e-6, dt)
         speed[1:] = np.sqrt(np.diff(pos_x) ** 2 + np.diff(pos_y) ** 2) / dt_safe
         return np.nan_to_num(speed, nan=0.0)
@@ -310,6 +295,37 @@ class BaseMetricCalculator(ABC):
         vx[1:] = np.diff(pos_x) / dt_safe
         vy[1:] = np.diff(pos_y) / dt_safe
         return np.nan_to_num(vx, nan=0.0), np.nan_to_num(vy, nan=0.0)
+
+    @staticmethod
+    def _parse_peds(peds_raw, num_peds_hint=None) -> np.ndarray:
+        """Flat ped position list to an (N, 2) or (N, 3) array, empty when unparseable.
+
+        The pedestrian count disambiguates a flat list; without it a length
+        divisible by three is read as (x, y, theta) triples.
+        """
+        if peds_raw is None or len(peds_raw) == 0:
+            return np.empty((0, 2))
+        if isinstance(peds_raw, str):
+            try:
+                peds_raw = ast.literal_eval(peds_raw)
+            except (ValueError, SyntaxError):
+                return np.empty((0, 2))
+        arr = np.array(peds_raw, dtype=np.float64)
+        if arr.size == 0:
+            return np.empty((0, 2))
+        if arr.ndim == 1:
+            if num_peds_hint and num_peds_hint > 0:
+                if num_peds_hint * 3 == len(arr):
+                    arr = arr.reshape(-1, 3)
+                elif num_peds_hint * 2 == len(arr):
+                    arr = arr.reshape(-1, 2)
+            elif len(arr) % 3 == 0:
+                arr = arr.reshape(-1, 3)
+            elif len(arr) % 2 == 0:
+                arr = arr.reshape(-1, 2)
+        if arr.ndim != 2 or arr.shape[1] < 2:
+            return np.empty((0, 2))
+        return arr
 
     @classmethod
     @abstractmethod

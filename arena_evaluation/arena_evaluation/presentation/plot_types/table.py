@@ -2,19 +2,17 @@
 
 Renders up to three independent pieces inside the plot block:
 
-1. **Data-derived table** — ``options.columns`` aggregates the metrics frame
+1. **Data-derived table** - ``options.columns`` aggregates the metrics frame
    per ``group_by`` (mean of each column, formatted).
 
-2. **Agent-authored rows** — ``options.rows`` is a list of ``{label, value}``
-   entries rendered as a clean two-column table. The agent decides exactly
-   what appears — no predefined layout/category filling.
+2. **Agent-authored rows** - ``options.rows`` is a list of ``{label, value}``
+   entries rendered as a two-column table, exactly as given.
 
-3. **Agent-written notes** — ``options.notes`` pulls in free-form rows written
+3. **Agent-written notes** - ``options.notes`` pulls in free-form rows written
    by an agent (e.g. through MCP tools) into ``notes.yaml`` in the benchmark
    dir, or inline YAML / ``"key: value"`` text lines. Notes render in a
-   **standalone callout section** below the tables — they are NEVER appended
-   into the metric table rows (different column counts used to destroy the
-   layout).
+   standalone callout below the tables, never appended into the metric table
+   rows (the column counts differ).
 
 Example manifest spec:
 
@@ -29,7 +27,7 @@ Example manifest spec:
     columns:
       - {metric: success, label: Success, format: "{:.0%}"}
       - {metric: time_to_goal, label: Avg Time, format: "{:.1f}"}
-    notes: notes.yaml          # → standalone callout section
+    notes: notes.yaml          # -> standalone callout section
 
 - id: agent_table
   type: table

@@ -10,6 +10,11 @@ from arena_evaluation.presentation.report_builder import ReportBuilder
 from arena_evaluation.storage.data_root import latest_benchmark
 from arena_evaluation.storage.folder_manager import FolderManager
 
+_PATH_ARG_SUBDIRS: dict[str, tuple[str, ...]] = {
+    "run_dir": ("recordings", "recording"),
+    "benchmark_dir": ("benchmarks", "benchmark"),
+}
+
 
 def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
     search_roots = []
@@ -51,23 +56,14 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
                 if candidate.is_dir():
                     return candidate.resolve()
         return p
-    if getattr(args, "run_dir", None) is not None:
-        if isinstance(args.run_dir, list):
-            args.run_dir = [
-                _resolve_single_path(p, ("recordings", "recording"))
-                for p in args.run_dir
-            ]
+    for dest, value in list(vars(args).items()):
+        subdirs = _PATH_ARG_SUBDIRS.get(dest)
+        if subdirs is None or value is None:
+            continue
+        if isinstance(value, list):
+            setattr(args, dest, [_resolve_single_path(p, subdirs) for p in value])
         else:
-            args.run_dir = _resolve_single_path(args.run_dir, ("recordings", "recording"))
-
-    if getattr(args, "benchmark_dir", None) is not None:
-        if isinstance(args.benchmark_dir, list):
-            args.benchmark_dir = [
-                _resolve_single_path(p, ("benchmarks", "benchmark"))
-                for p in args.benchmark_dir
-            ]
-        else:
-            args.benchmark_dir = _resolve_single_path(args.benchmark_dir, ("benchmarks", "benchmark"))
+            setattr(args, dest, _resolve_single_path(value, subdirs))
 
     return args
 
@@ -95,6 +91,7 @@ Examples:
 """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.set_defaults(run_dir=None, list_manifests=False)
 
     run_parent = argparse.ArgumentParser(add_help=False)
     run_group = run_parent.add_mutually_exclusive_group(required=False)
@@ -147,6 +144,7 @@ Examples:
         action="store_true",
         help="List the available named report manifests and exit.",
     )
+    run_parent.set_defaults(force_extract=False)
 
     subparsers.add_parser(
         "extract",
@@ -156,7 +154,7 @@ Examples:
     subparsers.add_parser(
         "run",
         parents=[run_parent],
-        help="Full pipeline: Extract MCAP (overwrite) → Process → Parquet → HTML report.",
+        help="Full pipeline: Extract MCAP (overwrite) -> Process -> Parquet -> HTML report.",
     )
     process_parser = subparsers.add_parser(
         "process",
@@ -184,7 +182,7 @@ Examples:
 
     args = parser.parse_args()
 
-    if getattr(args, "list_manifests", False):
+    if args.list_manifests:
         from arena_evaluation.presentation.manifest_registry import available_manifests
 
         print("Available report manifests:")
@@ -209,28 +207,28 @@ Examples:
             print(f"Error: directory does not exist: {d}")
             sys.exit(1)
 
-    # ── acoustic subcommand handler ────────────────────────────────────────
+    # acoustic subcommand handler
     if args.command == "acoustic":
         from arena_evaluation.cli_acoustic import _handle_acoustic
         _handle_acoustic(args)
         return 0
 
     profiler = None
-    if getattr(args, "profile", False):
+    if args.profile:
         from arena_evaluation.benchmark.profiler import PipelineProfiler as _PP
 
-        output_dir = getattr(args, "output_dir", None) or target_dirs[0]
+        output_dir = args.output_dir or target_dirs[0]
         profiler = _PP(output_dir=output_dir, sample_hz=2.0)
 
     if args.command in ("extract", "run", "process"):
-        force_extract = getattr(args, "force_extract", False)
+        force_extract = args.force_extract
         if args.command == "run":
             force_extract = True 
 
-        if getattr(args, "run_dir", None):
+        if args.run_dir:
             for run_dir in args.run_dir:
                 fm = FolderManager(data_root=run_dir.parent)
-                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=getattr(args, "workers", None))
+                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=args.workers)
                 
                 if args.command == "extract":
                     print(f"Extracting single run: {run_dir}")
@@ -241,12 +239,12 @@ Examples:
                     if out:
                         print(f"Metrics written to: {out}")
                     else:
-                        print(f"Processing failed for {run_dir} — see errors above.")
+                        print(f"Processing failed for {run_dir} - see errors above.")
 
         else:
             for benchmark_dir in args.benchmark_dir:
                 fm = FolderManager(data_root=benchmark_dir.parent)
-                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=getattr(args, "workers", None))
+                pipeline = ProcessingPipeline(fm, profiler=profiler, workers=args.workers)
                 
                 if args.command == "extract":
                     print(f"Extracting benchmark: {benchmark_dir.name}")
@@ -256,16 +254,16 @@ Examples:
                     pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
 
     if args.command in ("run", "report", "plot"):
-        output_dir = getattr(args, "output_dir", None)
+        output_dir = args.output_dir
         if not output_dir:
             output_dir = target_dirs[0]
 
         from arena_evaluation.presentation.manifest_registry import resolve_manifest
 
-        manifest_obj = resolve_manifest(getattr(args, "report_manifest", None), benchmark_dir=target_dirs[0])
+        manifest_obj = resolve_manifest(args.report_manifest, benchmark_dir=target_dirs[0])
 
         print(f"Building report/plots from {len(target_dirs)} sources into: {output_dir}")
-        generate_gifs = getattr(args, "generate_gifs", False)
+        generate_gifs = args.generate_gifs
         _ctx = profiler.phase("report") if profiler else contextlib.nullcontext()
         with _ctx:
             builder = ReportBuilder.from_dirs(

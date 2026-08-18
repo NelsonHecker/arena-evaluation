@@ -1,4 +1,4 @@
-# benchmark — Benchmark Runner
+# benchmark
 
 Orchestrates multi-planner benchmark campaigns: spawns simulator environments, drives episodes, records results, and manages run state for pause/resume.
 
@@ -6,13 +6,13 @@ Orchestrates multi-planner benchmark campaigns: spawns simulator environments, d
 
 | File | Purpose |
 |---|---|
-| `runner.py` | `BenchmarkRunner` — spawns envs, drives episodes via `RunEpisode` action, writes `progress.csv` and `.benchmark_state.json` |
-| `config.py` | `Suite` and `Contest` parsers — YAML schema, sweep expansion, inline contest resolution |
-| `state.py` | `Manifest`, `RunDir`, `StateFile` — run manifest, config hash, resume discovery, git SHA capture |
-| `step.py` | `Step` / `StepResult` / `StepErrorKind` — grid model for contestant × stage combinations |
-| `debug.py` | Process introspection — `running_processes()`, `tail_console()`, `console_log_path()` |
-| `profiler.py` | `PipelineProfiler` — per-phase CPU/GPU/RAM/duration metrics (NVML-accelerated) |
-| `cli.py` | `evaluation_cli` entry point — `list`, `status`, `tail`, `ps`, `console` subcommands |
+| `runner.py` | `BenchmarkRunner`: spawns envs, drives episodes via `RunEpisode` action, writes `progress.csv` and `.benchmark_state.json` |
+| `config.py` | `Suite` and `Contest` parsers: YAML schema, sweep expansion, inline contest resolution |
+| `state.py` | `Manifest`, `RunDir`, `StateFile`: run manifest, config hash, resume discovery, git SHA capture |
+| `step.py` | `Step` / `StepResult` / `StepErrorKind`: grid model for contestant x stage combinations |
+| `debug.py` | Process introspection: `running_processes()`, `tail_console()`, `console_log_path()` |
+| `profiler.py` | `PipelineProfiler`: per-phase CPU/GPU/RAM/duration metrics (NVML-accelerated) |
+| `cli.py` | `evaluation_cli` entry point: `list`, `status`, `tail`, `ps`, `console` subcommands |
 
 ## CLI (evaluation_cli)
 
@@ -26,7 +26,7 @@ evaluation_cli console [<run_id>]            # Tail runner.log (--follow for str
 
 ## How It Works
 
-The runner takes a suite (ordered stages) and a contest (planner lineup). It generates a step grid as the cartesian product of contestants × stages, groups consecutive steps by `(contestant, robot, simulator)`, and spawns one env per group.
+The runner takes a suite (ordered stages) and a contest (planner lineup). It generates a step grid as the cartesian product of contestants x stages, groups consecutive steps by `(contestant, robot, simulator)`, and spawns one env per group.
 
 For each group:
 1. Calls `/arena/spawn_env` with launch args derived from the first step
@@ -37,17 +37,17 @@ For each group:
 Run output lands in `$ARENA_DATA_DIR/benchmarks/<run_id>/`:
 ```
 <run_id>/
-├── manifest.yaml              # Config snapshot (never overwritten)
-├── progress.csv               # Append-only, one row per episode
-├── runner.log                 # Python logging + launch output
-├── .benchmark_state.json      # Per-step status (atomic write)
-├── episodes/                  # One MCAP per episode
-│   ├── episode_000/
-│   │   ├── episode_000.mcap
-│   │   └── episode_000.yaml
-│   └── ...
-├── combined_metrics.parquet   # After processing
-└── report_manifest.yaml       # Note: which manifest was used
+|-- manifest.yaml              # config snapshot (never overwritten)
+|-- progress.csv               # append-only, one row per episode
+|-- runner.log                 # python logging + launch output
+|-- .benchmark_state.json      # per-step status (atomic write)
+|-- episodes/                  # one MCAP per episode
+|   |-- episode_000/
+|   |   |-- episode_000.mcap
+|   |   `-- episode_000.yaml
+|   `-- ...
+|-- combined_metrics.parquet   # after processing
+`-- report_manifest.yaml       # note: which manifest was used
 ```
 
 ## Programmatic Use

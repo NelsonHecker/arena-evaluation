@@ -1,4 +1,19 @@
-"""Declarative report-manifest resolution, mirroring the suite/contest pattern."""
+"""Declarative report-manifest resolution, mirroring the suite/contest pattern.
+
+Named manifests live in ``configs/benchmark/manifests/<name>.yaml`` (packaged
+with the ``configs`` data files) and are selected via
+``arena evaluation run/report --report-manifest <name|path|{inline}>``.
+
+Resolution precedence:
+1. Inline YAML (reference starts with ``{`` or ``[``).
+2. Explicit path to an existing YAML file.
+3. Name -> ``share/configs/benchmark/manifests/<name>.yaml`` (source tree as
+   fallback so unit tests run without ROS).
+4. Legacy ``benchmark_dir/viz_manifest.yaml`` (only when no reference given).
+5. The ``report_manifest.yaml`` note file in the benchmark dir (only when no
+   reference given and no legacy file).
+6. Default ``standard``.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +46,11 @@ def share_dir() -> pathlib.Path | None:
 
 
 def source_tree_dir() -> pathlib.Path | None:
-    """The package root in the source checkout."""
+    """The package root in the source checkout (for tests / no-ROS runs).
+
+    Walks up to find ``configs/benchmark/manifests``, so it works from the
+    source tree, the colcon build dir, or a symlinked install.
+    """
     here = pathlib.Path(__file__).resolve()
     for parent in here.parents:
         cand = parent / "configs" / "benchmark" / "manifests"
@@ -41,7 +60,7 @@ def source_tree_dir() -> pathlib.Path | None:
 
 
 def find_manifest_file(stem: str) -> pathlib.Path | None:
-    """Resolve a manifest name to its YAML file (share dir → source tree)."""
+    """Resolve a manifest name to its YAML file (share dir -> source tree)."""
     for base in (share_dir(), source_tree_dir()):
         if base is None:
             continue
@@ -97,7 +116,12 @@ def resolve_manifest(
     *,
     _allow_note: bool = True,
 ) -> VizManifest:
-    """Resolve a manifest reference to a :class:`VizManifest`."""
+    """Resolve a manifest reference to a :class:`VizManifest`.
+
+    ``ref`` may be a name, a YAML file path, or inline ``{...}``/``[...]`` YAML.
+    ``None`` walks the legacy chain: benchmark-dir ``viz_manifest.yaml`` ->
+    ``report_manifest.yaml`` note -> default ``standard``.
+    """
     if ref is None:
         if benchmark_dir is not None:
             legacy = benchmark_dir / "viz_manifest.yaml"

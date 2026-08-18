@@ -13,6 +13,8 @@ from .plotly_renderer import PlotlyRenderer
 from .seaborn_renderer import SeabornRenderer
 from ..processing.parquet_store import ParquetStore
 
+# Data source name -> parquet filename. Any other data_source string ending in
+# ".parquet" is used verbatim as the filename in the benchmark/output dir.
 _DATA_FILES = {
     "metrics": None,
 }
@@ -41,24 +43,54 @@ def data_file_for(data_source: str | None) -> str | None:
     return None
 
 
-def _default_summary_group_cols(df: "pl.DataFrame") -> list[str]:
-    """Planner-first grouping for summary tables.
+def _has_values(df: "pl.DataFrame", col: str) -> bool:
+    """True when the column exists and holds at least one non-null value."""
+    return col in df.columns and bool(df[col].is_not_null().any())
 
-    Prefers the explicit planner identity columns (local_planner, then
-    planner) so summaries compare PLANNERS by default, not whatever
-    dimension happens to vary (stage-wise grouping was confusing).
+
+def _default_summary_group_cols(df: "pl.DataFrame") -> list[str]:
+    """Planner-led grouping, widened by whatever else actually varies.
+
+    The planner columns lead so a summary reads as a planner comparison; the
+    remaining varying identity columns follow so a single-planner sweep across
+    robots or worlds keeps its breakdown. An empty result means the frame
+    carries no usable identity, and the caller aggregates every run into one
+    row rather than dropping the table.
     """
-    for col in ("local_planner", "planner"):
-        if col in df.columns:
-            return [col]
-    return []
+    from .dimension_detector import detect_varying_dims
+
+    lead = next((c for c in ("local_planner", "planner") if _has_values(df, c)), None)
+    rest = [c for c in detect_varying_dims(df) if c != lead and _has_values(df, c)]
+    return ([lead] if lead else []) + rest
+
+
+def _aggregate(df: "pl.DataFrame", group_cols: list[str], agg_exprs: list) -> "pd.DataFrame":
+    """Grouped aggregate, or a single ``All runs`` row when nothing identifies a run."""
+    if group_cols:
+        return df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
+    out = df.select(agg_exprs).to_pandas()
+    out.insert(0, "runs", "All runs")
+    return out
+
+
+def _labelled(df: "pl.DataFrame", group_cols: list[str]) -> "pl.DataFrame":
+    """Make grouping keys renderable: nulls become an explicit label.
+
+    List columns are left alone; they are exploded before they are grouped on.
+    """
+    scalar = [c for c in group_cols if c in df.columns and df.schema[c] != pl.List]
+    if not scalar:
+        return df
+    return df.with_columns([
+        pl.col(c).cast(pl.Utf8).fill_null("unknown") for c in scalar
+    ])
 
 
 def _render_markdown_light(text: str) -> str:
-    """Minimal safe markdown → HTML for agent notes.
+    """Minimal safe markdown -> HTML for agent notes.
 
     Escapes everything first, then applies: **bold**, *italic*, `code`,
-    [text](url) links, and newline → <br>.
+    [text](url) links, and newline -> <br>.
     """
     import html as _html
     import re as _re
@@ -91,6 +123,7 @@ class ReportBuilder:
         self.generate_gifs = generate_gifs
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
         self._source_frames: dict[str, pl.DataFrame] = {}
+        self._merged_df: pl.DataFrame | None = None
 
     @classmethod
     def from_dirs(
@@ -237,7 +270,7 @@ class ReportBuilder:
         """Execute the report building process."""
         manifest = self._manifest_obj if self._manifest_obj is not None else VizManifest.load(self.manifest_path)
 
-        if hasattr(self, "_merged_df") and self._merged_df is not None:
+        if self._merged_df is not None:
             df = self._merged_df
         else:
             df = self._load_primary_frame(manifest)
@@ -258,6 +291,8 @@ class ReportBuilder:
                     pl.Series("inter_planner", ip_list)
                 ])
 
+        # Separate contestant evaluation runs from reference runs (metrics only;
+        # characterization frames have no is_reference column -> no-op).
         if "is_reference" in df.columns:
             df_contestants = df.filter(pl.col("is_reference").is_null() | (pl.col("is_reference") == False))
             if len(df_contestants) == 0:
@@ -333,8 +368,8 @@ class ReportBuilder:
         """Per-plot agent note, rendered under the plot.
 
         Sources (in priority order):
-        - ``spec.options.note`` — inline markdown-ish string.
-        - ``spec.options.notes_key`` — a key into the benchmark's notes.yaml;
+        - ``spec.options.note`` - inline markdown-ish string.
+        - ``spec.options.notes_key`` - a key into the benchmark's notes.yaml;
           the matching note's value is shown. (Reads the same notes file the
           table plot type consumes, so agents write one notes.yaml.)
         Returns an empty string when neither is set.
@@ -386,16 +421,10 @@ class ReportBuilder:
     def _generate_summary_table(self, df: pl.DataFrame) -> str:
         """Legacy summary table (used when the manifest declares no summary).
 
-        Groups by planner by default (local_planner when present), NOT by
-        whichever dimensions happen to vary (that caused stage-wise grouping).
+        Groups planner-first, then by the other varying identity columns.
         """
         group_cols = _default_summary_group_cols(df)
-        if not group_cols:
-            return ""
-
-        group_cols = [c for c in group_cols if c in df.columns]
-        if not group_cols:
-            group_cols = ["planner"]
+        df = _labelled(df, group_cols)
 
         agg_exprs = []
         if "success" in df.columns and not df["success"].is_null().all():
@@ -410,7 +439,7 @@ class ReportBuilder:
         if not agg_exprs:
             return ""
 
-        summary = df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
+        summary = _aggregate(df, group_cols, agg_exprs)
 
         import pandas as pd
         if "success_rate" in summary.columns:
@@ -435,9 +464,8 @@ class ReportBuilder:
     def _generate_summary_table_manifest(self, df: pl.DataFrame, manifest: VizManifest) -> str:
         """Declarative summary table: one column per SummarySpec.
 
-        Grouping: manifest.summary_group_by wins; when the manifest declares
-        none, group by planner (local_planner/planner) instead of whichever
-        dimensions vary — stage-wise grouping was confusing.
+        Grouping: manifest.summary_group_by wins, otherwise planner-first plus
+        the other varying identity columns.
         """
         group_by = manifest.summary_group_by
         if isinstance(group_by, str):
@@ -447,15 +475,10 @@ class ReportBuilder:
         if not group_cols:
             group_cols = _default_summary_group_cols(df)
 
-        if not group_cols:
-            return ""
-
         list_cols = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns and df.schema[c] == pl.List]
         if list_cols:
-            # Explode only the needed columns (see line renderer note: the
-            # full frame carries other list columns of differing lengths).
-            need = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns]
-            df = df.select(need).explode(list_cols)
+            df = df.explode(list_cols)
+        df = _labelled(df, group_cols)
 
         agg_exprs = []
         for spec in manifest.summary:
@@ -464,7 +487,7 @@ class ReportBuilder:
         if not agg_exprs:
             return ""
 
-        summary = df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
+        summary = _aggregate(df, group_cols, agg_exprs)
 
         import pandas as pd
         spec_by_metric = {s.metric: s for s in manifest.summary}

@@ -325,7 +325,7 @@ def _acoustic_snapshot(df: "pl.DataFrame", args: argparse.Namespace) -> None:
         peds,
         title=f"{episode_id}  frame {frame_idx}  t={time_ns/1e9:.1f}s  {source_dba:.0f} dBA",
         out_path=out_path,
-        downsample=args.downsample if hasattr(args, 'downsample') else 2,
+        downsample=args.downsample,
         vmin=42.0,
         vmax=None,
         pixel_tl=pixel_tl,
@@ -379,5 +379,6 @@ def setup_acoustic_subparsers(subparsers):
     acoustic_snap.add_argument("--episode", type=str, default="worst", metavar="EP",
                                help="Episode ID or keyword (default: worst).")
     acoustic_snap.add_argument("--frame", type=int, default=None, help="Frame index (default: worst-case frame).")
+    acoustic_snap.add_argument("--downsample", type=int, default=2, help="Solver grid downsample (default: 2).")
     acoustic_snap.add_argument("--output", type=pathlib.Path, default=None, metavar="PATH",
                                help="Override output path (default: plots/{episode}_acoustic_snapshot.png).")

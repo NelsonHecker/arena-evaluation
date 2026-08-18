@@ -9,7 +9,7 @@ from ..storage.schemas import PlotSpec
 
 
 class ManifestGroup(BaseModel):
-    """A report section (layout_group → rendered heading)."""
+    """A report section (layout_group -> rendered heading)."""
     id: str
     title: str
 
@@ -22,7 +22,11 @@ class SummarySpec(BaseModel):
 
 
 class VizManifest(BaseModel):
-    """Declarative manifest configuring which plots to generate for a benchmark."""
+    """Declarative manifest of which plots to generate for a benchmark.
+
+    Named YAML files in ``configs/benchmark/manifests/*.yaml``, resolved by
+    :func:`resolve_manifest`.
+    """
     manifest_version: str = "1.0"
     name: str | None = None
     title: str | None = None
@@ -37,7 +41,7 @@ class VizManifest(BaseModel):
 
     @classmethod
     def load(cls, path: pathlib.Path | None) -> "VizManifest":
-        """Load manifest from a YAML file path (missing path → default)."""
+        """Load manifest from a YAML file path (missing path -> default)."""
         if path is None or not pathlib.Path(path).exists():
             return cls.load_default()
 
