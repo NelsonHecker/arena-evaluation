@@ -81,6 +81,34 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
+            name="kill_processes",
+            description="Terminate running arena OS processes (benchmark runner, Gazebo simulation, "
+                        "arena/recorder nodes, world generators). Sends SIGTERM first with automatic "
+                        "escalation to SIGKILL (-9) if the process does not terminate within the timeout. "
+                        "Optionally target specific PIDs, filter by process kind, or pass force=True to "
+                        "send SIGKILL immediately. Use this to clean up wedged, stuck, or orphaned processes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Specific process IDs to terminate. Default: all running arena processes.",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, sends SIGKILL immediately without waiting for graceful SIGTERM.",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["benchmark_runner", "simulation", "arena_node", "world_generator", "arena_cli"],
+                        "description": "Filter by process kind (e.g. 'benchmark_runner' or 'simulation').",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="get_benchmark_console",
             description="Tail the console log of a benchmark run. Reads the benchmark's own "
                         "runner.log inside its run directory (benchmarks/<run_id>/runner.log, "
@@ -771,6 +799,15 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
 
     if name == "list_running_processes":
         return {"processes": bridge.running_processes()}
+
+    if name == "kill_processes":
+        return {
+            "results": bridge.kill_processes(
+                pids=args.get("pids"),
+                force=bool(args.get("force", False)),
+                kind=args.get("kind"),
+            )
+        }
 
     if name == "get_benchmark_console":
         return bridge.tail_console(

@@ -115,13 +115,13 @@ Output directory: `$ARENA_DATA_DIR/benchmarks/<run_id>/`
 `-- report_manifest.yaml       # Used report manifest
 ```
 
-## Inspection Commands
-
+## Inspection & Management Commands
 ```bash
-evaluation_cli list                          # List runs
-evaluation_cli status [run_id] [--watch]     # Show progress
-evaluation_cli tail [run_id]                 # Tail progress.csv
-evaluation_cli ps                            # List running arena processes
-evaluation_cli console [run_id] [--follow]   # Tail runner.log
+arena evaluation list                          # List runs
+arena evaluation status [run_id] [--watch]     # Show progress
+arena evaluation tail [run_id]                 # Tail progress.csv
+arena evaluation ps                            # List running arena processes
+arena evaluation kill [pid...] [-9]            # Terminate running processes (-9 for SIGKILL)
+arena evaluation console [run_id] [--follow]   # Tail runner.log
 ```
 

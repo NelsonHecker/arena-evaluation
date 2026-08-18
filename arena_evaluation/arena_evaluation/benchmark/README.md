@@ -12,16 +12,16 @@ Runs multi-planner benchmark campaigns: spawns simulation environments, drives e
 | `step.py` | `Step`, `StepResult`, `StepErrorKind`: grid model for contestant x stage combinations |
 | `debug.py` | Process introspection: `running_processes()`, `tail_console()`, `console_log_path()` |
 | `profiler.py` | `PipelineProfiler`: CPU, GPU, RAM, duration metrics |
-| `cli.py` | `evaluation_cli` entry point: `list`, `status`, `tail`, `ps`, `console` subcommands |
-
-## CLI (evaluation_cli)
+## CLI (`arena evaluation`)
 
 ```bash
-evaluation_cli list                          # List all benchmark runs
-evaluation_cli status [<run_id>]             # Show run progress (--watch for live)
-evaluation_cli tail [<run_id>]               # tail -F progress.csv
-evaluation_cli ps                            # List running arena OS processes
-evaluation_cli console [<run_id>]            # Tail runner.log (--follow for streaming)
+arena evaluation list                          # List all benchmark runs
+arena evaluation status [<run_id>]             # Show run progress (--watch for live)
+arena evaluation tail [<run_id>]               # tail -F progress.csv
+arena evaluation ps                            # List running arena OS processes
+arena evaluation kill [<pid>...] [-9]          # Terminate running arena/sim processes (-9 for SIGKILL)
+arena evaluation console [<run_id>]            # Tail runner.log (--follow for streaming)
+arena evaluation benchmark                     # Launch a benchmark campaign
 ```
 
 ## Execution Flow

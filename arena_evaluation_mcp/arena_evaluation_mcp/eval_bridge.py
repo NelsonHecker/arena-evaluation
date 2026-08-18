@@ -789,6 +789,17 @@ class EvalBridge:
 
         return running_processes()
 
+    def kill_processes(
+        self,
+        pids: list[int] | None = None,
+        force: bool = False,
+        kind: str | None = None,
+    ) -> list[dict]:
+        """Terminate running arena processes with optional SIGKILL escalation."""
+        from arena_evaluation.benchmark.debug import kill_processes
+
+        return kill_processes(pids=pids, force=force, kind=kind)
+
     def tail_console(self, run_id: str | None = None, lines: int = 200) -> dict:
         """Tail the console log of a benchmark run.
 
