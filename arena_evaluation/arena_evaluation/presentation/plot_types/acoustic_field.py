@@ -9,7 +9,7 @@ from PIL import Image
 from .base import BasePlotRenderer
 from ...processing.map_registry import MapRegistry
 from ...processing.acoustics.impedance_grid import downsample_occupancy
-from ...processing.acoustics.door_map import door_segments, build_pixel_tl
+from ...processing.acoustics.door_map import door_segments, build_pixel_tl, _entity_matches_door
 
 try:
     from ...processing.acoustics.impedance_grid import compute_attenuations
@@ -83,35 +83,45 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
     def _render_cell_png(self, grid, resolution, ox, oy,
                          rx_m, ry_m, source_dba, peds, title, out_path,
-                         downsample=1, vmin=None, vmax=None, pixel_tl=None, doors=None):
+                         downsample=1, vmin=None, vmax=None, open_doors=None, doors=None):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        result = self._compute_full_field(grid, resolution, ox, oy,
-                                          rx_m, ry_m, source_dba,
-                                          downsample=downsample, pixel_tl=pixel_tl)
-        if result is None:
-            return False
-        field_dba, eff_res, (h, w) = result
+        eff_res = resolution
+        grid_eval = grid
+        doors_eval = doors
 
         if downsample > 1:
-            mask_grid = grid[::downsample, ::downsample]
-        else:
-            mask_grid = grid
+            grid_eval = downsample_occupancy(grid, downsample)
+            eff_res = resolution * downsample
+            h, w = grid_eval.shape
+            if doors:
+                doors_eval = {}
+                for name, (mask, tl_db) in doors.items():
+                    m_ds = mask[::downsample, ::downsample][:h, :w]
+                    doors_eval[name] = (m_ds, tl_db)
 
-        # Build door mask (all doors) and open-door mask (carved to 0 dB)
-        door_mask = np.zeros_like(mask_grid, dtype=bool)
-        open_door_mask = np.zeros_like(mask_grid, dtype=bool)
-        if doors:
-            for _name, (m, _tl) in doors.items():
-                m_ds = m[::downsample, ::downsample] if downsample > 1 else m
-                door_mask |= m_ds
-                if pixel_tl is not None:
-                    open_door_mask |= m_ds & (pixel_tl == 0.0)
+        h, w = grid_eval.shape
+        pixel_tl = build_pixel_tl(grid_eval, doors_eval, open_doors=open_doors) if doors_eval else None
 
-        # NaN walls and closed doors, but NOT open doors - they show free-space colour
-        wall_or_closed = (mask_grid == 1) & ~open_door_mask
+        result = self._compute_full_field(grid_eval, eff_res, ox, oy,
+                                          rx_m, ry_m, source_dba,
+                                          downsample=1, pixel_tl=pixel_tl)
+        if result is None:
+            return False
+        field_dba, _, (h, w) = result
+
+        door_mask = np.zeros_like(grid_eval, dtype=bool)
+        open_door_mask = np.zeros_like(grid_eval, dtype=bool)
+        if doors_eval:
+            open_set = open_doors or set()
+            for name, (m, _tl) in doors_eval.items():
+                door_mask |= m
+                if any(_entity_matches_door(name, e) for e in open_set):
+                    open_door_mask |= m
+
+        wall_or_closed = (grid_eval == 1) & ~open_door_mask
         render_grid = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
         render_grid = np.flipud(render_grid)
 
@@ -125,17 +135,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         im = plt.imshow(render_grid, cmap="inferno", origin="upper", extent=extent,
                         vmin=vmin, vmax=vmax)
-        # Subtle wall outline so room structure is always visible (even when field is dark)
-        cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
-        cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
-        wall_outline = (mask_grid == 1).astype(np.uint8)
+        cy = np.linspace(extent[2], extent[3], grid_eval.shape[0])
+        cx = np.linspace(extent[0], extent[1], grid_eval.shape[1])
+        wall_outline = (grid_eval == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                    linewidths=0.3, alpha=0.25)
         if door_overlay is not None:
-            # Cyan contour outlines for ALL doors, in meter coords
             ax.contour(cx, cy, door_overlay.astype(np.uint8), levels=[0.5],
                        colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
-            # Brighter green contour for OPEN doors
             if open_door_mask.any():
                 ax.contour(cx, cy, open_door_mask.astype(np.uint8), levels=[0.5],
                            colors=["#00ff00"], linewidths=2.0, alpha=0.9)
@@ -158,6 +165,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(out_path, dpi=_CELL_DPI, bbox_inches="tight")
         plt.close()
+        return True
         logger.info("AcousticFieldRenderer: saved %s", out_path)
         return True
 
@@ -278,11 +286,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             if vmax <= vmin:
                 vmax = vmin + 20.0
 
-            pixel_tl = None
             door_states = worst.get("door_states") or {}
-            if doors:
-                open_set = {n for n, st in door_states.items() if st == "open"}
-                pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+            open_doors = {n for n, st in door_states.items() if st == "open"} if doors else None
 
             ok = self._render_cell_png(
                 grid, resolution, ox, oy,
@@ -293,8 +298,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 downsample=downsample,
                 vmin=vmin,
                 vmax=vmax,
-                pixel_tl=pixel_tl,
-                doors=doors if pixel_tl is not None else None,
+                open_doors=open_doors,
+                doors=doors,
             )
             if not ok:
                 return ""
@@ -348,11 +353,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             safe = safe.replace("/", "_").replace(" ", "_")
             png_path = plots_dir / f"{safe}.png"
 
-            pixel_tl = None
             door_states = worst.get("door_states") or {}
-            if doors:
-                open_set = {n for n, st in door_states.items() if st == "open"}
-                pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+            open_doors = {n for n, st in door_states.items() if st == "open"} if doors else None
 
             cell_src = _eff_src(worst)
             ok = self._render_cell_png(
@@ -364,8 +366,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 downsample=downsample,
                 vmin=vmin,
                 vmax=global_max,
-                pixel_tl=pixel_tl,
-                doors=doors if pixel_tl is not None else None,
+                open_doors=open_doors,
+                doors=doors,
             )
             if ok:
                 cells.append({
@@ -380,29 +382,22 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         ncols = max(len(col_values), 1)
         html = (
-            '<div style="display:grid;'
+            f'<div style="display:grid;'
             f'grid-template-columns:repeat({ncols},1fr);'
-            'gap:12px;margin-top:8px;">'
+            f'gap:12px;margin-top:8px;">'
         )
         for c in cells:
             html += (
                 f'<div style="text-align:center;font-size:0.78em;color:#475569;">'
                 f'<img src="{c["img_rel_path"]}" style="width:100%;border-radius:4px;" '
                 f'alt="{c["row_val"]}/{c["col_label"]}">'
-                f'<br>{c["row_val"]} / {c["col_label"]} &mdash; {c["exposure"]:.0f} dBA'
+                f'<br>{c["row_val"]} / {c["col_label"]} - {c["exposure"]:.0f} dBA'
                 f'</div>'
             )
         html += '</div>'
-
         return html
 
-    def render_seaborn(self, df, out_path):
-        import matplotlib
-        matplotlib.use("Agg")
-
-        if compute_attenuations is None:
-            return
-
+    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         work_df = self._prepared_df(df)
         if len(work_df) == 0:
             return
@@ -410,6 +405,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         map_name = work_df["map"][0] if "map" in work_df.columns else None
         if not map_name:
             return
+
         result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
         if result is None:
             return
@@ -432,11 +428,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if vmax <= vmin:
             vmax = vmin + 20.0
 
-        pixel_tl = None
         door_states = worst.get("door_states") or {}
-        if doors:
-            open_set = {n for n, st in door_states.items() if st == "open"}
-            pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+        open_doors = {n for n, st in door_states.items() if st == "open"} if doors else None
 
         self._render_cell_png(
             grid, resolution, ox, oy,
@@ -447,8 +440,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             downsample=downsample,
             vmin=vmin,
             vmax=vmax,
-            pixel_tl=pixel_tl,
-            doors=doors if pixel_tl is not None else None,
+            open_doors=open_doors,
+            doors=doors,
         )
 
     # Animation / timeseries
@@ -907,7 +900,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             elif fmt == "frames":
                 frames_dir = out_path.with_suffix("")
                 frames_dir.mkdir(parents=True, exist_ok=True)
-                for fi, (_, field_data) in enumerate(valid):
+                for fi, (orig_idx, field_data) in enumerate(valid):
                     frame_path = frames_dir / f"frame_{fi:04d}.png"
                     field_dba, _, _, open_set, source_dba = field_data
                     open_dm = open_door_masks[fi] if show_doors else np.zeros((h, w), dtype=bool)
@@ -920,7 +913,20 @@ class AcousticFieldRenderer(BasePlotRenderer):
                                     vmin=vmin, vmax=vmax)
                     ax_frame.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                                      linewidths=0.3, alpha=0.25)
-                    ax_frame.plot(rx_m, ry_m, "g*", markersize=8)
+
+                    row_idx = indices[orig_idx]
+                    row = rows[min(row_idx, total_rows - 1)]
+                    rx_frame = float(row.get("pos_x_gt", 0) or 0)
+                    ry_frame = float(row.get("pos_y_gt", 0) or 0)
+                    ax_frame.plot(rx_frame, ry_frame, "g*", markersize=8)
+
+                    peds = peds_per_frame[fi]
+                    if peds:
+                        px = [p[0] for p in peds if len(p) >= 2]
+                        py = [p[1] for p in peds if len(p) >= 2]
+                        if px:
+                            ax_frame.plot(px, py, "ro", markersize=4)
+
                     if show_doors and door_mask_all.any():
                         ax_frame.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5],
                                          colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
@@ -928,9 +934,11 @@ class AcousticFieldRenderer(BasePlotRenderer):
                             ax_frame.contour(cx, cy, open_dm.astype(np.uint8), levels=[0.5],
                                              colors=["#00ff00"], linewidths=2.0, alpha=0.9)
                     ax_frame.set_title(f"Frame {fi}", fontsize=9)
-                    plt.savefig(frame_path, dpi=dpi, bbox_inches="tight")
+                    fig_frame.savefig(frame_path, dpi=dpi, bbox_inches="tight")
                     plt.close(fig_frame)
                 logger.info("Saved %d frames to %s", len(valid), frames_dir)
+                plt.close(fig)
+                return frames_dir
             else:
                 logger.warning("Unknown format %r, falling back to gif.", fmt)
                 ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
@@ -1105,7 +1113,7 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
             chunks = []
             for ep_id in sorted(int(v) for v in work_df["episode"].unique().to_list()):
                 gif_rel = f"plots/{self.spec.id}_episode_{ep_id:03d}.{ext}"
-                caption = f"{self.spec.title} — episode_{ep_id:03d}"
+                caption = f"{self.spec.title} - episode_{ep_id:03d}"
                 chunks.append(
                     f'<div style="text-align:center;">'
                     f'<img src="{gif_rel}" style="max-width:100%;border-radius:4px;" '

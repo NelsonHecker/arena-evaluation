@@ -634,15 +634,14 @@ def test_af_plotly_grid_mode_with_doors(monkeypatch, tmp_path):
     assert (tmp_path / "plots" / "af_test_dwb_hall.png").exists()
 
 
-def test_af_plotly_doors_with_downsample_raises_value_error(monkeypatch, tmp_path):
-    """Suspected source bug (documented): with downsample > 1 the per-pixel
-    transmission-loss map is built at full resolution but the solver grid is
-    downsampled -> shape mismatch ValueError. Pins current behaviour."""
+def test_af_plotly_doors_with_downsample_succeeds(monkeypatch, tmp_path):
+    """With downsample > 1 and doors present, grid and doors are downsampled
+    together and rendering succeeds."""
     _patch_grid(monkeypatch, n=16)
     _patch_doors(monkeypatch, {"world/d1": (_door_mask(16), 25.0)})
     renderer = _new_renderer(_af_spec(downsample=2), tmp_path)
-    with pytest.raises(ValueError):
-        renderer.render_plotly(_af_df())
+    html = renderer.render_plotly(_af_df())
+    assert '<img src="plots/' in html
 
 
 @pytest.mark.slow
@@ -684,6 +683,16 @@ def test_af_plotly_single_mode(monkeypatch, tmp_path):
     assert '<img src="plots/af_test.png"' in html
     assert (tmp_path / "plots" / "af_test.png").exists()
     assert "105 dBA" in html
+
+
+@pytest.mark.slow
+def test_af_plotly_downsample_with_doors(monkeypatch, tmp_path):
+    _patch_grid(monkeypatch)
+    _patch_doors(monkeypatch, {"world/d1": (_door_mask(20), 25.0)})
+    renderer = _new_renderer(_af_spec(mode="single", downsample=2), tmp_path)
+    html = renderer.render_plotly(_af_df())
+    assert '<img src="plots/af_test.png"' in html
+    assert (tmp_path / "plots" / "af_test.png").exists()
 
 
 def test_af_plotly_single_mode_no_worst_frame(monkeypatch, tmp_path):
@@ -788,19 +797,17 @@ def test_render_animation_gif(tmp_path):
 
 
 @pytest.mark.slow
-def test_render_animation_frames_format_fails_gracefully(tmp_path, capsys):
-    """The 'frames' format branch references undefined rx_m/ry_m locals
-    (NameError) and is caught by the generic except -> None. Documented
-    suspected source bug; asserts the current graceful-failure behaviour."""
+def test_render_animation_frames_format_exports_pngs(tmp_path):
     renderer = _new_renderer(_af_spec(), tmp_path)
     out = tmp_path / "anim.png"
     result = renderer.render_animation(
         _anim_df(2), _grid(12), 0.1, 0.0, 0.0, {}, out_path=out,
         downsample=2, max_frames=2, fmt="frames",
     )
-    assert result is None
-    assert "Failed to save animation: name 'rx_m' is not defined" in capsys.readouterr().err
-    assert not list(out.with_suffix("").glob("frame_*.png"))
+    frames_dir = out.with_suffix("")
+    assert result == frames_dir
+    frames = sorted(frames_dir.glob("frame_*.png"))
+    assert len(frames) == 2
 
 
 @pytest.mark.slow

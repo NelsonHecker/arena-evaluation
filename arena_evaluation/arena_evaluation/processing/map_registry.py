@@ -1,11 +1,22 @@
 import os
 import yaml
 import pathlib
+import subprocess
 from PIL import Image
 
 class MapRegistry:
     @staticmethod
     def _find_ros_map_dir(map_name: str) -> pathlib.Path | None:
+        try:
+            res = subprocess.run(["rospack", "find", "arena_simulation_setup"],
+                                 capture_output=True, text=True, check=False)
+            if res.returncode == 0 and res.stdout.strip():
+                map_dir = pathlib.Path(res.stdout.strip()) / "worlds" / map_name
+                if map_dir.exists():
+                    return map_dir
+        except Exception:
+            pass
+
         try:
             from ament_index_python.packages import get_package_share_directory
 
@@ -15,13 +26,18 @@ class MapRegistry:
                 return map_dir
         except Exception:
             pass
-            
+
+        for ws in ("/opt/arena_ws", "/home/nelson/arena_ws"):
+            map_dir = pathlib.Path(ws) / "src" / "Arena" / "arena_simulation_setup" / "worlds" / map_name
+            if map_dir.exists():
+                return map_dir
+
         arena_dir = os.environ.get("ARENA_DIR")
         if arena_dir:
             map_dir = pathlib.Path(arena_dir) / "arena_simulation_setup/worlds" / map_name
             if map_dir.exists():
                 return map_dir
-            
+
         return None
 
     @staticmethod

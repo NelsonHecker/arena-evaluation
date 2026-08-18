@@ -224,11 +224,11 @@ def test_resolve_compound_overrides_requested_column():
     assert col == COMPOUND_LABEL_COL
 
 
-def test_resolve_uses_getattr_default_when_auto_differentiate_absent():
-    """Spec-like objects without ``auto_differentiate`` default to True."""
+def test_resolve_default_auto_differentiate_true():
+    """PlotSpec defaults auto_differentiate to True."""
     df = _identity_frame(n_varying=2)
-    minimal = types.SimpleNamespace(differentiate="planner")
-    col, out = resolve_differentiate(minimal, df)
+    spec = _spec(differentiate="planner")
+    col, out = resolve_differentiate(spec, df)
     assert col == COMPOUND_LABEL_COL
     assert COMPOUND_LABEL_COL in out.columns
 

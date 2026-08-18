@@ -85,7 +85,7 @@ class BarRenderer(BasePlotRenderer):
 
     def _explode_needed(self, df_filtered: pl.DataFrame, diff_col: str) -> pl.DataFrame:
         """Explode per-sample list columns (timeseries metrics) before
-        aggregation. Selects only the needed columns first — the full frame
+        aggregation. Selects only the needed columns first - the full frame
         carries other list columns of differing lengths whose explosion grows
         combinatorially (polars 1.x, see the line renderer note)."""
         metrics = self.spec.options.get("metrics", [])

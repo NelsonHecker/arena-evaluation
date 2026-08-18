@@ -595,7 +595,7 @@ class MCAPReader:
 
         # Load global data
         global_bundle = TopicBundle()
-        for t_name in ("tf", "tf_static"):
+        for t_name in ("tf", "tf_static", "semantic_snapshot"):
             lf = load_parquet(topics_dir / f"{t_name}.parquet")
             if lf is not None:
                 setattr(global_bundle, t_name, lf)

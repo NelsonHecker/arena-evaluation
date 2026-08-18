@@ -464,11 +464,12 @@ class DataRecorderNode(Node):
 
         self.current_time = new_time
 
-        if self._pre_clock_buffer:
-            self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
-            for topic, buffered_msg in self._pre_clock_buffer:
-                self._write_to_bag_at(topic, buffered_msg, self.current_time)
-            self._pre_clock_buffer.clear()
+        if hasattr(self, "_pre_clock_buffer"):
+            if self._pre_clock_buffer:
+                self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
+                for topic, buffered_msg in self._pre_clock_buffer:
+                    self._write_to_bag_at(topic, buffered_msg, self.current_time)
+            del self._pre_clock_buffer
 
     def _begin_episode(self, episode_id: int, source: str = "episode_record") -> bool:
         """Open a writer for a new episode unless one was already started for it."""
@@ -619,7 +620,8 @@ class DataRecorderNode(Node):
 
         def callback(msg):
             if self.current_time is None:
-                self._pre_clock_buffer.append((topic_name, msg))
+                if hasattr(self, "_pre_clock_buffer"):
+                    self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
             last_time = self.last_recorded_times.get(topic_name, 0)
@@ -631,7 +633,8 @@ class DataRecorderNode(Node):
     def _create_unthrottled_callback(self, topic_name: str):
         def callback(msg):
             if self.current_time is None:
-                self._pre_clock_buffer.append((topic_name, msg))
+                if hasattr(self, "_pre_clock_buffer"):
+                    self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
             self._write_to_bag_at(topic_name, msg, now)

@@ -467,7 +467,7 @@ def test_cmd_console_truncated_message(capsys, monkeypatch):
     rc = cli_mod._cmd_console(_args(data_root=None, run_id="r1", lines=2, follow=False))
     out = capsys.readouterr().out
     assert rc == 0
-    assert "(last 2 of 2 lines — use --lines to see more)" in out
+    assert "(last 2 of 2 lines, use --lines to see more)" in out
 
 
 def test_cmd_console_follow_until_runner_exits(capsys, monkeypatch):
