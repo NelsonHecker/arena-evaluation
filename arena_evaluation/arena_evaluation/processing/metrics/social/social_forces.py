@@ -11,22 +11,7 @@ if typing.TYPE_CHECKING:
 
 
 class SocialForcesCalculator(BaseMetricCalculator):
-    """Social force metrics on the native peds time base.
-
-    Metrics:
-    - SFM (Helbing & Molnar 1995): cumulative / peak / mean repulsive force
-      of pedestrians on the robot, center-to-center per the original model.
-    - ESFM (Moussaid et al. 2010): anisotropy-weighted SFM. The anisotropy
-      w(phi) applies to the receiver of the force, so the headline variant
-      weights by the robot heading (the force the robot experiences); the
-      ped-heading variant is reported separately as esfm_ped_*.
-    - CI / SII: Gaussian personal-space violation index with equal sigmas
-      (0.28 m), i.e. a circular personal space. Adapt the sigmas for other
-      cultures, relationships or contexts.
-
-    Robot pose is sampled onto the peds axis by backward-asof join (100 ms),
-    ground truth when recorded and odom otherwise.
-    """
+    """Computes social force and personal space violation metrics."""
 
     NAME = "social_forces"
     CATEGORY = "social"

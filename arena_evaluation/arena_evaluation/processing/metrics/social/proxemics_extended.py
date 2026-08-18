@@ -11,26 +11,7 @@ if typing.TYPE_CHECKING:
 
 
 class ProxemicsExtendedCalculator(BaseMetricCalculator):
-    """Extended proxemic metrics on the native peds time base.
-
-    Zones are evaluated on the edge-to-edge distance
-    ``d_eff = d_center - (r_robot + r_ped)`` against Hall's (1966) bands
-    (intimate < 0.45 m, personal 0.45-1.2 m, social 1.2-3.6 m, public
-    >= 3.6 m), so they stay comparable across robot footprints. The legacy
-    ``proxemics`` calculator measures center-to-center instead, hence the
-    ``_zone`` suffix here.
-
-    Metrics:
-    - Time and max robot speed per zone.
-    - PSI event counts per zone (contiguous blocks, 2 s gap-merge).
-    - Movement-towards-pedestrians ratio over frames that have peds.
-    - TTI min/mean: d_eff / |v_rel| when closing, 5 s horizon.
-    - PSII: integral of d_eff while inside personal space.
-    - timeseries_min_ped_clearance: per-frame min d_eff (None = no peds).
-
-    Robot pose and velocity are sampled onto the peds axis by backward-asof
-    join (100 ms), ground truth when recorded and odom otherwise.
-    """
+    """Computes edge-to-edge proxemic zone metrics on the native pedestrian time base."""
 
     NAME = "proxemics_extended"
     CATEGORY = "social"

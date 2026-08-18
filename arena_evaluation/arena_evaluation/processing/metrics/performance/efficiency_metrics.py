@@ -9,13 +9,7 @@ if typing.TYPE_CHECKING:
 
 
 class PathEfficiencyCalculator(BaseMetricCalculator):
-    """
-    Calculates path efficiency.
-    
-    Metrics:
-    - path_efficiency: Ratio of Euclidean distance (start to goal) over total path length.
-                       Close to 1.0 means highly efficient.
-    """
+    """Calculates ratio of start-to-goal straight-line distance over actual path length."""
     
     NAME = "path_efficiency"
     CATEGORY = "performance"

@@ -1,16 +1,4 @@
-#!/usr/bin/env python3
-"""Door state timeline from the recorded SemanticSnapshot (long format).
-
-The mcap_reader flattens each SemanticSnapshot message into long-format rows:
-(time_ns, env_id, world, entity, kind, field, field_kind, value_str, value_num,
- value_bool, value_list). This module turns that table into an efficient
-backward-asof lookup: for any frame timestamp, which doors are OPEN.
-
-Open determination per door entity (kind == 'door'):
-  - predicate 'open' == True          -> open
-  - discrete state == 'open'          -> open
-  - continuous 'progress' > 0.5       -> open (mid-transition treated as open)
-"""
+"""Door state timeline constructed from SemanticSnapshot messages."""
 from __future__ import annotations
 
 import bisect

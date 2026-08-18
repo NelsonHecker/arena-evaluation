@@ -8,9 +8,7 @@ if typing.TYPE_CHECKING:
 
 
 class TopicAligner:
-    """
-    Aligns multiple asynchronous topics onto a single time axis using ASOF joins.
-    """
+    """Aligns asynchronous topics onto the odom time axis using asof joins."""
     def __init__(self, tolerance_ns: int = 100_000_000):
         self.tolerance_ns = tolerance_ns
 

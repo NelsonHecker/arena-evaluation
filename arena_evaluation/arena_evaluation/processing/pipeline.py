@@ -35,12 +35,7 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
 
 
 def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
-    """Filter null poses and slice to the longest consistent odom segment.
-
-    Mirrors ``BaseMetricCalculator.resolve_robot_pose`` but runs once per
-    episode, before the registry executes, so every calculator sees the same
-    frame range. Uses GT columns when present.
-    """
+    """Filter null poses and slice to longest consistent segment."""
     import polars as pl
     import numpy as np
 

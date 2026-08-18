@@ -22,17 +22,7 @@ def _parse_float(token: str) -> float:
 
 
 class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
-    """
-    Door/elevator interaction metrics derived from the recorded semantic snapshot.
-
-    time_waiting_at_doors: seconds a door was `triggered` while not `open`, replayed
-    over the per-field change-point series reconstructed from `semantic_snapshot`
-    (see `_reconstruct_events`), seeded by the entity's first recorded snapshot value.
-    The series carries no per-entity position, so multi-robot episodes over-count.
-    elevator_rides: `just_arrived` rising edges with `occupants` > 0.
-    `occupants` is a scalar, so attribution to the robot holds only in
-    single-robot episodes.
-    """
+    """Computes door waiting time and elevator ride metrics from semantic snapshots."""
 
     NAME = "semantic_interaction_metrics"
     CATEGORY = "ecological"

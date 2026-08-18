@@ -9,15 +9,7 @@ if typing.TYPE_CHECKING:
 
 
 class PedestrianDisturbanceCalculator(BaseMetricCalculator):
-    """
-    Calculates pedestrian disturbance metrics by comparing contestant pedestrian motion
-    against baseline pedestrian motion (unhindered_peds reference or expected trajectory).
-
-    Metrics:
-    - ped_path_deflection_m: Mean spatial deflection (m) of pedestrians from baseline
-    - ped_velocity_delay_ratio: Relative slowdown of pedestrians (0.0 = no slowdown)
-    - ped_round_trips_completed: Estimated number of waypoint round-trips completed
-    """
+    """Computes pedestrian deflection and slowdown metrics against baseline trajectories."""
 
     NAME = "pedestrian_disturbance"
     CATEGORY = "social"

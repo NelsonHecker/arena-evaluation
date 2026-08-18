@@ -9,15 +9,7 @@ if typing.TYPE_CHECKING:
 
 
 class CollisionMetricsCalculator(BaseMetricCalculator):
-    """
-    Calculates collision-related metrics and determines final episode result.
-    
-    Metrics:
-    - collision_amount: Number of distinct collision events
-    - collisions: Indices of collision events
-    - result: GOAL_REACHED, COLLISION, or TIMEOUT
-    - success: Boolean true if GOAL_REACHED
-    """
+    """Calculates collision counts and determines episode success status."""
     
     NAME = "collision_metrics"
     CATEGORY = "performance"

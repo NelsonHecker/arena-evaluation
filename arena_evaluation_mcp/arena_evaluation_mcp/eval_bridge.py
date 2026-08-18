@@ -21,13 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class EvalBridge:
-    """Adapter that wraps arena_evaluation library APIs for the MCP server.
-
-    Provides filesystem-based path resolution, data loading, CLI execution,
-    manifest discovery, and metric registry introspection. Has a soft ROS
-    dependency - needs ROS packages installed for imports but does NOT need
-    a running ROS node.
-    """
+    """Adapter wrapping arena_evaluation APIs for MCP server tools and resources."""
 
     def __init__(self) -> None:
         self._data_root = self._resolve_data_root()

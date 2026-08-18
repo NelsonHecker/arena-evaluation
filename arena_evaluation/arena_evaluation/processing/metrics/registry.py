@@ -14,9 +14,7 @@ if typing.TYPE_CHECKING:
 
 
 class MetricRegistry:
-    """
-    Discovers, validates, and executes metric calculators in topological order.
-    """
+    """Discovers, validates, and executes metric calculators in topological order."""
     def __init__(self, robot_params: RobotParams, world: str | None = None):
         self.robot_params = robot_params
         self.world = world
@@ -66,10 +64,7 @@ class MetricRegistry:
         return units
 
     def _compute_execution_order(self) -> list[list[str]]:
-        """
-        Computes the topological sort of calculators using Kahn's algorithm.
-        Groups independent calculators into execution stages.
-        """
+        """Compute topological sort of calculators using Kahn's algorithm."""
         in_degree = {name: 0 for name in self.calculators}
         adj_list = defaultdict(list)
 

@@ -1,43 +1,4 @@
-"""Declarative HTML table plot type.
-
-Renders up to three independent pieces inside the plot block:
-
-1. **Data-derived table** - ``options.columns`` aggregates the metrics frame
-   per ``group_by`` (mean of each column, formatted).
-
-2. **Agent-authored rows** - ``options.rows`` is a list of ``{label, value}``
-   entries rendered as a two-column table, exactly as given.
-
-3. **Agent-written notes** - ``options.notes`` pulls in free-form rows written
-   by an agent (e.g. through MCP tools) into ``notes.yaml`` in the benchmark
-   dir, or inline YAML / ``"key: value"`` text lines. Notes render in a
-   standalone callout below the tables, never appended into the metric table
-   rows (the column counts differ).
-
-Example manifest spec:
-
-```yaml
-- id: overview_table
-  type: table
-  title: Benchmark Overview
-  data_key: "*"
-  layout_group: overview
-  options:
-    group_by: [local_planner]
-    columns:
-      - {metric: success, label: Success, format: "{:.0%}"}
-      - {metric: time_to_goal, label: Avg Time, format: "{:.1f}"}
-    notes: notes.yaml          # -> standalone callout section
-
-- id: agent_table
-  type: table
-  title: Agent Conclusions
-  data_key: "*"
-  options:
-    rows:                      # agent-defined, exactly as given
-      - {label: Key Finding, value: "DWB wins on success"}
-      - {label: Recommendation, value: "Use DWB in corridors"}
-"""
+"""HTML table plot renderer for aggregated metric columns and notes."""
 
 from __future__ import annotations
 
@@ -54,11 +15,7 @@ if typing.TYPE_CHECKING:
 
 
 def _load_notes(notes, benchmark_dir: pathlib.Path | None) -> list[dict[str, str]]:
-    """Normalize the notes source into [{label, value}, ...].
-
-    Accepts: a list of {label, value} dicts, a YAML file path (resolved
-    against the benchmark dir), or a text file with ``key: value`` lines.
-    """
+    """Normalize notes input into a list of label/value mappings."""
     rows: list[dict[str, str]] = []
     if notes is None:
         return rows

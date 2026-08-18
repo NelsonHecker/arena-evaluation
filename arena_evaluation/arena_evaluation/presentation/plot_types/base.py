@@ -39,13 +39,7 @@ class BasePlotRenderer(ABC):
         return resolve_differentiate(self.spec, df)
 
     def _apply_filters(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Apply filters defined in the PlotSpec.
-
-        Scalar values match equality; list/tuple/set values match membership
-        (e.g. ``filter: {planner: [dwb, teb]}`` selects only those runs).
-        List columns (per-sample timeseries, e.g. ``timeseries_char_phase_kind``)
-        match rows whose list CONTAINS the value (or any value for a value list).
-        """
+        """Apply scalar and sequence filter predicates from PlotSpec."""
         if not self.spec.filter:
             return df
 

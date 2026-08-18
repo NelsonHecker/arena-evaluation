@@ -10,18 +10,7 @@ if typing.TYPE_CHECKING:
 
 
 class MotionMetricsCalculator(BaseMetricCalculator):
-    """
-    Calculates velocity, acceleration, and jerk.
-    
-    Metrics:
-    - velocity: Real velocity of the robot over time
-    - velocity_mean: Average velocity
-    - velocity_max: Maximum velocity
-    - acceleration: Difference of velocities (dv/dt approximation)
-    - acceleration_mean: Average acceleration
-    - jerk: Rate at which acceleration changes (da/dt approximation)
-    - jerk_mean: Average jerk
-    """
+    """Calculates robot velocity, acceleration, and jerk metrics."""
     
     NAME = "motion_metrics"
     CATEGORY = "performance"

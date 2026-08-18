@@ -1,24 +1,4 @@
-"""Long-format line chart renderer (per-sample / per-working-point frames).
-
-Unlike ``timeseries`` (wide per-episode list columns), this renders one trace
-per ``group_by`` combination from a long dataframe - the shape produced by the
-characterization pipeline (``characterization_samples.parquet``) and the
-per-working-point summary (``characterization_summary.parquet``).
-
-Options:
-    y (str, required):           y-axis column
-    error_y (str, optional):     std column -> confidence band (default) or bars
-    error_style (str):           "band" (fill) | "bars" (error bars), default "band"
-    mode (str):                  "lines" | "lines+markers" | "markers", default "lines"
-    time_to_s (bool):            divide x by 1e9 (ns timestamps), default false
-    time_relative (bool):        subtract per-trace x minimum so traces overlay at t=0
-    max_points_per_trace (int):  stride downsample per trace, default 5000
-    max_traces (int):            cap on the number of traces, default 40
-
-``data_key`` is the x column. ``group_by`` (PlotSpec field) selects the trace
-grouping columns. ``differentiate`` is used as fallback when ``group_by`` is
-absent (must exist in the frame, else single color).
-"""
+"""Long-format line chart renderer supporting grouped traces and error bands."""
 
 from __future__ import annotations
 
