@@ -49,13 +49,31 @@ class BasePlotRenderer(ABC):
                 continue
             if res_df.schema[k] == pl.List:
                 if isinstance(v, (list, tuple, set)):
-                    res_df = res_df.filter(
-                        pl.col(k).list.eval(pl.element().is_in(list(v)).any())
-                    )
+                    v_list = list(v)
+                    if v_list:
+                        res_df = res_df.filter(
+                            pl.any_horizontal([pl.col(k).list.contains(x) for x in v_list])
+                        )
+                    else:
+                        res_df = res_df.filter(pl.lit(False))
                 else:
                     res_df = res_df.filter(pl.col(k).list.contains(v))
             elif isinstance(v, (list, tuple, set)):
                 res_df = res_df.filter(pl.col(k).is_in(list(v)))
             else:
                 res_df = res_df.filter(pl.col(k) == v)
+        return res_df
+
+    def _apply_row_filters(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Apply filters to scalar/exploded columns after list expansion."""
+        if not self.spec.filter:
+            return df
+
+        res_df = df
+        for k, v in self.spec.filter.items():
+            if k in res_df.columns and res_df.schema[k] != pl.List:
+                if isinstance(v, (list, tuple, set)):
+                    res_df = res_df.filter(pl.col(k).is_in(list(v)))
+                else:
+                    res_df = res_df.filter(pl.col(k) == v)
         return res_df

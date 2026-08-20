@@ -1,6 +1,7 @@
-# Open-loop characterization: the robot drives its own maneuver sweep in an
+# Open-loop characterization: the robot drives its own multi-mode maneuver sweep in an
 # empty world (tm_robots: characterization drives exact cmd_vel profiles and
-# tags phases). Episodes = repetitions → cross-episode confidence bands.
+# tags phases: linear, lateral, arc, ramps, brake, angular, idle).
+# Episodes = repetitions -> cross-episode confidence bands.
 references: false
 stages:
   - name: characterization
@@ -14,4 +15,11 @@ stages:
         dynamic: {min: 0, max: 0}
         static: {min: 0, max: 0}
         interactive: {min: 0, max: 0}
-    timeout: 300s
+      characterization:
+        modes: [idle, linear, lateral, arc, ramps, brake, angular]
+        linear_dwell_s: 10.0
+        angular_dwell_s: 10.0
+        arc_dwell_s: 10.0
+        arc_speeds: [0.5, 1.0, 1.5]
+        arc_radii_m: [0.5, 1.0, 2.5]
+    timeout: 360s

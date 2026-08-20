@@ -21,8 +21,16 @@ def test_output_keys_and_units():
     keys = calc.output_keys()
     assert "timeseries_char_power_total_w" in keys
     assert "timeseries_char_phase_kind" in keys
+    assert "timeseries_char_vx_achieved" in keys
+    assert "timeseries_char_vy_achieved" in keys
+    assert "timeseries_char_wz_achieved" in keys
+    assert "timeseries_char_turn_radius_m" in keys
+    assert "timeseries_char_energy_intensity" in keys
+    assert "timeseries_char_energy_per_rad" in keys
     assert calc.UNITS["timeseries_char_power_total_w"] == "W"
     assert calc.UNITS["timeseries_char_dba"] == "dBA"
+    assert calc.UNITS["timeseries_char_wz_achieved"] == "rad/s"
+    assert calc.UNITS["timeseries_char_energy_per_rad"] == "J/rad"
     assert len(keys) == len(set(keys))
 
 
@@ -46,7 +54,7 @@ def _sample_episode() -> AlignedEpisodeBundle:
             "total_level_af_dba": [42.0, 46.0, 51.0, 56.0],
             "velocity": [[0.0, 0.0], [2.0, 2.0], [4.0, 4.0], [8.0, 8.0]],
             "effort": [[0.1, 0.1], [0.5, -0.5], [1.0, 1.0], [1.0, -1.0]],
-            "label": ["linear_vx_0.25", "linear_vx_0.25", "linear_vx_0.50", "linear_vx_0.50"],
+            "label": ["ramp_apex_vx_0.25", "ramp_apex_vx_0.25", "ramp_apex_vx_0.50", "ramp_apex_vx_0.50"],
         }
     )
     return AlignedEpisodeBundle(
@@ -66,6 +74,44 @@ def test_calculate_produces_timeseries():
     # Energy intensity = p*dt/ds: 55 W * 1s / 0.25 m = 220 J/m at t=1s
     assert out["timeseries_char_energy_intensity"][1] == 220.0
     assert len(out["timeseries_char_dba"]) == 4
+
+
+def test_steady_state_transient_filtering():
+    # 5s dwell: first 1.5s tagged transient, remaining tagged linear
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "pos_x": [0.0, 0.25, 0.50, 0.75],
+            "pos_y": [0.0, 0.0, 0.0, 0.0],
+            "vel_linear": [0.0, 0.25, 0.25, 0.25],
+            "total_power_w": [500.0, 200.0, 42.2, 42.2],
+            "label": ["linear_vx_0.25", "linear_vx_0.25", "linear_vx_0.25", "linear_vx_0.25"],
+        }
+    )
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    # t=0s, 1s (< 1.5s): transient; t=2s, 3s (>= 1.5s): steady-state linear
+    assert out["timeseries_char_phase_kind"] == ["transient", "transient", "linear", "linear"]
+
+
+def test_arc_and_lateral_characterization_phases():
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "pos_x": [0.0, 0.5, 1.0, 1.5],
+            "pos_y": [0.0, 0.1, 0.3, 0.6],
+            "vel_linear": [0.5, 0.5, 1.0, 1.0],
+            "vel_angular": [0.5, 0.5, 1.0, 1.0],
+            "total_power_w": [60.0, 60.0, 75.0, 75.0],
+            "total_level_af_dba": [45.0, 45.0, 50.0, 50.0],
+            "label": ["arc_vx_0.50_r_1.00_left", "arc_vx_0.50_r_1.00_left", "arc_vx_1.00_r_1.00_left", "arc_vx_1.00_r_1.00_left"],
+        }
+    )
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    assert out["timeseries_char_turn_radius_m"][0] == 1.0
+    # Energy per rad: 60W / 0.5 rad/s = 120 J/rad
+    assert abs(out["timeseries_char_energy_per_rad"][0] - 120.0) < 1e-4
 
 
 def test_calculate_missing_power_and_acoustics():

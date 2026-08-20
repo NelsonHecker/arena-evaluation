@@ -29,6 +29,7 @@ class ScatterRenderer(BasePlotRenderer):
             df_filtered = df_filtered.select(keep).explode(list_cols)
         else:
             df_filtered = df_filtered.select(keep)
+        df_filtered = self._apply_row_filters(df_filtered)
 
         pdf = df_filtered.to_pandas()
         if pdf.empty:
@@ -75,6 +76,7 @@ class ScatterRenderer(BasePlotRenderer):
             df_filtered = df_filtered.select(keep).explode(list_cols)
         else:
             df_filtered = df_filtered.select(keep)
+        df_filtered = self._apply_row_filters(df_filtered)
 
         pdf = df_filtered.to_pandas()
         if pdf.empty:

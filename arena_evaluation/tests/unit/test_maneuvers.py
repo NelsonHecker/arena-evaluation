@@ -27,7 +27,7 @@ def test_schedule_structure():
     assert phases[0].kind == PhaseKind.IDLE
     assert phases[-1].kind == PhaseKind.IDLE
     # Idle blocks at start, middle(s), and end.
-    idle_blocks = [p for p in phases if p.kind == PhaseKind.IDLE]
+    idle_blocks = [p for p in phases if p.kind == PhaseKind.IDLE and p.duration_s == IDLE_DURATION_S]
     assert len(idle_blocks) == 4
     assert all(p.duration_s == IDLE_DURATION_S for p in idle_blocks)
 

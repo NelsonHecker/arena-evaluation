@@ -21,22 +21,12 @@ logger = logging.getLogger(__name__)
 _CELL_FIGSIZE = (5, 4)
 _CELL_DPI = 150
 
-# Color-scale floor (dBA).  Set below hospital ambient so quiet frames still
-# show field structure rather than collapsing to solid black.
 _FIELD_VMIN_DBA = 30.0
 
 
 class AcousticFieldRenderer(BasePlotRenderer):
     PLOT_TYPE = "acoustic_field"
 
-    # Manifest-driven options
-    #  filter:            {col: value} or {col: [v1, v2]} - select specific runs
-    #  differentiate:     rows of the grid (e.g. local_planner)
-    #  group_by:          columns of the grid (e.g. [stage])
-    #  options.mode:      "grid" (default) | "single" - single = one worst-case image
-    #  options.downsample: stride factor for the field solver (default 1)
-    #  options.vmin:      color-scale floor (default = hospital ambient 42 dBA)
-    #  options.include_reference: include reference/unhindered runs (default false)
 
     @staticmethod
     def _load_grid_and_meta(map_name, run_dir=None):
@@ -471,12 +461,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
     @staticmethod
     def _load_episode_data(benchmark_dir: pathlib.Path, episode_id: str):
-        """Load the time-aligned episode DataFrame from cached topic parquets.
-
-        Returns a Polars DataFrame with columns ``time_ns``, ``pos_x_gt``,
-        ``pos_y_gt``, ``source_dba``, ``peds_positions``, or ``None`` when
-        the topic cache is missing.
-        """
+        """Load the time-aligned episode DataFrame from cached topic parquets."""
         topics_root = benchmark_dir / "episodes" / episode_id / "topics"
         if not topics_root.is_dir():
             logger.warning("No topics cache at %s, run 'evaluation extract' first.", topics_root)
@@ -557,11 +542,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         stride: int = 1,
         max_frames: int = 120,
     ):
-        """Compute the 2D acoustic field for a sequence of episode frames.
-
-        Returns a list of ``(field_dba, eff_res, (h, w), open_set_frozen, source_dba)``
-        tuples, one per rendered frame.
-        """
+        """Compute the 2D acoustic field for a sequence of episode frames."""
         from ...processing.acoustics.door_state import DoorStateTimeline
 
         if compute_attenuations is None:
@@ -574,8 +555,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         h, w = grid.shape
 
-        # Downsample door masks to match the solver grid (trim to grid dims:
-        # stride slicing can leave one extra row vs the floor-divided grid)
         doors_ds = {}
         if doors:
             for name, (mask, tl_db) in doors.items():
@@ -587,10 +566,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         total_rows = len(df)
 
-        # Determine frame indices. The stride samples the episode at its own
-        # rate; when the cap kicks in the indices are spread EVENLY across the
-        # whole episode (not taken from the start), so the animation covers
-        # the full run rather than only its first seconds.
         indices = list(range(0, total_rows, stride))
         if len(indices) > max_frames:
             step = len(indices) / max_frames
@@ -684,10 +659,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         show_doors: bool = True,
         fmt: str = "gif",
     ) -> pathlib.Path | None:
-        """Render an animated GIF/MP4/PNG-sequence of the acoustic field timeseries.
-
-        Returns the output path on success, ``None`` on failure.
-        """
+        """Render an animated GIF/MP4/PNG-sequence of the acoustic field timeseries."""
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -707,9 +679,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
             logger.warning("render_animation: no valid frames to animate.")
             return None
 
-        # Determine vmax from data if not specified. Use the 99th percentile
-        # so a single outlier frame (e.g. an idle start at 42 dBA everywhere,
-        # or a collision impulse) does not skew the whole colormap.
         if vmax is None:
             field_maxima = np.array([np.nanmax(f[0]) for _, f in valid], dtype=float)
             all_max = float(np.percentile(field_maxima, 99)) if len(field_maxima) > 0 else vmin
@@ -725,9 +694,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
         else:
             grid_ds = grid
 
-        # Build downsampled door dict matching grid_ds dimensions (trim to
-        # grid dims: stride slicing can leave one extra row vs the
-        # floor-divided grid)
         doors_ds = {}
         door_mask_all = np.zeros((h, w), dtype=bool)
         if doors:
@@ -765,7 +731,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
                        vmin=vmin, vmax=vmax)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
-        # Subtle wall outline so room structure is always visible
         cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
         cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
         wall_outline = (mask_grid == 1).astype(np.uint8)
@@ -805,8 +770,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
             step = len(indices) / max_frames
             indices = [indices[int(i * step)] for i in range(max_frames)]
 
-        # Pre-compute pedestrian positions and collision flags per rendered
-        # frame, keyed by the field's actual episode row index
         peds_per_frame = []
         has_collision_col = "has_collision" in df.columns
         collision_per_frame = []
@@ -957,20 +920,8 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
 
     PLOT_TYPE = "acoustic_field_animation"
 
-    # Manifest-driven options (inherited + animation-specific)
-    #  options.fps:         output frame rate (default 10)
-    #  options.max_frames:  cap on rendered frames (default 120)
-    #  options.stride:      render every Nth data frame (default auto)
-    #  options.downsample:  solver grid stride (default 2 for performance)
-    #  options.format:      "gif" (default) | "mp4" | "frames"
-
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        """Generate acoustic-field animations.
-
-        Default: one GIF of the worst episode. With ``per_episode: true`` in
-        the spec options: one GIF per episode, saved as
-        ``plots/{spec.id}_episode_XXX.{fmt}``.
-        """
+        """Generate acoustic-field animations."""
         if compute_attenuations is None:
             logger.warning("AcousticFieldAnimationRenderer: C++ solver not available.")
             return
@@ -1016,16 +967,21 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
                     self._rendered_gifs.append(f"plots/{gif_path.name}")
             return
 
-        # ── Worst-episode mode (default) ──
-        worst = self._pick_worst_row(work_df)
-        if worst is None:
-            return
-
+        # ── Single / worst-episode mode (default) ──
         episode_id = None
-        if "episode" in work_df.columns:
-            max_idx = work_df["ped_max_exposure_dba"].arg_max()
-            if max_idx is not None:
-                episode_id = int(work_df.row(max_idx, named=True).get("episode", 0))
+        if "episode" in work_df.columns and len(work_df) > 0:
+            if "ped_max_exposure_dba" in work_df.columns and work_df["ped_max_exposure_dba"].null_count() < len(work_df):
+                max_idx = work_df["ped_max_exposure_dba"].arg_max()
+                if max_idx is not None:
+                    episode_id = int(work_df.row(max_idx, named=True).get("episode", 0))
+            if episode_id is None:
+                for ep in work_df["episode"].to_list():
+                    ep_name = f"episode_{int(ep):03d}"
+                    if (benchmark_dir / "episodes" / ep_name).is_dir() or any((p / "episodes" / ep_name).is_dir() for p in benchmark_dir.parents):
+                        episode_id = int(ep)
+                        break
+                if episode_id is None:
+                    episode_id = int(work_df["episode"][0])
         if episode_id is None:
             logger.warning("Cannot determine episode ID for animation.")
             return
@@ -1092,17 +1048,11 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         return gif_path
 
     def render_plotly(self, df: pl.DataFrame) -> str | list[str]:
-        """Return HTML snippet(s) embedding the animated GIF(s) in the report.
-
-        One snippet per GIF produced by ``render_seaborn`` (worst episode by
-        default, one per episode with ``per_episode: true``).
-        """
+        """Return HTML snippet(s) embedding the animated GIF(s) in the report."""
         work_df = self._prepared_df(df)
         if len(work_df) == 0 or compute_attenuations is None:
             return ""
 
-        # The render_seaborn call already saved the GIF(s) during the report build;
-        # we reference the files it produced (plots/<name>.gif).
         fmt = str(self.spec.options.get("format", "gif"))
         ext = "gif" if fmt in ("gif", "mp4") else ""
         if not ext:

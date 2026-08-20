@@ -74,3 +74,42 @@ def test_line_seaborn_empty_df_no_crash(tmp_path: pathlib.Path):
     out = tmp_path / "empty.png"
     LineRenderer(_spec(y="p_total_w")).render_seaborn(pl.DataFrame(), out)
     assert not out.exists() or out.stat().st_size == 0
+
+
+def test_line_error_band_clamped_at_zero():
+    # If std > mean (e.g. mean=10, std=25), y_low should be clamped at 0.0, not -15.0
+    df = pl.DataFrame(
+        {
+            "time_ns": [1e9, 2e9],
+            "p_total_w": [10.0, 10.0],
+            "phase_kind": ["linear", "linear"],
+            "std": [25.0, 25.0],
+        }
+    )
+    spec = _spec(y="p_total_w", error_y="std")
+    html = LineRenderer(spec).render_plotly(df)
+    assert html is not None
+    # Verify negative values are not in the lower band y coordinates
+    assert "-15" not in html
+
+
+def test_line_bin_x_aggregation():
+    # Multiple episodes with slightly jittered timestamps
+    df = pl.DataFrame(
+        {
+            "time_s": [0.039, 0.041, 0.139, 0.141],
+            "p_total_w": [40.0, 44.0, 50.0, 54.0],
+            "robot": ["jackal", "jackal", "jackal", "jackal"],
+        }
+    )
+    spec = PlotSpec(
+        id="t_bin",
+        type="line",
+        title="Binned Time",
+        data_key="time_s",
+        group_by=["robot"],
+        options={"y": "p_total_w", "aggregate": True, "bin_x": 0.1},
+    )
+    html = LineRenderer(spec).render_plotly(df)
+    assert html is not None
+    assert "toself" in html  # has confidence band from 2-sample std at each bin

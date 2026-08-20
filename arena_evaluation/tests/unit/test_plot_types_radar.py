@@ -963,3 +963,18 @@ def test_animation_renderer_plotly_mp4_embeds_gif_reference():
     renderer = AcousticFieldAnimationRenderer(_anim_spec(format="mp4"))
     html = renderer.render_plotly(_af_df())
     assert '<img src="plots/af_anim.gif"' in html
+
+
+def test_animation_renderer_seaborn_characterization_null_peds(monkeypatch, tmp_path):
+    bench = _make_episode(tmp_path, tf_gt=True)
+    _patch_grid(monkeypatch)
+    _patch_doors(monkeypatch)
+    seen = {}
+    _patch_animation(monkeypatch, seen)
+    out = tmp_path / "anim.png"
+    # Null ped_max_exposure_dba (characterization run without pedestrians)
+    df = _af_df().with_columns(pl.lit(None, dtype=pl.Float64).alias("ped_max_exposure_dba"))
+    renderer = AcousticFieldAnimationRenderer(_anim_spec(data_key="timeseries_char_dba"))
+    renderer.run_dir = bench
+    renderer.render_seaborn(df, out)
+    assert seen.get("out_path") == tmp_path / "anim.gif"
