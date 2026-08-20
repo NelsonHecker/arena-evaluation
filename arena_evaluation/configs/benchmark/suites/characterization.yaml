@@ -6,7 +6,7 @@ stages:
   - name: characterization
     map: map_empty
     robot: jackal
-    episodes: 3
+    episodes: 1
     tm_robots: characterization
     tm_obstacles: random
     config:

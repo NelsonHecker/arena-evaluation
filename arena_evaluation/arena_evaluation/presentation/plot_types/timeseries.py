@@ -78,7 +78,6 @@ class TimeseriesRenderer(BasePlotRenderer):
                     ))
 
         fig.update_layout(
-            title=self.spec.title,
             template="plotly_white",
             xaxis_title=self.format_label(x_col.replace("timeseries_", "").replace("_", " ").title(), x_col),
             legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),

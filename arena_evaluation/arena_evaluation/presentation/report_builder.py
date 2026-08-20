@@ -418,6 +418,10 @@ class ReportBuilder:
         Groups planner-first, then by the other varying identity columns.
         """
         group_cols = _default_summary_group_cols(df)
+        metric_cols = [c for c in ["success", "time_to_goal", "path_length", "collision_amount"] if c in df.columns and not df[c].is_null().all()]
+        needed = [c for c in [*group_cols, *metric_cols] if c in df.columns]
+        if needed:
+            df = df.select(needed)
         df = _labelled(df, group_cols)
 
         agg_exprs = []
@@ -469,9 +473,12 @@ class ReportBuilder:
         if not group_cols:
             group_cols = _default_summary_group_cols(df)
 
-        list_cols = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns and df.schema[c] == pl.List]
+        needed = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns]
+        list_cols = [c for c in needed if df.schema[c] == pl.List]
         if list_cols:
-            df = df.explode(list_cols)
+            df = df.select(needed).explode(list_cols)
+        else:
+            df = df.select(needed) if needed else df
         df = _labelled(df, group_cols)
 
         agg_exprs = []

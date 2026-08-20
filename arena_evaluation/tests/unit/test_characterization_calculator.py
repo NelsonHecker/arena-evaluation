@@ -83,3 +83,25 @@ def test_calculate_empty_returns_none_keys():
     )
     out = _calc().calculate(ep, {})
     assert all(v is None for v in out.values())
+
+
+def test_energy_intensity_speed_threshold_gating():
+    # When moving below 0.05 m/s, energy intensity should be None to prevent division singularities
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 1_000_000_000, 2_000_000_000],
+            "pos_x": [0.0, 0.01, 0.50],  # dt=1s -> v=0.01 m/s at t=1s, v=0.49 m/s at t=2s
+            "pos_y": [0.0, 0.0, 0.0],
+            "vel_linear": [0.0, 0.01, 0.49],
+            "total_power_w": [50.0, 50.0, 50.0],
+            "total_level_af_dba": [42.0, 42.0, 42.0],
+            "label": ["ramp_up_vx_0.50", "ramp_up_vx_0.50", "ramp_up_vx_0.50"],
+        }
+    )
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    # t=0: ds=0 -> None; t=1: speed=0.01 m/s < 0.05 m/s -> None (gated!); t=2: speed=0.49 m/s >= 0.05 -> valid float
+    assert out["timeseries_char_energy_intensity"][0] is None
+    assert out["timeseries_char_energy_intensity"][1] is None
+    assert out["timeseries_char_energy_intensity"][2] is not None
+

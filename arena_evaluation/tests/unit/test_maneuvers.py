@@ -51,15 +51,20 @@ def test_linear_sweep_coverage_up_to_2mps():
 def test_ramp_tests():
     phases = build_schedule()
     ramps_up = [p for p in phases if p.kind == PhaseKind.RAMP_UP and p.vx_target > 0.0]
-    ramps_back = [p for p in phases if p.kind == PhaseKind.RAMP_UP and p.vx_target < 0.0]
-    assert [p.ramp_s for p in ramps_up] == [0.5, 1.0, 2.0]
-    assert all(p.vx_target == VX_MAX for p in ramps_up)
-    # Ramps return the robot to its start by accelerating backward to -vx_max.
-    assert [p.ramp_s for p in ramps_back] == [0.5, 1.0, 2.0]
-    assert all(p.vx_target == -VX_MAX for p in ramps_back)
-    # Each ramp is followed by a settle at the apex.
+    ramps_down = [p for p in phases if p.kind == PhaseKind.RAMP_DOWN and p.vx_target > 0.0]
+    ramps_up_neg = [p for p in phases if p.kind == PhaseKind.RAMP_UP and p.vx_target < 0.0]
+    ramps_down_neg = [p for p in phases if p.kind == PhaseKind.RAMP_DOWN and p.vx_target < 0.0]
+
+    # Covers the linear envelope steps
+    targets = sorted(p.vx_target for p in ramps_up)
+    assert targets == [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    assert sorted(p.vx_target for p in ramps_down) == targets
+    assert sorted(p.vx_target for p in ramps_up_neg) == [-v for v in reversed(targets)]
+    assert sorted(p.vx_target for p in ramps_down_neg) == [-v for v in reversed(targets)]
+
+    # Settle at apex for each positive and negative step
     apexes = [p for p in phases if p.name.startswith("ramp_apex")]
-    assert len(apexes) == 3
+    assert len(apexes) == len(targets) * 2
     assert all(p.duration_s == 1.0 for p in apexes)
 
 

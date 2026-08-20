@@ -1293,12 +1293,15 @@ def _query_metrics_data(args: dict, bridge: EvalBridge) -> dict:
         return {"error": "No valid group_by or metric columns found",
                 "available_columns": df.columns}
 
+    needed = list(dict.fromkeys([*group_cols, *metric_cols, *([sort_by] if sort_by and sort_by in df.columns else [])]))
     list_cols = [
-        c for c in [*group_cols, *metric_cols]
+        c for c in needed
         if c in df.columns and df.schema[c] == pl.List
     ]
     if list_cols:
-        df = df.explode(list_cols)
+        df = df.select(needed).explode(list_cols)
+    else:
+        df = df.select(needed)
 
     agg = [pl.col(m).mean().alias(m) for m in metric_cols]
     result = df.group_by(group_cols).agg(agg).sort(group_cols)
@@ -1405,12 +1408,15 @@ def _compare_planners_frame(
     if group_by_stage and "stage" in df.columns:
         group_cols.append("stage")
 
+    needed = list(dict.fromkeys([*group_cols, *metric_cols]))
     list_cols = [
-        c for c in [*group_cols, *metric_cols]
+        c for c in needed
         if c in df.columns and df.schema[c] == pl.List
     ]
     if list_cols:
-        df = df.explode(list_cols)
+        df = df.select(needed).explode(list_cols)
+    else:
+        df = df.select(needed)
 
     agg = [pl.col(m).mean().alias(m) for m in metric_cols]
     agg += [pl.col(m).std().alias(f"{m}_std") for m in metric_cols]
@@ -1497,10 +1503,13 @@ def _find_top_n_frame(
 
     planner_col = "local_planner" if "local_planner" in df.columns else "planner"
 
-    list_cols = [c for c in [planner_col, *metrics]
+    needed = list(dict.fromkeys([planner_col, *metrics]))
+    list_cols = [c for c in needed
                  if c in df.columns and df.schema[c] == pl.List]
     if list_cols:
-        df = df.explode(list_cols)
+        df = df.select(needed).explode(list_cols)
+    else:
+        df = df.select(needed)
 
     agg = [pl.col(m).mean().alias(m) for m in metrics]
     result = df.group_by(planner_col).agg(agg)
@@ -1563,10 +1572,13 @@ def _aggregate_by_dimension(args: dict, bridge: EvalBridge) -> dict:
             if str(df[c].dtype).startswith(("Float", "Int"))
         ]
 
-    list_cols = [c for c in [dim, *metric_cols]
+    needed = list(dict.fromkeys([dim, *metric_cols]))
+    list_cols = [c for c in needed
                  if c in df.columns and df.schema[c] == pl.List]
     if list_cols:
-        df = df.explode(list_cols)
+        df = df.select(needed).explode(list_cols)
+    else:
+        df = df.select(needed)
 
     agg = [pl.col(m).mean().alias(m) for m in metric_cols]
     result = df.group_by(dim).agg(agg).sort(dim)

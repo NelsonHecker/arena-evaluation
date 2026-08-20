@@ -87,6 +87,10 @@ def test_report_builder_characterization_from_metrics():
             "timeseries_char_power_total_w": [[40.0, 60.0, 55.0]],
             "timeseries_char_phase_kind": [["idle", "linear", "linear"]],
             "timeseries_char_vx_target": [[0.0, 0.5, 1.0]],
+            # Extra list columns of differing length that would cause combinatorial
+            # explosion / OOM if unselected during summary table explode:
+            "timeseries_time_s": [[0.0, 0.1, 0.2, 0.3, 0.4]],
+            "timeseries_x": [[1.0, 1.1, 1.2, 1.3, 1.4]],
         })
         df.write_parquet(tmp_path / "combined_metrics.parquet")
 

@@ -50,7 +50,6 @@ def test_bar_plotly_happy_path_with_units():
     html = BarRenderer(_spec("bar"), units={"success": "%"}).render_plotly(_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Title bar" in html
     assert "Success [%]" in html
 
 
@@ -125,7 +124,6 @@ def test_box_plotly_happy_path_with_units():
     html = BoxRenderer(_spec("box"), units={"success": "%"}).render_plotly(_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Title box" in html
     assert "Success [%]" in html
 
 
@@ -188,7 +186,6 @@ def test_histogram_plotly_happy_path():
     html = HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_plotly(_hist_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Title histogram" in html
     assert "Count" in html
 
 
@@ -265,7 +262,6 @@ def test_violin_plotly_happy_path_with_units():
     html = ViolinRenderer(_spec("violin"), units={"success": "%"}).render_plotly(_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Title violin" in html
     assert "Success [%]" in html
 
 

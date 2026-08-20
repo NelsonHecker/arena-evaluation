@@ -89,7 +89,6 @@ class RadarRenderer(BasePlotRenderer):
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=True,
-            title=self.spec.title,
             template="plotly_white",
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )

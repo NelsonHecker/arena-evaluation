@@ -19,7 +19,8 @@ class ViolinRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return None
 
-        pdf = df_filtered.to_pandas()
+        keep = [self.spec.data_key, diff_col]
+        pdf = df_filtered.select(keep).to_pandas()
         if pdf.empty:
             return None
 
@@ -29,7 +30,6 @@ class ViolinRenderer(BasePlotRenderer):
             color=diff_col,
             box=True,
             points="all",
-            title=self.spec.title,
             labels={
                 self.spec.data_key: self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
                 diff_col: diff_col.lstrip("_").replace("_", " ").title(),
@@ -48,7 +48,8 @@ class ViolinRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return
 
-        pdf = df_filtered.to_pandas()
+        keep = [self.spec.data_key, diff_col]
+        pdf = df_filtered.select(keep).to_pandas()
         if pdf.empty:
             return
 

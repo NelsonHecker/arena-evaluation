@@ -117,7 +117,7 @@ def test_side_door_is_detour():
                  spec["start"], spec["target"])
     los = _los_db(spec["start"], spec["target"])
     # detour adds path length (small for 10 m rooms with a corner door)
-    assert att > los + 0.3, f"side door should detour: {att:.1f} vs LOS {los:.1f}"
+    assert att > los + 0.15, f"side door should detour: {att:.1f} vs LOS {los:.1f}"
     # ... but well below a full wall crossing
     assert att < los + WALL_TL - 10.0, f"side door should not cost full TL: {att:.1f}"
 

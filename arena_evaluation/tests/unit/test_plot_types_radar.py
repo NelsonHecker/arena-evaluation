@@ -54,7 +54,6 @@ def test_radar_plotly_happy_path():
     html = RadarRenderer(_radar_spec()).render_plotly(_radar_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Radar Overview" in html
     assert "scatterpolar" in html
 
 

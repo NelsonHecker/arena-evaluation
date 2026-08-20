@@ -81,7 +81,6 @@ def test_scatter_plotly_happy_path_with_units():
     html = ScatterRenderer(_scatter_spec(), units={"time_to_goal": "s"}).render_plotly(_scatter_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "T2G vs Length" in html
     assert "Time To Goal [s]" in html      # unit-suffixed axis title
     assert "Path Length" in html
 
@@ -129,7 +128,7 @@ def test_scatter_plotly_list_x_column_is_exploded():
         },
     )
     html = ScatterRenderer(_scatter_spec()).render_plotly(df)
-    assert html is not None and "T2G vs Length" in html
+    assert html is not None and "dwb" in html
 
 
 def test_scatter_plotly_list_y_column_is_exploded():
@@ -146,7 +145,7 @@ def test_scatter_plotly_list_y_column_is_exploded():
         },
     )
     html = ScatterRenderer(_scatter_spec()).render_plotly(df)
-    assert html is not None and "T2G vs Length" in html
+    assert html is not None and "dwb" in html
 
 
 def test_scatter_plotly_both_list_columns_exploded():
@@ -163,7 +162,7 @@ def test_scatter_plotly_both_list_columns_exploded():
         },
     )
     html = ScatterRenderer(_scatter_spec()).render_plotly(df)
-    assert html is not None and "T2G vs Length" in html
+    assert html is not None and "dwb" in html
 
 
 def test_scatter_plotly_all_empty_lists_render_empty_figure():
@@ -297,7 +296,6 @@ def test_timeseries_plotly_happy_path_with_units():
         _ts_obj_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Power over Time" in html
     assert "Time S [s]" in html                  # timeseries_ prefix stripped + unit
     assert "dwb - Ep 1" in html                  # per-episode legend groups
 

@@ -55,7 +55,7 @@ def test_render_bar_returns_html_fragment():
     html = PlotlyRenderer().render(_spec("bar"), _df())
     assert isinstance(html, str)
     assert html.startswith("<div")
-    assert "Title bar" in html
+    assert "plotly" in html.lower() or "data" in html
 
 
 def test_render_unknown_type_returns_none():

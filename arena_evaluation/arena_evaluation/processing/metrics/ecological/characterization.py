@@ -217,8 +217,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
         t_s = (out["time_ns"].cast(pl.Float64) - out["time_ns"].cast(pl.Float64).min()) / 1e9
         ds = out["_ds"].fill_null(0.0)
         dt = out["_dt"].fill_null(0.0)
+        speed = pl.when(dt > 1e-6).then(ds / dt).otherwise(0.0)
         out = out.with_columns(
-            pl.when(ds > 1e-6).then(out["_p_total"] * dt / ds).otherwise(None).alias("_e_per_m")
+            pl.when((ds > 1e-6) & (speed >= 0.05)).then(out["_p_total"] * dt / ds).otherwise(None).alias("_e_per_m")
         )
 
         rows = {

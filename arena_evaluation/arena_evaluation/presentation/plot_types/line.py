@@ -159,12 +159,11 @@ class LineRenderer(BasePlotRenderer):
                 fig.add_trace(go.Scatter(x=x, y=y, mode=mode, name=label, line=dict(color=color)))
 
         fig.update_layout(
-            title=self.spec.title,
             template="plotly_white",
             xaxis_title="Time [s]" if time_to_s else self.format_label(x_col.replace("_", " ").title(), x_col),
             yaxis_title=self.format_label(y_col.replace("_", " ").title(), y_col),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            margin=dict(t=60),
+            margin=dict(t=30),
         )
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 

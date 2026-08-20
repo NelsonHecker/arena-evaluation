@@ -42,7 +42,6 @@ class BarRenderer(BasePlotRenderer):
                 grouped,
                 x=diff_col,
                 y=metrics,
-                title=self.spec.title,
                 template="plotly_white",
                 barmode="stack",
                 labels={"value": "Percentage (%)", "variable": "Component", diff_col: diff_col.lstrip("_").replace("_", " ").title()}
@@ -73,7 +72,6 @@ class BarRenderer(BasePlotRenderer):
                 color=diff_col,
                 error_y="std",
                 template="plotly_white",
-                title=self.spec.title,
                 labels={
                     "mean": self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
                     diff_col: diff_col.lstrip("_").replace("_", " ").title()
@@ -103,7 +101,8 @@ class BarRenderer(BasePlotRenderer):
 
         df_filtered = self._explode_needed(df_filtered, diff_col)
 
-        pdf = df_filtered.to_pandas()
+        keep = [c for c in [self.spec.data_key, diff_col] if c in df_filtered.columns]
+        pdf = df_filtered.select(keep).to_pandas()
         if pdf.empty:
             return
 

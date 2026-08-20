@@ -45,7 +45,6 @@ class HeatmapRenderer(BasePlotRenderer):
                 color_continuous_scale="RdBu",
                 color_continuous_midpoint=0,
                 range_color=[-1, 1],
-                title=self.spec.title,
                 labels=dict(color="Correlation"),
                 aspect="auto"
             )
@@ -85,7 +84,6 @@ class HeatmapRenderer(BasePlotRenderer):
                 x=pivot_df.columns.tolist(),
                 y=pivot_df.index.tolist(),
                 color_continuous_scale="Viridis",
-                title=self.spec.title,
                 labels=dict(color=self.format_label(metric.replace("_", " ").title(), metric), x=x_col.replace("_", " ").title(), y=y_col.replace("_", " ").title()),
                 aspect="auto"
             )
