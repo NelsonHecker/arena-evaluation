@@ -26,6 +26,17 @@ if typing.TYPE_CHECKING:
 _BENCH_TTL_S = 365 * 86400
 
 
+def _stem(asset_type: str) -> str:
+    """`suites` -> `suite`: the filename a directory bundle stores its config under."""
+    return asset_type.removesuffix('s')
+
+
+def _config_file(path: Path, asset_type: str) -> Path:
+    """The yaml to read. A local resolver hands back the file itself, a bucket hands back
+    the bundle directory holding it, and load() has to accept either."""
+    return path / f'{_stem(asset_type)}.yaml' if path.is_dir() else path
+
+
 class SuiteIdentifier(AssetIdentifier["Suite"]):
     _asset_type = 'suites'
 
@@ -39,7 +50,7 @@ class SuiteIdentifier(AssetIdentifier["Suite"]):
         del kwargs
         from .config import Suite
 
-        return Suite.parse(self.name, yaml.safe_load(path.read_text()))
+        return Suite.parse(self.name, yaml.safe_load(_config_file(path, self._asset_type).read_text()))
 
 
 class ContestIdentifier(AssetIdentifier["Contest"]):
@@ -55,7 +66,7 @@ class ContestIdentifier(AssetIdentifier["Contest"]):
         del kwargs
         from .config import Contest
 
-        return Contest.parse(self.name, yaml.safe_load(path.read_text()))
+        return Contest.parse(self.name, yaml.safe_load(_config_file(path, self._asset_type).read_text()))
 
 
 class ManifestIdentifier(AssetIdentifier[VizManifest]):
@@ -69,7 +80,7 @@ class ManifestIdentifier(AssetIdentifier[VizManifest]):
 
     def load(self, path: Path, /, **kwargs: object) -> VizManifest:
         del kwargs
-        return VizManifest.load(path)
+        return VizManifest.load(_config_file(path, self._asset_type))
 
 
 class ConfigPathResolver(SimplePathResolver):
@@ -78,7 +89,7 @@ class ConfigPathResolver(SimplePathResolver):
     async def resolve(self, identifier: AssetIdentifier) -> Path | None:
         if identifier in self._cache:
             return self._cache[identifier]
-        kind = self._asset_type.removesuffix('s')
+        kind = _stem(self._asset_type)
         stem = self.path / identifier.relpath()
         flat = stem.with_suffix('.yaml')
         if flat.is_file():
@@ -92,7 +103,7 @@ class ConfigPathResolver(SimplePathResolver):
 
     def listall(self, **kwargs: object) -> Iterator[AssetIdentifier]:
         del kwargs
-        kind = self._asset_type.removesuffix('s')
+        kind = _stem(self._asset_type)
         source = self.path / self._asset_type
         if not source.is_dir():
             return
@@ -112,7 +123,7 @@ def _bench_dirs() -> Iterator[Path]:
 
 def _register(cls: type[AssetIdentifier]) -> None:
     cls.use(*(ConfigPathResolver(cls, d) for d in _bench_dirs()))
-    cls.use(*NetResolver.all(cls, providers=BENCHMARK_PROVIDERS, formats=(), ttl=_BENCH_TTL_S))
+    cls.use(*NetResolver.all(cls, providers=BENCHMARK_PROVIDERS, formats=(), ttl=_BENCH_TTL_S, annotated=False, list_prefix=cls._asset_type))
     share = share_dir()
     if share is not None:
         cls.use(FallbackResolver(cls, share / 'configs' / 'benchmark'))
