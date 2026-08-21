@@ -26,9 +26,9 @@ def test_schedule_structure():
     phases = build_schedule()
     assert phases[0].kind == PhaseKind.IDLE
     assert phases[-1].kind == PhaseKind.IDLE
-    # Idle blocks at start, middle(s), and end.
+    # Baseline standstill blocks at start and end.
     idle_blocks = [p for p in phases if p.kind == PhaseKind.IDLE and p.duration_s == IDLE_DURATION_S]
-    assert len(idle_blocks) == 4
+    assert len(idle_blocks) == 2
     assert all(p.duration_s == IDLE_DURATION_S for p in idle_blocks)
 
 
@@ -93,8 +93,9 @@ def test_classify_cmd_point():
     assert classify_cmd_point(0.0, 0.0) == (PhaseKind.IDLE, 0.0, 0.0)
     assert classify_cmd_point(1.5, 0.0) == (PhaseKind.LINEAR, 1.5, 0.0)
     assert classify_cmd_point(0.0, -1.0) == (PhaseKind.ANGULAR, 0.0, -1.0)
-    # Angular dominates linear
-    assert classify_cmd_point(0.5, 2.0)[0] == PhaseKind.ANGULAR
+    # Combined linear + angular classifies as arc
+    assert classify_cmd_point(0.5, 2.0) == (PhaseKind.ARC, 0.5, 2.0)
+    assert classify_cmd_point(0.0, 2.0)[0] == PhaseKind.ANGULAR
 
 
 def test_resolve_envelope_from_caps(tmp_path: pathlib.Path):
@@ -112,13 +113,23 @@ def test_resolve_envelope_from_caps(tmp_path: pathlib.Path):
         "      max: 4.0\n"
     )
     env = resolve_envelope("some_robot", caps_dir=tmp_path)
-    assert env == {"vx_max": 3.0, "wz_max": 4.0}
+    assert env == {
+        "vx_max": 3.0,
+        "vy_max": 0.0,
+        "wz_max": 4.0,
+        "is_holonomic": False,
+    }
 
 
 def test_resolve_envelope_fallback(tmp_path: pathlib.Path):
     # Unknown robot with no caps file -> generic defaults.
     env = resolve_envelope("ghost_robot", caps_dir=tmp_path)
-    assert env == {"vx_max": VX_MAX, "wz_max": 2.5}
+    assert env == {
+        "vx_max": VX_MAX,
+        "vy_max": 0.0,
+        "wz_max": 2.5,
+        "is_holonomic": False,
+    }
 
 
 def test_schedule_uses_resolved_envelope(tmp_path: pathlib.Path):

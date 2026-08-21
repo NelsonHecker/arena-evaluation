@@ -35,17 +35,8 @@ from arena_evaluation.processing.acoustics.door_map import (
 
 
 def _remap_pathlib(monkeypatch, tmp_path: pathlib.Path) -> None:
-    """Point door_map.pathlib.Path at tmp_path for the absolute ws_root prefixes."""
-    real_path = pathlib.Path
-
-    def _patched(s):
-        s = str(s)
-        for prefix in ("/opt/arena_ws", "/home/nelson/arena_ws"):
-            if s.startswith(prefix):
-                return real_path(str(tmp_path) + s[len(prefix):])
-        return real_path(s)
-
-    monkeypatch.setattr(dm, "pathlib", types.SimpleNamespace(Path=_patched))
+    """Point ARENA_DIR at tmp_path / src / Arena for ws_root discovery."""
+    monkeypatch.setenv("ARENA_DIR", str(tmp_path / "src" / "Arena"))
 
 
 def _install_fake_ament(monkeypatch, tmp_path: pathlib.Path, *, raise_error: bool = False) -> None:

@@ -1,0 +1,13 @@
+*/**/*.csv
+*/**/*.zip
+.vscode
+test.ipynb
+*/**/params.yaml
+/**/__pycache__
+/data/**
+!/data/.gitkeep
+/plots/**
+!/plots/.gitkeep
+log
+build
+install

@@ -180,7 +180,8 @@ def test_running_processes_truncates_command(monkeypatch):
 # find_runner_pid
 # ---------------------------------------------------------------------------
 
-def test_find_runner_pid_none():
+def test_find_runner_pid_none(monkeypatch):
+    monkeypatch.setattr(debug_mod, "_ps_lines", lambda: [])
     assert debug_mod.find_runner_pid() is None
 
 

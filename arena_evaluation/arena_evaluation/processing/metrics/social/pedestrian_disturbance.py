@@ -112,6 +112,17 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
                 if not np.isnan(trips) and not np.isinf(trips):
                     round_trips += max(0, int(np.round(trips)))
 
+            # Standalone geometric lateral deflection against straight-line start-to-end vector
+            p_start, p_end = arr[0], arr[-1]
+            seg_vec = p_end - p_start
+            seg_len = float(np.hypot(seg_vec[0], seg_vec[1]))
+            if seg_len > 0.5:
+                u_vec = seg_vec / seg_len
+                # Cross-product magnitude gives perpendicular distance in 2D
+                rel_pos = arr - p_start
+                lateral_dists = np.abs(rel_pos[:, 0] * u_vec[1] - rel_pos[:, 1] * u_vec[0])
+                total_deflection += float(np.mean(lateral_dists))
+
         # Velocity delay: compare actual mean speed to baseline desired speed (~1.2 m/s)
         time_ns = episode.data["time_ns"].to_numpy() if "time_ns" in episode.data.columns else None
         avg_speed = 0.0
