@@ -77,7 +77,7 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
             pts = [
                 (float(item[0]), float(item[1]))
                 for item in arr
-                if not np.isnan(item[0]) and not np.isnan(item[1])
+                if np.isfinite(item[0]) and np.isfinite(item[1]) and abs(item[0]) < 1e6 and abs(item[1]) < 1e6
             ]
 
             for agent_idx, (px, py) in enumerate(pts):
@@ -86,7 +86,11 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
                 agent_paths[agent_idx].append((px, py))
 
         if not agent_paths:
-            return {k: None for k in self.output_keys()}
+            return {
+                "ped_path_deflection_m": 0.0,
+                "ped_velocity_delay_ratio": 0.0,
+                "ped_round_trips_completed": 0,
+            }
 
         round_trips = 0
         total_deflection = 0.0
@@ -100,28 +104,33 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
             dx = np.diff(arr[:, 0])
             dy = np.diff(arr[:, 1])
             step_dists = np.hypot(dx, dy)
-            total_dist = float(np.sum(step_dists))
+            finite_steps = step_dists[np.isfinite(step_dists)]
+            total_dist = float(np.sum(finite_steps)) if len(finite_steps) > 0 else 0.0
             
             diffs = arr - arr[0]
             dists_from_start = np.hypot(diffs[:, 0], diffs[:, 1])
-            max_disp = float(np.max(dists_from_start))
+            finite_disp = dists_from_start[np.isfinite(dists_from_start)]
+            max_disp = float(np.max(finite_disp)) if len(finite_disp) > 0 else 0.0
             
-            if not np.isnan(max_disp) and not np.isinf(max_disp) and max_disp > 0.5:
-                # Avoid 2.0 * max_disp which can overflow if max_disp is near max float64
+            if np.isfinite(max_disp) and max_disp > 0.5:
                 trips = (total_dist / 2.0) / max_disp
-                if not np.isnan(trips) and not np.isinf(trips):
+                if np.isfinite(trips):
                     round_trips += max(0, int(np.round(trips)))
 
             # Standalone geometric lateral deflection against straight-line start-to-end vector
             p_start, p_end = arr[0], arr[-1]
             seg_vec = p_end - p_start
             seg_len = float(np.hypot(seg_vec[0], seg_vec[1]))
-            if seg_len > 0.5:
+            if np.isfinite(seg_len) and seg_len > 0.5:
                 u_vec = seg_vec / seg_len
                 # Cross-product magnitude gives perpendicular distance in 2D
                 rel_pos = arr - p_start
                 lateral_dists = np.abs(rel_pos[:, 0] * u_vec[1] - rel_pos[:, 1] * u_vec[0])
-                total_deflection += float(np.mean(lateral_dists))
+                finite_lat = lateral_dists[np.isfinite(lateral_dists)]
+                if len(finite_lat) > 0:
+                    mean_def = float(np.mean(finite_lat))
+                    if np.isfinite(mean_def):
+                        total_deflection += mean_def
 
         # Velocity delay: compare actual mean speed to baseline desired speed (~1.2 m/s)
         time_ns = episode.data["time_ns"].to_numpy() if "time_ns" in episode.data.columns else None
@@ -133,16 +142,24 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
                 for pts in agent_paths.values():
                     if len(pts) > 1:
                         p_arr = np.array(pts)
-                        all_dists.append(np.sum(np.hypot(np.diff(p_arr[:, 0]), np.diff(p_arr[:, 1]))))
+                        step_dists = np.hypot(np.diff(p_arr[:, 0]), np.diff(p_arr[:, 1]))
+                        finite_d = step_dists[np.isfinite(step_dists)]
+                        if len(finite_d) > 0:
+                            all_dists.append(float(np.sum(finite_d)))
                 if all_dists:
                     avg_dist = float(np.mean(all_dists))
-                    avg_speed = avg_dist / dt_s
+                    if np.isfinite(avg_dist):
+                        avg_speed = avg_dist / dt_s
 
         desired_speed = 1.2  # Nominal pedsim desired speed
-        velocity_delay_ratio = max(0.0, float(1.0 - (avg_speed / desired_speed))) if avg_speed > 0 else 0.0
+        velocity_delay_ratio = max(0.0, float(1.0 - (avg_speed / desired_speed))) if avg_speed > 0 and np.isfinite(avg_speed) else 0.0
+
+        deflection_val = round(total_deflection / num_agents, 3) if num_agents > 0 and np.isfinite(total_deflection) else 0.0
+        delay_val = round(velocity_delay_ratio, 3) if np.isfinite(velocity_delay_ratio) else 0.0
+        trips_val = round_trips / num_agents if num_agents > 0 and np.isfinite(round_trips) else 0
 
         return {
-            "ped_path_deflection_m": round(total_deflection / num_agents, 3) if num_agents > 0 else 0.0,
-            "ped_velocity_delay_ratio": round(velocity_delay_ratio, 3),
-            "ped_round_trips_completed": round_trips / num_agents if num_agents > 0 else 0,
+            "ped_path_deflection_m": deflection_val,
+            "ped_velocity_delay_ratio": delay_val,
+            "ped_round_trips_completed": trips_val,
         }
