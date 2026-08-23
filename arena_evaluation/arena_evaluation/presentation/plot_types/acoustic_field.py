@@ -589,7 +589,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
             rx_m = row.get("pos_x_gt")
             ry_m = row.get("pos_y_gt")
-            source_dba = row.get("source_dba", _FIELD_VMIN_DBA)
+            source_dba = row.get("total_level_af_dba") or row.get("source_dba") or _FIELD_VMIN_DBA
             time_ns = int(row.get("time_ns", 0))
 
             if rx_m is None or ry_m is None or np.isnan(rx_m) or np.isnan(ry_m):
@@ -855,14 +855,11 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            if fmt == "gif":
-                ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
-            elif fmt == "mp4":
-                ani.save(str(out_path), writer="ffmpeg", fps=fps, dpi=dpi)
-            elif fmt == "frames":
-                frames_dir = out_path.with_suffix("")
-                frames_dir.mkdir(parents=True, exist_ok=True)
+        # ── frames export: render each frame independently, no FuncAnimation needed ──
+        if fmt == "frames":
+            frames_dir = out_path.with_suffix("") if out_path.suffix else out_path.parent / (out_path.name + "_frames")
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            try:
                 for fi, (orig_idx, field_data) in enumerate(valid):
                     frame_path = frames_dir / f"frame_{fi:04d}.png"
                     field_dba, _, _, open_set, source_dba = field_data
@@ -870,10 +867,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
                     wall_or_closed = (mask_grid == 1) & ~open_dm
                     rg = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
                     rg = np.flipud(rg)
+
                     fig_frame, ax_frame = plt.subplots(figsize=(5, 4))
                     ax_frame.set_facecolor("black")
-                    ax_frame.imshow(rg, cmap="inferno", origin="upper", extent=extent,
-                                    vmin=vmin, vmax=vmax)
+                    ax_frame.grid(False)
+                    im_frame = ax_frame.imshow(rg, cmap="inferno", origin="upper", extent=extent,
+                                               vmin=vmin, vmax=vmax)
+                    plt.colorbar(im_frame, ax=ax_frame, label="dBA", fraction=0.046, pad=0.04)
+
                     ax_frame.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                                      linewidths=0.3, alpha=0.25)
 
@@ -881,14 +882,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
                     row = rows[min(row_idx, total_rows - 1)]
                     rx_frame = float(row.get("pos_x_gt", 0) or 0)
                     ry_frame = float(row.get("pos_y_gt", 0) or 0)
-                    ax_frame.plot(rx_frame, ry_frame, "g*", markersize=8)
+                    t_s = float(row.get("time_ns", 0)) / 1e9
+                    ax_frame.plot(rx_frame, ry_frame, "g*", markersize=8, label="Robot")
 
                     peds = peds_per_frame[fi]
                     if peds:
-                        px = [p[0] for p in peds if len(p) >= 2]
-                        py = [p[1] for p in peds if len(p) >= 2]
-                        if px:
-                            ax_frame.plot(px, py, "ro", markersize=4)
+                        px_f = [p[0] for p in peds if len(p) >= 2]
+                        py_f = [p[1] for p in peds if len(p) >= 2]
+                        if px_f:
+                            ax_frame.plot(px_f, py_f, "ro", markersize=4, label="Peds")
 
                     if show_doors and door_mask_all.any():
                         ax_frame.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5],
@@ -896,19 +898,50 @@ class AcousticFieldRenderer(BasePlotRenderer):
                         if open_dm.any():
                             ax_frame.contour(cx, cy, open_dm.astype(np.uint8), levels=[0.5],
                                              colors=["#00ff00"], linewidths=2.0, alpha=0.9)
-                    ax_frame.set_title(f"Frame {fi}", fontsize=9)
+
+                    is_collision = collision_per_frame[fi]
+                    collision_label = "  COLLISION!" if is_collision else ""
+                    ax_frame.set_title(
+                        f"t={t_s:.1f}s | src={source_dba:.0f} dBA | {len(open_set)} doors open{collision_label}",
+                        fontsize=8,
+                    )
+                    ax_frame.set_xlabel("X (m)", fontsize=7)
+                    ax_frame.set_ylabel("Y (m)", fontsize=7)
+                    ax_frame.tick_params(labelsize=6)
+                    fig_frame.tight_layout()
                     fig_frame.savefig(frame_path, dpi=dpi, bbox_inches="tight")
                     plt.close(fig_frame)
-                logger.info("Saved %d frames to %s", len(valid), frames_dir)
+
                 plt.close(fig)
+                logger.info("Saved %d frames to %s", len(valid), frames_dir)
                 return frames_dir
+            except Exception as e:
+                logger.warning("Failed to save frames: %s", e)
+                plt.close(fig)
+                return None
+
+        # ── gif / mp4: build FuncAnimation and save ──
+        ani = animation.FuncAnimation(
+            fig, update, frames=list(enumerate(valid)), interval=1000 // fps, blit=True
+        )
+
+        try:
+            if fmt == "gif":
+                ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
+            elif fmt == "mp4":
+                ani.save(str(out_path), writer="ffmpeg", fps=fps, dpi=dpi)
             else:
+                import sys
+                sys.stderr.write(f"Unknown format '{fmt}', falling back to gif.\n")
                 logger.warning("Unknown format %r, falling back to gif.", fmt)
                 ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
         except Exception as e:
+            import sys
+            sys.stderr.write(f"Failed to save animation: {e}\n")
             logger.warning("Failed to save animation: %s", e)
             plt.close(fig)
             return None
+
 
         plt.close(fig)
         logger.info("Animation saved to %s (%d frames, %d fps)", out_path, len(valid), fps)

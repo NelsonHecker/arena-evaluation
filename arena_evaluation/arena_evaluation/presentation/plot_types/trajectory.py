@@ -19,6 +19,50 @@ class TrajectoryRenderer(BasePlotRenderer):
     def _load_map_image(self, map_name: str, run_dir: pathlib.Path | None = None):
         return MapRegistry.get_map(map_name, run_dir=run_dir)
 
+    @staticmethod
+    def _extract_start_goal(r: dict) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
+        s_raw = r.get("start") or r.get("start_pos")
+        g_raw = r.get("goal") or r.get("goal_pos")
+        
+        s_pt = None
+        g_pt = None
+        
+        if s_raw is not None and isinstance(s_raw, (list, tuple, np.ndarray)) and len(s_raw) >= 2:
+            try:
+                s_pt = (float(s_raw[0]), float(s_raw[1]))
+            except (ValueError, TypeError):
+                pass
+
+        if g_raw is not None and isinstance(g_raw, (list, tuple, np.ndarray)) and len(g_raw) >= 2:
+            try:
+                g_pt = (float(g_raw[0]), float(g_raw[1]))
+            except (ValueError, TypeError):
+                pass
+
+        path_val = r.get("path")
+        if (s_pt is None or g_pt is None) and path_val is not None and len(path_val) > 0:
+            flat_pts = []
+            try:
+                if isinstance(path_val[0], (list, tuple, np.ndarray)) and len(path_val[0]) > 0 and isinstance(path_val[0][0], (list, tuple, np.ndarray)):
+                    for sub in path_val:
+                        for pt in sub:
+                            if len(pt) >= 2:
+                                flat_pts.append((float(pt[0]), float(pt[1])))
+                else:
+                    for pt in path_val:
+                        if isinstance(pt, (list, tuple, np.ndarray)) and len(pt) >= 2:
+                            flat_pts.append((float(pt[0]), float(pt[1])))
+            except Exception:
+                pass
+
+            if flat_pts:
+                if s_pt is None:
+                    s_pt = flat_pts[0]
+                if g_pt is None:
+                    g_pt = flat_pts[-1]
+
+        return s_pt, g_pt
+
     def _render_single_plot(self, pdf, title_suffix: str, map_name: str | None, run_dir: pathlib.Path | None = None) -> str:
         fig = go.Figure()
         diff_col = self.spec.differentiate or "planner"
@@ -27,14 +71,22 @@ class TrajectoryRenderer(BasePlotRenderer):
         if self.spec.options.get("show_map", True) and map_name:
             map_meta = self._load_map_image(map_name, run_dir=run_dir)
             
-        planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
+        # Separate evaluated dynamic episodes from reference baseline episodes
+        if "is_reference" in pdf.columns:
+            pdf_eval = pdf[~pdf["is_reference"].fillna(False)]
+            pdf_ref = pdf[pdf["is_reference"].fillna(False)]
+        else:
+            pdf_eval = pdf
+            pdf_ref = pdf.iloc[0:0]
+
+        planners = pdf_eval[diff_col].unique() if diff_col in pdf_eval.columns else ["unknown"]
         seen_planners = set()
         
         for planner in planners:
-            if diff_col in pdf.columns:
-                planner_df = pdf[pdf[diff_col] == planner]
+            if diff_col in pdf_eval.columns:
+                planner_df = pdf_eval[pdf_eval[diff_col] == planner]
             else:
-                planner_df = pdf
+                planner_df = pdf_eval
                 
             if "episode" in planner_df.columns:
                 planner_df = planner_df.sort_values("episode")
@@ -119,7 +171,10 @@ class TrajectoryRenderer(BasePlotRenderer):
                             starts_y_by_agent[k].append(path_arr[first_idx, 1])
                             starts_idx_by_agent[k].append(current_len + first_idx)
                             
-                            if is_collision:
+                            is_success = (row.get("result") in ("SUCCESS", "success", "reached", "goal_reached")) or bool(row.get("success"))
+                            is_coll = (row.get("result") in ("COLLISION", "collision", "CRASH")) or ((row.get("collision_amount") or 0) > 0)
+                            
+                            if is_coll:
                                 col_x_by_agent[k].append(path_arr[last_idx, 0])
                                 col_y_by_agent[k].append(path_arr[last_idx, 1])
                                 col_idx_by_agent[k].append(current_len + last_idx)
@@ -128,9 +183,12 @@ class TrajectoryRenderer(BasePlotRenderer):
                                 goals_y_by_agent[k].append(path_arr[last_idx, 1])
                                 goals_idx_by_agent[k].append(current_len + last_idx)
                                 
-                    all_x_by_agent[k].extend(path_arr[:, 0])
-                    all_y_by_agent[k].extend(path_arr[:, 1])
-                    
+                    if len(all_x_by_agent[k]) > 0:
+                        all_x_by_agent[k].append(None)
+                        all_y_by_agent[k].append(None)
+                    all_x_by_agent[k].extend(path_arr[:, 0].tolist())
+                    all_y_by_agent[k].extend(path_arr[:, 1].tolist())
+
             palette = get_color_palette()
             planner_idx = list(planners).index(planner) if planner in planners else 0
             planner_color = palette[planner_idx % len(palette)]
@@ -138,23 +196,6 @@ class TrajectoryRenderer(BasePlotRenderer):
             for k in range(len(all_x_by_agent)):
                 if not all_x_by_agent[k]:
                     continue
-                    
-                x_arr = np.array(all_x_by_agent[k], dtype=float)
-                y_arr = np.array(all_y_by_agent[k], dtype=float)
-                
-                dists = np.sqrt(np.diff(x_arr)**2 + np.diff(y_arr)**2)
-                jumps = np.where((dists > 3.0) & ~np.isnan(dists))[0]
-                split_indices = jumps + 1
-                
-                final_x = x_arr.copy()
-                final_y = y_arr.copy()
-                if len(split_indices) > 0:
-                    final_x[split_indices] = np.nan
-                    final_y[split_indices] = np.nan
-                    
-                final_x = final_x.tolist()
-                final_y = final_y.tolist()
-                
                 if len(all_x_by_agent) > 1:
                     trace_name = f"{planner} - Agent {k}"
                     legendgroup = planner
@@ -168,30 +209,40 @@ class TrajectoryRenderer(BasePlotRenderer):
                     seen_planners.add(planner)
                     opacity = 0.8
                 
-                fig.add_trace(
-                    go.Scatter(
-                        x=final_x, y=final_y,
-                        mode='lines',
-                        name=trace_name,
-                        legendgroup=legendgroup,
-                        showlegend=showlegend,
-                        opacity=opacity,
-                        line=dict(color=planner_color),
-                        hovertemplate=f"<b>{{planner}}</b><br>{{trace_name}}<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>"
-                    )
-                )
+                customdata = []
+                idx_counter = 0
+                for val in all_x_by_agent[k]:
+                    if val is None:
+                        customdata.append(idx_counter)
+                        idx_counter += 1
+                    else:
+                        customdata.append(idx_counter)
+                        idx_counter += 1
+                
+                fig.add_trace(go.Scatter(
+                    x=all_x_by_agent[k],
+                    y=all_y_by_agent[k],
+                    mode='lines',
+                    name=trace_name,
+                    legendgroup=legendgroup,
+                    showlegend=showlegend,
+                    line=dict(color=planner_color),
+                    opacity=opacity,
+                    hovertemplate=f"<b>{planner}</b><br>{trace_name}<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                    customdata=customdata
+                ))
                 
                 if overlay_markers:
                     if starts_x_by_agent[k]:
                         fig.add_trace(go.Scatter(
                             x=starts_x_by_agent[k], y=starts_y_by_agent[k],
                             mode='markers',
-                            marker=dict(symbol='circle', size=8, color='#00bfb2'),
+                            marker=dict(symbol='circle', size=8, color='#10b981', line=dict(width=1, color='#065f46')),
                             name=f"{planner} Starts",
                             legendgroup=planner,
                             showlegend=False,
-                            opacity=0.8,
-                            hovertemplate=f"<b>{{planner}}</b><br>Start<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                            opacity=0.9,
+                            hovertemplate=f"<b>{planner}</b><br>Start<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
                             customdata=starts_idx_by_agent[k]
                         ))
                     if goals_x_by_agent[k]:
@@ -203,7 +254,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                             legendgroup=planner,
                             showlegend=False,
                             opacity=0.9,
-                            hovertemplate=f"<b>{{planner}}</b><br>Goal<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                            hovertemplate=f"<b>{planner}</b><br>Goal<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
                             customdata=goals_idx_by_agent[k]
                         ))
                     if col_x_by_agent[k]:
@@ -215,9 +266,144 @@ class TrajectoryRenderer(BasePlotRenderer):
                             legendgroup=planner,
                             showlegend=False,
                             opacity=1.0,
-                            hovertemplate=f"<b>{{planner}}</b><br>Collision<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                            hovertemplate=f"<b>{planner}</b><br>Collision<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
                             customdata=col_idx_by_agent[k]
                         ))
+
+        # 1. Overlay Theta* Synthetic Demonstration Baseline Path
+        if self.spec.options.get("overlay_theta_star", False) or self.spec.options.get("show_theta_star", False) or (self.spec.data_key and "theta" in self.spec.data_key):
+            try:
+                from ...processing.path.theta_star import compute_theta_star_for_episode
+                theta_rendered = False
+                seen_theta_endpoints = set()
+                # Iterate through evaluated dynamic episodes to render matching Theta* baseline for each stage
+                for _, r in pdf_eval.iterrows():
+                    m_name = map_name or r.get("map")
+                    s_pt, g_pt = self._extract_start_goal(r.to_dict())
+
+                    if m_name and s_pt is not None and g_pt is not None:
+                        ep_key = (str(m_name), round(s_pt[0], 2), round(s_pt[1], 2), round(g_pt[0], 2), round(g_pt[1], 2))
+                        if ep_key in seen_theta_endpoints:
+                            continue
+                        seen_theta_endpoints.add(ep_key)
+
+                        try:
+                            res = compute_theta_star_for_episode(str(m_name), s_pt, g_pt, run_dir=str(run_dir) if run_dir else None)
+                            if res and res.success and len(res.path_x) > 0:
+                                fig.add_trace(go.Scatter(
+                                    x=res.path_x.tolist(),
+                                    y=res.path_y.tolist(),
+                                    mode='lines+markers',
+                                    name='Theta* Optimal Demonstration',
+                                    legendgroup='theta_star',
+                                    line=dict(color='#d97706', width=3, dash='dash'),
+                                    marker=dict(size=7, symbol='diamond', color='#d97706'),
+                                    opacity=0.95,
+                                    hovertemplate="<b>Theta* Optimal Path</b><br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>",
+                                    showlegend=not theta_rendered
+                                ))
+                                theta_rendered = True
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # 2. Overlay Pedestrian Paths (Human Interaction Flows)
+        if self.spec.options.get("overlay_pedestrians", False) or self.spec.options.get("show_peds", False) or (self.spec.data_key and "ped" in self.spec.data_key):
+            peds_rendered = False
+            for _, r in pdf_eval.iterrows():
+                p_paths = r.get("pedestrian_path")
+                # Fallback: extract directly from episode topics/peds.parquet if available
+                if p_paths is None and run_dir is not None and "episode" in r:
+                    try:
+                        ep_id = int(r["episode"])
+                        peds_pq = pathlib.Path(run_dir) / "episodes" / f"episode_{ep_id:03d}" / "topics" / "peds.parquet"
+                        if peds_pq.exists():
+                            p_df = pl.read_parquet(peds_pq)
+                            if "peds_positions" in p_df.columns:
+                                raw_pos = p_df["peds_positions"].to_list()
+                                parsed_frames = []
+                                for frame_raw in raw_pos:
+                                    if frame_raw is not None and len(frame_raw) > 0:
+                                        if isinstance(frame_raw[0], (list, tuple, np.ndarray)):
+                                            parsed_frames.append([[float(p[0]), float(p[1])] for p in frame_raw if len(p) >= 2])
+                                        else:
+                                            pts = []
+                                            for j in range(0, len(frame_raw), 3):
+                                                if j + 1 < len(frame_raw):
+                                                    pts.append([float(frame_raw[j]), float(frame_raw[j+1])])
+                                            parsed_frames.append(pts)
+                                    else:
+                                        parsed_frames.append([])
+                                if parsed_frames:
+                                    max_peds = max(len(f) for f in parsed_frames) if parsed_frames else 0
+                                    p_paths = []
+                                    for p_idx in range(max_peds):
+                                        ped_traj = [f[p_idx] for f in parsed_frames if len(f) > p_idx]
+                                        if len(ped_traj) > 1:
+                                            p_paths.append(ped_traj)
+                    except Exception:
+                        pass
+
+                if p_paths is not None and isinstance(p_paths, (list, tuple)):
+                    for p_idx, single_ped_path in enumerate(p_paths):
+                        if single_ped_path is not None and len(single_ped_path) > 1:
+                            arr = np.array(single_ped_path)
+                            if arr.ndim == 2 and arr.shape[1] >= 2:
+                                fig.add_trace(go.Scatter(
+                                    x=arr[:, 0].tolist(),
+                                    y=arr[:, 1].tolist(),
+                                    mode='lines',
+                                    name='Pedestrian Flows' if not peds_rendered else f'Pedestrian {p_idx+1}',
+                                    legendgroup='pedestrians',
+                                    line=dict(color='#8b5cf6', width=2, dash='dot'),
+                                    opacity=0.7,
+                                    hovertemplate=f"<b>Pedestrian {p_idx+1}</b><br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                                    showlegend=not peds_rendered
+                                ))
+                                peds_rendered = True
+
+        # 3. Overlay Unobstructed Robot Reference Baseline Path
+        if self.spec.options.get("overlay_reference", False) or (self.spec.data_key and "mar" in self.spec.data_key):
+            ref_rendered = False
+            for _, r in pdf.iterrows():
+                is_ref = bool(r.get("is_reference")) if r.get("is_reference") is not None else False
+                ref_type = str(r.get("reference_type", "")).lower()
+                stage_name = str(r.get("stage", "")).lower()
+                planner_name = str(r.get("planner", "")).lower()
+                
+                # Exclude unhindered_peds
+                if "unhindered" in ref_type or "unhindered" in planner_name:
+                    continue
+
+                if (ref_type == "unobstructed_robot") or ("unobstructed" in ref_type) or ("unobstructed" in stage_name) or (is_ref and ref_type != "unhindered_peds"):
+                    r_path = r.get("path")
+                    if r_path is not None:
+                        paths_to_process = []
+                        first_elem = r_path[0] if len(r_path) > 0 else None
+                        if first_elem is not None and isinstance(first_elem, (list, tuple, np.ndarray)) and len(first_elem) > 0 and isinstance(first_elem[0], (list, tuple, np.ndarray)):
+                            for sub_p in r_path:
+                                paths_to_process.append(np.array(sub_p))
+                        else:
+                            paths_to_process.append(np.array(r_path))
+
+                        for r_arr in paths_to_process:
+                            if r_arr.ndim == 2 and r_arr.shape[1] >= 2:
+                                # Ensure it's not a dummy spawn location
+                                if np.any(np.abs(r_arr[:, 0]) > 500) or np.any(np.abs(r_arr[:, 1]) > 500):
+                                    continue
+                                fig.add_trace(go.Scatter(
+                                    x=r_arr[:, 0].tolist(),
+                                    y=r_arr[:, 1].tolist(),
+                                    mode='lines',
+                                    name='Unobstructed Reference Robot',
+                                    legendgroup='unobstructed_ref',
+                                    line=dict(color='#06b6d4', width=3, dash='dashdot'),
+                                    opacity=0.9,
+                                    hovertemplate="<b>Unobstructed Reference</b><br>X: %{x:.2f}<br>Y: %{y:.2f}<extra></extra>",
+                                    showlegend=not ref_rendered
+                                ))
+                                ref_rendered = True
             
         title = self.spec.title
         if title_suffix:
@@ -241,26 +427,27 @@ class TrajectoryRenderer(BasePlotRenderer):
                 res = map_meta["resolution"]
                 w_m = map_meta["width"] * res
                 h_m = map_meta["height"] * res
+                ox = float(map_meta.get("origin", [0.0, 0.0, 0.0])[0])
+                oy = float(map_meta.get("origin", [0.0, 0.0, 0.0])[1])
                 
                 fig.add_layout_image(
                     dict(
                         source=f"data:image/png;base64,{encoded}",
                         xref="x",
                         yref="y",
-                        x=0,
-                        y=h_m,
+                        x=ox,
+                        y=oy + h_m,
                         sizex=w_m,
                         sizey=h_m,
                         xanchor="left",
                         yanchor="top",
                         sizing="fill",
-                        opacity=0.5,
+                        opacity=0.45,
                         layer="below"
                     )
                 )
-                
-                layout_args["xaxis"] = dict(range=[0, w_m])
-                layout_args["yaxis"] = dict(range=[0, h_m], scaleanchor="x", scaleratio=1)
+                layout_args["xaxis"] = dict(range=[ox, ox + w_m], title="X [m]")
+                layout_args["yaxis"] = dict(range=[oy, oy + h_m], title="Y [m]", scaleanchor="x", scaleratio=1)
             except Exception as e:
                 print(f"Failed to overlay map {map_name}: {e}")
                 
@@ -380,7 +567,11 @@ class TrajectoryRenderer(BasePlotRenderer):
                         
                         // Mutate directly and redraw for 100% reliability
                         plotDiv.data.forEach((trace, i) => {{
-                            if (trace.customdata && trace.customdata.length > 0) {{
+                            let isStaticRef = trace.name && (trace.name.includes("Theta*") || trace.name.includes("Unobstructed") || trace.legendgroup === "theta_star" || trace.legendgroup === "unobstructed_ref");
+                            if (isStaticRef) {{
+                                trace.x = plotDiv._originalData[i].x;
+                                trace.y = plotDiv._originalData[i].y;
+                            }} else if (trace.customdata && trace.customdata.length > 0) {{
                                 let new_x = [];
                                 let new_y = [];
                                 let cdata = Array.isArray(trace.customdata[0]) ? trace.customdata.map(d => d[0]) : trace.customdata;
@@ -666,11 +857,57 @@ class TrajectoryRenderer(BasePlotRenderer):
         
         if overlay_markers:
             if starts_x:
-                scat_starts = plt.scatter(starts_x, starts_y, marker='o', color='#00bfb2', s=30, zorder=5)
+                scat_starts = plt.scatter(starts_x, starts_y, marker='o', color='#00bfb2', s=30, zorder=5, label='Start')
             if goals_x:
-                scat_goals = plt.scatter(goals_x, goals_y, marker='*', color='#ffc845', s=60, zorder=5)
+                scat_goals = plt.scatter(goals_x, goals_y, marker='*', color='#ffc845', s=60, zorder=5, label='Goal')
             if col_x:
-                scat_cols = plt.scatter(col_x, col_y, marker='x', color='#d3273e', s=50, linewidths=2, zorder=5)
+                scat_cols = plt.scatter(col_x, col_y, marker='x', color='#d3273e', s=50, linewidths=2, zorder=5, label='Collision')
+
+        # 1. Overlay Theta* Synthetic Demonstration Baseline
+        if self.spec.options.get("overlay_theta_star", False) or self.spec.options.get("show_theta_star", False) or (self.spec.data_key and "theta" in self.spec.data_key):
+            try:
+                from ...processing.path.theta_star import compute_theta_star_for_episode
+                for _, r in pdf.iterrows():
+                    m_name = map_name or r.get("map")
+                    s_pt = r.get("start")
+                    g_pt = r.get("goal")
+                    if m_name and s_pt is not None and g_pt is not None:
+                        try:
+                            s_coords = (float(s_pt[0]), float(s_pt[1]))
+                            g_coords = (float(g_pt[0]), float(g_pt[1]))
+                            res = compute_theta_star_for_episode(str(m_name), s_coords, g_coords, run_dir=str(run_dir) if run_dir else None)
+                            if res and res.success and len(res.path_x) > 0:
+                                plt.plot(res.path_x, res.path_y, color='#d97706', linestyle='--', linewidth=2.5, marker='d', markersize=5, label='Theta* Reference', zorder=4)
+                                break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # 2. Overlay Pedestrian Paths
+        if self.spec.options.get("overlay_pedestrians", False) or self.spec.options.get("show_peds", False) or (self.spec.data_key and "ped" in self.spec.data_key):
+            peds_rendered = False
+            for _, r in pdf.iterrows():
+                p_paths = r.get("pedestrian_path")
+                if p_paths is not None and isinstance(p_paths, (list, tuple)):
+                    for single_ped_path in p_paths:
+                        if single_ped_path is not None and len(single_ped_path) > 1:
+                            arr = np.array(single_ped_path)
+                            if arr.ndim == 2 and arr.shape[1] >= 2:
+                                plt.plot(arr[:, 0], arr[:, 1], color='#8b5cf6', linestyle=':', linewidth=1.5, alpha=0.6, label='Pedestrians' if not peds_rendered else None, zorder=3)
+                                peds_rendered = True
+
+        # 3. Overlay Unobstructed Robot Reference Baseline
+        if self.spec.options.get("overlay_reference", False) or (self.spec.data_key and "mar" in self.spec.data_key):
+            ref_rendered = False
+            for _, r in pdf.iterrows():
+                if r.get("is_reference") and r.get("reference_type") == "unobstructed_robot":
+                    r_path = r.get("path")
+                    if r_path is not None:
+                        r_arr = np.array(r_path)
+                        if r_arr.ndim == 2 and r_arr.shape[1] >= 2:
+                            plt.plot(r_arr[:, 0], r_arr[:, 1], color='#06b6d4', linestyle='-.', linewidth=2.5, alpha=0.85, label='Unobstructed Reference' if not ref_rendered else None, zorder=4)
+                            ref_rendered = True
             
         title = self.spec.title
         if title_suffix:

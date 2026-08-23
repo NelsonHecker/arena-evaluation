@@ -35,11 +35,15 @@ def _load_notes(notes, benchmark_dir: pathlib.Path | None) -> list[dict[str, str
             return rows
 
         path: pathlib.Path | None = None
-        candidate = pathlib.Path(notes)
-        if candidate.is_file():
-            path = candidate
-        elif benchmark_dir is not None and (benchmark_dir / candidate).is_file():
-            path = benchmark_dir / candidate
+        if "\n" not in notes and len(notes) < 256:
+            try:
+                candidate = pathlib.Path(notes)
+                if candidate.is_file():
+                    path = candidate
+                elif benchmark_dir is not None and (benchmark_dir / candidate).is_file():
+                    path = benchmark_dir / candidate
+            except (OSError, ValueError):
+                path = None
 
         if path is not None:
             text = path.read_text()
