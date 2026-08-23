@@ -187,9 +187,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         last_eval_peds = None
         last_eval_source = None
 
-        POS_THRESHOLD = 0.1  # meters
-        SRC_THRESHOLD = 1.0  # dB
-
+        POS_THRESHOLD = 0.5  # meters (attenuation changes < 0.3 dB over 0.5m)
         total_frames = len(rx_m)
 
         # Pre-compute collision frame mask (used for per-pedestrian impulse).
@@ -207,11 +205,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     n_collisions, COLLISION_IMPULSE_DBA,
                 )
 
-        logger.info(
-            "AcousticExposureCalculator: Starting Dijkstra propagation for %d frames (episode %s)",
-            total_frames, episode.episode_id,
-        )
         eval_count = 0
+        last_attenuations: np.ndarray | None = None
 
         for i in range(total_frames):
             pts = self._parse_pedestrian_positions(peds_pos[i])
@@ -226,64 +221,60 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
             current_source = source_dba[i]
 
-            # Check if we should re-evaluate (caching based on movement / source level)
+            # Check if we should re-evaluate geometric attenuation field
             should_eval = False
             if i == 0 or i == total_frames - 1:
                 should_eval = True
-            elif last_eval_rx is None:
+            elif last_eval_rx is None or last_attenuations is None:
                 should_eval = True
             else:
                 if np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > POS_THRESHOLD:
                     should_eval = True
-                elif abs(current_source - last_eval_source) > SRC_THRESHOLD:
+                elif len(px_m) != len(last_eval_peds[0]):
                     should_eval = True
                 else:
-                    if len(px_m) != len(last_eval_peds[0]):
+                    ped_dists = np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1])
+                    if np.any(ped_dists > POS_THRESHOLD):
                         should_eval = True
-                    else:
-                        ped_dists = np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1])
-                        if np.any(ped_dists > POS_THRESHOLD):
-                            should_eval = True
 
-            if not should_eval:
-                ts_exposure.append(ts_exposure[-1])
-                ts_attenuation.append(ts_attenuation[-1])
-                continue
+            if should_eval:
+                last_eval_rx = rx_m[i]
+                last_eval_ry = ry_m[i]
+                last_eval_peds = (px_m, py_m)
 
-            last_eval_rx = rx_m[i]
-            last_eval_ry = ry_m[i]
-            last_eval_peds = (px_m, py_m)
-            last_eval_source = current_source
+                rx_px = (rx_m[i] - ox) / resolution
+                ry_px = (ry_m[i] - oy) / resolution
 
-            rx_px = (rx_m[i] - ox) / resolution
-            ry_px = (ry_m[i] - oy) / resolution
+                px_px = (px_m - ox) / resolution
+                py_px = (py_m - oy) / resolution
 
-            px_px = (px_m - ox) / resolution
-            py_px = (py_m - oy) / resolution
+                # Door-aware per-pixel TL (open doors carved to 0 dB)
+                open_set = (
+                    state_timeline.open_doors_at(int(df["time_ns"][i]))
+                    if state_timeline is not None
+                    else frozenset()
+                )
+                tl_key = tuple(sorted(open_set))
+                pixel_tl = tl_cache.get(tl_key)
+                if pixel_tl is None:
+                    pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
+                    tl_cache[tl_key] = pixel_tl
 
-            # Door-aware per-pixel TL (open doors carved to 0 dB)
-            open_set = (
-                state_timeline.open_doors_at(int(df["time_ns"][i]))
-                if state_timeline is not None
-                else frozenset()
-            )
-            tl_key = tuple(sorted(open_set))
-            pixel_tl = tl_cache.get(tl_key)
-            if pixel_tl is None:
-                pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
-                tl_cache[tl_key] = pixel_tl
-
-            attenuations = compute_attenuations(
-                occupancy_grid=grid,
-                resolution=resolution,
-                start_x_px=rx_px,
-                start_y_px=ry_px,
-                target_xs_px=px_px,
-                target_ys_px=py_px,
-                wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
-                mic_distance=1.0,
-                pixel_tl=pixel_tl,
-            )
+                attenuations = compute_attenuations(
+                    occupancy_grid=grid,
+                    resolution=resolution,
+                    start_x_px=rx_px,
+                    start_y_px=ry_px,
+                    target_xs_px=px_px,
+                    target_ys_px=py_px,
+                    wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
+                    mic_distance=1.0,
+                    pixel_tl=pixel_tl,
+                )
+                last_attenuations = attenuations
+                eval_count += 1
+            else:
+                attenuations = last_attenuations
 
             # Filter out infinity (unreachable)
             valid = ~np.isinf(attenuations)
@@ -293,8 +284,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 continue
 
             att_valid = attenuations[valid]
-            # SPL received = source - attenuation
-            exp_valid = source_dba[i] - att_valid
+            # SPL received = instantaneous source level - geometric attenuation
+            exp_valid = current_source - att_valid
 
             # Per-pedestrian collision impulse: crash events add a ~100 dB(A)
             # penalty directly to each pedestrian's exposure at that frame.

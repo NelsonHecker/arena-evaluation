@@ -57,6 +57,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_vx_achieved": "m/s",
         "timeseries_char_vy_achieved": "m/s",
         "timeseries_char_wz_achieved": "rad/s",
+        "timeseries_char_accel_achieved": "m/s^2",
+        "timeseries_char_accel_target": "m/s^2",
+        "timeseries_char_efficiency": "",
         "timeseries_char_vx_target": "m/s",
         "timeseries_char_vy_target": "m/s",
         "timeseries_char_wz_target": "rad/s",
@@ -73,6 +76,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_vx_achieved",
         "timeseries_char_vy_achieved",
         "timeseries_char_wz_achieved",
+        "timeseries_char_accel_achieved",
+        "timeseries_char_accel_target",
+        "timeseries_char_efficiency",
         "timeseries_char_phase_kind",
         "timeseries_char_vx_target",
         "timeseries_char_vy_target",
@@ -89,31 +95,45 @@ class CharacterizationCalculator(BaseMetricCalculator):
 
     def _phase_map(self) -> pl.DataFrame:
         """Schedule name to (kind, vx_target, vy_target, wz_target, turn_radius_m) for this robot's envelope."""
-        from task_generator.tasks.robots.characterization.schedule import (
-            build_schedule,
-            resolve_envelope,
-        )
+        try:
+            from task_generator.tasks.robots.characterization.schedule import (
+                build_schedule,
+                resolve_envelope,
+            )
 
-        envelope = resolve_envelope(self.robot_params.model)
-        schedule = build_schedule(
-            vx_max=float(envelope["vx_max"]),
-            vy_max=float(envelope["vy_max"]),
-            wz_max=float(envelope["wz_max"]),
-            is_holonomic=bool(envelope["is_holonomic"]),
-        )
-        return pl.DataFrame(
-            [
-                {
-                    "phase_label": p.name,
-                    "phase_kind": p.kind.value,
-                    "vx_target": p.vx_target,
-                    "vy_target": p.vy_target,
-                    "wz_target": p.wz_target,
-                    "turn_radius_m": p.radius_m,
+            envelope = resolve_envelope(self.robot_params.model)
+            schedule = build_schedule(
+                vx_max=float(envelope["vx_max"]),
+                vy_max=float(envelope["vy_max"]),
+                wz_max=float(envelope["wz_max"]),
+                is_holonomic=bool(envelope["is_holonomic"]),
+            )
+            return pl.DataFrame(
+                [
+                    {
+                        "phase_label": p.name,
+                        "phase_kind": p.kind.value,
+                        "vx_target": p.vx_target,
+                        "vy_target": p.vy_target,
+                        "wz_target": p.wz_target,
+                        "turn_radius_m": p.radius_m,
+                        "accel_target": float(p.vx_target / p.ramp_s) if p.ramp_s > 0 else 0.0,
+                    }
+                    for p in schedule
+                ]
+            )
+        except ImportError:
+            return pl.DataFrame(
+                schema={
+                    "phase_label": pl.Utf8,
+                    "phase_kind": pl.Utf8,
+                    "vx_target": pl.Float64,
+                    "vy_target": pl.Float64,
+                    "wz_target": pl.Float64,
+                    "turn_radius_m": pl.Float64,
+                    "accel_target": pl.Float64,
                 }
-                for p in schedule
-            ]
-        )
+            )
 
     def _attach_phases(self, df: pl.DataFrame) -> pl.DataFrame:
         out = df
@@ -148,6 +168,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             pl.col("vx_target").fill_null(cmd_vx).alias("vx_target"),
             pl.col("vy_target").fill_null(cmd_vy).alias("vy_target"),
             pl.col("wz_target").fill_null(cmd_wz).alias("wz_target"),
+            pl.col("accel_target").fill_null(0.0).alias("accel_target"),
             pl.col("turn_radius_m").fill_null(
                 pl.when((cmd_vx.abs() >= 0.05) & (cmd_wz.abs() >= 0.05))
                 .then(cmd_vx.abs() / cmd_wz.abs())
@@ -307,6 +328,27 @@ class CharacterizationCalculator(BaseMetricCalculator):
             .alias("_turn_radius"),
         )
 
+        import numpy as np
+
+        # Compute achieved linear acceleration (dv/dt)
+        if "vel_linear" in out.columns:
+            vx_arr = out["vel_linear"].cast(pl.Float64).fill_null(0.0).to_numpy()
+        else:
+            vx_arr = speed.to_numpy()
+        dt_arr = dt.to_numpy()
+
+        accel_achieved = np.zeros_like(vx_arr)
+        for i in range(1, len(vx_arr)):
+            if dt_arr[i] > 1e-4:
+                accel_achieved[i] = (vx_arr[i] - vx_arr[i - 1]) / dt_arr[i]
+
+        p_tot_arr = out["_p_total"].to_numpy()
+        p_mech_arr = out["_p_mech"].to_numpy()
+        eff_arr = np.zeros_like(p_tot_arr)
+        for i in range(len(p_tot_arr)):
+            if p_tot_arr[i] > 0.1:
+                eff_arr[i] = max(0.0, min(1.0, float(p_mech_arr[i] / p_tot_arr[i])))
+
         rows = {
             "timeseries_char_time_s": t_s.to_list(),
             "timeseries_char_power_total_w": out["_p_total"].to_list(),
@@ -318,6 +360,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
             if "vel_lateral" in out.columns else [0.0] * len(out),
             "timeseries_char_wz_achieved": out["vel_angular"].cast(pl.Float64).fill_null(0.0).to_list()
             if "vel_angular" in out.columns else [0.0] * len(out),
+            "timeseries_char_accel_achieved": accel_achieved.tolist(),
+            "timeseries_char_accel_target": out["accel_target"].fill_null(0.0).to_list(),
+            "timeseries_char_efficiency": eff_arr.tolist(),
             "timeseries_char_phase_kind": out["phase_kind"].fill_null("unknown").to_list(),
             "timeseries_char_vx_target": out["vx_target"].fill_null(0.0).to_list(),
             "timeseries_char_vy_target": out["vy_target"].fill_null(0.0).to_list(),

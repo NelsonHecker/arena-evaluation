@@ -17,7 +17,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["odom", "peds"]
+    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
 
     UNITS = {
         "sfm_cumulative_force": "N·s",
@@ -29,14 +29,23 @@ class SocialForcesCalculator(BaseMetricCalculator):
         "esfm_ped_cumulative_force": "N·s",
         "esfm_ped_peak_force": "N",
         "esfm_ped_mean_force": "N",
+        "social_force_max": "N",
+        "social_force_mean": "N",
+        "social_force_ped_max": "N",
+        "social_force_ped_mean": "N",
         "ci_max": "",
         "ci_mean": "",
         "timeseries_sfm_force": "N",
         "timeseries_ci": "",
     }
 
-    PRIMARY_OUTPUTS = ["sfm_mean_force", "ci_mean"]
-    OUTPUT_DIRECTIONS = {"sfm_mean_force": "lower", "ci_mean": "lower"}
+    PRIMARY_OUTPUTS = ["sfm_mean_force", "ci_mean", "social_force_ped_max"]
+    OUTPUT_DIRECTIONS = {
+        "sfm_mean_force": "lower",
+        "ci_mean": "lower",
+        "social_force_ped_max": "lower",
+        "social_force_ped_mean": "lower",
+    }
 
     # SFM constants (Helbing & Molnar)
     _A = 2.1       # interaction strength (N)
@@ -47,6 +56,8 @@ class SocialForcesCalculator(BaseMetricCalculator):
     _LAMBDA_ESFM = 0.5  # anisotropy, 0.5 = moderate rear de-weighting
 
     # CI / SII personal-space sigmas
+    _SIGMA_FRONT = 1.0  # m, along pedestrian heading
+    _SIGMA_SIDE = 0.5   # m, perpendicular to heading
     _SIGMA_PX0 = 0.28  # m
     _SIGMA_PY0 = 0.28  # m
 
@@ -62,6 +73,10 @@ class SocialForcesCalculator(BaseMetricCalculator):
             "esfm_ped_cumulative_force",
             "esfm_ped_peak_force",
             "esfm_ped_mean_force",
+            "social_force_max",
+            "social_force_mean",
+            "social_force_ped_max",
+            "social_force_ped_mean",
             "ci_max",
             "ci_mean",
             "timeseries_sfm_force",
@@ -152,8 +167,16 @@ class SocialForcesCalculator(BaseMetricCalculator):
                 dy = py - ry
                 d_ij = np.sqrt(dx**2 + dy**2)
 
-                # CI = max_i exp(-((xr-xpi)^2/(2 sx0^2) + (yr-ypi)^2/(2 sy0^2)))
-                ci_val = np.exp(-((dx**2) / sx2 + (dy**2) / sy2))
+                if headings is not None and j < len(headings):
+                    ped_heading = float(headings[j])
+                    cos_h = np.cos(ped_heading)
+                    sin_h = np.sin(ped_heading)
+                    d_front = dx * cos_h + dy * sin_h
+                    d_side = -dx * sin_h + dy * cos_h
+                    ci_val = np.exp(-(d_front**2 / (2 * self._SIGMA_FRONT**2) + d_side**2 / (2 * self._SIGMA_SIDE**2)))
+                else:
+                    ci_val = np.exp(-((dx**2) / sx2 + (dy**2) / sy2))
+
                 max_ci = max(max_ci, float(ci_val))
 
                 if d_ij > self._CUTOFF:
@@ -206,6 +229,10 @@ class SocialForcesCalculator(BaseMetricCalculator):
             "esfm_ped_cumulative_force": esfm_ped_cumulative,
             "esfm_ped_peak_force": float(np.max(esfm_ped_arr)),
             "esfm_ped_mean_force": float(np.mean(esfm_ped_arr)),
+            "social_force_max": float(np.max(sfm_arr)),
+            "social_force_mean": float(np.mean(sfm_arr)),
+            "social_force_ped_max": float(np.max(esfm_ped_arr)),
+            "social_force_ped_mean": float(np.mean(esfm_ped_arr)),
             "ci_max": float(np.max(ci_arr)),
             "ci_mean": float(np.mean(ci_arr)),
             "timeseries_sfm_force": sfm_forces,

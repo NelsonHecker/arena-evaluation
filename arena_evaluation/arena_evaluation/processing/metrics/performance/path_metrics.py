@@ -39,9 +39,11 @@ class PathMetricsCalculator(BaseMetricCalculator):
         "path_length": "m",
         "curvature": "1/m",
         "curvature_mean": "1/m",
+        "curvature_max": "1/m",
         "normalized_curvature": "",
-        "roughness": "m²",
-        "roughness_mean": "m²",
+        "roughness": "rad/m",
+        "roughness_mean": "rad/m",
+        "roughness_max": "rad/m",
         "angle_over_length": "rad/m",
     }
 
@@ -56,9 +58,11 @@ class PathMetricsCalculator(BaseMetricCalculator):
             "path_length",
             "curvature",
             "curvature_mean",
+            "curvature_max",
             "normalized_curvature",
             "roughness",
             "roughness_mean",
+            "roughness_max",
             "angle_over_length",
         ]
         
@@ -115,9 +119,11 @@ class PathMetricsCalculator(BaseMetricCalculator):
                 "path_length": path_length,
                 "curvature": [],
                 "curvature_mean": 0.0,
+                "curvature_max": 0.0,
                 "normalized_curvature": [],
                 "roughness": [],
                 "roughness_mean": 0.0,
+                "roughness_max": 0.0,
                 "angle_over_length": angle_over_length,
             }
             
@@ -146,9 +152,11 @@ class PathMetricsCalculator(BaseMetricCalculator):
             "path_length_values": path_length_values.tolist(),
             "path_length": path_length,
             "curvature": curvature.tolist(),
-            "curvature_mean": float(np.mean(curvature)),
+            "curvature_mean": float(np.mean(curvature)) if len(curvature) > 0 else 0.0,
+            "curvature_max": float(np.max(curvature)) if len(curvature) > 0 else 0.0,
             "normalized_curvature": normalized_curvature.tolist(),
             "roughness": roughness.tolist(),
-            "roughness_mean": float(np.mean(roughness)),
+            "roughness_mean": float(np.mean(roughness)) if len(roughness) > 0 else 0.0,
+            "roughness_max": float(np.max(roughness)) if len(roughness) > 0 else 0.0,
             "angle_over_length": angle_over_length,
         }

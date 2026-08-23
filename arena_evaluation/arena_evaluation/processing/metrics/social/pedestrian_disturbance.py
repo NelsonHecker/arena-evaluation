@@ -50,13 +50,18 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         if len(valid_act) == 0 or len(valid_ref) == 0:
             return 0.0
 
-        valid_act = valid_act[:, :2]
-        valid_ref = valid_ref[:, :2]
+        valid_act = np.ascontiguousarray(valid_act[:, :2], dtype=np.float64)
+        valid_ref = np.ascontiguousarray(valid_ref[:, :2], dtype=np.float64)
 
-        diffs = valid_act[:, np.newaxis, :] - valid_ref[np.newaxis, :, :]  # (N, M, 2)
-        dists = np.sqrt(np.sum(diffs ** 2, axis=-1))  # (N, M)
-        min_dists = np.min(dists, axis=1)  # (N,)
-        return float(np.mean(min_dists))
+        try:
+            from scipy.spatial import cKDTree
+            tree = cKDTree(valid_ref)
+            dists, _ = tree.query(valid_act, k=1)
+            return float(np.mean(dists))
+        except Exception:
+            from scipy.spatial.distance import cdist
+            dists = cdist(valid_act, valid_ref)
+            return float(np.mean(np.min(dists, axis=1)))
 
     def calculate(
         self,

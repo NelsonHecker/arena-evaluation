@@ -261,7 +261,10 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
 
     NAME = "compliance_metrics"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = ["odom"]
+    REQUIRES_PEDSIM = True
+    DEPENDS_ON = ["motion_metrics"]
+    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    passing_convention = "right"
 
     UNITS = {
         "speed_zone_violations": "",
@@ -269,6 +272,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         "quiet_zone_dwell_seconds": "s",
         "restricted_zone_entries": "",
         "doorway_blocking_time": "s",
+        "passing_rule_compliance": "",
     }
 
     STATIONARY_THRESHOLD = 0.05
@@ -287,6 +291,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
             "quiet_zone_dwell_seconds",
             "restricted_zone_entries",
             "doorway_blocking_time",
+            "passing_rule_compliance",
         ]
 
     def _load_world(self, world_name: str) -> tuple[list[_ZoneGeometry], list[_DoorGeometry]] | None:
@@ -348,46 +353,156 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
                     break
         return total
 
+    def _compute_passing_compliance(self, episode: AlignedEpisodeBundle) -> float | None:
+        peds_df = self.native_ped_frame(episode)
+        if peds_df is None or "peds_positions" not in peds_df.columns:
+            return None
+        
+        pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
+        if len(pos_x) == 0:
+            return None
+            
+        peds_time_ns = peds_df["time_ns"].to_numpy()
+        N = len(peds_time_ns)
+        if N == 0:
+            return None
+            
+        vx_full, vy_full = self.velocity_from_pose(pos_x, pos_y, t_odom)
+        rvx = self.values_at_times(vx_full, t_odom, peds_time_ns)
+        rvy = self.values_at_times(vy_full, t_odom, peds_time_ns)
+        rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom)
+        dt = np.diff(peds_time_ns, prepend=peds_time_ns[0]) / 1e9
+        
+        peds_positions = peds_df["peds_positions"].to_list()
+        num_peds_col = peds_df["num_pedestrians"].to_numpy() if "num_pedestrians" in peds_df.columns else None
+        peds_twists_list = peds_df["peds_twists"].to_list() if "peds_twists" in peds_df.columns else None
+        
+        in_encounter = False
+        min_dist = float('inf')
+        lat_offset_at_min = 0.0
+        
+        encounters_total = 0
+        encounters_compliant = 0
+        
+        prev_peds_arr: np.ndarray | None = None
+        for i in range(N):
+            peds_arr = self._parse_peds(peds_positions[i], num_peds_col[i] if num_peds_col is not None else None)
+            if peds_arr.shape[0] == 0:
+                prev_peds_arr = None
+                continue
+
+            ped_vels = None
+            if peds_twists_list is not None and i < len(peds_twists_list):
+                tw_raw = peds_twists_list[i]
+                if tw_raw and len(tw_raw) > 0:
+                    import ast
+                    if isinstance(tw_raw, str):
+                        try:
+                            tw_raw = ast.literal_eval(tw_raw)
+                        except Exception:
+                            tw_raw = []
+                    tw_arr = np.array(tw_raw, dtype=np.float64)
+                    if tw_arr.size > 0 and len(tw_arr) % 3 == 0:
+                        ped_vels = tw_arr.reshape(-1, 3)
+
+            # Finite difference fallback if twists missing
+            if ped_vels is None and prev_peds_arr is not None and prev_peds_arr.shape == peds_arr.shape:
+                dt_i = max(float(dt[i]), 1e-3)
+                ped_vels = (peds_arr - prev_peds_arr) / dt_i
+            prev_peds_arr = peds_arr
+
+            rx, ry = float(rpx[i]), float(rpy[i])
+            vr_x, vr_y = float(rvx[i]), float(rvy[i])
+            speed_r = np.hypot(vr_x, vr_y)
+            
+            head_on_found = False
+            curr_min_dist = float('inf')
+            curr_lat = 0.0
+            
+            for j in range(peds_arr.shape[0]):
+                vp_x, vp_y = 0.0, 0.0
+                if ped_vels is not None and j < ped_vels.shape[0]:
+                    vp_x, vp_y = float(ped_vels[j, 0]), float(ped_vels[j, 1])
+                speed_p = np.hypot(vp_x, vp_y)
+                
+                px, py = float(peds_arr[j, 0]), float(peds_arr[j, 1])
+                dist = np.hypot(px - rx, py - ry)
+                
+                if dist <= 4.0 and speed_r > 0.05 and speed_p > 0.05:
+                    cos_angle = (vr_x * vp_x + vr_y * vp_y) / (speed_r * speed_p)
+                    # Opposing direction: approaching each other within 120 degrees
+                    if cos_angle < -0.3:
+                        head_on_found = True
+                        if dist < curr_min_dist:
+                            curr_min_dist = dist
+                            # Positive when pedestrian is to the robot's left (robot passes on right)
+                            curr_lat = vr_x * (py - ry) - vr_y * (px - rx)
+            
+            if head_on_found:
+                if not in_encounter:
+                    in_encounter = True
+                    min_dist = float('inf')
+                
+                if curr_min_dist < min_dist:
+                    min_dist = curr_min_dist
+                    lat_offset_at_min = curr_lat
+            else:
+                if in_encounter:
+                    in_encounter = False
+                    encounters_total += 1
+                    if self.passing_convention == "right" and lat_offset_at_min >= 0.0:
+                        encounters_compliant += 1
+                    elif self.passing_convention == "left" and lat_offset_at_min <= 0.0:
+                        encounters_compliant += 1
+                        
+        if in_encounter:
+            encounters_total += 1
+            if self.passing_convention == "right" and lat_offset_at_min >= 0.0:
+                encounters_compliant += 1
+            elif self.passing_convention == "left" and lat_offset_at_min <= 0.0:
+                encounters_compliant += 1
+                
+        if encounters_total == 0:
+            return 1.0
+        return float(encounters_compliant) / encounters_total
+
+
     def calculate(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
         del prior_results
-        empty = {k: None for k in self.output_keys()}
+        result = {k: None for k in self.output_keys()}
 
-        if self.world is None:
-            return empty
-        if not episode.start_pos:
-            return empty
-        loaded = self._load_world(self.world)
-        if loaded is None:
-            return empty
-        zones, doors = loaded
+        # 1. Passing Rule Compliance (Independent of world)
+        result["passing_rule_compliance"] = self._compute_passing_compliance(episode)
 
-        pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
+        # 2. Zone/Door Metrics (Requires world)
+        if self.world is not None and episode.start_pos:
+            loaded = self._load_world(self.world)
+            if loaded is not None:
+                zones, doors = loaded
+                pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
 
-        if episode.data is None or len(episode.data) == 0 or "vel_linear" not in episode.data.columns:
-            return empty
+                if episode.data is not None and len(episode.data) > 0 and "vel_linear" in episode.data.columns:
+                    speed = np.abs(episode.data["vel_linear"].to_numpy())
+                    time_ns = episode.data["time_ns"].to_numpy()
+                    n = len(pos_x)
+                    if n > 0 and len(speed) == n:
+                        dt = np.diff(time_ns) / 1e9
+                        zone_idx = _zone_membership(pos_x, pos_y, zones)
+                        violations, violation_seconds = _speed_zone_metrics(zone_idx, speed, dt, zones)
+                        quiet_seconds = _quiet_zone_dwell(zone_idx, dt, zones)
+                        restricted_entries = _restricted_zone_entries(zone_idx, zones)
+                        doorway_blocking = self._doorway_blocking_time(episode, pos_x, pos_y, speed, time_ns, doors)
 
-        speed = np.abs(episode.data["vel_linear"].to_numpy())
-        time_ns = episode.data["time_ns"].to_numpy()
-        n = len(pos_x)
-        if n == 0 or len(speed) != n:
-            return empty
+                        result.update({
+                            "speed_zone_violations": violations,
+                            "speed_zone_violation_seconds": violation_seconds,
+                            "quiet_zone_dwell_seconds": quiet_seconds,
+                            "restricted_zone_entries": restricted_entries,
+                            "doorway_blocking_time": doorway_blocking,
+                        })
 
-        dt = np.diff(time_ns) / 1e9
-
-        zone_idx = _zone_membership(pos_x, pos_y, zones)
-        violations, violation_seconds = _speed_zone_metrics(zone_idx, speed, dt, zones)
-        quiet_seconds = _quiet_zone_dwell(zone_idx, dt, zones)
-        restricted_entries = _restricted_zone_entries(zone_idx, zones)
-        doorway_blocking = self._doorway_blocking_time(episode, pos_x, pos_y, speed, time_ns, doors)
-
-        return {
-            "speed_zone_violations": violations,
-            "speed_zone_violation_seconds": violation_seconds,
-            "quiet_zone_dwell_seconds": quiet_seconds,
-            "restricted_zone_entries": restricted_entries,
-            "doorway_blocking_time": doorway_blocking,
-        }
+        return result

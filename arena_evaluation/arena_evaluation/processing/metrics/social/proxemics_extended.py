@@ -17,7 +17,7 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics", "path_metrics"]
-    REQUIRED_TOPICS = ["odom", "peds"]
+    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
 
     # Hall's proxemic zones (meters), edge-to-edge
     _INTIMATE_R = 0.45
@@ -184,7 +184,7 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
                 approaching_count += 1
 
             if d_eff < self._PERSONAL_R:
-                psii_sum += max(d_eff, 0.0) * dt[i]
+                psii_sum += (self._PERSONAL_R - max(d_eff, 0.0)) * dt[i]
 
             ped_vels = None
             if peds_twists_list is not None and i < len(peds_twists_list):
