@@ -68,7 +68,7 @@ def resolve_paths(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
-def main():
+def _main_impl():
     parser = argparse.ArgumentParser(
         description="Arena Evaluation Pipeline CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -277,6 +277,15 @@ Examples:
 
     if profiler is not None:
         profiler.write_summary()
+
+
+def main():
+    try:
+        _main_impl()
+    except KeyboardInterrupt:
+        print("\n\nEvaluation cancelled by user (Ctrl+C). Exiting.\n", flush=True)
+        sys.exit(130)
+
 
 if __name__ == "__main__":
     main()

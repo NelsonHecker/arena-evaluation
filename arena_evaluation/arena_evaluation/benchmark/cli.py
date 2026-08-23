@@ -439,6 +439,9 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_console(args)
     except SystemExit:
         raise
+    except KeyboardInterrupt:
+        print("\nInterrupted by user (Ctrl+C). Exiting.", file=sys.stderr)
+        return 130
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

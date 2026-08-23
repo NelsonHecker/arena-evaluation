@@ -6,6 +6,12 @@ import contextlib
 import typing
 import polars as pl
 import os
+import sys
+import time
+import shutil
+import json
+import traceback
+import multiprocessing
 import concurrent.futures
 
 from ..storage.schemas import RobotParams, EpisodeDescriptor, TopicBundle, AlignedEpisodeBundle
@@ -13,24 +19,68 @@ from ..storage.folder_manager import FolderManager
 
 def _worker_init():
     import os
+    import signal
     os.environ["POLARS_MAX_THREADS"] = "1"
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Exception:
+        pass
 
-def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool) -> int:
+
+def _shutdown_executor_cleanly(executor: concurrent.futures.ProcessPoolExecutor):
+    """Force terminate all child worker processes without blocking on wait=True."""
+    try:
+        processes = list(getattr(executor, "_processes", {}).values())
+        for proc in processes:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        pass
+
+def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> int:
     from arena_evaluation.processing.pipeline import ProcessingPipeline
     from arena_evaluation.storage.folder_manager import FolderManager
     import pathlib
+    import time
+    if status_dict is not None:
+        try:
+            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Extracting MCAP / Topics", 1, 1, time.perf_counter())
+        except Exception:
+            pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
     pipeline.extract_episode(ep, force_extract=force_extract)
+    if status_dict is not None:
+        try:
+            status_dict.pop(ep.episode_id, None)
+        except Exception:
+            pass
     return ep.episode_id
 
-def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool) -> typing.Tuple[int, typing.Any]:
+def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> typing.Tuple[int, typing.Any]:
     from arena_evaluation.processing.pipeline import ProcessingPipeline
     from arena_evaluation.storage.folder_manager import FolderManager
     import pathlib
+    import time
+    if status_dict is not None:
+        try:
+            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Loading Topics", 0, 18, time.perf_counter())
+        except Exception:
+            pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
-    result = pipeline.process_episode(ep, force_extract=force_extract)
+    result = pipeline.process_episode(ep, force_extract=force_extract, status_dict=status_dict)
+    if status_dict is not None:
+        try:
+            status_dict.pop(ep.episode_id, None)
+        except Exception:
+            pass
     return ep.episode_id, result
 
 
@@ -105,30 +155,6 @@ def _collect_native_topics(bundle) -> dict:
     return topics
 
 
-def _mean_warped_ped_error(actual_paths, ref_paths) -> float | None:
-    """Mean per-ped warped displacement error (m) via DTW.
-
-    Warped distance between each pedestrian's actual trajectory and its
-    unhindered_peds reference, averaged over matched pedestrians.
-    """
-    import numpy as np
-
-    errors: list[float] = []
-    n = min(len(actual_paths), len(ref_paths))
-    for i in range(n):
-        a, r = actual_paths[i], ref_paths[i]
-        if a is None or r is None or len(a) < 2 or len(r) < 2:
-            continue
-        a_arr = np.asarray(a, dtype=float)
-        r_arr = np.asarray(r, dtype=float)
-        if a_arr.ndim != 2 or r_arr.ndim != 2 or a_arr.shape[1] < 2 or r_arr.shape[1] < 2:
-            continue
-        try:
-            from dtaidistance import dtw_ndim
-            errors.append(float(dtw_ndim.distance(a_arr[:, :2], r_arr[:, :2])))
-        except Exception:
-            continue
-    return float(np.mean(errors)) if errors else None
 from ..storage.manifest import MetadataWriter
 from ..benchmark.profiler import PipelineProfiler
 
@@ -150,7 +176,6 @@ class ProcessingPipeline:
         # -1 (or None) = auto-detect the CPU count; any value < 1 falls back to it.
         self.workers = (os.cpu_count() or 1) if (workers is None or workers < 1) else workers
 
-    # New flat-episode API
 
     def extract_episode(self, ep: EpisodeDescriptor, force_extract: bool = False) -> dict[str, TopicBundle] | None:
         """Extract topics from a single episode MCAP into episode_dir/topics/."""
@@ -165,12 +190,10 @@ class ProcessingPipeline:
         if not force_extract:
             bundles = TopicParquetStore.read(topics_dir)
             if bundles:
-                print(f"  Loading cached topics for episode_{ep.episode_id:03d}...")
                 return bundles
 
         _ctx = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx:
-            print(f"  Extracting episode_{ep.episode_id:03d} ({ep.planner}/{ep.stage}) -> {topics_dir}...")
             if topics_dir.exists():
                 import shutil
                 shutil.rmtree(topics_dir)
@@ -179,7 +202,12 @@ class ProcessingPipeline:
             TopicParquetStore.write(bundles, topics_dir, overwrite=True)
             return bundles
 
-    def process_episode(self, ep: EpisodeDescriptor, force_extract: bool = False) -> dict | None:
+    def process_episode(
+        self,
+        ep: EpisodeDescriptor,
+        force_extract: bool = False,
+        status_dict: typing.Any = None,
+    ) -> dict | None:
         """Process a single episode: extract MCAP, compute metrics."""
         episode_dir = pathlib.Path(ep.episode_dir)
 
@@ -243,9 +271,6 @@ class ProcessingPipeline:
                     print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid pose data after resolution")
                     continue
 
-                # Raw per-topic frames keep their own timestamps so
-                # rate-sensitive metrics can use the native time base.
-                # Bounded to the odom range +100 ms so asof joins match.
                 topics = _collect_native_topics(bundle)
                 if len(aligned_df) > 0:
                     t0 = int(aligned_df["time_ns"][0])
@@ -313,9 +338,28 @@ class ProcessingPipeline:
                 )
                 episodes = [aligned_ep]
 
-                # Each per-episode MCAP should produce exactly 1 AlignedEpisodeBundle
+                def on_calc_progress(calc_name: str, calc_idx: int, total_calcs: int):
+                    if status_dict is not None:
+                        try:
+                            import time
+                            status_dict[ep.episode_id] = (
+                                ep.planner,
+                                ep.stage,
+                                calc_name,
+                                calc_idx,
+                                total_calcs,
+                                time.perf_counter(),
+                            )
+                        except Exception:
+                            pass
+
                 for aligned_ep in episodes:
-                    ep_metrics = registry.run(aligned_ep, pedsim_available=pedsim_avail, available_topics=available_topics)
+                    ep_metrics = registry.run(
+                        aligned_ep,
+                        pedsim_available=pedsim_avail,
+                        available_topics=available_topics,
+                        progress_callback=on_calc_progress,
+                    )
                     ep_metrics["episode"] = ep.episode_id
                     ep_metrics["planner"] = ep.planner
                     if metadata is not None and metadata.local_planner:
@@ -352,20 +396,44 @@ class ProcessingPipeline:
             print(f"No episodes found for benchmark '{benchmark_id}'")
             return
 
-        print(f"Extracting benchmark {benchmark_id} ({len(episodes)} episodes) with {self.workers} workers...")
+        import multiprocessing
+        from .progress_display import PipelineProgressDisplay
+
+        manager = multiprocessing.Manager()
+        status_dict = manager.dict()
         data_root_str = str(self.folder_manager.data_root)
-        with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init) as executor:
-            futures = [
-                executor.submit(_extract_worker, data_root_str, ep, force_extract)
-                for ep in episodes
-            ]
-            for i, future in enumerate(concurrent.futures.as_completed(futures)):
-                try:
-                    ep_id = future.result()
-                    print(f"[{i+1}/{len(episodes)}] Extracted episode_{ep_id:03d}")
-                except Exception as e:
-                    print(f"Error extracting episode: {e}")
-        print("Done.")
+
+        with PipelineProgressDisplay(
+            f"Phase 1: Extracting MCAP topics for {benchmark_id}",
+            len(episodes),
+            self.workers,
+            status_dict=status_dict,
+        ) as display:
+            executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.workers, initializer=_worker_init
+            )
+            try:
+                futures = {
+                    executor.submit(
+                        _extract_worker, data_root_str, ep, force_extract, status_dict
+                    ): (ep, time.perf_counter())
+                    for ep in episodes
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    ep, t_start = futures[future]
+                    try:
+                        ep_id = future.result()
+                        elapsed = time.perf_counter() - t_start
+                        display.log_completed(
+                            ep_id, f"{ep.planner}/{ep.stage}", elapsed
+                        )
+                    except Exception as e:
+                        display.log_error(ep.episode_id, str(e))
+            except KeyboardInterrupt:
+                _shutdown_executor_cleanly(executor)
+                raise
+            finally:
+                _shutdown_executor_cleanly(executor)
 
     def process_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """Process all episodes and write combined_metrics.parquet using a 2-Phase pipeline."""
@@ -375,41 +443,60 @@ class ProcessingPipeline:
             print(f"No episodes found for benchmark '{benchmark_id}'")
             return
 
-        print(f"Phase 1: Extracting all episodes for benchmark {benchmark_id} ({len(episodes)} episodes)...")
         _ctx_extract = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx_extract:
             self.extract_benchmark(benchmark_id, force_extract=force_extract)
 
-        print(f"Phase 2: Calculating metrics across {len(episodes)} episodes...")
         all_metrics: list[dict] = []
-        episode_bundles: dict[int, dict[str, TopicBundle]] = {}
-
         data_root_str = str(self.folder_manager.data_root)
+
+        import multiprocessing
+        from .progress_display import PipelineProgressDisplay
+
+        manager = multiprocessing.Manager()
+        status_dict = manager.dict()
+
         _ctx_process = self.profiler.phase("process") if self.profiler else contextlib.nullcontext()
         with _ctx_process:
-            with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init) as executor:
-                futures = {
-                    executor.submit(_process_worker, data_root_str, ep, False): ep
-                    for ep in episodes
-                }
-                
-                completed_count = 0
-                for future in concurrent.futures.as_completed(futures):
-                    ep = futures[future]
-                    completed_count += 1
-                    try:
-                        ep_id, result = future.result()
-                        if result is not None:
-                            if isinstance(result, list):
-                                all_metrics.extend(result)
-                            else:
-                                all_metrics.append(result)
-                        
-                        print(f"[{completed_count}/{len(episodes)}] Processed metrics for episode_{ep_id:03d}")
-                    except Exception as e:
-                        import traceback
-                        traceback.print_exc()
-                        print(f"Error processing episode {ep.episode_id}: {e}")
+            with PipelineProgressDisplay(
+                f"Phase 2: Calculating metrics across {len(episodes)} episodes",
+                len(episodes),
+                self.workers,
+                status_dict=status_dict,
+            ) as display:
+                executor = concurrent.futures.ProcessPoolExecutor(
+                    max_workers=self.workers, initializer=_worker_init
+                )
+                try:
+                    futures = {
+                        executor.submit(
+                            _process_worker, data_root_str, ep, False, status_dict
+                        ): (ep, time.perf_counter())
+                        for ep in episodes
+                    }
+
+                    for future in concurrent.futures.as_completed(futures):
+                        ep, t_start = futures[future]
+                        try:
+                            ep_id, result = future.result()
+                            elapsed = time.perf_counter() - t_start
+                            if result is not None:
+                                if isinstance(result, list):
+                                    all_metrics.extend(result)
+                                else:
+                                    all_metrics.append(result)
+
+                            display.log_completed(
+                                ep_id, f"{ep.planner}/{ep.stage}", elapsed
+                            )
+                        except Exception as e:
+                            display.log_error(ep.episode_id, str(e))
+                except KeyboardInterrupt:
+                    print("\n[KeyboardInterrupt] Metrics calculation interrupted by user. Terminating workers...", flush=True)
+                    _shutdown_executor_cleanly(executor)
+                    raise
+                finally:
+                    _shutdown_executor_cleanly(executor)
 
         if not all_metrics:
             print("No valid results were generated.")
@@ -423,30 +510,6 @@ class ProcessingPipeline:
                     ref_episodes_by_stage[stage] = []
                 ref_episodes_by_stage[stage].append(row)
 
-        if ref_episodes_by_stage:
-            import numpy as np
-            for row in all_metrics:
-                if not row.get("is_reference"):
-                    stage = row.get("stage")
-                    refs = ref_episodes_by_stage.get(stage, [])
-                    if refs and "pedestrian_path" in row and row["pedestrian_path"] is not None:
-                        actual_paths = row["pedestrian_path"]
-                        ref_paths = refs[0].get("pedestrian_path")
-                        if actual_paths and ref_paths:
-                            try:
-                                actual_pts = np.concatenate([np.array(p) for p in actual_paths if len(p) > 0], axis=0) if isinstance(actual_paths, list) else np.array(actual_paths)
-                                ref_pts = np.concatenate([np.array(p) for p in ref_paths if len(p) > 0], axis=0) if isinstance(ref_paths, list) else np.array(ref_paths)
-                                if len(actual_pts) > 0 and len(ref_pts) > 0 and actual_pts.ndim == 2 and ref_pts.ndim == 2:
-                                    from .metrics.social.pedestrian_disturbance import PedestrianDisturbanceCalculator
-                                    deflect = PedestrianDisturbanceCalculator._compute_trajectory_deflection(actual_pts, ref_pts)
-                                    row["ped_path_deflection_m"] = round(float(deflect), 3)
-                            except Exception:
-                                pass
-
-        # PFI: mean per-ped warped displacement error vs the
-        # unhindered_peds reference (DTW, meters).
-        # MAR: that deviation over the robot's detour vs the
-        # unobstructed_robot reference path length.
         ref_ped_by_stage: dict[str, list[dict]] = {}
         ref_robot_by_stage: dict[str, list[dict]] = {}
         for row in all_metrics:
@@ -458,30 +521,31 @@ class ProcessingPipeline:
             elif row.get("reference_type") == "unobstructed_robot":
                 ref_robot_by_stage.setdefault(stage, []).append(row)
 
+        if ref_episodes_by_stage or ref_robot_by_stage:
+            print(f"Phase 2 Post-Processing: Cross-referencing {len(all_metrics)} episodes against {len(ref_ped_by_stage)} ped references and {len(ref_robot_by_stage)} robot references...", flush=True)
+
+        from .metrics.social.mutual_accommodation import MutualAccommodationCalculator
+
         for row in all_metrics:
             if row.get("is_reference"):
                 continue
+
             stage = row.get("stage")
-            actual_paths = row.get("pedestrian_path")
-            pfi_val = None
-            if actual_paths and ref_ped_by_stage.get(stage):
-                ref_paths = ref_ped_by_stage[stage][0].get("pedestrian_path")
-                if ref_paths:
-                    try:
-                        pfi_val = _mean_warped_ped_error(actual_paths, ref_paths)
-                    except Exception:
-                        pfi_val = None
-            if pfi_val is not None:
-                row["pfi"] = round(float(pfi_val), 4)
-                ref_robots = ref_robot_by_stage.get(stage, [])
-                if row.get("path_length") is not None and ref_robots:
-                    ref_len = ref_robots[0].get("path_length")
-                    if ref_len is not None:
-                        robot_dev = max(float(row["path_length"]) - float(ref_len), 0.0)
-                        if robot_dev >= 0.01:
-                            row["mar"] = round(float(pfi_val / robot_dev), 4)
+            ref_robots = ref_robot_by_stage.get(stage, [])
+            ref_peds = ref_ped_by_stage.get(stage, [])
+
+            ref_robot_row = ref_robots[0] if ref_robots else None
+            ref_ped_row = ref_peds[0] if ref_peds else None
+
+            reconciled = MutualAccommodationCalculator.reconcile_stage_references(
+                dynamic_row=row,
+                ref_robot_row=ref_robot_row,
+                ref_ped_row=ref_ped_row,
+            )
+            row.update(reconciled)
 
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
         df = pl.DataFrame(all_metrics)
         ParquetStore.write(df, combined_path)
         print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")
+
