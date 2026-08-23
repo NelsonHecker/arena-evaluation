@@ -52,6 +52,7 @@ from .state import (
     find_most_recent_resumable,
 )
 from .step import Step, StepErrorKind, StepResult
+from .progress_display import BenchmarkProgressDisplay
 
 
 class _WithSteps(typing.Protocol):
@@ -432,6 +433,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
         self._arena_proc: subprocess.Popen | None = None
         self._parent_episode_map: dict[tuple[str, str, int], int] = {}
+        self._progress: BenchmarkProgressDisplay | None = None
 
     def _build_pending(self) -> list[Step]:
         return build_pending(
@@ -629,6 +631,7 @@ class BenchmarkRunner(ArenaMixinNode):
         self,
         step: Step,
         env_id: int,
+        slot_index: int = 0,
     ) -> StepResult:
         """Drive all episodes for one step. Env is already up and clients are set up."""
         started = time.time()
@@ -638,6 +641,17 @@ class BenchmarkRunner(ArenaMixinNode):
 
         try:
             for ep_idx in range(step.episodes):
+                if self._progress is not None:
+                    self._progress.update_slot(
+                        slot_index=slot_index,
+                        env_id=env_id,
+                        contestant=step.contestant.name,
+                        stage=step.stage.name,
+                        step_key=step.key,
+                        ep_idx=ep_idx,
+                        ep_total=step.episodes,
+                        state="RUNNING",
+                    )
                 goal = RunEpisode.Goal()
                 goal.world = step.stage.map
                 goal.seed = (step.stage.seed + ep_idx) if step.stage.seed is not None else ep_idx
@@ -949,7 +963,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 await self._push_stage_config(env_id, step)
 
                 try:
-                    step_result = await self._run_episodes(step, env_id)
+                    step_result = await self._run_episodes(step, env_id, slot_index)
                 except asyncio.CancelledError:
                     step_result = StepResult(
                         step.key,
@@ -1203,6 +1217,18 @@ class BenchmarkRunner(ArenaMixinNode):
         cap = max(1, min(self._env_n, len(pending) or 1))
         in_flight: set[asyncio.Task[bool]] = set()
 
+        step_map: dict[str, Step] = {
+            s.key: s
+            for s in (*_all_steps_grid(self._suite, self._contest, self._scale_episodes, self._run_dir.path), *pending)
+        }
+
+        self._progress = BenchmarkProgressDisplay(
+            title=f"Arena Benchmark: {self._suite.name} • {self._contest.name}",
+            total_steps=steps_total,
+            env_n=self._env_n,
+            run_id=self._run_id,
+        )
+
         def _mark_step_in_progress(step: Step) -> None:
             results[step.key] = StepResult(
                 step.key,
@@ -1219,9 +1245,26 @@ class BenchmarkRunner(ArenaMixinNode):
 
         def _flush_step_result(res: StepResult) -> bool:
             results[res.key] = res
-            _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={((res.ended_at or 0.0) - res.started_at):.1f}s")
+            elapsed = (res.ended_at or time.time()) - res.started_at
+            _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={elapsed:.1f}s")
             self._run_dir.state.write(results)
             self._publish_state(results, steps_total)
+
+            if self._progress is not None:
+                st = step_map.get(res.key)
+                c_name = st.contestant.name if st else res.key
+                s_name = st.stage.name if st else ""
+                self._progress.log_step_completed(
+                    step_key=res.key,
+                    status=res.status,
+                    contestant=c_name,
+                    stage=s_name,
+                    episodes_run=res.episodes_run,
+                    episodes_total=res.episodes_total,
+                    episodes_failed=res.episodes_failed,
+                    elapsed_sec=elapsed,
+                    error_detail=res.error_detail,
+                )
             
             total_episodes_run = sum(r.episodes_run for r in results.values())
             if total_episodes_run > 0:
@@ -1246,32 +1289,33 @@ class BenchmarkRunner(ArenaMixinNode):
                     return True
             return False
 
-        try:
-            for slot in range(cap):
-                in_flight.add(asyncio.create_task(_worker(slot), name=f"worker_{slot}"))
-            
-            while in_flight:
-                done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
-                for t in done:
-                    abort = t.result()
-                    if abort:
-                        aborted_systemic = True
-                        _log.error(f"benchmark: worker hit a systemic setup failure; aborting run")
-                        for t2 in in_flight:
-                            t2.cancel()
-                        with contextlib.suppress(Exception):
-                            await asyncio.gather(*in_flight, return_exceptions=True)
-                        in_flight.clear()
-                        block_queues.clear()
-                        break
-        except asyncio.CancelledError:
-            for t in in_flight:
-                t.cancel()
-            await asyncio.gather(*in_flight, return_exceptions=True)
-            raise
-        finally:
-            self._run_dir.progress.dedupe_in_place()
-            self._publish_state(results, steps_total)
+        with self._progress:
+            try:
+                for slot in range(cap):
+                    in_flight.add(asyncio.create_task(_worker(slot), name=f"worker_{slot}"))
+                
+                while in_flight:
+                    done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
+                    for t in done:
+                        abort = t.result()
+                        if abort:
+                            aborted_systemic = True
+                            _log.error(f"benchmark: worker hit a systemic setup failure; aborting run")
+                            for t2 in in_flight:
+                                t2.cancel()
+                            with contextlib.suppress(Exception):
+                                await asyncio.gather(*in_flight, return_exceptions=True)
+                            in_flight.clear()
+                            block_queues.clear()
+                            break
+            except asyncio.CancelledError:
+                for t in in_flight:
+                    t.cancel()
+                await asyncio.gather(*in_flight, return_exceptions=True)
+                raise
+            finally:
+                self._run_dir.progress.dedupe_in_place()
+                self._publish_state(results, steps_total)
 
         return 1 if aborted_systemic else 0
 
