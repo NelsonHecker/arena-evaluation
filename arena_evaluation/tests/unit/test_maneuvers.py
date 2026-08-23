@@ -9,6 +9,8 @@ import pathlib
 
 import pytest
 
+pytest.importorskip("controller_manager_msgs")
+
 from task_generator.tasks.robots.characterization.schedule import (
     ANGULAR_DWELL_S,
     IDLE_DURATION_S,
@@ -20,6 +22,7 @@ from task_generator.tasks.robots.characterization.schedule import (
     resolve_envelope,
     schedule_duration,
 )
+
 
 
 def test_schedule_structure():

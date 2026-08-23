@@ -395,15 +395,11 @@ def test_timeseries_plotly_none_metric_skips_trace():
     assert html is not None and "dwb - Ep 1" in html
 
 
-def test_timeseries_plotly_polars_list_columns_skip_all_traces():
-    """Suspected source bug (documented): polars List columns convert to
-    numpy arrays via ``to_pandas``, which fail the renderer's
-    ``isinstance(x, (list, tuple))`` guard — so real-pipeline frames render
-    an empty figure. Pins current behaviour; remove once the guard accepts
-    numpy arrays."""
+def test_timeseries_plotly_polars_list_columns_render_successfully():
+    """Verify that Polars List columns (which convert to NumPy arrays) render correctly."""
     html = TimeseriesRenderer(_ts_spec()).render_plotly(_ts_df())
     assert html is not None
-    assert "dwb - Ep 1" not in html
+    assert "dwb - Ep 1" in html
 
 
 def test_timeseries_seaborn_is_pass_through(tmp_path):
