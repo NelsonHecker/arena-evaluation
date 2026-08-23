@@ -113,6 +113,10 @@ class ConfigPathResolver(SimplePathResolver):
             elif entry.is_dir() and (entry / f'{kind}.yaml').is_file():
                 yield self._IdentifierT(name=entry.name)
 
+    async def listall_async(self, **kwargs: object) -> list[AssetIdentifier]:
+        # the inherited child-process walk would list raw filenames, not config names
+        return list(self.listall(**kwargs))
+
 
 def _bench_dirs() -> Iterator[Path]:
     """configs/benchmark under the package share dir, then the source-tree fallback."""
