@@ -17,9 +17,9 @@ stages:
         interactive: {min: 0, max: 0}
       characterization:
         modes: [idle, linear, lateral, arc, ramps, brake, angular]
-        linear_dwell_s: 10.0
-        angular_dwell_s: 10.0
-        arc_dwell_s: 10.0
+        linear_dwell_s: 5.0
+        angular_dwell_s: 5.0
         arc_speeds: [0.5, 1.0, 1.5]
         arc_radii_m: [0.5, 1.0, 2.5]
-    timeout: 360s
+        ramp_horizons: [0.5, 1.0, 2.0]
+    timeout: 600s
