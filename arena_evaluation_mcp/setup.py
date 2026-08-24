@@ -13,7 +13,7 @@ setup(
          ['resource/' + package_name]),
         (os.path.join('share', package_name), ['package.xml']),
     ],
-    install_requires=['setuptools', 'mcp>=1.0'],
+    install_requires=['setuptools', 'mcp>=2.0'],
     zip_safe=True,
     author='NelsonHecker',
     author_email='heckernelson@gmail.com',
