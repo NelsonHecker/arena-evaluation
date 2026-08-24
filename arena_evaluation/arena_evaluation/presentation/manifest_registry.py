@@ -7,8 +7,8 @@ with the ``configs`` data files) and are selected via
 Resolution precedence:
 1. Inline YAML (reference starts with ``{`` or ``[``).
 2. Explicit path to an existing YAML file.
-3. Name -> ``share/configs/benchmark/manifests/<name>.yaml`` (source tree as
-   fallback so unit tests run without ROS).
+3. ``ManifestIdentifier`` resolver chain: share dir -> source tree (so unit
+   tests run without ROS) -> network providers (``BENCHMARK_BUCKETS``).
 4. Legacy ``benchmark_dir/viz_manifest.yaml`` (only when no reference given).
 5. The ``report_manifest.yaml`` note file in the benchmark dir (only when no
    reference given and no legacy file).
@@ -26,8 +26,6 @@ from .viz_manifest import VizManifest
 
 if typing.TYPE_CHECKING:
     pass
-
-MANIFESTS_SUBDIR = "configs/benchmark/manifests"
 
 
 def is_inline(ref: str) -> bool:
@@ -60,26 +58,20 @@ def source_tree_dir() -> pathlib.Path | None:
 
 
 def find_manifest_file(stem: str) -> pathlib.Path | None:
-    """Resolve a manifest name to its YAML file (share dir -> source tree)."""
-    for base in (share_dir(), source_tree_dir()):
-        if base is None:
-            continue
-        cand = base / MANIFESTS_SUBDIR / f"{stem}.yaml"
-        if cand.is_file():
-            return cand
-    return None
+    """Resolve a manifest name to its YAML file, stopping at the first resolver that has it."""
+    from ..benchmark.tree import ManifestIdentifier
+
+    try:
+        return ManifestIdentifier(name=stem).resolve_source_sync().path
+    except FileNotFoundError:
+        return None
 
 
 def available_manifests() -> list[str]:
     """Sorted stems of all bundled manifests."""
-    found: set[str] = set()
-    for base in (share_dir(), source_tree_dir()):
-        if base is None:
-            continue
-        d = base / MANIFESTS_SUBDIR
-        if d.is_dir():
-            found.update(p.stem for p in d.glob("*.yaml"))
-    return sorted(found)
+    from ..benchmark.tree import ManifestIdentifier
+
+    return sorted({m.shortname for m in ManifestIdentifier.listall()})
 
 
 class ManifestNotFoundError(FileNotFoundError):

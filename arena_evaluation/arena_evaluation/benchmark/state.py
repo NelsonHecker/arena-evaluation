@@ -91,6 +91,8 @@ class Manifest:
     contest: list | dict
     steps: list[dict]
     launch_args: dict = dataclasses.field(default_factory=dict)
+    suite_provenance: dict | None = None
+    contest_provenance: dict | None = None
 
     def to_yaml(self) -> str:
         return yaml.dump(dataclasses.asdict(self), allow_unicode=True, sort_keys=False)
