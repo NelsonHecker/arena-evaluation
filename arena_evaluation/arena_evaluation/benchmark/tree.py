@@ -18,9 +18,9 @@ from arena_simulation_setup.tree import (
 )
 
 from ..presentation.manifest_registry import share_dir, source_tree_dir
-from ..presentation.viz_manifest import VizManifest
 
 if typing.TYPE_CHECKING:
+    from ..presentation.viz_manifest import VizManifest
     from .config import Contest, Suite
 
 _BENCH_TTL_S = 365 * 86400
@@ -69,7 +69,7 @@ class ContestIdentifier(AssetIdentifier["Contest"]):
         return Contest.parse(self.name, yaml.safe_load(_config_file(path, self._asset_type).read_text()))
 
 
-class ManifestIdentifier(AssetIdentifier[VizManifest]):
+class ManifestIdentifier(AssetIdentifier['VizManifest']):
     _asset_type = 'manifests'
 
     def __hash__(self) -> int:
@@ -80,6 +80,8 @@ class ManifestIdentifier(AssetIdentifier[VizManifest]):
 
     def load(self, path: Path, /, **kwargs: object) -> VizManifest:
         del kwargs
+        from ..presentation.viz_manifest import VizManifest
+
         return VizManifest.load(_config_file(path, self._asset_type))
 
 
