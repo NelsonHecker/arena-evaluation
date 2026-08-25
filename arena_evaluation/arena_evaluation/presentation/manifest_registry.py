@@ -22,10 +22,8 @@ import typing
 
 import yaml
 
-from .viz_manifest import VizManifest
-
 if typing.TYPE_CHECKING:
-    pass
+    from .viz_manifest import VizManifest
 
 
 def is_inline(ref: str) -> bool:
@@ -114,6 +112,8 @@ def resolve_manifest(
     ``None`` walks the legacy chain: benchmark-dir ``viz_manifest.yaml`` ->
     ``report_manifest.yaml`` note -> default ``standard``.
     """
+    from .viz_manifest import VizManifest
+
     if ref is None:
         if benchmark_dir is not None:
             legacy = benchmark_dir / "viz_manifest.yaml"
