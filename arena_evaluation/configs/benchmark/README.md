@@ -83,8 +83,9 @@ A flat local `<name>.yaml` is wrapped into that shape on publish, so nothing has
 restructured by hand. Fetched bundles cache under `$ARENA_ASSETS_DIR/<bucket>/` with a one
 year TTL, since a published config is expected to be pinned rather than revised in place.
 
-Move them with `arena asset find|ls|pull|push suite|contest|manifest <name>`; `find` prints
-every resolver's verdict without downloading. Pushing a suite first checks that every world
+Move them with `arena asset find|ls|pull|push suite|contest|manifest <name>`. `find` prints
+every resolver's verdict without downloading. Reading is anonymous. Pushing requires
+`GCS_ACCESS_TOKEN` in the environment, and for a suite first checks that every world
 its stages name would resolve for someone else, counting worlds bundled under the suite.
 Task modes are not checked, since they are code rather than data shipped with the suite.
 Contests and manifests carry no such closure and publish as-is.
