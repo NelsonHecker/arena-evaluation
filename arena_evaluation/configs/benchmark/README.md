@@ -69,6 +69,33 @@ launched runtime, so the bundled world directories resolve ahead of the canonica
 tree in every sim process (an `ARENA_WORLD_PATH` already set in the outer environment
 keeps priority). See `suites/acoustics/` for an example that ships its own worlds.
 
+### Inline configs
+
+`--suite` and `--contest` also accept a YAML literal instead of a name. A value whose first
+non-space character is `[` or `{` is parsed with `yaml.safe_load` and used directly, with the
+same schema as the corresponding file. The run is recorded under the stem `inline`, so it is
+not resumable by name. Quote the literal so the shell passes it as one argument:
+
+```bash
+# simplest: name only, robot comes up with the sim's default mobile adapter and planners
+arena evaluation benchmark --suite basic --contest '[{name: default}]'
+arena evaluation benchmark --suite basic \
+  --contest '[{name: dwb, mobile: {driver: nav2, local_planner: dwb, inter_planner: navigate_w_replanning_time}}]'
+# sweep form works too
+arena evaluation benchmark --suite basic --contest '{mobile: {driver: nav2, local_planner: [teb, dwa]}}'
+```
+
+The robot model is a stage field, not a contestant field. `robot` (like `world`, `sim` and
+the `task.*` keys) is set by the stage and any contestant key that collides with it is dropped
+with a warning. To run a single planner on a single robot without touching the config tree,
+inline both:
+
+```bash
+arena evaluation benchmark \
+  --suite '{stages: [{name: jackal, map: arena_hospital_small, robot: jackal, tm_robots: random, tm_obstacles: random, episodes: 5}]}' \
+  --contest '[{name: default}]'
+```
+
 ### Bucket-hosted configs
 
 Suites, contests and manifests are `Identifier`s, resolved through the same chain as every
@@ -214,16 +241,6 @@ The old flat dot-notation format is still accepted in both list and sweep forms:
 # Old flat sweep form - still works
 mobile.local_planner: [teb, dwa]
 mobile.inter_planner: bypass
-```
-
-### Inline contest (CLI)
-
-Pass the YAML inline as the `--contest` value when the string starts with `[`
-or `{`:
-
-```
-arena evaluation benchmark --suite basic --contest '[{name: teb, mobile: {driver: nav2, local_planner: teb}}]'
-arena evaluation benchmark --suite basic --contest '{mobile: {driver: nav2, local_planner: [teb, dwa]}}'
 ```
 
 ### Contestant args
