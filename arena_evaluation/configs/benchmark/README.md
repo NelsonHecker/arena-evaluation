@@ -31,6 +31,8 @@ A suite is an ordered list of stages. The runner steps through the
 stages sequentially, cycling through all contestants at each stage.
 
 ```yaml
+launch:                       # optional. launch args for the whole run, CLI passthrough wins. stage-owned keys (world, robot, run_seed, task.*, record.*) are rejected
+  lockstep: true
 stages:
   - name: scenario            # human-readable label (used in log output)
     map: arena_hospital_small # world/map name
@@ -42,9 +44,16 @@ stages:
       scenario:               # top-level key matches tm_robots / tm_obstacles
         file: 4.json          # -> task.scenario.file
       random:
-        dynamic:  {min: 3, max: 5, models: [arenian]}  # -> task.random.dynamic.{min,max,models}
+        dynamic:  {min: 3, max: 5, models: [arenian]}  # -> task.random.dynamic.n=[3,5], task.random.dynamic.models
         static:   {min: 5, max: 10, models: [shelf]}
 ```
+
+A `{min, max}` pair anywhere in `config` is a runner-side convenience: it collapses to a
+single `<leaf>.n` param holding `[min, max]` (the actual ROS param the mode declares, e.g.
+`random`'s `static.n`/`dynamic.n`/`interactive.n` - see
+[task_generator/tasks/obstacles/README.md](../../../../task_generator/task_generator/tasks/obstacles/README.md)).
+Writing `static: {n: [5, 10]}` directly also works. For `scenario`, a `file` value with an
+extension has the extension stripped before it is sent (`4.json` and `4` are equivalent).
 
 ### Stage fields
 
@@ -55,10 +64,12 @@ stages:
 | `robot` | string | Robot model |
 | `tm_robots` | string | `Constants.TaskMode.TM_Robots` enum key (case-insensitive) |
 | `tm_obstacles` | string | `Constants.TaskMode.TM_Obstacles` enum key (case-insensitive) |
-| `episodes` | int | Episode count (scaled by `scale_episodes` launch arg) |
+| `episodes` | int | Episode count (scaled by the `--scale-episodes` CLI flag, default 1.0) |
 | `config` | dict | Per-mode params; top-level keys must match `tm_robots`/`tm_obstacles` (e.g. `scenario`, `random`). Inner leaves map to `task.<mode>.<leaf>` via QueueEpisode (see [task_generator/tasks/obstacles/README.md](../../../../task_generator/task_generator/tasks/obstacles/README.md)) |
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
-| `timeout` | string | Per-episode timeout; defaults to `Constants.Robot.TIMEOUT` if absent |
+| `timeout` | string | Per-episode timeout, e.g. `300s`/`5m`. Defaults to 60s if absent |
+| `timeout_peds` | string | Timeout override used only for the `unhindered_peds` reference step of this stage (see `references` below). Defaults to `timeout` if absent |
+| `optim` | dict | Extra `optim.<key>:=<value>` launch args for this stage's env |
 
 ### Directory bundles
 
@@ -156,9 +167,10 @@ arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 A contest defines the set of planner configurations (contestants) to evaluate.
 The runner iterates over all contestants at each suite stage.
 
-Contestant args use **cap-scoped dicts** - each capability (e.g. `mobile`,
-`arm`) is a dict with a `driver` key identifying the driver and any extra
-kwargs forwarded as launch args under the `robot.` prefix:
+Contestant args use **cap-scoped dicts** - each capability (`mobile`, `arm`,
+`planner`) is a dict with a `driver` key identifying the driver and any extra
+kwargs forwarded as launch args under the `robot.` prefix. `planner` also
+accepts a bare scalar value as shorthand for `robot.planner:=<value>`:
 
 ```yaml
 mobile:
@@ -284,7 +296,8 @@ For each group the runner:
 
 1. Calls `/arena/spawn_env` once with the first step's launch args: `sim`,
    `robot`, `world`, `task.robots`, `task.obstacles`, `run_seed`,
-   `task.auto_reset:=false`, `task.modules:=` (empty), and any contestant args of
+   `task.auto_reset:=false`, `task.modules:=` (empty), any `optim.<key>:=<value>`
+   from the stage's `optim` dict, and any contestant args of
    shape `mobile`, `arm`, `mobile.<key>`, or `arm.<key>` (emitted as
    `robot.mobile...` / `robot.arm...`). `record.dir` and `record.auto:=false`
    are added when recording is enabled.

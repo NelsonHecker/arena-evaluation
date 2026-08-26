@@ -1438,9 +1438,6 @@ def cli_main(argv: list[str] | None = None) -> int:
     if "env_n" in arena_passthrough:
         print("benchmark: env_n:= is deprecated, use env.n:=", file=sys.stderr)
         arena_passthrough.setdefault("env.n", arena_passthrough.pop("env_n"))
-    env_n = int(arena_passthrough.get("env.n", "1"))
-    headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
-    simulator = arena_passthrough.get("sim", None)
 
     try:
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
@@ -1482,6 +1479,11 @@ def cli_main(argv: list[str] | None = None) -> int:
             suite, contest, suite_dict, contest_dict, suite_bundle_dir, suite_provenance, contest_provenance = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
+
+        arena_passthrough = {**suite.launch_args, **arena_passthrough}
+        env_n = int(arena_passthrough.get("env.n", "1"))
+        headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
+        simulator = arena_passthrough.get("sim", None)
 
         steps = _all_steps(contest, suite, scale_episodes)
         if not steps:
@@ -1527,6 +1529,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
+                launch_args=dict(arena_passthrough),
                 suite_provenance=suite_provenance,
                 contest_provenance=contest_provenance,
             )
