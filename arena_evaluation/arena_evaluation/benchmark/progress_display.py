@@ -41,7 +41,6 @@ class BenchmarkProgressDisplay:
         self._running = False
         self._lock = threading.Lock()
         self.start_time = time.perf_counter()
-        self._monitor_thread: threading.Thread | None = None
 
         # slot_index -> dict with details: {env_id, contestant, stage, step_key, ep_idx, ep_total, state, start_time}
         self.active_slots: dict[int, dict[str, typing.Any]] = {}
@@ -50,18 +49,15 @@ class BenchmarkProgressDisplay:
         if _HAS_RICH and sys.stdout.isatty():
             self.console.print(f"[bold cyan]{self.title}[/bold cyan] [dim](run_id: {self.run_id}, env_n: {self.env_n})[/dim]")
             self.live = Live(
-                self._render(),
+                get_renderable=self._render,
                 console=self.console,
-                refresh_per_second=10,
+                refresh_per_second=4,
                 transient=True,
+                redirect_stdout=True,
+                redirect_stderr=True,
             )
             self.live.__enter__()
             self._running = True
-
-            self._monitor_thread = threading.Thread(
-                target=self._monitor_loop, daemon=True
-            )
-            self._monitor_thread.start()
         else:
             print(
                 f"{self.title} [run_id: {self.run_id}] ({self.total_steps} steps, {self.env_n} envs)...",
@@ -73,24 +69,25 @@ class BenchmarkProgressDisplay:
         self._running = False
         if self.live is not None:
             self.live.__exit__(exc_type, exc_val, exc_tb)
+            self.live = None
             elapsed = time.perf_counter() - self.start_time
             mins, secs = divmod(int(elapsed), 60)
-            self.console.print(
-                f"\n[bold green]✔ Benchmark completed in {mins:02d}:{secs:02d}[/bold green] "
-                f"(ok: [green]{self.ok_steps}[/green], "
-                f"failed: [red]{self.failed_steps}[/red], "
-                f"partial: [yellow]{self.partial_steps}[/yellow], "
-                f"skipped: [dim]{self.skipped_steps}[/dim])"
-            )
-
-    def _monitor_loop(self):
-        while self._running:
-            time.sleep(0.1)
-            if self.live is not None:
-                try:
-                    self.live.update(self._render())
-                except Exception:
-                    pass
+            if exc_type is not None and issubclass(exc_type, (asyncio.CancelledError, KeyboardInterrupt)):
+                self.console.print(
+                    f"\n[bold yellow]⚠ Benchmark interrupted after {mins:02d}:{secs:02d}[/bold yellow] "
+                    f"(completed: {self.completed_steps}/{self.total_steps}, "
+                    f"ok: [green]{self.ok_steps}[/green], "
+                    f"failed: [red]{self.failed_steps}[/red], "
+                    f"partial: [yellow]{self.partial_steps}[/yellow])"
+                )
+            else:
+                self.console.print(
+                    f"\n[bold green]✔ Benchmark completed in {mins:02d}:{secs:02d}[/bold green] "
+                    f"(ok: [green]{self.ok_steps}[/green], "
+                    f"failed: [red]{self.failed_steps}[/red], "
+                    f"partial: [yellow]{self.partial_steps}[/yellow], "
+                    f"skipped: [dim]{self.skipped_steps}[/dim])"
+                )
 
     def update_slot(
         self,
@@ -167,8 +164,8 @@ class BenchmarkProgressDisplay:
                 line += f" • [dim red]{error_detail}[/dim red]"
 
             if self.live is not None:
-                self.console.print(line)
-                self.live.update(self._render())
+                self.live.console.print(line)
+                self.live.refresh()
             else:
                 print(
                     f"[{self.completed_steps}/{self.total_steps}] {step_key} ({status}) in {elapsed_sec:.1f}s",
@@ -176,45 +173,46 @@ class BenchmarkProgressDisplay:
                 )
 
     def _render(self) -> Table:
+        with self._lock:
+            completed = self.completed_steps
+            total = self.total_steps
+            ok = self.ok_steps
+            failed = self.failed_steps
+            partial = self.partial_steps
+            skipped = self.skipped_steps
+            slots_snapshot = {k: dict(v) for k, v in self.active_slots.items()}
+
         table = Table.grid(padding=(0, 1))
 
         # Overall Progress Bar
-        pct = (
-            (self.completed_steps / self.total_steps) * 100
-            if self.total_steps > 0
-            else 0
-        )
-        filled = (
-            int(30 * (self.completed_steps / self.total_steps))
-            if self.total_steps > 0
-            else 0
-        )
+        pct = (completed / total * 100) if total > 0 else 0
+        filled = int(30 * (completed / total)) if total > 0 else 0
         bar = "█" * filled + "░" * (30 - filled)
         elapsed = time.perf_counter() - self.start_time
         mins, secs = divmod(int(elapsed), 60)
 
         table.add_row(
-            f"[{bar}] [bold green]{self.completed_steps}/{self.total_steps}[/bold green] "
+            f"[{bar}] [bold green]{completed}/{total}[/bold green] "
             f"steps ({pct:.0f}%) | "
-            f"ok: [green]{self.ok_steps}[/green] fail: [red]{self.failed_steps}[/red] part: [yellow]{self.partial_steps}[/yellow] | "
+            f"ok: [green]{ok}[/green] fail: [red]{failed}[/red] part: [yellow]{partial}[/yellow] | "
             f"Elapsed: [yellow]{mins:02d}:{secs:02d}[/yellow]"
         )
         table.add_row("")
 
         # Active Envs Table
-        if self.active_slots:
+        if slots_snapshot:
             worker_table = Table(
-                show_header=True, header_style="bold blue", box=None, padding=(0, 2)
+                show_header=True, header_style="bold blue", box=None, padding=(0, 2), expand=False
             )
             worker_table.add_column("Env", style="cyan", no_wrap=True)
-            worker_table.add_column("Contestant / Stage", style="white")
-            worker_table.add_column("State", style="yellow")
-            worker_table.add_column("Episode", justify="right", style="magenta")
-            worker_table.add_column("Time", justify="right", style="green")
+            worker_table.add_column("Contestant / Stage", style="white", no_wrap=True, overflow="ellipsis", max_width=60)
+            worker_table.add_column("State", style="yellow", no_wrap=True)
+            worker_table.add_column("Episode", justify="right", style="magenta", no_wrap=True)
+            worker_table.add_column("Time", justify="right", style="green", no_wrap=True)
 
             now = time.perf_counter()
-            for slot_idx in sorted(self.active_slots.keys()):
-                info = self.active_slots[slot_idx]
+            for slot_idx in sorted(slots_snapshot.keys()):
+                info = slots_snapshot[slot_idx]
                 env_label = f"env_{info['env_id']}" if info.get("env_id") is not None else f"slot_{slot_idx}"
                 ep_str = f"({info['ep_idx'] + 1}/{info['ep_total']})" if info.get("ep_total") else "-"
                 w_elapsed = max(now - info.get("start_time", now), 0.0)

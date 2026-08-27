@@ -939,6 +939,70 @@ class EvalBridge:
             return share / subdir / f"{stem}.yaml"
         return self._arena_evaluation_source_root() / subdir / f"{stem}.yaml"
 
+    @staticmethod
+    def _arena_simulation_setup_source_root() -> pathlib.Path | None:
+        """Source root of arena_simulation_setup."""
+        here = pathlib.Path(__file__).resolve()
+        for parent in here.parents:
+            cand = parent / "arena_simulation_setup"
+            if (cand / "worlds").is_dir():
+                return cand
+            cand2 = parent / "src" / "Arena" / "arena_simulation_setup"
+            if (cand2 / "worlds").is_dir():
+                return cand2
+        for cand_path in (
+            pathlib.Path("/opt/arena_ws/src/Arena/arena_simulation_setup"),
+            pathlib.Path("/home/nelson/arena_ws/src/Arena/arena_simulation_setup"),
+            pathlib.Path("u:/src/Arena/arena_simulation_setup"),
+            pathlib.Path("/mnt/u/src/Arena/arena_simulation_setup"),
+        ):
+            if (cand_path / "worlds").is_dir():
+                return cand_path
+        return None
+
+    def scenario_write_targets(
+        self, map_name: str, scenario_name: str, location: str = "both"
+    ) -> list[pathlib.Path]:
+        """Resolve write targets for a scenario file."""
+        map_name = validate_path_component(map_name)
+        scenario_name = validate_path_component(scenario_name)
+        targets: list[pathlib.Path] = []
+
+        # 1. Source target
+        src_root = self._arena_simulation_setup_source_root()
+        src_target = (
+            src_root / "worlds" / map_name / "scenarios" / scenario_name / "scenario.yaml"
+            if src_root is not None else None
+        )
+
+        # 2. Install share target
+        install_target = None
+        try:
+            from ament_index_python.packages import get_package_share_directory
+
+            share = pathlib.Path(get_package_share_directory("arena_simulation_setup"))
+            install_target = share / "worlds" / map_name / "scenarios" / scenario_name / "scenario.yaml"
+        except (ImportError, LookupError):
+            pass
+
+        if location == "source":
+            if src_target:
+                targets.append(src_target)
+        elif location == "install":
+            if install_target:
+                targets.append(install_target)
+            elif src_target:
+                targets.append(src_target)
+        else:  # "both" (default)
+            if src_target:
+                targets.append(src_target)
+            if install_target and (
+                not src_target or install_target.resolve() != src_target.resolve()
+            ):
+                targets.append(install_target)
+
+        return targets
+
 
     def _all_benchmark_ids(self) -> list[str]:
         """Return all benchmark directory names."""

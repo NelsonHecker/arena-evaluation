@@ -965,32 +965,11 @@ class BenchmarkRunner(ArenaMixinNode):
                 try:
                     step_result = await self._run_episodes(step, env_id, slot_index)
                 except asyncio.CancelledError:
-                    step_result = StepResult(
-                        step.key,
-                        "skipped",
-                        env_id,
-                        time.time(),
-                        time.time(),
-                        StepErrorKind.CANCELLED,
-                        "cancelled",
-                        episodes_total=step.episodes,
-                    )
-                    flush_cb(step_result)
                     while not q.empty():
                         try:
-                            rem_step = q.get_nowait()
+                            q.get_nowait()
                         except asyncio.QueueEmpty:
                             break
-                        flush_cb(StepResult(
-                            rem_step.key,
-                            "skipped",
-                            env_id,
-                            time.time(),
-                            time.time(),
-                            StepErrorKind.CANCELLED,
-                            "cancelled",
-                            episodes_total=rem_step.episodes,
-                        ))
                     raise
                 except _EnvDied as exc:
                     step_result = StepResult(
@@ -1018,19 +997,10 @@ class BenchmarkRunner(ArenaMixinNode):
                     if recorder_proc is not None:
                         try:
                             os.killpg(os.getpgid(recorder_proc.pid), signal.SIGINT)
-                            await asyncio.wait_for(recorder_proc.wait(), timeout=10.0)
-                        except asyncio.TimeoutError:
-                            _log.warning(f"Recorder process timed out during shutdown, killing it.")
-                            try:
+                            await asyncio.wait_for(recorder_proc.wait(), timeout=2.0)
+                        except (asyncio.TimeoutError, Exception):
+                            with contextlib.suppress(Exception):
                                 os.killpg(os.getpgid(recorder_proc.pid), signal.SIGKILL)
-                            except Exception:
-                                pass
-                        except Exception as e:
-                            _log.warning(f"Failed to cleanly terminate recorder process: {e}")
-                            try:
-                                os.killpg(os.getpgid(recorder_proc.pid), signal.SIGKILL)
-                            except Exception:
-                                pass
 
                 abort = flush_cb(step_result)
                 if abort:
@@ -1082,9 +1052,9 @@ class BenchmarkRunner(ArenaMixinNode):
                     with contextlib.suppress(Exception):
                         dreq = DespawnEnv.Request()
                         dreq.env_id = env_id
-                        await self._await_hb(self._despawn.call_forever(dreq), f"despawn of env {env_id}")
-                    with contextlib.suppress(asyncio.TimeoutError, Exception):
-                        await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
+                        await asyncio.wait_for(self._despawn.call_forever(dreq), timeout=2.0)
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(self._wait_env_gone(env_id, timeout=2.0), timeout=2.0)
                 if keep_alive:
                     _log.info(f"--noexit: keeping env {env_id} alive after last group {rep_step.key}")
         
@@ -1117,6 +1087,9 @@ class BenchmarkRunner(ArenaMixinNode):
     async def setup(self) -> None:
         try:
             BenchmarkRunner.exit_code = await self._run_steps()
+        except asyncio.CancelledError:
+            BenchmarkRunner.exit_code = 130
+            raise
         except Exception as exc:
             _log.error(f"benchmark crashed: {exc!r}")
             BenchmarkRunner.exit_code = 2
@@ -1134,24 +1107,50 @@ class BenchmarkRunner(ArenaMixinNode):
         p = self._arena_proc
         if p is None or p.poll() is not None:
             return
-        loop = asyncio.get_running_loop()
-        for sig, grace in ((signal.SIGINT, 5.0), (signal.SIGTERM, 3.0)):
+        
+        print("\nbenchmark: shutting down arena runtime...", flush=True)
+        try:
+            pgid = os.getpgid(p.pid)
+        except (ProcessLookupError, OSError):
+            if self._arena_log_file is not None:
+                with contextlib.suppress(Exception):
+                    self._arena_log_file.close()
+                self._arena_log_file = None
+            return
+
+        for sig, grace in ((signal.SIGINT, 3.0), (signal.SIGTERM, 2.0)):
             try:
-                os.killpg(os.getpgid(p.pid), sig)
-            except ProcessLookupError:
-                return
+                os.killpg(pgid, sig)
+            except (ProcessLookupError, OSError):
+                break
+            except Exception as e:
+                _log.warning(f"signal {sig} failed: {e}")
+
+            deadline = time.time() + grace
+            while time.time() < deadline:
+                if p.poll() is not None:
+                    break
+                await asyncio.sleep(0.1)
+            if p.poll() is not None:
+                break
+
+        if p.poll() is None:
             try:
-                await asyncio.wait_for(loop.run_in_executor(None, p.wait), timeout=grace)
-                return
-            except TimeoutError:
-                continue
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+            except Exception as e:
+                _log.warning(f"SIGKILL failed: {e}")
+            with contextlib.suppress(Exception):
+                p.kill()
+                p.wait(timeout=2.0)
 
         if self._arena_log_file is not None:
             with contextlib.suppress(Exception):
                 self._arena_log_file.close()
             self._arena_log_file = None
+        
+        print("benchmark: arena runtime shutdown complete.", flush=True)
 
     async def _run_steps(self) -> int:
         pending = self._build_pending()
@@ -1272,22 +1271,26 @@ class BenchmarkRunner(ArenaMixinNode):
             return res.status == "failed" and res.error_kind in _SYSTEMIC
 
         async def _worker(slot_index: int) -> bool:
-            while True:
-                target_q = None
-                rep_step = None
-                for r_step, q in block_queues:
-                    if not q.empty():
-                        target_q = q
-                        rep_step = r_step
+            try:
+                while True:
+                    target_q = None
+                    rep_step = None
+                    for r_step, q in block_queues:
+                        if not q.empty():
+                            target_q = q
+                            rep_step = r_step
+                            break
+                    
+                    if target_q is None:
                         break
-                
-                if target_q is None:
-                    break
-                
-                abort = await self._run_group_queue(rep_step, target_q, slot_index, _flush_step_result)
-                if abort:
-                    return True
-            return False
+                    
+                    abort = await self._run_group_queue(rep_step, target_q, slot_index, _flush_step_result)
+                    if abort:
+                        return True
+                return False
+            finally:
+                if self._progress is not None:
+                    self._progress.clear_slot(slot_index)
 
         with self._progress:
             try:
@@ -1426,13 +1429,14 @@ _KV_RE = re.compile(r"^[\w\.\-]+:=.*$")
 
 
 def cli_main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
-        datefmt="%H:%M:%S",
-        force=True,
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(logging.WARNING if sys.stderr.isatty() else logging.INFO)
+    console_handler.setFormatter(
+        logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s", datefmt="%H:%M:%S")
     )
-    logging.getLogger().setLevel(logging.DEBUG)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.handlers = [console_handler]
     _log.setLevel(logging.INFO)
     _log.propagate = True
     p = argparse.ArgumentParser(prog="benchmark")

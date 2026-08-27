@@ -1,0 +1,148 @@
+name: hospital_scenarios
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 2
+  optim.obstacles: bbox
+stages:
+- name: s01_head_on
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s01_head_on
+- name: s02_overtaking
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s02_overtaking
+- name: s03_perpendicular_crossing
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 60.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s03_perpendicular_crossing
+- name: s04_blind_corner
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 50.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s04_blind_corner
+- name: s05_doorway_passage
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 60.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s05_doorway_passage
+- name: s06_bidirectional_flow
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s06_bidirectional_flow
+- name: s07_crossing_pair
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 60.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s07_crossing_pair
+- name: s08_crossing_group
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 75.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s08_crossing_group
+- name: s09_corridor_crowd
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 120.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s09_corridor_crowd
+- name: s10_bottleneck_queue
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 75.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s10_bottleneck_queue
+- name: s11_visitor_emerging_flow
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 150.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s11_visitor_emerging_flow
+- name: s12_quiet_zone_transit
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s12_quiet_zone_transit
+- name: s13_restricted_zone_avoidance
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 60.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s13_restricted_zone_avoidance
+- name: s14_acoustic_corner
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 60.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s14_acoustic_corner

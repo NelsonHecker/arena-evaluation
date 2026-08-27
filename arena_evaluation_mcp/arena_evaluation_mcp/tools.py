@@ -11,7 +11,27 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import yaml
-from mcp.types import CallToolRequestParams, CallToolResult, TextContent, Tool
+try:
+    from mcp.types import CallToolRequestParams, CallToolResult, TextContent, Tool
+except ImportError:
+    class Tool:  # type: ignore
+        def __init__(self, name: str, description: str, inputSchema: dict):
+            self.name = name
+            self.description = description
+            self.inputSchema = inputSchema
+
+    class TextContent:  # type: ignore
+        def __init__(self, type: str, text: str):
+            self.type = type
+            self.text = text
+
+    class CallToolResult:  # type: ignore
+        def __init__(self, content: list, isError: bool = False):
+            self.content = content
+            self.isError = isError
+
+    class CallToolRequestParams:  # type: ignore
+        pass
 
 from .common import run_status, validate_path_component
 
@@ -398,6 +418,46 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "yaml_content": {"type": "string"},
+                },
+                "required": ["yaml_content"],
+            },
+        ),
+        Tool(
+            name="create_scenario",
+            description=(
+                "Create or update a scenario YAML for a map. Pass map_name (e.g. 'hospital_1'), "
+                "scenario_name (e.g. 's01_head_on'), and the complete scenario yaml_content. "
+                "Validates robot goals and dynamic obstacles before writing. Writes directly to "
+                "the arena_simulation_setup scenarios directory."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "map_name": {"type": "string", "description": "World name (e.g. 'hospital_1')."},
+                    "scenario_name": {"type": "string", "description": "Scenario directory/stem name."},
+                    "yaml_content": {"type": "string", "description": "Complete scenario YAML content."},
+                    "location": {
+                        "type": "string",
+                        "enum": ["both", "install", "source"],
+                        "default": "both",
+                        "description": "Where to write: both (default, immediately runnable & tracked in repo), "
+                                       "install (share dir only), or source (repo only).",
+                    },
+                },
+                "required": ["map_name", "scenario_name", "yaml_content"],
+            },
+        ),
+        Tool(
+            name="validate_scenario",
+            description=(
+                "Validate a scenario YAML string against the Scenario schema. Optionally pass "
+                "map_name to check coordinates against world bounds."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "yaml_content": {"type": "string", "description": "Complete scenario YAML content."},
+                    "map_name": {"type": "string", "description": "Optional world name to validate bounds against."},
                 },
                 "required": ["yaml_content"],
             },
@@ -873,6 +933,16 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
     if name == "validate_manifest":
         return _validate_manifest(args.get("yaml_content", ""))
 
+    if name == "create_scenario":
+        return _create_scenario(args, bridge)
+
+    if name == "validate_scenario":
+        return _validate_scenario(
+            args.get("yaml_content", ""),
+            map_name=args.get("map_name"),
+            bridge=bridge,
+        )
+
     #Execute
     if name == "run_benchmark":
         return _run_benchmark(args, bridge)
@@ -970,6 +1040,127 @@ def _validate_manifest(yaml_content: str) -> dict:
         return {"valid": True, "n_plots": len(vm.plots), "n_groups": len(vm.groups)}
     except Exception as exc:
         return {"valid": False, "error": str(exc)}
+
+
+def _validate_scenario(
+    yaml_content: str,
+    map_name: str | None = None,
+    bridge: EvalBridge | None = None,
+) -> dict:
+    if not yaml_content.strip():
+        return {"valid": False, "error": "Empty YAML content"}
+    try:
+        data = yaml.safe_load(yaml_content)
+        if not isinstance(data, dict):
+            return {"valid": False, "error": f"Expected a mapping, got {type(data).__name__}"}
+
+        robots = data.get("robots", [])
+        if not isinstance(robots, list):
+            return {"valid": False, "error": "'robots' must be a list"}
+        for idx, r in enumerate(robots):
+            if not isinstance(r, dict):
+                return {"valid": False, "error": f"robots[{idx}] must be a dict, got {type(r).__name__}"}
+            if "start" not in r and "start_pos" not in r:
+                return {"valid": False, "error": f"robots[{idx}] missing required 'start' (or 'start_pos') field"}
+            if "phases" not in r and "goal" not in r:
+                return {"valid": False, "error": f"robots[{idx}] missing 'phases' or 'goal'"}
+
+        dynamic = data.get("dynamic", [])
+        if not isinstance(dynamic, list):
+            return {"valid": False, "error": "'dynamic' must be a list"}
+        for idx, d in enumerate(dynamic):
+            if not isinstance(d, dict):
+                return {"valid": False, "error": f"dynamic[{idx}] must be a dict, got {type(d).__name__}"}
+            if "pose" not in d and "position" not in d:
+                return {"valid": False, "error": f"dynamic[{idx}] missing 'pose' or 'position'"}
+
+        warnings: list[str] = []
+        if map_name and bridge is not None:
+            try:
+                info = bridge.inspect_map(map_name)
+                mb = info.get("map_bounds")
+                if mb and "x" in mb and "y" in mb:
+                    min_x, max_x = mb["x"]
+                    min_y, max_y = mb["y"]
+
+                    def _check_pt(pt, label):
+                        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                            x, y = float(pt[0]), float(pt[1])
+                            if not (min_x - 1.0 <= x <= max_x + 1.0) or not (min_y - 1.0 <= y <= max_y + 1.0):
+                                warnings.append(
+                                    f"{label} ({x}, {y}) is outside map bounds X:[{min_x}, {max_x}], Y:[{min_y}, {max_y}]"
+                                )
+
+                    for idx, r in enumerate(robots):
+                        _check_pt(r.get("start"), f"robots[{idx}].start")
+                        for pidx, p in enumerate(r.get("phases") or []):
+                            if isinstance(p, dict) and "goto" in p:
+                                _check_pt(p["goto"], f"robots[{idx}].phases[{pidx}].goto")
+
+                    for idx, d in enumerate(dynamic):
+                        _check_pt(d.get("pose"), f"dynamic[{idx}].pose")
+                        for widx, wp in enumerate(d.get("waypoints") or []):
+                            _check_pt(wp, f"dynamic[{idx}].waypoints[{widx}]")
+            except Exception as exc:
+                logger.warning("bounds check failed for map %s: %s", map_name, exc)
+
+        return {
+            "valid": True,
+            "n_robots": len(robots),
+            "n_dynamic_peds": len(dynamic),
+            "n_static": len(data.get("static", [])),
+            "n_regions": len(data.get("regions", {})),
+            "conditions": len(data.get("conditions", [])),
+            "timeline": len(data.get("timeline", [])),
+            "warnings": warnings,
+        }
+    except Exception as exc:
+        return {"valid": False, "error": str(exc)}
+
+
+def _create_scenario(args: dict, bridge: EvalBridge) -> dict:
+    map_name = args.get("map_name", "")
+    scenario_name = args.get("scenario_name", "")
+    yaml_content = args.get("yaml_content", "")
+    location = args.get("location", "both")
+
+    validation = _validate_scenario(yaml_content, map_name=map_name, bridge=bridge)
+    if not validation.get("valid"):
+        return {"scenario_valid": False, "validation": validation}
+
+    try:
+        targets = bridge.scenario_write_targets(map_name, scenario_name, location=location)
+    except Exception as exc:
+        return {"scenario_valid": False, "error": f"Failed resolving target path: {exc}"}
+
+    if not targets:
+        return {
+            "scenario_valid": False,
+            "error": f"Could not resolve scenario write path for map '{map_name}' and scenario '{scenario_name}'",
+        }
+
+    written: list[str] = []
+    for target in targets:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(yaml_content)
+            written.append(str(target))
+        except OSError as exc:
+            logger.error("failed writing scenario to %s: %s", target, exc)
+
+    if not written:
+        return {
+            "scenario_valid": False,
+            "error": f"Failed writing scenario to all resolved targets: {targets}",
+        }
+
+    return {
+        "scenario_valid": True,
+        "scenario_name": scenario_name,
+        "map_name": map_name,
+        "written_paths": written,
+        **validation,
+    }
 
 
 def _warn_unknown_models(yaml_content: str, bridge: EvalBridge) -> list[str]:

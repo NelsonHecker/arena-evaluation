@@ -1171,3 +1171,81 @@ def test_flatten_typed_values():
     assert by_name["a_bool"].value.bool_value is True
     assert by_name["a_float"].value.type == ParameterType.PARAMETER_DOUBLE
     assert by_name["a_float"].value.double_value == pytest.approx(3.14)
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkProgressDisplay tests
+# ---------------------------------------------------------------------------
+
+def test_progress_display_slot_lifecycle():
+    from arena_evaluation.benchmark.progress_display import BenchmarkProgressDisplay
+
+    p = BenchmarkProgressDisplay(
+        title="Test Benchmark",
+        total_steps=10,
+        env_n=2,
+        run_id="run-123",
+    )
+    assert p.total_steps == 10
+    assert p.completed_steps == 0
+
+    # update slot
+    p.update_slot(
+        slot_index=0,
+        env_id=0,
+        contestant="dwb",
+        stage="s01",
+        step_key="dwb/s01",
+        ep_idx=0,
+        ep_total=3,
+        state="RUNNING",
+    )
+    assert 0 in p.active_slots
+    assert p.active_slots[0]["contestant"] == "dwb"
+    assert p.active_slots[0]["state"] == "RUNNING"
+
+    # update state
+    p.update_slot_state(0, "CLEANING_UP")
+    assert p.active_slots[0]["state"] == "CLEANING_UP"
+
+    # render
+    renderable = p._render()
+    assert renderable is not None
+
+    # step completed
+    p.log_step_completed(
+        step_key="dwb/s01",
+        status="ok",
+        contestant="dwb",
+        stage="s01",
+        episodes_run=3,
+        episodes_total=3,
+        episodes_failed=0,
+        elapsed_sec=5.2,
+    )
+    assert p.completed_steps == 1
+    assert p.ok_steps == 1
+
+    # clear slot
+    p.clear_slot(0)
+    assert 0 not in p.active_slots
+
+
+def test_progress_display_render_empty_and_with_slots():
+    from arena_evaluation.benchmark.progress_display import BenchmarkProgressDisplay
+
+    p = BenchmarkProgressDisplay(
+        title="Test Benchmark",
+        total_steps=5,
+        env_n=1,
+        run_id="run-456",
+    )
+    # render with no slots
+    tbl_empty = p._render()
+    assert tbl_empty is not None
+
+    # add slot and render
+    p.update_slot(0, 0, "teb", "s02", "teb/s02", 1, 5, "RUNNING")
+    tbl_slots = p._render()
+    assert tbl_slots is not None
+
