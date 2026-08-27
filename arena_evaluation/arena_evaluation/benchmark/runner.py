@@ -12,6 +12,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import typing
 
@@ -378,6 +379,86 @@ class _EnvDied(Exception):
 
 class BenchmarkRunner(ArenaMixinNode):
     exit_code: typing.ClassVar[int] = 0
+
+    @classmethod
+    def run_main(cls, *args: object, aiomonitor: bool = False, **kwargs: object) -> None:
+        """Run benchmark runner with clean lifecycle, non-blocking executor, and instant shutdown on Ctrl+C."""
+        import rclpy
+        from rclpy.signals import SignalHandlerOptions
+        from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
+
+        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        executor = MultiThreadedExecutor()
+        node: BenchmarkRunner | None = None
+        spinning = True
+
+        def _spin_worker():
+            while rclpy.ok() and spinning:
+                try:
+                    executor.spin_once(timeout_sec=0.1)
+                except (ExternalShutdownException, Exception):
+                    break
+
+        spin_thread = threading.Thread(target=_spin_worker, daemon=True)
+        spin_thread.start()
+
+        main_task: asyncio.Task | None = None
+
+        def _sig_handler(signum, _frame):
+            if main_task and not main_task.done():
+                loop.call_soon_threadsafe(main_task.cancel)
+
+        prev_sigint = signal.signal(signal.SIGINT, _sig_handler)
+        prev_sigterm = signal.signal(signal.SIGTERM, _sig_handler)
+
+        async def _run_app():
+            nonlocal node
+            node = cls(*args, **kwargs)
+            node.event_loop = loop
+            executor.add_node(node)
+            try:
+                await node.setup()
+            except asyncio.CancelledError:
+                cls.exit_code = 130
+            except Exception as e:
+                _log.error(f"Benchmark run error: {e!r}")
+                cls.exit_code = 2
+
+        try:
+            main_task = loop.create_task(_run_app())
+            loop.run_until_complete(main_task)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            cls.exit_code = 130
+        finally:
+            spinning = False
+            # Ensure arena runtime subprocess is terminated cleanly
+            if node is not None:
+                with contextlib.suppress(Exception):
+                    loop.run_until_complete(node._shutdown_arena())
+                if node._progress is not None:
+                    node._progress.stop()
+            # Clean up pending tasks in event loop
+            pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for t in pending:
+                t.cancel()
+            if pending:
+                with contextlib.suppress(Exception):
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            # Shutdown executor & rclpy
+            executor.shutdown()
+            spin_thread.join(timeout=0.5)
+            if node is not None:
+                with contextlib.suppress(Exception):
+                    executor.remove_node(node)
+                    node.destroy_node()
+            rclpy.try_shutdown()
+            loop.close()
+            # Restore previous signal handlers
+            signal.signal(signal.SIGINT, prev_sigint)
+            signal.signal(signal.SIGTERM, prev_sigterm)
 
     def __init__(
         self,
@@ -1093,9 +1174,6 @@ class BenchmarkRunner(ArenaMixinNode):
         except Exception as exc:
             _log.error(f"benchmark crashed: {exc!r}")
             BenchmarkRunner.exit_code = 2
-        finally:
-            await self._shutdown_arena()
-            rclpy.try_shutdown()
 
     async def teardown(self) -> None:
         await self._shutdown_arena()

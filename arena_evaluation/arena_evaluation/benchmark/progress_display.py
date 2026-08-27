@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import asyncio
 import os
 import sys
 import time
@@ -53,8 +52,6 @@ class BenchmarkProgressDisplay:
                 console=self.console,
                 refresh_per_second=4,
                 transient=True,
-                redirect_stdout=True,
-                redirect_stderr=True,
             )
             self.live.__enter__()
             self._running = True
@@ -65,11 +62,30 @@ class BenchmarkProgressDisplay:
             )
         return self
 
+    def stop(self):
+        with self._lock:
+            self._running = False
+            if self.live is not None:
+                try:
+                    self.live.stop()
+                except Exception:
+                    pass
+                self.live = None
+            if self.console is not None:
+                try:
+                    self.console.show_cursor(True)
+                except Exception:
+                    pass
+
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._running = False
         if self.live is not None:
-            self.live.__exit__(exc_type, exc_val, exc_tb)
+            try:
+                self.live.__exit__(exc_type, exc_val, exc_tb)
+            except Exception:
+                pass
             self.live = None
+        self.stop()
+        if self.console is not None:
             elapsed = time.perf_counter() - self.start_time
             mins, secs = divmod(int(elapsed), 60)
             if exc_type is not None and issubclass(exc_type, (asyncio.CancelledError, KeyboardInterrupt)):
