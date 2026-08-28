@@ -140,6 +140,16 @@ from ..benchmark.profiler import PipelineProfiler
 from .mcap_reader import MCAPReader
 from .topic_aligner import TopicAligner
 from .parquet_store import ParquetStore, TopicParquetStore
+
+# Columns whose values are all-None (no kind in the recording) or all-empty
+# (no collisions) would otherwise infer as Null / List(Null) and clash with
+# an Int64 / List(String) run when frames from several runs are combined.
+_METRIC_DTYPES = {
+    "collision_amount_wall": pl.Int64,
+    "collision_amount_static": pl.Int64,
+    "collision_amount_pedestrian": pl.Int64,
+    "collision_obstacles": pl.List(pl.String),
+}
 from .metrics.registry import MetricRegistry
 
 import arena_evaluation
@@ -343,7 +353,7 @@ class ProcessingPipeline:
 
             if all_results:
                 try:
-                    df_ep = pl.DataFrame(all_results)
+                    df_ep = pl.DataFrame(all_results, schema_overrides=_METRIC_DTYPES)
                     ParquetStore.write(df_ep, episode_dir / "metrics.parquet")
                 except Exception:
                     pass
@@ -487,6 +497,6 @@ class ProcessingPipeline:
                             row["mar"] = round(float(pfi_val / robot_dev), 4)
 
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
-        df = pl.DataFrame(all_metrics)
+        df = pl.DataFrame(all_metrics, schema_overrides=_METRIC_DTYPES)
         ParquetStore.write(df, combined_path)
         print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")
