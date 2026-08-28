@@ -395,18 +395,14 @@ class BenchmarkRunner(ArenaMixinNode):
 
         executor = MultiThreadedExecutor()
         node: BenchmarkRunner | None = None
-        spinning = True
 
-        def _spin_worker():
-            while rclpy.ok() and spinning:
-                try:
-                    executor.spin_once(timeout_sec=0.1)
-                except (ExternalShutdownException, Exception):
-                    break
+        def _spin():
+            try:
+                executor.spin()
+            except (ExternalShutdownException, Exception):
+                pass
 
-        spin_thread = threading.Thread(target=_spin_worker, daemon=True)
-        spin_thread.start()
-
+        spin_future = loop.run_in_executor(None, _spin)
         main_task: asyncio.Task | None = None
 
         def _sig_handler(signum, _frame):
@@ -435,7 +431,6 @@ class BenchmarkRunner(ArenaMixinNode):
         except (KeyboardInterrupt, asyncio.CancelledError):
             cls.exit_code = 130
         finally:
-            spinning = False
             # Ensure arena runtime subprocess is terminated cleanly
             if node is not None:
                 with contextlib.suppress(Exception):
@@ -449,9 +444,10 @@ class BenchmarkRunner(ArenaMixinNode):
             if pending:
                 with contextlib.suppress(Exception):
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # Shutdown executor & rclpy
+            # Shutdown executor (this unblocks executor.spin immediately)
             executor.shutdown()
-            spin_thread.join(timeout=0.5)
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(spin_future)
             if node is not None:
                 with contextlib.suppress(Exception):
                     executor.remove_node(node)
