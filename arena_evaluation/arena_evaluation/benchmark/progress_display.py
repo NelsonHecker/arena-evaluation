@@ -38,10 +38,9 @@ class BenchmarkProgressDisplay:
         self.console = Console() if _HAS_RICH else None
         self.live: Live | None = None
         self._running = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.start_time = time.perf_counter()
 
-        # slot_index -> dict with details: {env_id, contestant, stage, step_key, ep_idx, ep_total, state, start_time}
         self.active_slots: dict[int, dict[str, typing.Any]] = {}
 
     def __enter__(self):
@@ -178,15 +177,16 @@ class BenchmarkProgressDisplay:
             )
             if error_detail and status == "failed":
                 line += f" • [dim red]{error_detail}[/dim red]"
+            has_live = self.live is not None
 
-            if self.live is not None:
-                self.live.console.print(line)
-                self.live.refresh()
-            else:
-                print(
-                    f"[{self.completed_steps}/{self.total_steps}] {step_key} ({status}) in {elapsed_sec:.1f}s",
-                    flush=True,
-                )
+        if has_live:
+            self.live.console.print(line)
+            self.live.refresh()
+        else:
+            print(
+                f"[{self.completed_steps}/{self.total_steps}] {step_key} ({status}) in {elapsed_sec:.1f}s",
+                flush=True,
+            )
 
     def _render(self) -> Table:
         with self._lock:

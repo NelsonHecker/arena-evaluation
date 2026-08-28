@@ -3,7 +3,7 @@ references: true
 launch:
   sim: gazebo
   headless: true
-  env.n: 2
+  env.n: 1
   optim.obstacles: bbox
 stages:
 - name: s01_head_on

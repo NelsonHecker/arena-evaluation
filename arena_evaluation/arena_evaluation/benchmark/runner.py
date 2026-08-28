@@ -30,6 +30,7 @@ from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
 from arena_simulation_setup.tree import ResolverVerdict
 
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import SetParameters
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from task_generator.constants import Constants
 from task_generator_msgs.action import RunEpisode
@@ -444,7 +445,6 @@ class BenchmarkRunner(ArenaMixinNode):
             if pending:
                 with contextlib.suppress(Exception):
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            # Shutdown executor (this unblocks executor.spin immediately)
             executor.shutdown()
             with contextlib.suppress(Exception):
                 loop.run_until_complete(spin_future)
@@ -454,7 +454,6 @@ class BenchmarkRunner(ArenaMixinNode):
                     node.destroy_node()
             rclpy.try_shutdown()
             loop.close()
-            # Restore previous signal handlers
             signal.signal(signal.SIGINT, prev_sigint)
             signal.signal(signal.SIGTERM, prev_sigterm)
 
@@ -700,11 +699,33 @@ class BenchmarkRunner(ArenaMixinNode):
                         value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
                     )
                 ]
+                param_client = self.create_client_wrapper(
+                    SetParameters,
+                    f"/arena/env_{env_id}/task_generator_node/set_parameters"
+                )
+                set_req = SetParameters.Request()
+                set_req.parameters = [
+                    Parameter(
+                        name="task.stationary.pos_x",
+                        value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
+                    ),
+                    Parameter(
+                        name="task.stationary.pos_y",
+                        value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)
+                    )
+                ]
+                with contextlib.suppress(Exception):
+                    await param_client.call_timeout(set_req, timeout_sec=5.0)
+
         req.obstacles_params = obs_params
         req.robots_params = rob_params
-        resp = await self.await_ros(queue.client.call_async(req))
+        _log.info(f"[env {env_id}] pushing stage config for {step.key} (map={step.stage.map}, tm_robots={req.tm_robots}, tm_obstacles={req.tm_obstacles})")
+        resp = await queue.call_timeout(req, timeout_sec=10.0)
+        if resp is None:
+            raise RuntimeError(f"queue_episode service call timed out after 10s on env {env_id} for {step.key}")
         if not resp.success:
             raise RuntimeError(f"queue_episode failed for {step.key}: {resp.error_msg}")
+        _log.info(f"[env {env_id}] stage config applied for {step.key}")
 
     async def _run_episodes(
         self,
@@ -739,7 +760,25 @@ class BenchmarkRunner(ArenaMixinNode):
                 ep_started_wall = time.time()
 
                 try:
-                    goal_handle = await self._await_or_env_died(env_id, ac.send_goal(goal))
+                    goal_handle = await self._await_or_env_died(
+                        env_id,
+                        asyncio.wait_for(ac.send_goal(goal), timeout=15.0),
+                    )
+                except asyncio.TimeoutError:
+                    episodes_failed += 1
+                    _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} send_goal timed out after 15s; abandoning env")
+                    return StepResult(
+                        step.key,
+                        "failed",
+                        env_id,
+                        started,
+                        time.time(),
+                        StepErrorKind.ENV_SETUP,
+                        f"send_goal timed out after 15s on env {env_id}",
+                        episodes_run=episodes_run,
+                        episodes_failed=episodes_failed,
+                        episodes_total=step.episodes,
+                    )
                 except (_EnvDied, asyncio.CancelledError):
                     raise
                 except Exception as exc:
@@ -1037,7 +1076,22 @@ class BenchmarkRunner(ArenaMixinNode):
                         stderr=subprocess.DEVNULL,
                         start_new_session=True,
                     )
-                    await asyncio.sleep(2.0)
+                    rc = self.create_client_wrapper(RecordEpisode, f"{env_ns_root}/start_episode")
+                    self._recorder_clients[env_id] = rc
+                    with contextlib.suppress(Exception):
+                        await rc.ensure(timeout_sec=5.0)
+                if self._progress is not None:
+                    self._progress.update_slot(
+                        slot_index=slot_index,
+                        env_id=env_id,
+                        contestant=step.contestant.name,
+                        stage=step.stage.name,
+                        step_key=step.key,
+                        ep_idx=0,
+                        ep_total=step.episodes,
+                        state="SETTING_UP",
+                    )
+                _log.info(f"Starting step {step.key} (env={env_id}, {step.episodes} episodes)")
 
                 await self._push_stage_config(env_id, step)
 
@@ -1085,8 +1139,6 @@ class BenchmarkRunner(ArenaMixinNode):
                 if abort:
                     return True
 
-                # a systemic step failure means the env is likely wedged, and a dead env
-                # would otherwise eat every remaining queued step as spurious failures
                 if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
                     systemic_streak += 1
                     if q.empty():
@@ -1249,7 +1301,6 @@ class BenchmarkRunner(ArenaMixinNode):
         log_path = self._run_dir.path / "runner.log"
         self._arena_log_file = log_path.open("a")
 
-        # suite-bundle worlds resolve ahead of the canonical tree in every sim process
         proc_env = None
         if self._suite_bundle_dir is not None:
             worlds_dir = self._suite_bundle_dir / "worlds"
@@ -1452,8 +1503,6 @@ def _load_suite_contest(
         suite = Suite.parse("inline", suite_dict)
     else:
         suite_path, suite_bundle_dir, suite_provenance = _resolve_suite_source(suite_name)
-        # resolved-by-name keeps the identifier's stem (bundled suites live under <stem>/suite.yaml,
-        # whose file stem is "suite"). An explicit filesystem path falls back to its own stem.
         suite_stem = suite_name.removesuffix(".yaml") if suite_provenance is not None else suite_path.stem
         suite_dict = yaml.safe_load(suite_path.read_text())
         suite = Suite.parse(suite_stem, suite_dict)
