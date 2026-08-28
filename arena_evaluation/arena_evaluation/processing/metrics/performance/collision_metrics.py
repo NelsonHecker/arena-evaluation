@@ -18,6 +18,10 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     
     UNITS = {
         "collision_amount": "",
+        "collision_amount_wall": "",
+        "collision_amount_static": "",
+        "collision_amount_pedestrian": "",
+        "collision_obstacles": "",
         "collisions": "",
         "result": "",
         "success": "",
@@ -34,12 +38,45 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     def output_keys(cls) -> list[str]:
         return [
             "collision_amount",
+            "collision_amount_wall",
+            "collision_amount_static",
+            "collision_amount_pedestrian",
+            "collision_obstacles",
             "collisions",
             "result",
             "success",
             "spl",
         ]
+
+    @staticmethod
+    def _count_rising_edges(is_active: np.ndarray) -> int:
+        count = 0
+        if len(is_active) > 0 and is_active[0]:
+            count += 1
+        for i in range(1, len(is_active)):
+            if is_active[i] and not is_active[i - 1]:
+                count += 1
+        return count
+
+    @classmethod
+    def _column_rising_edges(cls, episode: AlignedEpisodeBundle, column: str) -> int | None:
+        if episode.data is None or column not in episode.data.columns:
+            return None
+        counts = episode.data[column].to_numpy().astype(float)
+        if np.isnan(counts).all():
+            return None
+        return cls._count_rising_edges(np.nan_to_num(counts, nan=0.0) > 0)
         
+    @staticmethod
+    def _hit_obstacles(episode: AlignedEpisodeBundle) -> list[str]:
+        if episode.data is None or "collision_obstacle_ids" not in episode.data.columns:
+            return []
+        hit: set[str] = set()
+        for ids in episode.data["collision_obstacle_ids"].to_list():
+            if ids is not None:
+                hit.update(i for i in ids if i)
+        return sorted(hit)
+
     def calculate(
         self,
         episode: AlignedEpisodeBundle,
@@ -54,34 +91,23 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         if episode.data is not None and "action_type" in episode.data.columns:
             action_types = episode.data["action_type"].to_numpy()
             is_stopped = (action_types == 1)
-            
-            nav2_collisions = 0
-            if len(is_stopped) > 0 and is_stopped[0]:
-                nav2_collisions += 1
-                
-            for i in range(1, len(is_stopped)):
-                if is_stopped[i] and not is_stopped[i-1]:
-                    nav2_collisions += 1
+            nav2_collisions = self._count_rising_edges(is_stopped)
             
             if nav2_collisions > collision_amount:
                 collision_amount = nav2_collisions
 
         if episode.data is not None and "collision_event" in episode.data.columns:
             events_count = episode.data["collision_event"].to_numpy()
-            
             valid_counts = np.nan_to_num(events_count.astype(float), nan=0.0)
-            is_collision = (valid_counts > 0)
-            
-            arena_collisions = 0
-            if len(is_collision) > 0 and is_collision[0]:
-                arena_collisions += 1
-                
-            for i in range(1, len(is_collision)):
-                if is_collision[i] and not is_collision[i-1]:
-                    arena_collisions += 1
+            arena_collisions = self._count_rising_edges(valid_counts > 0)
             
             if arena_collisions > collision_amount:
                 collision_amount = arena_collisions
+
+        collision_amount_wall = self._column_rising_edges(episode, "collision_wall")
+        collision_amount_static = self._column_rising_edges(episode, "collision_static")
+        collision_amount_pedestrian = self._column_rising_edges(episode, "collision_pedestrian")
+        collision_obstacles = self._hit_obstacles(episode)
                 
         time_to_goal = prior_results.get("time_to_goal")
         
@@ -120,6 +146,10 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
             
         return {
             "collision_amount": collision_amount,
+            "collision_amount_wall": collision_amount_wall,
+            "collision_amount_static": collision_amount_static,
+            "collision_amount_pedestrian": collision_amount_pedestrian,
+            "collision_obstacles": collision_obstacles,
             "collisions": collisions,
             "result": result,
             "success": success,

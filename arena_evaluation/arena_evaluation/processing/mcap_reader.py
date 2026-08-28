@@ -31,6 +31,14 @@ _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
         ("value_bool", pa.bool_()),
         ("value_list", pa.list_(pa.string())),
     ]),
+    "collision_events": pa.schema([
+        ("time_ns", pa.int64()),
+        ("collision_event", pa.int64()),
+        ("collision_wall", pa.int64()),
+        ("collision_static", pa.int64()),
+        ("collision_pedestrian", pa.int64()),
+        ("collision_obstacle_ids", pa.list_(pa.string())),
+    ]),
 }
 
 
@@ -185,7 +193,7 @@ class MCAPReader:
                     if not topic_data or len(topic_data.get("time_ns", [])) == 0:
                         continue
                         
-                    batch = pa.RecordBatch.from_pydict(dict(topic_data))
+                    batch = pa.RecordBatch.from_pydict(dict(topic_data), schema=_TOPIC_SCHEMAS.get(topic_name))
                     writer_key = (robot_name, topic_name)
                     
                     if writer_key not in writers:
@@ -205,7 +213,8 @@ class MCAPReader:
                     
                     msg_count = 0
                     decoders = {}
-                    
+                    collision_kind_schema_cache: dict[int, bool] = {}
+
                     for schema, channel, message in reader.iter_messages(log_time_order=False):
                         try:
                             decoder = decoders.get(message.channel_id)
@@ -399,6 +408,30 @@ class MCAPReader:
                             target = robot_data[robot_name]["collision_events"]
                             target["time_ns"].append(ts_ns)
                             target["collision_event"].append(len(ros_msg.events))
+
+                            has_kind = collision_kind_schema_cache.get(schema.id)
+                            if has_kind is None:
+                                has_kind = re.search(r"^\s*string\s+kind\b", schema.data.decode(), re.M) is not None
+                                collision_kind_schema_cache[schema.id] = has_kind
+
+                            wall_count = None
+                            static_count = None
+                            pedestrian_count = None
+                            if has_kind:
+                                wall_count = 0
+                                static_count = 0
+                                pedestrian_count = 0
+                                for ev in ros_msg.events:
+                                    if ev.kind == "wall":
+                                        wall_count += 1
+                                    elif ev.kind == "static":
+                                        static_count += 1
+                                    elif ev.kind == "pedestrian":
+                                        pedestrian_count += 1
+                            target["collision_wall"].append(wall_count)
+                            target["collision_static"].append(static_count)
+                            target["collision_pedestrian"].append(pedestrian_count)
+                            target["collision_obstacle_ids"].append(sorted({ev.obstacle_id for ev in ros_msg.events}))
                             appended = True
                             
                         # Collision Monitor State (Nav2)
