@@ -4,15 +4,16 @@ import pathlib
 
 import pytest
 
+from arena_evaluation.benchmark.tree import ConfigPathResolver, ManifestIdentifier
 from arena_evaluation.presentation import manifest_registry as registry
 from arena_evaluation.presentation.viz_manifest import VizManifest
 
 
 @pytest.fixture
-def manifests_dir(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
-    """A fake package root with bundled manifests, reachable via source_tree_dir()."""
-    root = tmp_path
-    d = root / "configs" / "benchmark" / "manifests"
+def manifests_dir(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A real configs/benchmark tree, registered as ManifestIdentifier's only resolver for the test."""
+    bench_dir = tmp_path / "configs" / "benchmark"
+    d = bench_dir / "manifests"
     d.mkdir(parents=True)
     (d / "foo.yaml").write_text(
         "manifest_version: '1.0'\nname: foo\ntitle: Foo Report\ndata_source: metrics\nplots: []\n"
@@ -20,9 +21,12 @@ def manifests_dir(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
     (d / "standard.yaml").write_text(
         "manifest_version: '1.0'\nname: standard\nplots: []\n"
     )
-    monkeypatch.setattr(registry, "share_dir", lambda: None)
-    monkeypatch.setattr(registry, "source_tree_dir", lambda: root)
-    return d
+    registered = ManifestIdentifier._resolvers
+    ManifestIdentifier._resolvers = [ConfigPathResolver(ManifestIdentifier, bench_dir)]
+    try:
+        yield d
+    finally:
+        ManifestIdentifier._resolvers = registered
 
 
 def test_resolve_by_name(manifests_dir):

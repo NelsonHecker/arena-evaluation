@@ -27,6 +27,7 @@ from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
+from arena_simulation_setup.tree import ResolverVerdict
 
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
@@ -54,6 +55,7 @@ from .state import (
 )
 from .step import Step, StepErrorKind, StepResult
 from .progress_display import BenchmarkProgressDisplay
+from .tree import ContestIdentifier, SuiteIdentifier
 
 
 class _WithSteps(typing.Protocol):
@@ -1415,62 +1417,69 @@ def _is_inline_suite(suite_name: str) -> bool:
     return stripped.startswith("[") or stripped.startswith("{")
 
 
-def _resolve_suite_source(suites_dir: pathlib.Path, suite_name: str) -> tuple[pathlib.Path, pathlib.Path | None]:
-    """Resolve a suite name to (yaml path, bundle dir). Flat `<stem>.yaml` wins over
-    the directory-bundle form `<stem>/suite.yaml`; bundle dir is None for flat suites."""
-    stem = suite_name.removesuffix(".yaml")
-    flat = suites_dir / f"{stem}.yaml"
-    if flat.exists():
-        return flat, None
-    bundled = suites_dir / stem / "suite.yaml"
-    if bundled.exists():
-        return bundled, bundled.parent
-    raise FileNotFoundError(f"{flat} (or bundle {bundled})")
+def _provenance(verdict: ResolverVerdict) -> dict:
+    return {"resolver": repr(verdict.resolver), "path": str(verdict.path)}
+
+
+def _resolve_suite_source(suite_name: str) -> tuple[pathlib.Path, pathlib.Path | None, dict | None]:
+    """Resolve a suite name to (yaml path, bundle dir, provenance). Flat `<stem>.yaml`
+    wins over the directory-bundle form `<stem>/suite.yaml`, whose parent is the bundle dir."""
+    verdict = SuiteIdentifier(name=suite_name.removesuffix(".yaml")).resolve_source_sync()
+    bundle_dir = verdict.path.parent if verdict.path.name == "suite.yaml" else None
+    return verdict.path, bundle_dir, _provenance(verdict)
+
+
+def _resolve_contest_source(contest_name: str) -> tuple[pathlib.Path, dict | None]:
+    """Resolve a contest name to (yaml path, provenance)."""
+    verdict = ContestIdentifier(name=contest_name.removesuffix(".yaml")).resolve_source_sync()
+    return verdict.path, _provenance(verdict)
 
 
 def _suite_bundle_dir(suite_name: str) -> pathlib.Path | None:
     """Re-derive the bundle dir for a suite name; None for inline or unresolvable names."""
     if _is_inline_suite(suite_name):
         return None
-    share = pathlib.Path(get_package_share_directory("arena_evaluation"))
     try:
-        _, bundle_dir = _resolve_suite_source(share / "configs" / "benchmark" / "suites", suite_name)
+        _, bundle_dir, _ = _resolve_suite_source(suite_name)
     except FileNotFoundError:
         return None
     return bundle_dir
 
 
-def _load_suite_contest(suite_name: str, contest_name: str) -> tuple[Suite, Contest, dict, list | dict, pathlib.Path | None]:
-    share = pathlib.Path(get_package_share_directory("arena_evaluation"))
-    bench_dir = share / "configs" / "benchmark"
-
+def _load_suite_contest(
+    suite_name: str, contest_name: str
+) -> tuple[Suite, Contest, dict, list | dict, pathlib.Path | None, dict | None, dict | None]:
     suite_bundle_dir = None
+    suite_provenance = None
     if _is_inline_suite(suite_name):
         suite_dict = yaml.safe_load(suite_name)
         suite = Suite.parse("inline", suite_dict)
     else:
-        suite_stem = suite_name.removesuffix(".yaml")
-        suite_path, suite_bundle_dir = _resolve_suite_source(bench_dir / "suites", suite_name)
+        suite_path, suite_bundle_dir, suite_provenance = _resolve_suite_source(suite_name)
+        # resolved-by-name keeps the identifier's stem (bundled suites live under <stem>/suite.yaml,
+        # whose file stem is "suite"). An explicit filesystem path falls back to its own stem.
+        suite_stem = suite_name.removesuffix(".yaml") if suite_provenance is not None else suite_path.stem
         suite_dict = yaml.safe_load(suite_path.read_text())
         suite = Suite.parse(suite_stem, suite_dict)
 
+    contest_provenance = None
     if _is_inline_contest(contest_name):
         contest_dict = yaml.safe_load(contest_name)
         contest = Contest.parse("inline", contest_dict)
     else:
-        contest_stem = contest_name.removesuffix(".yaml")
-        contest_path = bench_dir / "contests" / f"{contest_stem}.yaml"
+        contest_path, contest_provenance = _resolve_contest_source(contest_name)
+        contest_stem = contest_name.removesuffix(".yaml") if contest_provenance is not None else contest_path.stem
         contest_dict = yaml.safe_load(contest_path.read_text())
         contest = Contest.parse(contest_stem, contest_dict)
 
-    return suite, contest, suite_dict, contest_dict, suite_bundle_dir
+    return suite, contest, suite_dict, contest_dict, suite_bundle_dir, suite_provenance, contest_provenance
 
 
 def _warn_config_drift(manifest: Manifest) -> None:
     """Non-fatal: note when the on-disk suite/contest for this run's names has drifted
     from the config the run was created with. Resume always replays the stored config."""
     try:
-        _, _, suite_dict, contest_dict, _ = _load_suite_contest(manifest.suite_name, manifest.contest_name)
+        _, _, suite_dict, contest_dict, _, _, _ = _load_suite_contest(manifest.suite_name, manifest.contest_name)
     except FileNotFoundError:
         return
     if compute_config_hash(suite_dict, contest_dict) != manifest.config_hash:
@@ -1555,9 +1564,6 @@ def cli_main(argv: list[str] | None = None) -> int:
     if "env_n" in arena_passthrough:
         print("benchmark: env_n:= is deprecated, use env.n:=", file=sys.stderr)
         arena_passthrough.setdefault("env.n", arena_passthrough.pop("env_n"))
-    env_n = int(arena_passthrough.get("env.n", "1"))
-    headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
-    simulator = arena_passthrough.get("sim", None)
 
     try:
         share = pathlib.Path(get_package_share_directory("arena_evaluation"))
@@ -1596,9 +1602,14 @@ def cli_main(argv: list[str] | None = None) -> int:
             _warn_config_drift(man)
             run_dir.progress.write_comment(f"resumed at {datetime.datetime.now(tz=datetime.UTC).isoformat()}")
         else:
-            suite, contest, suite_dict, contest_dict, suite_bundle_dir = _load_suite_contest(args.suite, args.contest)
+            suite, contest, suite_dict, contest_dict, suite_bundle_dir, suite_provenance, contest_provenance = _load_suite_contest(args.suite, args.contest)
             scale_episodes = args.scale_episodes
             cfg_hash = compute_config_hash(suite_dict, contest_dict)
+
+        arena_passthrough = {**suite.launch_args, **arena_passthrough}
+        env_n = int(arena_passthrough.get("env.n", "1"))
+        headless = arena_passthrough.get("headless", "false").lower() in ("true", "1")
+        simulator = arena_passthrough.get("sim", None)
 
         steps = _all_steps(contest, suite, scale_episodes)
         if not steps:
@@ -1644,6 +1655,9 @@ def cli_main(argv: list[str] | None = None) -> int:
                 suite=suite_dict,
                 contest=contest_dict,
                 steps=steps_list,
+                launch_args=dict(arena_passthrough),
+                suite_provenance=suite_provenance,
+                contest_provenance=contest_provenance,
             )
             run_dir = RunDir.create(data_root, run_id, manifest)
     except FileNotFoundError as exc:

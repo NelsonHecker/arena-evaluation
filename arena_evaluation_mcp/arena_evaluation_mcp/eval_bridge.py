@@ -293,15 +293,14 @@ class EvalBridge:
     def pedestrian_models(self) -> dict:
         """Available pedestrian (dynamic) model names.
 
-        Models are filesystem assets (assets/Common/Human/<name>); the
-        bundled local model is 'arenian'. Network-fetched models (via
-        `arena_models net fetch`) add more.
+        Humans are asset-bucket bundles resolved by name (`arena asset ls human`).
+        'arenian' is the default.
         """
         local = self._share_subdirs("arena_simulation_setup", "assets/Common/Human")
         return {
-            "bundled": sorted(local) or ["arenian"],
+            "bundled": sorted(local),
             "fallback": "arenian",
-            "note": "Unknown models silently fall back to 'arenian'.",
+            "note": "Unknown models silently fall back to 'arenian', which is fetched from the asset bucket.",
         }
 
     def static_object_models(self) -> dict:

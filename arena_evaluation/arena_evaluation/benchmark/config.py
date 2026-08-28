@@ -34,15 +34,27 @@ def _yamlable(v: object) -> object:
     return repr(v)
 
 
+_STAGE_OWNED_KEYS = frozenset({"world", "robot", "run_seed"})
+_STAGE_OWNED_PREFIXES = ("task.", "record.")
+
+
 class Suite(typing.NamedTuple):
     @classmethod
     def parse(cls, name: str, obj: dict) -> Suite:
         return cls(
             name=name,
             stages=[cls.Stage.parse(stage) for stage in obj["stages"]],
-            launch_args={str(k): str(v) for k, v in obj.get("launch", {}).items()},
+            launch_args=cls._parse_launch(obj.get("launch") or {}),
             references=bool(obj.get("references", False)),
         )
+
+    @staticmethod
+    def _parse_launch(obj: dict) -> dict[str, str]:
+        launch = {str(k): str(v) for k, v in obj.items()}
+        owned = [k for k in launch if k in _STAGE_OWNED_KEYS or k.startswith(_STAGE_OWNED_PREFIXES)]
+        if owned:
+            raise ValueError(f"suite launch: {owned} are set per stage, not suite-wide")
+        return launch
 
     class Index(int):
         pass
