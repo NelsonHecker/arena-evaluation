@@ -375,6 +375,27 @@ _LATCHED = QoSProfile(
 _SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP)
 _MAX_CONSECUTIVE_SYSTEMIC = 3
 
+_SPAWN_CHATTER_PATTERNS = (
+    "waiting on env_",
+    "waiting on sim clock step",
+    "waiting on response from",
+    "still waiting for",
+    "still loading spawn_env",
+    "waiting on spawn_env",
+    "timed out after",
+    "sim cannot keep up",
+)
+
+
+def _is_substantive_log_line(line: str) -> bool:
+    s = line.strip()
+    if not s:
+        return False
+    for pat in _SPAWN_CHATTER_PATTERNS:
+        if pat in s:
+            return False
+    return True
+
 
 class _EnvDied(Exception):
     """Raised when an env disappears from /arena/state/envs while the runner was waiting on it."""
@@ -540,6 +561,85 @@ class BenchmarkRunner(ArenaMixinNode):
         if env_id in self._env_records:
             return
         await self._await_hb(self._env_visible_events.setdefault(env_id, asyncio.Event()).wait(), f"env {env_id} to appear on /arena/state/envs")
+
+    async def _await_activity(
+        self,
+        awaitable: typing.Awaitable[_T],
+        what: str,
+        *,
+        inactivity_timeout: float = 120.0,
+        max_total_timeout: float = 600.0,
+        check_interval: float = 15.0,
+    ) -> _T:
+        """Await task as long as non-chatter progress is detected in logs.
+        Times out if there is no substantive progress for `inactivity_timeout` seconds,
+        or if `max_total_timeout` is exceeded."""
+        task = asyncio.ensure_future(awaitable)
+        log_path = self._run_dir.path / "runner.log"
+        last_positions: dict[pathlib.Path, int] = {}
+        last_activity = time.monotonic()
+        total_waited = 0.0
+        ros_log_dir = pathlib.Path.home() / ".ros" / "log"
+
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=check_interval)
+                if task in done:
+                    return task.result()
+
+                total_waited += check_interval
+
+                has_progress = False
+                sample_line = ""
+
+                target_logs: list[pathlib.Path] = []
+                if log_path.exists():
+                    target_logs.append(log_path)
+                if ros_log_dir.is_dir():
+                    try:
+                        recent_cutoff = time.time() - 3600
+                        for p in ros_log_dir.glob("arena_env_*.log"):
+                            if p.stat().st_mtime >= recent_cutoff:
+                                target_logs.append(p)
+                    except Exception:
+                        pass
+
+                for p in target_logs:
+                    try:
+                        curr_size = p.stat().st_size
+                        last_pos = last_positions.get(p, 0)
+                        if curr_size < last_pos:
+                            last_pos = 0
+                        if curr_size > last_pos:
+                            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                                f.seek(last_pos)
+                                new_text = f.read()
+                                last_positions[p] = f.tell()
+                            for line in new_text.splitlines():
+                                if _is_substantive_log_line(line):
+                                    has_progress = True
+                                    sample_line = line.strip()[:80]
+                                    break
+                    except Exception:
+                        pass
+
+                if has_progress:
+                    last_activity = time.monotonic()
+                    _log.info(f"still loading {what} ({total_waited:.0f}s elapsed, active: {sample_line})")
+                else:
+                    silent_s = time.monotonic() - last_activity
+                    if total_waited >= max_total_timeout:
+                        _log.error(f"{what} exceeded max timeout of {max_total_timeout:.0f}s")
+                        task.cancel()
+                        raise TimeoutError(f"{what} exceeded max timeout of {max_total_timeout:.0f}s")
+                    if silent_s >= inactivity_timeout:
+                        _log.error(f"{what} stalled: no progress for {silent_s:.0f}s (total: {total_waited:.0f}s)")
+                        task.cancel()
+                        raise TimeoutError(f"no progress for {silent_s:.0f}s during {what}")
+                    _log.warning(f"waiting on {what} ({total_waited:.0f}s elapsed, no progress for {silent_s:.0f}s)")
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
 
     async def _await_hb(self, awaitable: typing.Awaitable[_T], what: str) -> _T:
         """Await with no timeout, warning every _HEARTBEAT_S while `what` stays pending."""
@@ -974,17 +1074,19 @@ class BenchmarkRunner(ArenaMixinNode):
             episodes_total=step.episodes,
         )
 
-    async def _spawn_and_setup_env(self, launch_step: Step, *, timeout: float = 300.0) -> tuple[int, str] | None:
-        """Spawn one env booting launch_step's world and set up its clients. None on failure."""
+    async def _spawn_and_setup_env(self, launch_step: Step, *, inactivity_timeout: float = 120.0) -> tuple[int, str] | None:
+        """Spawn one env booting launch_step's world and set up its clients.
+        Tracks active progress (log growth) and only times out if completely stalled."""
         try:
-            return await asyncio.wait_for(
+            return await self._await_activity(
                 self._spawn_and_setup_env_impl(launch_step),
-                timeout=timeout,
+                f"spawn_env for {launch_step.key}",
+                inactivity_timeout=inactivity_timeout,
             )
-        except asyncio.TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             _log.error(
-                f"spawn_env timed out after {timeout:.0f}s for {launch_step.key}; "
-                f"sim may be dead (e.g. Gazebo rendering crash during world switch)"
+                f"spawn_env stalled for {launch_step.key} (no progress/output for {inactivity_timeout:.0f}s); "
+                f"sim may be dead (e.g. Gazebo crash or deadlock)"
             )
             return None
 
@@ -994,7 +1096,7 @@ class BenchmarkRunner(ArenaMixinNode):
         req.ns = ""
         req.headless = self._headless
         req.launch_args = self._build_launch_args(launch_step)
-        resp = await self._await_hb(self.await_ros(self._spawn.client.call_async(req)), f"spawn_env for {launch_step.key}")
+        resp = await self.await_ros(self._spawn.client.call_async(req))
         if resp is None or not resp.success:
             msg = resp.error_msg if resp is not None else "no response"
             _log.error(f"spawn_env failed for {launch_step.key}: {msg}")
@@ -1025,6 +1127,17 @@ class BenchmarkRunner(ArenaMixinNode):
         env_id: int | None = None
         systemic_streak = 0
         try:
+            if self._progress is not None:
+                self._progress.update_slot(
+                    slot_index=slot_index,
+                    env_id=None,
+                    contestant=rep_step.contestant.name,
+                    stage=rep_step.stage.name,
+                    step_key=rep_step.key,
+                    ep_idx=0,
+                    ep_total=rep_step.episodes,
+                    state="SPAWNING",
+                )
             spawned = await self._spawn_and_setup_env(rep_step)
             if spawned is None:
                 abort = False
@@ -1298,15 +1411,7 @@ class BenchmarkRunner(ArenaMixinNode):
         
         print("benchmark: arena runtime shutdown complete.", flush=True)
 
-    async def _run_steps(self) -> int:
-        pending = self._build_pending()
-        results: dict[str, StepResult] = dict(self._run_dir.state.steps)
-        steps_total = len(results) + len(pending)
-        aborted_systemic = False
-
-        self._publish_state(results, steps_total)
-        _log.info(f"benchmark: signalled READY on {STATE_TOPIC}")
-
+    async def _start_arena(self) -> None:
         passthrough = dict(self._arena_passthrough)
         cmd = [
             "ros2",
@@ -1338,6 +1443,27 @@ class BenchmarkRunner(ArenaMixinNode):
         await self._spawn.ensure(timeout_sec=300.0)
         await self._despawn.ensure(timeout_sec=300.0)
 
+    async def _restart_arena(self) -> None:
+        """Restart arena_runtime for a fresh simulator session between world switches."""
+        _log.info("Restarting arena_runtime for fresh simulation session...")
+        await self._shutdown_arena()
+        self._env_records.clear()
+        self._env_visible_events.clear()
+        self._env_gone_events.clear()
+        await asyncio.sleep(1.0)
+        await self._start_arena()
+
+    async def _run_steps(self) -> int:
+        pending = self._build_pending()
+        results: dict[str, StepResult] = dict(self._run_dir.state.steps)
+        steps_total = len(results) + len(pending)
+        aborted_systemic = False
+
+        self._publish_state(results, steps_total)
+        _log.info(f"benchmark: signalled READY on {STATE_TOPIC}")
+
+        await self._start_arena()
+
         self._global_episode_id_offset = 0
         episodes_dir = self._run_dir.path / "episodes"
         if episodes_dir.exists():
@@ -1348,18 +1474,8 @@ class BenchmarkRunner(ArenaMixinNode):
                 except Exception:
                     pass
 
-        blocks = group_pending(pending, self._simulator)
-        self._total_groups = len(blocks)
-        
-        block_queues: list[tuple[Step, asyncio.Queue[Step]]] = []
-        for block in blocks:
-            q = asyncio.Queue()
-            for step in block:
-                q.put_nowait(step)
-            block_queues.append((block[0], q))
-
-        cap = max(1, min(self._env_n, len(pending) or 1))
-        in_flight: set[asyncio.Task[bool]] = set()
+        all_blocks = group_pending(pending, self._simulator)
+        self._total_groups = len(all_blocks)
 
         step_map: dict[str, Step] = {
             s.key: s
@@ -1415,47 +1531,75 @@ class BenchmarkRunner(ArenaMixinNode):
                 return False
             return res.status == "failed" and res.error_kind in _SYSTEMIC
 
-        async def _worker(slot_index: int) -> bool:
-            try:
-                while True:
-                    target_q = None
-                    rep_step = None
-                    for r_step, q in block_queues:
-                        if not q.empty():
-                            target_q = q
-                            rep_step = r_step
-                            break
-                    
-                    if target_q is None:
-                        break
-                    
-                    abort = await self._run_group_queue(rep_step, target_q, slot_index, _flush_step_result)
-                    if abort:
-                        return True
-                return False
-            finally:
-                if self._progress is not None:
-                    self._progress.clear_slot(slot_index)
+        world_maps = list(dict.fromkeys(s.stage.map for s in pending))
+        in_flight: set[asyncio.Task[bool]] = set()
 
         with self._progress:
             try:
-                for slot in range(cap):
-                    in_flight.add(asyncio.create_task(_worker(slot), name=f"worker_{slot}"))
-                
-                while in_flight:
-                    done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
-                    for t in done:
-                        abort = t.result()
-                        if abort:
-                            aborted_systemic = True
-                            _log.error(f"benchmark: worker hit a systemic setup failure; aborting run")
-                            for t2 in in_flight:
-                                t2.cancel()
-                            with contextlib.suppress(Exception):
-                                await asyncio.gather(*in_flight, return_exceptions=True)
-                            in_flight.clear()
-                            block_queues.clear()
+                for world_idx, world_map in enumerate(world_maps):
+                    world_steps = [s for s in pending if s.stage.map == world_map]
+                    if not world_steps:
+                        continue
+
+                    # If switching to a new world map in Gazebo, restart arena_runtime now that
+                    # all previous workers are completely finished and 0 tasks are running
+                    if world_idx > 0 and self._simulator == "gazebo":
+                        await self._restart_arena()
+
+                    blocks = group_pending(world_steps, self._simulator)
+                    block_queues: list[tuple[Step, asyncio.Queue[Step]]] = []
+                    for block in blocks:
+                        q = asyncio.Queue()
+                        for step in block:
+                            q.put_nowait(step)
+                        block_queues.append((block[0], q))
+
+                    cap = max(1, min(self._env_n, len(world_steps) or 1))
+
+                    async def _worker(slot_index: int) -> bool:
+                        try:
+                            while True:
+                                target_q = None
+                                rep_step = None
+                                for r_step, q in block_queues:
+                                    if not q.empty():
+                                        target_q = q
+                                        rep_step = r_step
+                                        break
+                                
+                                if target_q is None:
+                                    break
+
+                                abort = await self._run_group_queue(rep_step, target_q, slot_index, _flush_step_result)
+                                if abort:
+                                    return True
+                            return False
+                        finally:
+                            if self._progress is not None:
+                                self._progress.clear_slot(slot_index)
+
+                    for slot in range(cap):
+                        in_flight.add(asyncio.create_task(_worker(slot), name=f"worker_{slot}"))
+                    
+                    while in_flight:
+                        done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
+                        for t in done:
+                            abort = t.result()
+                            if abort:
+                                aborted_systemic = True
+                                _log.error(f"benchmark: worker hit a systemic setup failure; aborting run")
+                                for t2 in in_flight:
+                                    t2.cancel()
+                                with contextlib.suppress(Exception):
+                                    await asyncio.gather(*in_flight, return_exceptions=True)
+                                in_flight.clear()
+                                break
+                        if aborted_systemic:
                             break
+
+                    if aborted_systemic:
+                        break
+
             except asyncio.CancelledError:
                 for t in in_flight:
                     t.cancel()

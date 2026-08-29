@@ -1001,12 +1001,12 @@ def test_default_run_id_lex_sort_is_chronological():
 # ---------------------------------------------------------------------------
 
 
-def _make_step_for(contestant_name: str, stage_name: str, robot: str = "jackal") -> Step:
+def _make_step_for(contestant_name: str, stage_name: str, robot: str = "jackal", map: str = "map1") -> Step:
     stage = Suite.Stage(
         name=stage_name,
         episodes=5,
         robot=robot,
-        map="map1",
+        map=map,
         tm_robots=Constants.TaskMode.TM_Robots.RANDOM,
         tm_obstacles=Constants.TaskMode.TM_Obstacles.RANDOM,
         config={},
@@ -1248,4 +1248,27 @@ def test_progress_display_render_empty_and_with_slots():
     p.update_slot(0, 0, "teb", "s02", "teb/s02", 1, 5, "RUNNING")
     tbl_slots = p._render()
     assert tbl_slots is not None
+
+
+def test_runner_start_and_restart_arena_defined():
+    from arena_evaluation.benchmark.runner import BenchmarkRunner
+    assert hasattr(BenchmarkRunner, "_start_arena")
+    assert hasattr(BenchmarkRunner, "_restart_arena")
+
+
+def test_world_batch_ordering():
+    from arena_evaluation.benchmark.runner import group_pending
+    steps = [
+        _make_step_for("p1", "s1", map="hospital_1"),
+        _make_step_for("p2", "s2", map="hospital_1"),
+        _make_step_for("p1", "s3", map="hospital_2"),
+        _make_step_for("p1", "s4", map="office_1"),
+    ]
+    world_maps = list(dict.fromkeys(s.stage.map for s in steps))
+    assert world_maps == ["hospital_1", "hospital_2", "office_1"]
+    
+    h1_steps = [s for s in steps if s.stage.map == "hospital_1"]
+    blocks = group_pending(h1_steps, "gazebo")
+    assert len(blocks) == 2
+
 

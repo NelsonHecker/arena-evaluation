@@ -7,8 +7,7 @@ import typing
 
 import yaml
 
-if typing.TYPE_CHECKING:
-    from .viz_manifest import VizManifest
+from .viz_manifest import VizManifest
 
 
 def is_inline(ref: str) -> bool:

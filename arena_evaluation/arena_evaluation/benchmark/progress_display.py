@@ -229,7 +229,7 @@ class BenchmarkProgressDisplay:
             now = time.perf_counter()
             for slot_idx in sorted(slots_snapshot.keys()):
                 info = slots_snapshot[slot_idx]
-                env_label = f"env_{info['env_id']}" if info.get("env_id") is not None else f"slot_{slot_idx}"
+                env_label = f"env_{info['env_id']}" if info.get("env_id") is not None else "-"
                 ep_str = f"({info['ep_idx'] + 1}/{info['ep_total']})" if info.get("ep_total") else "-"
                 w_elapsed = max(now - info.get("start_time", now), 0.0)
                 worker_table.add_row(
