@@ -247,8 +247,8 @@ def resolve_planner_identity(contestant: Contest.Contestant) -> tuple[str, str]:
 
 
 def env_key(step: Step, simulator: str | None) -> tuple:
-    """Steps with the same env_key reuse one env. Contestants always force a new env."""
-    return (step.contestant.name, step.stage.robot, simulator)
+    """Steps with the same env_key reuse one env. Changing contestant, robot, or map forces a fresh env."""
+    return (step.contestant.name, step.stage.robot, step.stage.map, simulator)
 
 
 def group_pending(steps: list[Step], simulator: str | None) -> list[list[Step]]:
@@ -266,7 +266,7 @@ def group_pending(steps: list[Step], simulator: str | None) -> list[list[Step]]:
     for step in peds_steps:
         placed = False
         for g in sorted_groups:
-            if g[0].stage.robot == step.stage.robot:
+            if g[0].stage.robot == step.stage.robot and g[0].stage.map == step.stage.map:
                 g.append(step)
                 placed = True
                 break
@@ -974,8 +974,22 @@ class BenchmarkRunner(ArenaMixinNode):
             episodes_total=step.episodes,
         )
 
-    async def _spawn_and_setup_env(self, launch_step: Step) -> tuple[int, str] | None:
+    async def _spawn_and_setup_env(self, launch_step: Step, *, timeout: float = 300.0) -> tuple[int, str] | None:
         """Spawn one env booting launch_step's world and set up its clients. None on failure."""
+        try:
+            return await asyncio.wait_for(
+                self._spawn_and_setup_env_impl(launch_step),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            _log.error(
+                f"spawn_env timed out after {timeout:.0f}s for {launch_step.key}; "
+                f"sim may be dead (e.g. Gazebo rendering crash during world switch)"
+            )
+            return None
+
+    async def _spawn_and_setup_env_impl(self, launch_step: Step) -> tuple[int, str] | None:
+        """Inner impl without timeout — called by _spawn_and_setup_env."""
         req = SpawnEnv.Request()
         req.ns = ""
         req.headless = self._headless
@@ -998,9 +1012,13 @@ class BenchmarkRunner(ArenaMixinNode):
             with contextlib.suppress(Exception):
                 dreq = DespawnEnv.Request()
                 dreq.env_id = env_id
-                await self._await_hb(self._despawn.call_forever(dreq), f"despawn of env {env_id}")
+                await asyncio.wait_for(
+                    self._despawn.call_forever(dreq), timeout=30.0
+                )
             with contextlib.suppress(asyncio.TimeoutError, Exception):
-                await self._await_hb(self._wait_env_gone(env_id, timeout=None), f"env {env_id} to disappear")
+                await asyncio.wait_for(
+                    self._wait_env_gone(env_id, timeout=15.0), timeout=15.0
+                )
         await asyncio.sleep(2.0)
 
     async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:

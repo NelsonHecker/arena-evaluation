@@ -1068,14 +1068,14 @@ def test_env_key_components():
     from arena_evaluation.benchmark.runner import env_key
     step = _make_step_for("planner_a", "indoor", robot="jackal")
     key = env_key(step, "gazebo")
-    assert key == ("planner_a", "jackal", "gazebo")
+    assert key == ("planner_a", "jackal", "map1", "gazebo")
 
 
 def test_env_key_simulator_none():
     from arena_evaluation.benchmark.runner import env_key
     step = _make_step_for("planner_a", "indoor", robot="jackal")
     key = env_key(step, None)
-    assert key == ("planner_a", "jackal", None)
+    assert key == ("planner_a", "jackal", "map1", None)
 
 
 # ---------------------------------------------------------------------------
