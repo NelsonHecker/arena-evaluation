@@ -1,8 +1,7 @@
 # arena_evaluation
+> ROS 2 package for recording, processing, and visualising navigation and ecological evaluation metrics for Arena robots.
 
-> **ROS 2 package** - Record, process, and visualise navigation and ecological evaluation metrics for Arena robots.
-
-The package provides a complete, end-to-end evaluation pipeline that turns live simulation data into structured metric reports. It is built around a layered architecture that separates recording, processing, and presentation concerns so that each layer can be used, replaced, or extended independently.
+Evaluation pipeline converting simulation data into structured metric reports across recording, processing, and presentation layers.
 
 ---
 
@@ -11,17 +10,15 @@ The package provides a complete, end-to-end evaluation pipeline that turns live 
 ```
 +---------------------------------------------------------------------+
 |                          Arena Simulation                           |
-|  Gazebo -- task_generator -- nav2 -- planner / task mode            |
+|  Gazebo / task_generator / nav2 / planner / task mode               |
 +-------------------------+-------------------------------------------+
                          | ROS 2 topics
                          v
 +---------------------------------------------------------------------+
 |  Layer 1 - Ingestion  (ingestion/)                                  |
-|  DataRecorderNode writes ONE MCAP file per episode into             |
-|  benchmark/episodes/episode_XXX/. The episode lifecycle (start and  |
-|  stop) is driven authoritatively by the benchmark runner through    |
-|  the `start_episode` service - the EpisodeRecord topic is used      |
-|  for metadata enrichment only.                                      |
+|  DataRecorderNode writes one MCAP file per episode into             |
+|  benchmark/episodes/episode_XXX/. Episode lifecycle (start/stop) is |
+|  driven by the benchmark runner via the `start_episode` service.    |
 |  Output: episodes/episode_XXX/episode_XXX.mcap + .yaml              |
 +-------------------------+-------------------------------------------+
                          | MCAP file (one per episode)
@@ -30,25 +27,20 @@ The package provides a complete, end-to-end evaluation pipeline that turns live 
 |  Layer 3 - Processing  (processing/)                                |
 |  MCAPReader -> TopicParquetStore -> TopicAligner -> MetricRegistry  |
 |  -> ParquetStore                                                    |
-|  Reads each episode MCAP offline (no live ROS required), aligns     |
-|  multi-rate topics onto the odom axis (no splitting needed - one    |
-|  MCAP == one episode), and computes all metrics.                    |
-|  characterization/ adds open-loop energy/acoustic analysis.         |
+|  Reads episode MCAPs offline, aligns multi-rate topics onto the     |
+|  odom axis, and computes metrics.                                   |
 |  Output: metrics.parquet + combined_metrics.parquet                 |
 +-------------------------+-------------------------------------------+
                          | Parquet files
                          v
 +---------------------------------------------------------------------+
 |  Layer 5 - Presentation  (presentation/)                            |
-|  ReportBuilder reads the parquet selected by a DECLARATIVE          |
-|  manifest (configs/benchmark/manifests/*.yaml) and generates an     |
-|  interactive HTML report (trajectory time-sliders, line charts      |
-|  with confidence bands), static PNG plots, and optional GIFs.       |
+|  ReportBuilder reads parquet selected by a declarative manifest     |
+|  (configs/benchmark/manifests/*.yaml) and generates HTML reports,   |
+|  static PNG plots, and optional GIFs.                               |
 |  Output: report.html + plots/*.png (+ plots/*.gif)                  |
-+---------------------------------------------------------------------+
++-------------------------+-------------------------------------------+
 ```
-
-> **Note:** Layers are numbered 1, 3, 5 to align with the SRD which reserves Layer 2 (Storage/Folder Management) as a shared infrastructure module and Layer 4 (LLM Orchestration) for a later phase.
 
 ---
 
@@ -59,63 +51,63 @@ arena_evaluation/
 |-- arena_evaluation/          <- Python package root
 |   |-- ingestion/             <- Layer 1: Live recording (ROS node)
 |   |   |-- recorder.py        <- DataRecorderNode (service-driven episode lifecycle)
-|   |   |-- metadata.py        <- IngestionMetadata (full per-episode yaml context)
+|   |   |-- metadata.py        <- IngestionMetadata (per-episode YAML context)
 |   |   `-- topics.py          <- Topic definitions and type registry
 |   |-- storage/               <- Layer 2: Shared schemas and path management
-|   |   |-- schemas.py         <- Pydantic models (RunMetadata, PlotSpec, VizManifest, TopicBundle, ...)
+|   |   |-- schemas.py         <- Data models (RunMetadata, PlotSpec, VizManifest, ...)
 |   |   |-- folder_manager.py  <- Path resolution and run discovery
 |   |   |-- manifest.py        <- MetadataWriter (YAML read/write)
-|   |   |-- planner_names.py   <- split_planner_name (shared by ingestion + presentation)
-|   |   |-- data_root.py       <- benchmarks_root() and latest_benchmark() helpers
-|   |   `-- exceptions.py      <- Domain-specific exceptions
+|   |   |-- planner_names.py   <- split_planner_name helper
+|   |   |-- data_root.py       <- benchmarks_root and latest_benchmark helpers
+|   |   `-- exceptions.py      <- Pipeline exceptions
 |   |-- processing/            <- Layer 3: Offline metric computation
-|   |   |-- mcap_reader.py     <- Reads MCAP -> TopicBundle (incl. acoustics, characterization_phase)
-|   |   |-- topic_aligner.py   <- Aligns multi-rate topics via join_asof (unprefixed columns)
-|   |   |-- parquet_store.py   <- Reads/writes the topic cache and metrics
+|   |   |-- mcap_reader.py     <- MCAP to TopicBundle parser
+|   |   |-- topic_aligner.py   <- Aligns multi-rate topics via join_asof
+|   |   |-- parquet_store.py   <- Reads/writes topic cache and metrics
 |   |   |-- pipeline.py        <- ProcessingPipeline orchestrator
-|   |   |-- map_registry.py    <- Discovers and caches map images (PGM->PNG)
-|   |   `-- metrics/           <- Pluggable metric calculators (performance/, social/, ecological/, naturalness/)
+|   |   |-- map_registry.py    <- Discovers and caches map images (PGM to PNG)
+|   |   `-- metrics/           <- Metric calculators (performance, social, ecological, naturalness)
 |   |-- presentation/          <- Layer 5: Report and plot generation
-|   |   |-- report_builder.py  <- Generates report.html (data-source aware, declarative groups/summary)
-|   |   |-- manifest_registry.py <- Resolves named/inline/path manifests (like suites/contests)
-|   |   |-- viz_manifest.py    <- VizManifest model + default manifest loader
+|   |   |-- report_builder.py  <- Generates report.html and plots
+|   |   |-- manifest_registry.py <- Resolves report manifests
+|   |   |-- viz_manifest.py    <- VizManifest model and default loader
 |   |   |-- plotly_renderer.py <- Interactive HTML chart dispatcher
 |   |   |-- seaborn_renderer.py<- Static PNG chart dispatcher
-|   |   |-- color_utils.py     <- Global accessibility color palette (YAML-driven)
+|   |   |-- color_utils.py     <- Palette loader and styling
 |   |   |-- dimension_detector.py <- Auto-detects varying dimensions for compound labels
-|   |   |-- report_template.html.j2 <- Jinja2 HTML template
+|   |   |-- report_template.html.j2 <- Jinja2 report template
 |   |   `-- plot_types/        <- violin, box, bar, histogram, scatter, trajectory, radar, heatmap, timeseries, line
 |   |-- benchmark/             <- Benchmark runner and CLI
-|   |   |-- runner.py          <- BenchmarkRunner (orchestrates simulation)
-|   |   |-- config.py          <- Suite/Contest parsing
+|   |   |-- runner.py          <- BenchmarkRunner
+|   |   |-- config.py          <- Suite and Contest parsers
 |   |   |-- state.py           <- Run manifest, progress, resume
 |   |   |-- step.py            <- Step grid model
-|   |   |-- debug.py           <- Process introspection (ps, console)
-|   |   |-- profiler.py        <- PipelineProfiler (CPU/GPU/RAM per phase)
-|   |   `-- cli.py             <- Benchmark management CLI (argparse)
-|   |-- cli.py                 <- Evaluation pipeline CLI (argparse)
-|   `-- cli_acoustic.py        <- Acoustic analysis subcommands (list, animate, snapshot)
+|   |   |-- debug.py           <- Process introspection
+|   |   |-- profiler.py        <- PipelineProfiler (CPU, GPU, RAM)
+|   |   `-- cli.py             <- Benchmark management CLI
+|   |-- cli.py                 <- Evaluation pipeline CLI
+|   `-- cli_acoustic.py        <- Acoustic analysis subcommands
 |-- config/
 |   |-- data_recorder_config.yaml  <- Topic throttle frequencies
 |   |-- mcap_writer_options.yaml   <- MCAP writer tuning
-|   `-- color_palette.yaml         <- Accessibility color palette
+|   `-- color_palette.yaml         <- Color palette
 |-- configs/benchmark/
-|   |-- suites/                <- Benchmark suite YAML definitions
-|   |-- contests/              <- Contest (planner set) YAML definitions
-|   `-- manifests/             <- Declarative report manifests (standard, ecological, social, safety, characterization)
+|   |-- suites/                <- Suite definitions
+|   |-- contests/              <- Contest definitions
+|   `-- manifests/             <- Report manifests (standard, ecological, social, safety, characterization)
 `-- tests/
-    |-- unit/                  <- Pure Python unit tests (no ROS required)
-    |-- integration/           <- Full-pipeline tests with fixture data
-    `-- test_benchmark_*.py    <- Benchmark runner tests (top-level, no ROS required)
+    |-- unit/                  <- Unit tests (no ROS required)
+    |-- integration/           <- Integration tests
+    `-- test_benchmark_*.py    <- Benchmark runner tests
 
-arena_evaluation_msgs/         <- sibling package: ROS 2 message and service definitions
-|-- msg/BenchmarkState.msg     <- live benchmark progress (TRANSIENT_LOCAL on /arena/benchmark/state)
+arena_evaluation_msgs/         <- Sibling package: ROS 2 message and service definitions
+|-- msg/BenchmarkState.msg     <- Live benchmark progress
 `-- srv/                       <- RecordEpisode, ChangeDirectory services
 ```
 
 ---
 
-## The Full Flow
+## Workflow
 
 ### 1. Run a benchmark (live simulation)
 
@@ -123,46 +115,33 @@ arena_evaluation_msgs/         <- sibling package: ROS 2 message and service def
 arena evaluation benchmark --suite basic --contest basic
 ```
 
-The benchmark runner spawns envs, drives episodes, and the recorder writes one MCAP per episode into
-`$ARENA_DATA_DIR/benchmarks/<run_id>/episodes/episode_XXX/`.
+Outputs are written to `$ARENA_DATA_DIR/benchmarks/<run_id>/episodes/episode_XXX/`.
 
-**Open-loop characterization** is a benchmark like any other - the `characterization` robot task mode
-(in `task_generator`) drives `cmd_vel` directly through the robot's operating envelope while
-`tm_robots: characterization`:
+Open-loop characterization:
 
 ```bash
 arena evaluation benchmark --suite characterization --contest characterization
 ```
 
-### 2. Process + report (offline)
+### 2. Process and report (offline)
 
 ```bash
-# Standard metrics report:
+# Standard metrics report
 arena evaluation run --benchmark-dir <run_id>
 
-# Characterization report (energy/acoustic profiles per working point):
+# Characterization report
 arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 ```
 
-Characterization is a plain metric calculator (per-episode `timeseries_char_*` columns in
-`combined_metrics.parquet`); the report manifest simply selects the `metrics` data source and
-derives the curves/table from those columns.
-
 ### Report manifests
 
-Report layouts are **declarative named YAMLs** in `configs/benchmark/manifests/`, resolved like
-suites/contests (`manifest_registry.py`): by name, by path, or inline `{...}` YAML. Precompiled
-manifests: `standard`, `ecological`, `social`, `safety`, `characterization`.
+Report layouts are declarative YAML files in `configs/benchmark/manifests/`. Built-in manifests: `standard`, `ecological`, `social`, `safety`, `characterization`.
 
 ```bash
-arena evaluation run --list-manifests            # list available layouts
+arena evaluation run --list-manifests
 arena evaluation run --benchmark-dir X --report-manifest ecological
 arena evaluation run --benchmark-dir X --report-manifest '{name: inline, plots: [...]}'
 ```
-
-Each manifest declares its `data_source` (metrics / characterization_samples / characterization_summary),
-`groups`, `summary` table, `units`, and the `plots` list. A `report_manifest.yaml` note is written into
-the benchmark dir recording which manifest produced the report.
 
 ---
 
@@ -173,48 +152,43 @@ usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR] [--outpu
                             [--workers N] [--report-manifest NAME|PATH|{...}] [--list-manifests]
 
 Commands:
-  extract   Layer 3: Extract topics from MCAP into fast Parquet files (cache)
-  process   Layer 3: Compute metrics and write metrics.parquet (uses cached extraction by default)
-  run       Full pipeline: extract -> process -> (characterization analysis) -> report + plots
-  report    Layer 5: Generate report.html from existing metrics.parquet
-  plot      Layer 5: Generate static PNG plots only (no HTML)
-  acoustic  Acoustic analysis: list episodes, animate field snapshots, export single-frame PNG
+  extract   Extract topics from MCAP into Parquet files
+  process   Compute metrics and write metrics.parquet
+  run       Full pipeline: extract -> process -> report + plots
+  report    Generate report.html from existing metrics.parquet
+  plot      Generate static PNG plots only
+  acoustic  Acoustic analysis subcommands (list, animate, snapshot)
 ```
 
 | Flag | Description |
 |---|---|
-| `--output-dir DIR` | Output directory for reports/plots (defaults to first input dir) |
-| `--workers N` | Worker processes for parallel extraction/processing (`-1` = auto-detect CPU count) |
-| `--force-extract` | Force re-extraction of MCAP files, overwriting the cached topic cache |
+| `--output-dir DIR` | Output directory for reports and plots (defaults to first input dir) |
+| `--workers N` | Worker count for parallel processing (`-1` = auto CPU count) |
+| `--force-extract` | Force re-extraction of MCAP files |
 | `--report-manifest NAME\|PATH\|{...}` | Report layout: named manifest, YAML path, or inline YAML |
-| `--list-manifests` | List the available named report manifests and exit |
+| `--list-manifests` | List available named report manifests |
 
 ---
 
 ## Running Tests
 
-Unit tests are pure Python - no running ROS environment required.
+Unit tests are pure Python and do not require ROS.
 
 ```bash
-cd /opt/arena_ws/src/Arena/arena_evaluation/arena_evaluation
 pytest tests/unit -v
-pytest tests/ -v                # Includes benchmark runner and integration tests
+pytest tests/ -v
 ```
 
 ---
 
-## Rebuilding After Changes
+## Sub-package Documentation
 
-```bash
-arena build arena_evaluation
-```
+- [ingestion/README.md](arena_evaluation/ingestion/README.md): recording, topics, episode lifecycle
+- [processing/README.md](arena_evaluation/processing/README.md): extraction, alignment, metrics
+- [processing/metrics/README.md](arena_evaluation/processing/metrics/README.md): metric calculator framework
+- [presentation/README.md](arena_evaluation/presentation/README.md): declarative manifests, plot types
+- [storage/README.md](arena_evaluation/storage/README.md): schemas, paths, metadata
+- [benchmark/README.md](arena_evaluation/benchmark/README.md): runner, state, CLI, profiler
+- [configs/benchmark/README.md](configs/benchmark/README.md): suites, contests, characterization
+- [arena_evaluation_msgs/README.md](../arena_evaluation_msgs/README.md): ROS 2 message and service definitions
 
-See the sub-package READMEs for details:
-- [ingestion/README.md](arena_evaluation/ingestion/README.md) - recording, topics, episode lifecycle
-- [processing/README.md](arena_evaluation/processing/README.md) - extraction, alignment, metrics
-- [processing/metrics/README.md](arena_evaluation/processing/metrics/README.md) - metric calculator framework
-- [presentation/README.md](arena_evaluation/presentation/README.md) - declarative manifests, plot types
-- [storage/README.md](arena_evaluation/storage/README.md) - schemas, paths, metadata
-- [benchmark/README.md](arena_evaluation/benchmark/README.md) - runner, state, CLI, profiler
-- [configs/benchmark/README.md](configs/benchmark/README.md) - suites, contests, characterization
-- [arena_evaluation_msgs/README.md](../arena_evaluation_msgs/README.md) - ROS 2 message and service definitions

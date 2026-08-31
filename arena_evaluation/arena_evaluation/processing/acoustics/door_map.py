@@ -121,10 +121,17 @@ def door_segments(
         for zone in level.get("zones", []) or []:
             for door in zone.get("doors", []) or []:
                 name = door.get("name") or f"door_{len(result)}"
-                start = door.get("start") or {}
-                end = door.get("end") or {}
-                sx, sy = float(start.get("x", 0.0)), float(start.get("y", 0.0))
-                ex, ey = float(end.get("x", 0.0)), float(end.get("y", 0.0))
+
+                # door coords may be {x, y} dicts or [x, y, ...] lists
+                def _pt(entry) -> tuple[float, float]:
+                    if isinstance(entry, dict):
+                        return float(entry.get("x", 0.0)), float(entry.get("y", 0.0))
+                    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                        return float(entry[0]), float(entry[1])
+                    return 0.0, 0.0
+
+                sx, sy = _pt(door.get("start") or {})
+                ex, ey = _pt(door.get("end") or {})
                 width_m = float(door.get("width", 1.0))
                 kind = str(door.get("kind", "sliding"))
                 tl_db = float(door.get("tl_db", DEFAULT_DOOR_TL_DB))

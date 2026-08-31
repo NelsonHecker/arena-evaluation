@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import ast
 import typing
+import numpy as np
 
 import numpy as np
 import polars as pl
@@ -30,14 +31,13 @@ class BaseMetricCalculator(ABC):
     def resolve_robot_pose(self, episode: "AlignedEpisodeBundle") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame."""
         if episode.data is not None and len(episode.data) > 0:
-            use_gt = "pos_x_gt" in episode.data.columns
-            if use_gt:
+            if "pos_x_gt" in episode.data.columns:
                 episode.data = episode.data.filter(
                     pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() &
                     pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() &
                     pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan()
                 )
-            else:
+            elif "pos_x" in episode.data.columns:
                 episode.data = episode.data.filter(
                     pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan() &
                     pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan() &
@@ -45,14 +45,14 @@ class BaseMetricCalculator(ABC):
                 )
         
         if episode.data is not None and len(episode.data) > 0:
-            if "pos_x" in episode.data.columns:
-                odom_x = episode.data["pos_x"].to_numpy().copy()
-                odom_y = episode.data["pos_y"].to_numpy().copy()
-                odom_yaw = episode.data["yaw"].to_numpy().copy()
-            elif "pos_x_gt" in episode.data.columns:
+            if "pos_x_gt" in episode.data.columns:
                 odom_x = episode.data["pos_x_gt"].to_numpy().copy()
                 odom_y = episode.data["pos_y_gt"].to_numpy().copy()
                 odom_yaw = episode.data["yaw_gt"].to_numpy().copy()
+            elif "pos_x" in episode.data.columns:
+                odom_x = episode.data["pos_x"].to_numpy().copy()
+                odom_y = episode.data["pos_y"].to_numpy().copy()
+                odom_yaw = episode.data["yaw"].to_numpy().copy()
             else:
                 odom_x = np.array([], dtype=np.float64)
                 odom_y = np.array([], dtype=np.float64)
@@ -204,66 +204,70 @@ class BaseMetricCalculator(ABC):
         pos_y: np.ndarray,
         yaw: np.ndarray,
         time_ns: np.ndarray,
-        tolerance_ns: int = 100_000_000,
+        tolerance_ns: int | None = 100_000_000,
+        continuous: bool = False,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Backward-asof sample pose arrays onto ``times_ns``.
-
-        Returns (pos_x, pos_y, yaw) at the query times; 0/0/0 for query times
-        with no pose within tolerance.
-        """
-        if len(time_ns) == 0:
+        """Interpolate pose arrays onto query timestamps ``times_ns``."""
+        if len(time_ns) == 0 or len(times_ns) == 0:
             return np.zeros(len(times_ns)), np.zeros(len(times_ns)), np.zeros(len(times_ns))
-        q = pl.DataFrame({"time_ns": times_ns}).lazy()
-        ref = pl.DataFrame({
-            "time_ns": time_ns,
-            "pos_x": pos_x,
-            "pos_y": pos_y,
-            "yaw": yaw,
-        }).lazy().sort("time_ns")
-        joined = (
-            q.join_asof(ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
-            .select(["time_ns", "pos_x", "pos_y", "yaw"])
-            .collect()
+
+        order = np.argsort(time_ns)
+        t_sorted = time_ns[order]
+        x_sorted = np.asarray(pos_x, dtype=np.float64)[order]
+        y_sorted = np.asarray(pos_y, dtype=np.float64)[order]
+        yaw_sorted = np.asarray(yaw, dtype=np.float64)[order]
+
+        if continuous or tolerance_ns is None:
+            px = np.interp(times_ns, t_sorted, x_sorted)
+            py = np.interp(times_ns, t_sorted, y_sorted)
+            ya = np.interp(times_ns, t_sorted, yaw_sorted)
+            return px, py, ya
+
+        import polars as pl
+        df_ref = pl.DataFrame({
+            "time_ns": t_sorted,
+            "pos_x": x_sorted,
+            "pos_y": y_sorted,
+            "yaw": yaw_sorted,
+        })
+        df_query = pl.DataFrame({"time_ns": times_ns})
+        merged = df_query.join_asof(
+            df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns
         )
-        px = joined["pos_x"].to_numpy()
-        py = joined["pos_y"].to_numpy()
-        ya = joined["yaw"].to_numpy()
-        if px.dtype != np.float64:
-            px = px.astype(np.float64)
-        if py.dtype != np.float64:
-            py = py.astype(np.float64)
-        if ya.dtype != np.float64:
-            ya = ya.astype(np.float64)
-        return (
-            np.nan_to_num(px, nan=0.0),
-            np.nan_to_num(py, nan=0.0),
-            np.nan_to_num(ya, nan=0.0),
-        )
+        px = np.nan_to_num(merged["pos_x"].to_numpy(), nan=0.0)
+        py = np.nan_to_num(merged["pos_y"].to_numpy(), nan=0.0)
+        ya = np.nan_to_num(merged["yaw"].to_numpy(), nan=0.0)
+        return px, py, ya
 
     def values_at_times(
         self,
         values: np.ndarray,
         values_time_ns: np.ndarray,
         query_times_ns: np.ndarray,
-        tolerance_ns: int = 100_000_000,
+        tolerance_ns: int | None = 100_000_000,
+        continuous: bool = False,
     ) -> np.ndarray:
-        """Backward-asof sample an arbitrary per-frame array onto query times.
-
-        Returns NaN where no value within tolerance (caller decides fill).
-        """
+        """Interpolate values onto query timestamps."""
         if len(values_time_ns) == 0 or len(query_times_ns) == 0:
-            return np.full(len(query_times_ns), np.nan)
-        q = pl.DataFrame({"time_ns": query_times_ns}).lazy()
-        ref = pl.DataFrame({"time_ns": values_time_ns, "v": values}).lazy().sort("time_ns")
-        joined = (
-            q.join_asof(ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
-            .select("v")
-            .collect()
+            return np.zeros(len(query_times_ns))
+
+        order = np.argsort(values_time_ns)
+        t_sorted = values_time_ns[order]
+        v_sorted = np.asarray(values, dtype=np.float64)[order]
+
+        if continuous or tolerance_ns is None:
+            return np.interp(query_times_ns, t_sorted, v_sorted)
+
+        import polars as pl
+        df_ref = pl.DataFrame({
+            "time_ns": t_sorted,
+            "val": v_sorted,
+        })
+        df_query = pl.DataFrame({"time_ns": query_times_ns})
+        merged = df_query.join_asof(
+            df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns
         )
-        out = joined["v"].to_numpy()
-        if out.dtype.kind != "f":
-            out = out.astype(np.float64)
-        return out
+        return merged["val"].to_numpy()
 
     @staticmethod
     def speed_from_pose(
@@ -297,11 +301,7 @@ class BaseMetricCalculator(ABC):
 
     @staticmethod
     def _parse_peds(peds_raw, num_peds_hint=None) -> np.ndarray:
-        """Flat ped position list to an (N, 2) or (N, 3) array, empty when unparseable.
-
-        The pedestrian count disambiguates a flat list; without it a length
-        divisible by three is read as (x, y, theta) triples.
-        """
+        """Parse pedestrian positions into an (N, 2) or (N, 3) array of coordinates."""
         if peds_raw is None or len(peds_raw) == 0:
             return np.empty((0, 2))
         if isinstance(peds_raw, str):
@@ -309,22 +309,49 @@ class BaseMetricCalculator(ABC):
                 peds_raw = ast.literal_eval(peds_raw)
             except (ValueError, SyntaxError):
                 return np.empty((0, 2))
-        arr = np.array(peds_raw, dtype=np.float64)
-        if arr.size == 0:
-            return np.empty((0, 2))
-        if arr.ndim == 1:
+        
+        if isinstance(peds_raw, (list, tuple, np.ndarray)):
+            if len(peds_raw) == 0:
+                return np.empty((0, 2))
+            first = peds_raw[0]
+            if isinstance(first, (list, tuple, np.ndarray)):
+                pts = []
+                for p in peds_raw:
+                    if len(p) >= 2:
+                        try:
+                            pts.append([float(v) for v in p])
+                        except (ValueError, TypeError):
+                            pass
+                if pts:
+                    return np.array(pts, dtype=np.float64)
+                return np.empty((0, 2))
+            
+            try:
+                flat = [float(v) for v in peds_raw if v is not None]
+            except (ValueError, TypeError):
+                return np.empty((0, 2))
+            
+            if len(flat) == 0:
+                return np.empty((0, 2))
+                
             if num_peds_hint and num_peds_hint > 0:
-                if num_peds_hint * 3 == len(arr):
-                    arr = arr.reshape(-1, 3)
-                elif num_peds_hint * 2 == len(arr):
-                    arr = arr.reshape(-1, 2)
-            elif len(arr) % 3 == 0:
-                arr = arr.reshape(-1, 3)
-            elif len(arr) % 2 == 0:
-                arr = arr.reshape(-1, 2)
-        if arr.ndim != 2 or arr.shape[1] < 2:
-            return np.empty((0, 2))
-        return arr
+                if len(flat) == num_peds_hint * 3:
+                    return np.array(flat, dtype=np.float64).reshape(num_peds_hint, 3)
+                elif len(flat) == num_peds_hint * 2:
+                    return np.array(flat, dtype=np.float64).reshape(num_peds_hint, 2)
+                elif len(flat) >= num_peds_hint * 2:
+                    stride = len(flat) // num_peds_hint
+                    pts = [flat[k*stride : k*stride+2] for k in range(num_peds_hint)]
+                    return np.array(pts, dtype=np.float64)
+                else:
+                    return np.empty((0, 2))
+            
+            if len(flat) % 3 == 0:
+                return np.array(flat, dtype=np.float64).reshape(-1, 3)
+            elif len(flat) % 2 == 0:
+                return np.array(flat, dtype=np.float64).reshape(-1, 2)
+                
+        return np.empty((0, 2))
 
     @classmethod
     @abstractmethod

@@ -9,14 +9,8 @@ from .manifest import MetadataWriter
 
 
 class FolderManager:
-    """
-    Manages the directory structure and paths for the Arena Evaluation Pipeline.
-    Ensures all resolved paths stay within the designated data_root.
+    """Manages directory paths within data_root for evaluation runs."""
 
-    Supports two structures:
-    - Legacy: data_root / benchmark_id / recordings / planner / stage /
-    - New (flat): data_root / benchmark_id / episodes / episode_XXX /
-    """
     def __init__(self, data_root: pathlib.Path | None = None):
         if data_root is None:
             self.data_root = pathlib.Path(
@@ -29,7 +23,7 @@ class FolderManager:
             self.data_root.mkdir(parents=True, exist_ok=True)
 
     def _safe_resolve(self, target: pathlib.Path) -> pathlib.Path:
-        """Resolve path and ensure it's within data_root to prevent traversal."""
+        """Resolve path and ensure it remains within data_root."""
         resolved = target.resolve()
         try:
             resolved.relative_to(self.data_root)
@@ -37,10 +31,8 @@ class FolderManager:
             raise ValueError(f"Path {resolved} is outside data_root {self.data_root}")
         return resolved
 
-    # New flat-episode API
-
     def episodes_dir(self, benchmark_id: str) -> pathlib.Path:
-        """Return the episodes/ root for a benchmark."""
+        """Return the episodes directory for a benchmark."""
         return self._safe_resolve(self.data_root / benchmark_id / "episodes")
 
     def episode_dir(self, benchmark_id: str, episode_id: int) -> pathlib.Path:
@@ -50,10 +42,7 @@ class FolderManager:
         )
 
     def discover_episodes(self, benchmark_id: str) -> list[EpisodeDescriptor]:
-        """
-        Discover all valid episodes within the flat episodes/ directory.
-        A valid episode has a directory named episode_XXX/ containing episode_XXX.yaml.
-        """
+        """Discover valid episode directories and their metadata."""
         eps_dir = self.data_root / benchmark_id / "episodes"
         if not eps_dir.exists() or not eps_dir.is_dir():
             return []
@@ -67,10 +56,8 @@ class FolderManager:
             except (IndexError, ValueError):
                 continue
 
-            # Find the yaml sidecar: episode_XXX.yaml
             yaml_path = ep_dir / f"{ep_dir.name}.yaml"
             if not yaml_path.exists():
-                # Fall back to legacy metadata.yaml if present
                 yaml_path = ep_dir / "metadata.yaml"
             if not yaml_path.exists():
                 continue
@@ -93,22 +80,21 @@ class FolderManager:
         return episodes
 
     def mcap_path_for_episode(self, episode_dir: pathlib.Path) -> pathlib.Path:
-        """Get the MCAP file path for a given episode directory."""
-        # Prefer the canonically named file (e.g. episode_001.mcap)
+        """Get MCAP file path for an episode directory."""
         canonical = episode_dir / f"{episode_dir.name}.mcap"
         if canonical.exists():
             return self._safe_resolve(canonical)
-        # Fall back to any .mcap file present
         candidates = sorted(p for p in episode_dir.glob("*.mcap") if p.stat().st_size > 0)
         if candidates:
             return self._safe_resolve(candidates[0])
-        return self._safe_resolve(canonical)  # return expected path even if missing
+        return self._safe_resolve(canonical)
 
     def extracted_topics_path_for_episode(self, episode_dir: pathlib.Path) -> pathlib.Path:
-        """Return topics/ directory for a given episode directory."""
+        """Return topics directory for an episode."""
         return self._safe_resolve(episode_dir / "topics")
 
     def combined_metrics_path(self, benchmark_id: str) -> pathlib.Path:
-        """Get the path for the combined benchmark metrics Parquet file."""
+        """Get path for combined benchmark metrics Parquet file."""
         target = self.data_root / benchmark_id / "combined_metrics.parquet"
         return self._safe_resolve(target)
+

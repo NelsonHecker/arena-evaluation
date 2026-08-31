@@ -1,0 +1,38 @@
+name: office_scenarios
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 2
+  optim.obstacles: bbox
+stages:
+- name: office_s01_long_hallway_commute
+  map: office_1
+  robot: jackal
+  episodes: 3
+  timeout: 150.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: office_s01_long_hallway_commute
+- name: office_s02_cafeteria_cross_traffic
+  map: office_1
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: office_s02_cafeteria_cross_traffic
+- name: office_s03_main_office_doorway_emergence
+  map: office_1
+  robot: jackal
+  episodes: 3
+  timeout: 100.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: office_s03_main_office_doorway_emergence

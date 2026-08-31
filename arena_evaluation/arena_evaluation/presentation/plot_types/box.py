@@ -19,7 +19,8 @@ class BoxRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return None
 
-        pdf = df_filtered.to_pandas()
+        keep = [self.spec.data_key, diff_col]
+        pdf = df_filtered.select(keep).to_pandas()
         if pdf.empty:
             return None
 
@@ -27,7 +28,6 @@ class BoxRenderer(BasePlotRenderer):
             pdf,
             y=self.spec.data_key,
             color=diff_col,
-            title=self.spec.title,
             labels={
                 self.spec.data_key: self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
                 diff_col: diff_col.lstrip("_").replace("_", " ").title(),
@@ -46,7 +46,8 @@ class BoxRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return
 
-        pdf = df_filtered.to_pandas()
+        keep = [self.spec.data_key, diff_col]
+        pdf = df_filtered.select(keep).to_pandas()
         if pdf.empty or pdf[self.spec.data_key].isna().all():
             return
 

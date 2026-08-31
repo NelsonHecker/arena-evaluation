@@ -17,6 +17,8 @@ class BarRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return None
 
+        df_filtered = self._explode_needed(df_filtered, diff_col)
+
         is_stacked = self.spec.options.get("stacked", False)
 
         if is_stacked:
@@ -40,7 +42,6 @@ class BarRenderer(BasePlotRenderer):
                 grouped,
                 x=diff_col,
                 y=metrics,
-                title=self.spec.title,
                 template="plotly_white",
                 barmode="stack",
                 labels={"value": "Percentage (%)", "variable": "Component", diff_col: diff_col.lstrip("_").replace("_", " ").title()}
@@ -71,7 +72,6 @@ class BarRenderer(BasePlotRenderer):
                 color=diff_col,
                 error_y="std",
                 template="plotly_white",
-                title=self.spec.title,
                 labels={
                     "mean": self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
                     diff_col: diff_col.lstrip("_").replace("_", " ").title()
@@ -81,13 +81,28 @@ class BarRenderer(BasePlotRenderer):
 
             return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
 
+    def _explode_needed(self, df_filtered: pl.DataFrame, diff_col: str) -> pl.DataFrame:
+        """Explode per-sample list columns (timeseries metrics) before
+        aggregation. Selects only the needed columns first - the full frame
+        carries other list columns of differing lengths whose explosion grows
+        combinatorially (polars 1.x, see the line renderer note)."""
+        metrics = self.spec.options.get("metrics", [])
+        keep = [c for c in [self.spec.data_key, diff_col, *metrics] if c in df_filtered.columns]
+        list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
+        if list_cols:
+            return df_filtered.select(keep).explode(list_cols)
+        return df_filtered
+
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
         diff_col, df_filtered = self.resolve_diff_col(df_filtered)
         if diff_col not in df_filtered.columns:
             return
 
-        pdf = df_filtered.to_pandas()
+        df_filtered = self._explode_needed(df_filtered, diff_col)
+
+        keep = [c for c in [self.spec.data_key, diff_col] if c in df_filtered.columns]
+        pdf = df_filtered.select(keep).to_pandas()
         if pdf.empty:
             return
 

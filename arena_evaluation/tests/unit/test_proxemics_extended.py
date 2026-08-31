@@ -99,8 +99,9 @@ def test_psii_integrates_clearance_inside_personal_space(calc):
     times = [0, SEC, 2 * SEC]
     peds = [_at_clearance(0.2), _at_clearance(0.8), _at_clearance(3.0)]
     results = calc.calculate(_episode(times, peds), {})
-    # 0.2 m for 1 s, then 0.8 m for 1 s; the social frame is outside the band.
-    assert results["personal_space_intrusion_integral"] == pytest.approx(1.0)
+    # Penetration depth: (1.2 - 0.2) * 1s + (1.2 - 0.8) * 1s = 1.0 + 0.4 = 1.4 m·s; social frame is outside the band.
+    assert results["personal_space_intrusion_integral"] == pytest.approx(1.4)
+
 
 
 def test_frames_without_pedestrians_report_no_clearance(calc):

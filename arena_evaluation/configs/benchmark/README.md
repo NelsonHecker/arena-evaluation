@@ -1,48 +1,49 @@
-# Benchmark configs
+# Benchmark Configurations
 
-The `arena evaluation benchmark` runner reads all benchmark configuration from
-`arena_evaluation/configs/benchmark/` at startup.
+The `arena evaluation benchmark` runner reads benchmark configurations from `arena_evaluation/configs/benchmark/` at startup.
 
-Invocation: `arena evaluation benchmark --suite <name> --contest <name> [--scale-episodes N] [sim:=...] [headless:=...] [env.n:=...]` (Arena meta-repo shortcut: `arena evaluation benchmark ...`).
+Invocation:
+```bash
+arena evaluation benchmark --suite <name> --contest <name> [--scale-episodes N]
+```
 
-## Directory layout
+## Directory Layout
 
 ```
 configs/benchmark/
-|-- suites/           - stage sequences (maps, episodes, task modes)
+|-- suites/           - Stage sequences (maps, episodes, task modes)
 |   |-- basic.yaml
 |   |-- meta_suite.yaml
 |   |-- all_maps_random.yaml
 |   |-- arena_corridor.yaml
 |   |-- arena_hospital_small.yaml
 |   |-- map_empty.yaml
-|   `-- characterization.yaml   - open-loop energy/acoustic sweep
-`-- contests/         - planner lineups
+|   `-- characterization.yaml
+`-- contests/         - Planner lineups
     |-- basic.yaml
     |-- allplanners.yaml
     |-- inter.yaml
     |-- planners.yaml
-    `-- characterization.yaml  - dummy contestant (the task mode drives, not a planner)
+    `-- characterization.yaml
 ```
 
-## Suite files
+## Suite Files
 
-A suite is an ordered list of stages. The runner steps through the
-stages sequentially, cycling through all contestants at each stage.
+A suite defines an ordered list of stages executed sequentially across all contestants.
 
 ```yaml
 launch:                       # optional. launch args for the whole run, CLI passthrough wins. stage-owned keys (world, robot, run_seed, task.*, record.*) are rejected
   lockstep: true
 stages:
-  - name: scenario            # human-readable label (used in log output)
-    map: arena_hospital_small # world/map name
-    robot: jackal             # robot model
-    tm_robots: scenario       # TM_Robots kind (string, upper-cased to enum key)
-    tm_obstacles: random      # TM_Obstacles kind
-    episodes: 1               # number of episodes at this stage
-    config:                   # per-mode params, leaf-keyed (see task_generator/tasks/obstacles/README.md)
-      scenario:               # top-level key matches tm_robots / tm_obstacles
-        file: 4.json          # -> task.scenario.file
+  - name: scenario
+    map: arena_hospital_small
+    robot: jackal
+    tm_robots: scenario
+    tm_obstacles: random
+    episodes: 1
+    config:
+      scenario:
+        file: 4.json
       random:
         dynamic:  {min: 3, max: 5, models: [arenian]}  # -> task.random.dynamic.n=[3,5], task.random.dynamic.models
         static:   {min: 5, max: 10, models: [shelf]}
@@ -57,10 +58,10 @@ extension has the extension stripped before it is sent (`4.json` and `4` are equ
 
 ### Stage fields
 
-| Field | Type | Meaning |
+| Field | Type | Description |
 |---|---|---|
 | `name` | string | Stage label |
-| `map` | string | World name (sets `Arena.WORLD` param on the task-generator node) |
+| `map` | string | World name |
 | `robot` | string | Robot model |
 | `tm_robots` | string | `Constants.TaskMode.TM_Robots` enum key (case-insensitive) |
 | `tm_obstacles` | string | `Constants.TaskMode.TM_Obstacles` enum key (case-insensitive) |
@@ -200,33 +201,9 @@ become `args` forwarded to `Robot.parse` via the `SpawnRobot` service.
     agent: my_agent
 ```
 
-### Sweep form
+### Sweep Form
 
-Top-level YAML is a mapping. Inside a cap dict, list values are sweep axes;
-non-list values are constants shared by all contestants. The runner takes the
-cartesian product of all list-valued keys.
-
-```yaml
-mobile:
-  driver: nav2
-  local_planner: [teb, dwa, rosnav]
-  inter_planner: bypass
-```
-
-produces three contestants. `name` is auto-derived from the keys that vary
-across the product. If only one axis varies, names are the values of that axis.
-If two or more vary, names are the varying values joined by `-`, in yaml-dict
-order.
-
-```yaml
-# 4 contestants: dwa-navfn, dwa-smac, teb-navfn, teb-smac
-mobile:
-  driver: nav2
-  local_planner: [dwa, teb]
-  global_planner: [navfn, smac]
-```
-
-A constant `name: <prefix>` prepends the prefix to all auto-derived names:
+Cartesian product generated across list-valued parameters:
 
 ```yaml
 name: basic
@@ -234,13 +211,16 @@ mobile:
   driver: nav2
   inter_planner: bypass
   local_planner: [teb, dwa, rosnav]
-# produces: basic-teb, basic-dwa, basic-rosnav
 ```
 
-`description` (optional) is stored in the contest manifest and is not forwarded
-to `Robot.parse`.
+Produces: `basic-teb`, `basic-dwa`, `basic-rosnav`.
 
-### Backward compatibility
+### Inline Contest (CLI)
+
+```bash
+arena evaluation benchmark --suite basic --contest '[{name: teb, mobile: {driver: nav2, local_planner: teb}}]'
+arena evaluation benchmark --suite basic --contest '{mobile: {driver: nav2, local_planner: [teb, dwa]}}'
+```
 
 The old flat dot-notation format is still accepted in both list and sweep forms:
 
@@ -338,49 +318,22 @@ Output dir: `$ARENA_DATA_DIR/benchmarks/<run_id>/` (default `$ARENA_WS_DIR/data/
 Override with `--data-root`. Inside Docker: `/opt/arena_ws/data/benchmarks/<run_id>/`.
 
 ```
-$ARENA_DATA_DIR/benchmarks/<run_id>/
-|-- manifest.yaml              # requested config snapshot (never overwritten)
-|-- progress.csv               # append-only, one row per episode
-|-- runner.log
-|-- .benchmark_state.json      # per-step status, atomic write
-|-- episodes/                  # recorder output - one MCAP per episode
-|   |-- episode_000/
-|   |   |-- episode_000.mcap
-|   |   `-- episode_000.yaml
-|   `-- ...
-|-- combined_metrics.parquet   # after arena evaluation run
-`-- report_manifest.yaml       # note: which manifest produced the last report
+<run_id>/
+|-- manifest.yaml              # Config snapshot
+|-- progress.csv               # Episode results
+|-- runner.log                 # Execution logs
+|-- .benchmark_state.json      # Step state (atomic)
+|-- episodes/                  # Per-episode MCAP files
+|-- combined_metrics.parquet   # Computed metrics
+`-- report_manifest.yaml       # Used report manifest
 ```
 
-The recorder is spawned per step and writes one MCAP per episode into `episodes/`; its episode
-lifecycle is driven by the `start_episode` service (see the [ingestion README](../../arena_evaluation/ingestion/README.md)).
-`arena evaluation run --report-manifest <name>` performs extraction + metrics, then renders
-`report.html`. Characterization is a regular metric calculator - the report derives the
-per-working-point curves from its `timeseries_char_*` columns, with no separate analysis step.
-
-Inspection helpers:
-
-- `arena evaluation evaluation_cli list` - table of all runs under `$ARENA_DATA_DIR/benchmarks/`.
-- `arena evaluation evaluation_cli status [run_id] [--watch]` - snapshot or live view (subscribes to `/arena/benchmark/state` TRANSIENT_LOCAL).
-- `arena evaluation evaluation_cli tail [run_id]` - tail -F on `progress.csv` of the most recent (or named) run.
-- `arena evaluation evaluation_cli ps` - table of arena-related OS processes currently running
-  (benchmark runner, arena CLI wrapper, Gazebo sim, arena/recorder nodes, world generators)
-  with PID, kind, elapsed time, and command line. Same data as the MCP
-  `list_running_processes` tool.
-- `arena evaluation evaluation_cli console [run_id] [--lines N] [--follow]` - tail the console
-  log of a benchmark run: `benchmarks/<run_id>/runner.log` (the runner's own log: Python
-  logging plus launch output, written for every run, however it was launched). run_id omitted
-  = most recent run. Same data as the MCP `get_benchmark_console` tool.
-
-`progress.csv` schema: `ts_iso, run_id, step_key, contestant, stage, env_id, episode_id, world, seed, tm_robots, tm_obstacles, tm_modules, robots, outcome_state, outcome_info, started_at, ended_at, runtime_s, robots_params_json, obstacles_params_json, error_kind, error_detail`
-
-Step status values in `.benchmark_state.json`: `ok | partial | failed | skipped | in_progress`.
-
-## Known limitations
-
-- Recorder topic-namespace mismatch (`/scenario_reset` vs `<ns>/task_reset`)
-  means per-episode segmentation in CSV output is currently unreliable;
-  aggregate-per-run metrics are still usable. Tracked separately.
-- Heartbeat-eviction may rarely mark a stalled step `ok` instead of `failed`.
-  If you see suspiciously fast steps in `progress.csv`, use
-  `arena evaluation benchmark --resume <run_id> --retry-failed`.
+## Inspection & Management Commands
+```bash
+arena evaluation list                          # List runs
+arena evaluation status [run_id] [--watch]     # Show progress
+arena evaluation tail [run_id]                 # Tail progress.csv
+arena evaluation ps                            # List running arena processes
+arena evaluation kill [pid...] [-9]            # Terminate running processes (-9 for SIGKILL)
+arena evaluation console [run_id] [--follow]   # Tail runner.log
+```

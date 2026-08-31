@@ -61,13 +61,7 @@ class RunMetadata(BaseModel):
 
 @dataclass(frozen=True)
 class RobotParams:
-    """Robot physical parameters loaded at runtime.
-
-    Mass splits the way power does: the platform declares a base in
-    ``model_params.yaml`` and each attached component adds its own on top.
-    A mass of 0 means undeclared, and metrics that need one skip rather
-    than invent a number.
-    """
+    """Robot physical parameters loaded at runtime."""
     model: str = "unknown"
     robot_radius: float = 0.25
     laser_min_range: float = 0.0
@@ -77,12 +71,12 @@ class RobotParams:
 
     @property
     def mass(self) -> float:
-        """Total mass in kg, 0.0 when the robot declares none."""
+        """Total mass in kg, or 0.0 if undeclared."""
         return self.base_mass + sum(self.component_masses.values())
 
     @classmethod
     def load(cls, model: str) -> "RobotParams":
-        """Load parameters from the arena_robots share dir, defaults on failure."""
+        """Load parameters from arena_robots share directory, returning defaults on failure."""
         import os
         import yaml
         from ament_index_python.packages import get_package_share_directory
@@ -132,7 +126,7 @@ class RobotParams:
 
 @dataclass(frozen=True)
 class RunDescriptor:
-    """Describes a single run (step) discovered by FolderManager. Legacy."""
+    """Descriptor for a single run directory."""
     run_dir: str
     benchmark_id: str
     planner: str
@@ -141,7 +135,7 @@ class RunDescriptor:
 
 @dataclass(frozen=True)
 class EpisodeDescriptor:
-    """Describes a single episode discovered in the flat episodes/ folder structure."""
+    """Descriptor for an episode directory in flat storage."""
     episode_dir: str
     benchmark_id: str
     episode_id: int
@@ -154,7 +148,7 @@ class EpisodeDescriptor:
 
 @dataclass
 class TopicBundle:
-    """Raw topics extracted from MCAP"""
+    """Raw topic dataframes extracted from MCAP."""
     odom: pl.DataFrame | None = None
     scan: pl.DataFrame | None = None
     cmd_vel: pl.DataFrame | None = None
@@ -177,7 +171,7 @@ class TopicBundle:
 
 @dataclass
 class AlignedEpisodeBundle:
-    """Aligned data for a single episode"""
+    """Aligned topic data for a single episode."""
     episode_id: int
     data: pl.DataFrame
     start_pos: list[float]
@@ -186,19 +180,15 @@ class AlignedEpisodeBundle:
     robot_name: str | None = None
     semantic_snapshot: pl.DataFrame | None = None
     conditions: list[dict] | None = None
-    run: typing.Any = None # RunDescriptor
-    folder_manager: typing.Any = None # FolderManager
-    peds: pl.DataFrame | None = None # Raw pedestrian dataframe
-    map: str | None = None  # map name (e.g. "hospital_1")
-    # Native-rate raw topic frames keyed by topic name (odom, tf_gt, peds,
-    # scan, cmd_vel, power, energy, acoustics, ...). Each frame keeps its own
-    # timestamps; metrics that are sensitive to sampling rate compute on the
-    # native time base instead of the odom-aligned `data` frame.
+    run: typing.Any = None
+    folder_manager: typing.Any = None
+    peds: pl.DataFrame | None = None
+    map: str | None = None
     topics: dict[str, pl.DataFrame] | None = None
 
 
 class PlotSpec(BaseModel):
-    """Specification for a single plot in viz_manifest.yaml."""
+    """Specification for a single plot in a report manifest."""
     id: str
     type: str
     title: str
@@ -210,3 +200,4 @@ class PlotSpec(BaseModel):
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
     data_source: str | None = None
+

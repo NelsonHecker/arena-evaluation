@@ -372,6 +372,26 @@ def _cmd_console(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_kill(args: argparse.Namespace) -> int:
+    from arena_evaluation.benchmark.debug import kill_processes
+
+    results = kill_processes(pids=args.pids or None, force=args.force, kind=args.kind)
+    if not results:
+        if args.pids:
+            print("no matching processes found for specified PIDs")
+        else:
+            print("no running arena processes found")
+        return 0
+
+    for r in results:
+        cmd_short = r.get("command", "")
+        if len(cmd_short) > 60:
+            cmd_short = cmd_short[:57] + "..."
+        print(f"[{r['status']}] pid {r['pid']} ({r['kind']}) - {cmd_short}")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="evaluation_cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -391,6 +411,11 @@ def main(argv: list[str] | None = None) -> int:
     p_ps = sub.add_parser("ps", help="list running arena processes (benchmark runner, sim, nodes)")
     p_ps.add_argument("--data-root", default=None, metavar="PATH")
 
+    p_kill = sub.add_parser("kill", help="terminate running arena benchmark and simulation processes")
+    p_kill.add_argument("pids", nargs="*", type=int, default=None, help="specific PIDs to kill (default: all arena processes)")
+    p_kill.add_argument("-9", "--force", action="store_true", help="send SIGKILL immediately")
+    p_kill.add_argument("--kind", choices=["benchmark_runner", "simulation", "arena_node", "world_generator", "arena_cli"], default=None, help="filter by process kind")
+
     p_console = sub.add_parser("console", help="tail a benchmark run's console log")
     p_console.add_argument("--data-root", default=None, metavar="PATH")
     p_console.add_argument("--lines", type=int, default=200, help="tail lines (default 200)")
@@ -408,10 +433,15 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_tail(args)
         if args.command == "ps":
             return _cmd_ps(args)
+        if args.command == "kill":
+            return _cmd_kill(args)
         if args.command == "console":
             return _cmd_console(args)
     except SystemExit:
         raise
+    except KeyboardInterrupt:
+        print("\nInterrupted by user (Ctrl+C). Exiting.", file=sys.stderr)
+        return 130
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

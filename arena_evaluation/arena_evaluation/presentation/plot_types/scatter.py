@@ -23,24 +23,28 @@ class ScatterRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return None
 
+        keep = [c for c in [x_col, y_col, diff_col] if c in df_filtered.columns]
+        list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
+        if list_cols:
+            df_filtered = df_filtered.select(keep).explode(list_cols)
+        else:
+            df_filtered = df_filtered.select(keep)
+        df_filtered = self._apply_row_filters(df_filtered)
+
         pdf = df_filtered.to_pandas()
         if pdf.empty:
             return None
 
-        if df_filtered.schema[x_col] == pl.List or df_filtered.schema[y_col] == pl.List:
-            cols_to_explode = [col for col in [x_col, y_col] if df_filtered.schema[col] == pl.List]
-            df_filtered = df_filtered.explode(cols_to_explode)
-            pdf = df_filtered.to_pandas()
-
-        if pdf.empty:
-            return None
+        max_points = int(self.spec.options.get("max_points_per_trace", 5000))
+        if max_points > 0 and len(pdf) > max_points:
+            stride = max(1, len(pdf) // max_points)
+            pdf = pdf.iloc[::stride]
 
         fig = px.scatter(
             pdf,
             x=x_col,
             y=y_col,
             color=diff_col,
-            title=self.spec.title,
             template="plotly_white",
             opacity=0.7,
         )
@@ -66,15 +70,15 @@ class ScatterRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return
 
+        keep = [c for c in [x_col, y_col, diff_col] if c in df_filtered.columns]
+        list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
+        if list_cols:
+            df_filtered = df_filtered.select(keep).explode(list_cols)
+        else:
+            df_filtered = df_filtered.select(keep)
+        df_filtered = self._apply_row_filters(df_filtered)
+
         pdf = df_filtered.to_pandas()
-        if pdf.empty:
-            return
-
-        if df_filtered.schema[x_col] == pl.List or df_filtered.schema[y_col] == pl.List:
-            cols_to_explode = [col for col in [x_col, y_col] if df_filtered.schema[col] == pl.List]
-            df_filtered = df_filtered.explode(cols_to_explode)
-            pdf = df_filtered.to_pandas()
-
         if pdf.empty:
             return
 

@@ -9,14 +9,7 @@ if typing.TYPE_CHECKING:
 
 
 class PedestrianPathMetricsCalculator(BaseMetricCalculator):
-    """
-    Calculates pedestrian trajectory paths over the episode.
-    
-    Metrics:
-    - pedestrian_path: A list of independent 3D paths for each pedestrian.
-      Each path is padded with NaNs to be exactly length T (the episode length)
-      to guarantee perfect time synchronization in the trajectory plot slider.
-    """
+    """Calculates time-synchronized pedestrian trajectory paths."""
     
     NAME = "pedestrian_path_metrics"
     CATEGORY = "performance"

@@ -34,13 +34,15 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["energy", "path_metrics", "motion_metrics"]
-    REQUIRED_TOPICS = ["power", "odom"]
+    REQUIRED_TOPICS = [("power", "energy", "odom")]
 
     UNITS = {
         "specific_cost_of_transport": "",
         "energy_per_meter": "Wh/m",
         "peak_to_mean_power_ratio": "",
         "standstill_energy_penalty_wh": "Wh",
+        "kinetic_energy_demand_j": "J",
+        "friction_dissipation_j": "J",
     }
 
     PRIMARY_OUTPUTS = ["specific_cost_of_transport", "energy_per_meter"]
@@ -49,7 +51,29 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
         "energy_per_meter": "lower",
         "peak_to_mean_power_ratio": "lower",
         "standstill_energy_penalty_wh": "lower",
+        "kinetic_energy_demand_j": "lower",
+        "friction_dissipation_j": "lower",
     }
+
+    def __init__(self, robot_params):
+        super().__init__(robot_params)
+        self._rolling_resistance = self._load_rolling_resistance(robot_params.model)
+
+    @staticmethod
+    def _load_rolling_resistance(model: str) -> float:
+        import os
+        import yaml
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            power_path = os.path.join(
+                get_package_share_directory("arena_robots"),
+                "robots", model, "telemetry", "power.yaml"
+            )
+            with open(power_path) as f:
+                data = yaml.safe_load(f)
+            return float(data.get("power_system", {}).get("rolling_resistance_crr", 0.015))
+        except Exception:
+            return 0.015
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -58,6 +82,8 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
             "energy_per_meter",
             "peak_to_mean_power_ratio",
             "standstill_energy_penalty_wh",
+            "kinetic_energy_demand_j",
+            "friction_dissipation_j",
         ]
 
     def calculate(
@@ -144,14 +170,14 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
         min_len = min(lengths) if lengths else 0
 
         if min_len > 0:
-            vel = vel[:min_len]
-            p_ts = p_ts[:min_len]
-            t_ts = t_ts[:min_len]
+            vel_trim = vel[:min_len]
+            p_ts_trim = p_ts[:min_len]
+            t_ts_trim = t_ts[:min_len]
 
-            dt = np.diff(t_ts, prepend=0.0)
+            dt = np.diff(t_ts_trim, prepend=0.0)
             dt[dt < 0] = 0.0
 
-            is_stationary = np.abs(vel) < v_thresh
+            is_stationary = np.abs(vel_trim) < v_thresh
             sep_wh = 0.0
             if np.any(is_stationary):
                 padded = np.concatenate([[False], is_stationary, [False]])
@@ -162,10 +188,37 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
                 for s, e in zip(starts, ends):
                     block_duration = float(np.sum(dt[s:e]))
                     if block_duration >= 0.5:  # ignore micro-jitter blocks
-                        sep_wh += float(np.sum(p_ts[s:e] * dt[s:e])) / 3600.0
+                        sep_wh += float(np.sum(p_ts_trim[s:e] * dt[s:e])) / 3600.0
 
             result["standstill_energy_penalty_wh"] = float(sep_wh)
         else:
             result["standstill_energy_penalty_wh"] = None
+
+        # Kinetic Energy Demand
+        ked = None
+        if mass > 0 and len(vel) > 1 and len(t_ts) > 1:
+            inertia = 0.5 * mass * self.robot_params.robot_radius ** 2
+            omega = np.array(prior_results.get("angular_velocity", []), dtype=float)
+            if len(omega) == 0:
+                omega = np.zeros_like(vel)
+            min_n = min(len(vel), len(omega), len(t_ts))
+            vel_k = vel[:min_n]
+            omega_k = omega[:min_n]
+            t_k = t_ts[:min_n]
+            ke = 0.5 * mass * vel_k**2 + 0.5 * inertia * omega_k**2
+            dke = np.abs(np.diff(ke))
+            ked = float(np.sum(dke))
+        result["kinetic_energy_demand_j"] = ked
+
+        # Friction Dissipation
+        fd = None
+        if mass > 0 and len(vel) > 1 and len(t_ts) > 1:
+            min_n = min(len(vel), len(t_ts))
+            vel_f = vel[:min_n]
+            t_f = t_ts[:min_n]
+            dt_f = np.diff(t_f, prepend=0.0)
+            dt_f[dt_f < 0] = 0.0
+            fd = float(np.sum(self._rolling_resistance * mass * 9.81 * np.abs(vel_f) * dt_f))
+        result["friction_dissipation_j"] = fd
 
         return result

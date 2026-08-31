@@ -71,25 +71,7 @@ def compute_attenuations(
     mic_distance: float = 1.0,
     pixel_tl: np.ndarray | None = None,
 ) -> np.ndarray:
-    """
-    Computes the shortest path acoustic attenuation from a start pixel to multiple target pixels.
-
-    Args:
-        occupancy_grid: 2D uint8 numpy array (0 = free, >0 = wall).
-        resolution: Physical size of a pixel in meters.
-        start_x_px, start_y_px: Start position in pixel coordinates.
-        target_xs_px, target_ys_px: 1D arrays of target positions in pixel coordinates.
-        wall_tl: Transmission loss added per wall crossing (dB). Used when
-            pixel_tl is None (v1 behavior).
-        mic_distance: Minimum distance epsilon for self-noise (m).
-        pixel_tl: Optional float32 2D array (same shape as occupancy_grid) with
-            a per-pixel transmission loss in dB (entering pixel p costs
-            pixel_tl[p]). Free space = 0, brick wall = 47, closed door = 25,
-            glass = 20. When None, wall pixels cost wall_tl (v1).
-
-    Returns:
-        1D array of attenuations in dB (same length as targets).
-    """
+    """Compute acoustic attenuation from start pixel to target pixels."""
     if _lib is None:
         raise RuntimeError("C++ solver library not loaded.")
 

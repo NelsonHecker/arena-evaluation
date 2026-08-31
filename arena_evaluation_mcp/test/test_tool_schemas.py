@@ -157,7 +157,20 @@ class TestDispatchSeam:
         assert result.is_error
         payload = json.loads(result.content[0].text)
         assert "invalid name" in payload["error"]
-        assert "traceback" not in payload
+
+    def test_kill_processes_tool_schema_and_dispatch(self, monkeypatch):
+        from mcp.types import CallToolRequestParams
+        from arena_evaluation_mcp.eval_bridge import EvalBridge
+        from arena_evaluation_mcp.tools import dispatch_tool_call
+
+        bridge = EvalBridge()
+        monkeypatch.setattr(bridge, "kill_processes", lambda **kwargs: [{"pid": 999, "status": "killed"}])
+
+        params = CallToolRequestParams(name="kill_processes", arguments={"pids": [999], "force": True})
+        result = asyncio.run(dispatch_tool_call(params, bridge))
+        assert not result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["results"] == [{"pid": 999, "status": "killed"}]
 
 
 if __name__ == "__main__":

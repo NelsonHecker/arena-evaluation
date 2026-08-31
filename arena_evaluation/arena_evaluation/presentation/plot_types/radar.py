@@ -52,7 +52,11 @@ class RadarRenderer(BasePlotRenderer):
             for m in valid_metrics:
                 normalized[m] = np.log1p(normalized[m])
 
-        positive_metrics = {"success", "success_rate", "path_efficiency", "velocity_mean", "velocity_max"}
+        positive_metrics = {
+            "success", "success_rate", "spl", "path_efficiency",
+            "relative_throughput", "passing_rule_compliance",
+            "velocity_mean", "velocity_max",
+        }
 
         for m in valid_metrics:
             max_val = normalized[m].max()
@@ -89,7 +93,6 @@ class RadarRenderer(BasePlotRenderer):
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=True,
-            title=self.spec.title,
             template="plotly_white",
             legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5)
         )
@@ -130,7 +133,11 @@ class RadarRenderer(BasePlotRenderer):
             for m in valid_metrics:
                 normalized[m] = np.log1p(normalized[m])
 
-        positive_metrics = {"success", "success_rate", "path_efficiency", "velocity_mean", "velocity_max"}
+        positive_metrics = {
+            "success", "success_rate", "spl", "path_efficiency",
+            "relative_throughput", "passing_rule_compliance",
+            "velocity_mean", "velocity_max",
+        }
         for m in valid_metrics:
             max_val = normalized[m].max()
             min_val = normalized[m].min()
@@ -144,6 +151,7 @@ class RadarRenderer(BasePlotRenderer):
                         normalized[m] = min_val / normalized[m]
                     else:
                         normalized[m] = 1.0 - (normalized[m] / max_val)
+
 
         num_vars = len(valid_metrics)
         angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()

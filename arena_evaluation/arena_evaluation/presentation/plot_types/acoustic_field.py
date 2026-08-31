@@ -9,7 +9,7 @@ from PIL import Image
 from .base import BasePlotRenderer
 from ...processing.map_registry import MapRegistry
 from ...processing.acoustics.impedance_grid import downsample_occupancy
-from ...processing.acoustics.door_map import door_segments, build_pixel_tl
+from ...processing.acoustics.door_map import door_segments, build_pixel_tl, _entity_matches_door
 
 try:
     from ...processing.acoustics.impedance_grid import compute_attenuations
@@ -21,22 +21,12 @@ logger = logging.getLogger(__name__)
 _CELL_FIGSIZE = (5, 4)
 _CELL_DPI = 150
 
-# Color-scale floor (dBA).  Set below hospital ambient so quiet frames still
-# show field structure rather than collapsing to solid black.
 _FIELD_VMIN_DBA = 30.0
 
 
 class AcousticFieldRenderer(BasePlotRenderer):
     PLOT_TYPE = "acoustic_field"
 
-    # Manifest-driven options
-    #  filter:            {col: value} or {col: [v1, v2]} - select specific runs
-    #  differentiate:     rows of the grid (e.g. local_planner)
-    #  group_by:          columns of the grid (e.g. [stage])
-    #  options.mode:      "grid" (default) | "single" - single = one worst-case image
-    #  options.downsample: stride factor for the field solver (default 1)
-    #  options.vmin:      color-scale floor (default = hospital ambient 42 dBA)
-    #  options.include_reference: include reference/unhindered runs (default false)
 
     @staticmethod
     def _load_grid_and_meta(map_name, run_dir=None):
@@ -83,35 +73,45 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
     def _render_cell_png(self, grid, resolution, ox, oy,
                          rx_m, ry_m, source_dba, peds, title, out_path,
-                         downsample=1, vmin=None, vmax=None, pixel_tl=None, doors=None):
+                         downsample=1, vmin=None, vmax=None, open_doors=None, doors=None):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        result = self._compute_full_field(grid, resolution, ox, oy,
-                                          rx_m, ry_m, source_dba,
-                                          downsample=downsample, pixel_tl=pixel_tl)
-        if result is None:
-            return False
-        field_dba, eff_res, (h, w) = result
+        eff_res = resolution
+        grid_eval = grid
+        doors_eval = doors
 
         if downsample > 1:
-            mask_grid = grid[::downsample, ::downsample]
-        else:
-            mask_grid = grid
+            grid_eval = downsample_occupancy(grid, downsample)
+            eff_res = resolution * downsample
+            h, w = grid_eval.shape
+            if doors:
+                doors_eval = {}
+                for name, (mask, tl_db) in doors.items():
+                    m_ds = mask[::downsample, ::downsample][:h, :w]
+                    doors_eval[name] = (m_ds, tl_db)
 
-        # Build door mask (all doors) and open-door mask (carved to 0 dB)
-        door_mask = np.zeros_like(mask_grid, dtype=bool)
-        open_door_mask = np.zeros_like(mask_grid, dtype=bool)
-        if doors:
-            for _name, (m, _tl) in doors.items():
-                m_ds = m[::downsample, ::downsample] if downsample > 1 else m
-                door_mask |= m_ds
-                if pixel_tl is not None:
-                    open_door_mask |= m_ds & (pixel_tl == 0.0)
+        h, w = grid_eval.shape
+        pixel_tl = build_pixel_tl(grid_eval, doors_eval, open_doors=open_doors) if doors_eval else None
 
-        # NaN walls and closed doors, but NOT open doors - they show free-space colour
-        wall_or_closed = (mask_grid == 1) & ~open_door_mask
+        result = self._compute_full_field(grid_eval, eff_res, ox, oy,
+                                          rx_m, ry_m, source_dba,
+                                          downsample=1, pixel_tl=pixel_tl)
+        if result is None:
+            return False
+        field_dba, _, (h, w) = result
+
+        door_mask = np.zeros_like(grid_eval, dtype=bool)
+        open_door_mask = np.zeros_like(grid_eval, dtype=bool)
+        if doors_eval:
+            open_set = open_doors or set()
+            for name, (m, _tl) in doors_eval.items():
+                door_mask |= m
+                if any(_entity_matches_door(name, e) for e in open_set):
+                    open_door_mask |= m
+
+        wall_or_closed = (grid_eval == 1) & ~open_door_mask
         render_grid = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
         render_grid = np.flipud(render_grid)
 
@@ -125,17 +125,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         im = plt.imshow(render_grid, cmap="inferno", origin="upper", extent=extent,
                         vmin=vmin, vmax=vmax)
-        # Subtle wall outline so room structure is always visible (even when field is dark)
-        cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
-        cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
-        wall_outline = (mask_grid == 1).astype(np.uint8)
+        cy = np.linspace(extent[2], extent[3], grid_eval.shape[0])
+        cx = np.linspace(extent[0], extent[1], grid_eval.shape[1])
+        wall_outline = (grid_eval == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                    linewidths=0.3, alpha=0.25)
         if door_overlay is not None:
-            # Cyan contour outlines for ALL doors, in meter coords
             ax.contour(cx, cy, door_overlay.astype(np.uint8), levels=[0.5],
                        colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
-            # Brighter green contour for OPEN doors
             if open_door_mask.any():
                 ax.contour(cx, cy, open_door_mask.astype(np.uint8), levels=[0.5],
                            colors=["#00ff00"], linewidths=2.0, alpha=0.9)
@@ -158,6 +155,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(out_path, dpi=_CELL_DPI, bbox_inches="tight")
         plt.close()
+        return True
         logger.info("AcousticFieldRenderer: saved %s", out_path)
         return True
 
@@ -278,11 +276,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             if vmax <= vmin:
                 vmax = vmin + 20.0
 
-            pixel_tl = None
             door_states = worst.get("door_states") or {}
-            if doors:
-                open_set = {n for n, st in door_states.items() if st == "open"}
-                pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+            open_doors = {n for n, st in door_states.items() if st == "open"} if doors else None
 
             ok = self._render_cell_png(
                 grid, resolution, ox, oy,
@@ -293,8 +288,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 downsample=downsample,
                 vmin=vmin,
                 vmax=vmax,
-                pixel_tl=pixel_tl,
-                doors=doors if pixel_tl is not None else None,
+                open_doors=open_doors,
+                doors=doors,
             )
             if not ok:
                 return ""
@@ -348,11 +343,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             safe = safe.replace("/", "_").replace(" ", "_")
             png_path = plots_dir / f"{safe}.png"
 
-            pixel_tl = None
             door_states = worst.get("door_states") or {}
-            if doors:
-                open_set = {n for n, st in door_states.items() if st == "open"}
-                pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+            open_doors = {n for n, st in door_states.items() if st == "open"} if doors else None
 
             cell_src = _eff_src(worst)
             ok = self._render_cell_png(
@@ -364,8 +356,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 downsample=downsample,
                 vmin=vmin,
                 vmax=global_max,
-                pixel_tl=pixel_tl,
-                doors=doors if pixel_tl is not None else None,
+                open_doors=open_doors,
+                doors=doors,
             )
             if ok:
                 cells.append({
@@ -380,29 +372,22 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         ncols = max(len(col_values), 1)
         html = (
-            '<div style="display:grid;'
+            f'<div style="display:grid;'
             f'grid-template-columns:repeat({ncols},1fr);'
-            'gap:12px;margin-top:8px;">'
+            f'gap:12px;margin-top:8px;">'
         )
         for c in cells:
             html += (
                 f'<div style="text-align:center;font-size:0.78em;color:#475569;">'
                 f'<img src="{c["img_rel_path"]}" style="width:100%;border-radius:4px;" '
                 f'alt="{c["row_val"]}/{c["col_label"]}">'
-                f'<br>{c["row_val"]} / {c["col_label"]} &mdash; {c["exposure"]:.0f} dBA'
+                f'<br>{c["row_val"]} / {c["col_label"]} - {c["exposure"]:.0f} dBA'
                 f'</div>'
             )
         html += '</div>'
-
         return html
 
-    def render_seaborn(self, df, out_path):
-        import matplotlib
-        matplotlib.use("Agg")
-
-        if compute_attenuations is None:
-            return
-
+    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         work_df = self._prepared_df(df)
         if len(work_df) == 0:
             return
@@ -410,6 +395,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         map_name = work_df["map"][0] if "map" in work_df.columns else None
         if not map_name:
             return
+
         result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
         if result is None:
             return
@@ -432,11 +418,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if vmax <= vmin:
             vmax = vmin + 20.0
 
-        pixel_tl = None
         door_states = worst.get("door_states") or {}
-        if doors:
-            open_set = {n for n, st in door_states.items() if st == "open"}
-            pixel_tl = build_pixel_tl(grid, doors, open_doors=open_set)
+        open_doors = {n for n, st in door_states.items() if st == "open"} if doors else None
 
         self._render_cell_png(
             grid, resolution, ox, oy,
@@ -447,8 +430,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             downsample=downsample,
             vmin=vmin,
             vmax=vmax,
-            pixel_tl=pixel_tl,
-            doors=doors if pixel_tl is not None else None,
+            open_doors=open_doors,
+            doors=doors,
         )
 
     # Animation / timeseries
@@ -478,12 +461,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
     @staticmethod
     def _load_episode_data(benchmark_dir: pathlib.Path, episode_id: str):
-        """Load the time-aligned episode DataFrame from cached topic parquets.
-
-        Returns a Polars DataFrame with columns ``time_ns``, ``pos_x_gt``,
-        ``pos_y_gt``, ``source_dba``, ``peds_positions``, or ``None`` when
-        the topic cache is missing.
-        """
+        """Load the time-aligned episode DataFrame from cached topic parquets."""
         topics_root = benchmark_dir / "episodes" / episode_id / "topics"
         if not topics_root.is_dir():
             logger.warning("No topics cache at %s, run 'evaluation extract' first.", topics_root)
@@ -564,11 +542,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         stride: int = 1,
         max_frames: int = 120,
     ):
-        """Compute the 2D acoustic field for a sequence of episode frames.
-
-        Returns a list of ``(field_dba, eff_res, (h, w), open_set_frozen, source_dba)``
-        tuples, one per rendered frame.
-        """
+        """Compute the 2D acoustic field for a sequence of episode frames."""
         from ...processing.acoustics.door_state import DoorStateTimeline
 
         if compute_attenuations is None:
@@ -579,21 +553,23 @@ class AcousticFieldRenderer(BasePlotRenderer):
             grid = downsample_occupancy(grid, downsample)
             resolution = resolution * downsample
 
-        # Downsample door masks to match the solver grid
+        h, w = grid.shape
+
         doors_ds = {}
         if doors:
             for name, (mask, tl_db) in doors.items():
                 m_ds = mask[::downsample, ::downsample] if downsample > 1 else mask
+                m_ds = m_ds[:h, :w]
                 doors_ds[name] = (m_ds, tl_db)
         else:
             doors_ds = doors
 
-        h, w = grid.shape
         total_rows = len(df)
 
         indices = list(range(0, total_rows, stride))
         if len(indices) > max_frames:
-            indices = indices[:max_frames]
+            step = len(indices) / max_frames
+            indices = [indices[int(i * step)] for i in range(max_frames)]
 
         logger.info(
             "compute_field_timeseries: %d frames (stride=%d, max=%d) on %dx%d grid",
@@ -613,7 +589,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
             rx_m = row.get("pos_x_gt")
             ry_m = row.get("pos_y_gt")
-            source_dba = row.get("source_dba", _FIELD_VMIN_DBA)
+            source_dba = row.get("total_level_af_dba") or row.get("source_dba") or _FIELD_VMIN_DBA
             time_ns = int(row.get("time_ns", 0))
 
             if rx_m is None or ry_m is None or np.isnan(rx_m) or np.isnan(ry_m):
@@ -656,6 +632,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             att_grid = attenuations.reshape((h, w))
             field_dba = float(source_dba) - att_grid
             field_dba = np.clip(field_dba, 0, None)
+            # (field, eff_res, (h, w), open_set, source_dba)
             results.append((field_dba, resolution, (h, w), open_set, float(source_dba)))
 
         logger.info("compute_field_timeseries: %d frames computed.", len([r for r in results if r is not None]))
@@ -682,10 +659,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         show_doors: bool = True,
         fmt: str = "gif",
     ) -> pathlib.Path | None:
-        """Render an animated GIF/MP4/PNG-sequence of the acoustic field timeseries.
-
-        Returns the output path on success, ``None`` on failure.
-        """
+        """Render an animated GIF/MP4/PNG-sequence of the acoustic field timeseries."""
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -706,7 +680,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
             return None
 
         if vmax is None:
-            all_max = max(np.nanmax(f[0]) for _, f in valid)
+            field_maxima = np.array([np.nanmax(f[0]) for _, f in valid], dtype=float)
+            all_max = float(np.percentile(field_maxima, 99)) if len(field_maxima) > 0 else vmin
             vmax = float(np.ceil(all_max / 10.0) * 10.0)
             if vmax <= vmin:
                 vmax = vmin + 20.0
@@ -719,12 +694,12 @@ class AcousticFieldRenderer(BasePlotRenderer):
         else:
             grid_ds = grid
 
-        # Build downsampled door dict matching grid_ds dimensions
         doors_ds = {}
         door_mask_all = np.zeros((h, w), dtype=bool)
         if doors:
             for _name, (m, _tl) in doors.items():
                 m_ds = m[::downsample, ::downsample] if downsample > 1 else m
+                m_ds = m_ds[:h, :w]
                 doors_ds[_name] = (m_ds, _tl)
                 door_mask_all |= m_ds
 
@@ -756,7 +731,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
                        vmin=vmin, vmax=vmax)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
-        # Subtle wall outline so room structure is always visible
         cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
         cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
         wall_outline = (mask_grid == 1).astype(np.uint8)
@@ -791,11 +765,18 @@ class AcousticFieldRenderer(BasePlotRenderer):
         rows = df.rows(named=True)
         total_rows = len(df)
 
+        indices = list(range(0, total_rows, stride))
+        if len(indices) > max_frames:
+            step = len(indices) / max_frames
+            indices = [indices[int(i * step)] for i in range(max_frames)]
+
         peds_per_frame = []
         has_collision_col = "has_collision" in df.columns
         collision_per_frame = []
-        for fidx, _ in valid:
-            row = rows[min(fidx, total_rows - 1)]
+        for orig_idx, _ in valid:
+            row_idx = indices[orig_idx]
+            row = rows[min(row_idx, total_rows - 1)]
+            # Parse pedestrian positions
             peds_raw = row.get("peds_positions", [])
             peds = self._parse_pedestrian_positions(peds_raw)
             peds_per_frame.append(peds)
@@ -809,17 +790,17 @@ class AcousticFieldRenderer(BasePlotRenderer):
         # Store previous collision state to avoid redundant patch updates
         prev_collision = [False]  # mutable container for nonlocal
 
-        def update(frame_idx_tuple):
+        def update(enum_tuple):
             nonlocal open_door_contour
-            fi, field_data = frame_idx_tuple
-            frame_idx = valid[fi][0]  # original index in fields list
+            rg_idx, (orig_idx, field_data) = enum_tuple
             field_dba, _, _, open_set, source_dba = field_data
-            rg_idx = fi  # index in render_grids list
             rg = render_grids[rg_idx]
 
             im.set_data(rg)
 
-            row = rows[min(frame_idx, total_rows - 1)]
+            # Update robot position from the field's actual episode row
+            row_idx = indices[orig_idx]
+            row = rows[min(row_idx, total_rows - 1)]
             rx_m = float(row.get("pos_x_gt", 0) or 0)
             ry_m = float(row.get("pos_y_gt", 0) or 0)
             robot_dot.set_data([rx_m], [ry_m])
@@ -866,7 +847,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             return artists
 
         ani = animation.FuncAnimation(
-            fig, update, frames=valid, interval=1000 // fps, blit=True
+            fig, update, frames=list(enumerate(valid)), interval=1000 // fps, blit=True
         )
 
         if out_path is None:
@@ -874,45 +855,93 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            if fmt == "gif":
-                ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
-            elif fmt == "mp4":
-                ani.save(str(out_path), writer="ffmpeg", fps=fps, dpi=dpi)
-            elif fmt == "frames":
-                frames_dir = out_path.with_suffix("")
-                frames_dir.mkdir(parents=True, exist_ok=True)
-                for fi, (_, field_data) in enumerate(valid):
+        # ── frames export: render each frame independently, no FuncAnimation needed ──
+        if fmt == "frames":
+            frames_dir = out_path.with_suffix("") if out_path.suffix else out_path.parent / (out_path.name + "_frames")
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                for fi, (orig_idx, field_data) in enumerate(valid):
                     frame_path = frames_dir / f"frame_{fi:04d}.png"
                     field_dba, _, _, open_set, source_dba = field_data
                     open_dm = open_door_masks[fi] if show_doors else np.zeros((h, w), dtype=bool)
                     wall_or_closed = (mask_grid == 1) & ~open_dm
                     rg = np.where(wall_or_closed | np.isinf(field_dba), np.nan, field_dba)
                     rg = np.flipud(rg)
+
                     fig_frame, ax_frame = plt.subplots(figsize=(5, 4))
                     ax_frame.set_facecolor("black")
-                    ax_frame.imshow(rg, cmap="inferno", origin="upper", extent=extent,
-                                    vmin=vmin, vmax=vmax)
+                    ax_frame.grid(False)
+                    im_frame = ax_frame.imshow(rg, cmap="inferno", origin="upper", extent=extent,
+                                               vmin=vmin, vmax=vmax)
+                    plt.colorbar(im_frame, ax=ax_frame, label="dBA", fraction=0.046, pad=0.04)
+
                     ax_frame.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"],
                                      linewidths=0.3, alpha=0.25)
-                    ax_frame.plot(rx_m, ry_m, "g*", markersize=8)
+
+                    row_idx = indices[orig_idx]
+                    row = rows[min(row_idx, total_rows - 1)]
+                    rx_frame = float(row.get("pos_x_gt", 0) or 0)
+                    ry_frame = float(row.get("pos_y_gt", 0) or 0)
+                    t_s = float(row.get("time_ns", 0)) / 1e9
+                    ax_frame.plot(rx_frame, ry_frame, "g*", markersize=8, label="Robot")
+
+                    peds = peds_per_frame[fi]
+                    if peds:
+                        px_f = [p[0] for p in peds if len(p) >= 2]
+                        py_f = [p[1] for p in peds if len(p) >= 2]
+                        if px_f:
+                            ax_frame.plot(px_f, py_f, "ro", markersize=4, label="Peds")
+
                     if show_doors and door_mask_all.any():
                         ax_frame.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5],
                                          colors=["#00ffd5"], linewidths=1.2, alpha=0.85)
                         if open_dm.any():
                             ax_frame.contour(cx, cy, open_dm.astype(np.uint8), levels=[0.5],
                                              colors=["#00ff00"], linewidths=2.0, alpha=0.9)
-                    ax_frame.set_title(f"Frame {fi}", fontsize=9)
-                    plt.savefig(frame_path, dpi=dpi, bbox_inches="tight")
+
+                    is_collision = collision_per_frame[fi]
+                    collision_label = "  COLLISION!" if is_collision else ""
+                    ax_frame.set_title(
+                        f"t={t_s:.1f}s | src={source_dba:.0f} dBA | {len(open_set)} doors open{collision_label}",
+                        fontsize=8,
+                    )
+                    ax_frame.set_xlabel("X (m)", fontsize=7)
+                    ax_frame.set_ylabel("Y (m)", fontsize=7)
+                    ax_frame.tick_params(labelsize=6)
+                    fig_frame.tight_layout()
+                    fig_frame.savefig(frame_path, dpi=dpi, bbox_inches="tight")
                     plt.close(fig_frame)
+
+                plt.close(fig)
                 logger.info("Saved %d frames to %s", len(valid), frames_dir)
+                return frames_dir
+            except Exception as e:
+                logger.warning("Failed to save frames: %s", e)
+                plt.close(fig)
+                return None
+
+        # ── gif / mp4: build FuncAnimation and save ──
+        ani = animation.FuncAnimation(
+            fig, update, frames=list(enumerate(valid)), interval=1000 // fps, blit=True
+        )
+
+        try:
+            if fmt == "gif":
+                ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
+            elif fmt == "mp4":
+                ani.save(str(out_path), writer="ffmpeg", fps=fps, dpi=dpi)
             else:
+                import sys
+                sys.stderr.write(f"Unknown format '{fmt}', falling back to gif.\n")
                 logger.warning("Unknown format %r, falling back to gif.", fmt)
                 ani.save(str(out_path), writer="pillow", fps=fps, dpi=dpi)
         except Exception as e:
+            import sys
+            sys.stderr.write(f"Failed to save animation: {e}\n")
             logger.warning("Failed to save animation: %s", e)
             plt.close(fig)
             return None
+
 
         plt.close(fig)
         logger.info("Animation saved to %s (%d frames, %d fps)", out_path, len(valid), fps)
@@ -924,15 +953,8 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
 
     PLOT_TYPE = "acoustic_field_animation"
 
-    # Manifest-driven options (inherited + animation-specific)
-    #  options.fps:         output frame rate (default 10)
-    #  options.max_frames:  cap on rendered frames (default 120)
-    #  options.stride:      render every Nth data frame (default auto)
-    #  options.downsample:  solver grid stride (default 2 for performance)
-    #  options.format:      "gif" (default) | "mp4" | "frames"
-
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        """Generate an animated GIF of the worst episode's acoustic field."""
+        """Generate acoustic-field animations."""
         if compute_attenuations is None:
             logger.warning("AcousticFieldAnimationRenderer: C++ solver not available.")
             return
@@ -960,71 +982,130 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
 
         doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+        benchmark_dir = self.run_dir if self.run_dir else pathlib.Path(".")
 
-        worst = self._pick_worst_row(work_df)
-        if worst is None:
+        self._rendered_gifs: list[str] = []
+
+        # ── Per-episode mode: one GIF per episode ──
+        per_episode = bool(self.spec.options.get("per_episode", False))
+        if per_episode and "episode" in work_df.columns:
+            for ep_id in sorted(int(v) for v in work_df["episode"].unique().to_list()):
+                gif_path = self._render_episode_gif(
+                    ep_id, benchmark_dir, out_path,
+                    grid, resolution, ox, oy, doors,
+                    downsample, fps, max_frames, stride, fmt, vmin,
+                    per_episode=True,
+                )
+                if gif_path is not None:
+                    self._rendered_gifs.append(f"plots/{gif_path.name}")
             return
 
+        # ── Single / worst-episode mode (default) ──
         episode_id = None
-        if "episode" in work_df.columns:
-            max_idx = work_df["ped_max_exposure_dba"].arg_max()
-            if max_idx is not None:
-                episode_id = f"episode_{work_df.row(max_idx, named=True).get('episode', 0):03d}"
-
+        if "episode" in work_df.columns and len(work_df) > 0:
+            if "ped_max_exposure_dba" in work_df.columns and work_df["ped_max_exposure_dba"].null_count() < len(work_df):
+                max_idx = work_df["ped_max_exposure_dba"].arg_max()
+                if max_idx is not None:
+                    episode_id = int(work_df.row(max_idx, named=True).get("episode", 0))
+            if episode_id is None:
+                for ep in work_df["episode"].to_list():
+                    ep_name = f"episode_{int(ep):03d}"
+                    if (benchmark_dir / "episodes" / ep_name).is_dir() or any((p / "episodes" / ep_name).is_dir() for p in benchmark_dir.parents):
+                        episode_id = int(ep)
+                        break
+                if episode_id is None:
+                    episode_id = int(work_df["episode"][0])
         if episode_id is None:
             logger.warning("Cannot determine episode ID for animation.")
             return
+        gif_path = self._render_episode_gif(
+            episode_id, benchmark_dir, out_path,
+            grid, resolution, ox, oy, doors,
+            downsample, fps, max_frames, stride, fmt, vmin,
+            per_episode=False,
+        )
+        if gif_path is not None:
+            self._rendered_gifs.append(f"plots/{gif_path.name}")
 
-        benchmark_dir = self.run_dir if self.run_dir else pathlib.Path(".")
-        if not (benchmark_dir / "episodes" / episode_id).is_dir():
-            # Try: run_dir might be the output_dir, benchmark might be a parent
-            for parent in benchmark_dir.parents:
-                if (parent / "episodes" / episode_id).is_dir():
-                    benchmark_dir = parent
+    def _render_episode_gif(
+        self, episode_id: int, benchmark_dir: pathlib.Path, out_path: pathlib.Path,
+        grid: np.ndarray, resolution: float, ox: float, oy: float,
+        doors: dict, downsample: int, fps: int, max_frames: int, stride: int,
+        fmt: str, vmin: float, per_episode: bool = False,
+    ) -> pathlib.Path | None:
+        """Render one episode's acoustic-field animation; returns the GIF path."""
+        episode_dir_name = f"episode_{int(episode_id):03d}"
+
+        # run_dir may be the output dir; the benchmark may be a parent
+        bdir = benchmark_dir
+        if not (bdir / "episodes" / episode_dir_name).is_dir():
+            for parent in bdir.parents:
+                if (parent / "episodes" / episode_dir_name).is_dir():
+                    bdir = parent
                     break
 
-        episode_df = self._load_episode_data(benchmark_dir, episode_id)
+        episode_df = self._load_episode_data(bdir, episode_dir_name)
         if episode_df is None:
-            logger.warning("No episode data for %s/%s", benchmark_dir, episode_id)
-            return
+            logger.warning("No episode data for %s", episode_dir_name)
+            return None
 
         from ...processing.acoustics.door_state import DoorStateTimeline
 
-        semantic_path = benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
+        semantic_path = bdir / "episodes" / episode_dir_name / "topics" / "semantic_snapshot.parquet"
         state_timeline = None
         if semantic_path.exists():
             semantic_df = pl.read_parquet(semantic_path)
             state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
 
-        gif_path = out_path.with_suffix(f".{fmt}" if fmt != "frames" else "")
-        if fmt == "frames":
-            gif_path = out_path.with_suffix("")
+        if per_episode:
+            gif_path = out_path.with_name(f"{out_path.stem}_{episode_dir_name}.{fmt}")
+        else:
+            gif_path = out_path.with_suffix(f".{fmt}" if fmt != "frames" else "")
+            if fmt == "frames":
+                gif_path = out_path.with_suffix("")
 
-        # Let render_animation auto-compute vmax from actual field data
-        # so collision impulses (100 dBA) are correctly reflected in the scale.
-        self.render_animation(
-            episode_df, grid, resolution, ox, oy, doors,
-            state_timeline=state_timeline,
-            out_path=gif_path,
-            downsample=downsample, stride=stride, max_frames=max_frames,
-            fps=fps, vmin=vmin, vmax=None,
-            show_doors=bool(doors),
-            fmt=fmt,
-        )
+        try:
+            self.render_animation(
+                episode_df, grid, resolution, ox, oy, doors,
+                state_timeline=state_timeline,
+                out_path=gif_path,
+                downsample=downsample, stride=stride, max_frames=max_frames,
+                fps=fps, vmin=vmin, vmax=None,
+                show_doors=bool(doors),
+                fmt=fmt,
+            )
+        except Exception as e:
+            logger.warning("Failed to render animation for %s: %s", episode_dir_name, e)
+            return None
+        logger.info("Animation saved to %s", gif_path)
+        return gif_path
 
-    def render_plotly(self, df: pl.DataFrame) -> str:
-        """Return an HTML snippet embedding the animated GIF in the report."""
+    def render_plotly(self, df: pl.DataFrame) -> str | list[str]:
+        """Return HTML snippet(s) embedding the animated GIF(s) in the report."""
         work_df = self._prepared_df(df)
         if len(work_df) == 0 or compute_attenuations is None:
             return ""
 
-        # The render_seaborn call already saved the GIF during the report build.
-        # We just need to reference it. The filename follows the spec.id convention
-        # from ReportBuilder: plots/{spec.id}.{fmt}
         fmt = str(self.spec.options.get("format", "gif"))
         ext = "gif" if fmt in ("gif", "mp4") else ""
         if not ext:
             return ""
+
+        per_episode = bool(self.spec.options.get("per_episode", False))
+        if per_episode and "episode" in work_df.columns:
+            chunks = []
+            for ep_id in sorted(int(v) for v in work_df["episode"].unique().to_list()):
+                gif_rel = f"plots/{self.spec.id}_episode_{ep_id:03d}.{ext}"
+                caption = f"{self.spec.title} - episode_{ep_id:03d}"
+                chunks.append(
+                    f'<div style="text-align:center;">'
+                    f'<img src="{gif_rel}" style="max-width:100%;border-radius:4px;" '
+                    f'alt="{self.spec.title}">'
+                    f'<br><span style="font-size:0.78em;color:#475569;">'
+                    f'{caption}'
+                    f'</span></div>'
+                )
+            return chunks
 
         gif_rel = f"plots/{self.spec.id}.{ext}"
         return (

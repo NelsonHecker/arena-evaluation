@@ -1001,12 +1001,12 @@ def test_default_run_id_lex_sort_is_chronological():
 # ---------------------------------------------------------------------------
 
 
-def _make_step_for(contestant_name: str, stage_name: str, robot: str = "jackal") -> Step:
+def _make_step_for(contestant_name: str, stage_name: str, robot: str = "jackal", map: str = "map1") -> Step:
     stage = Suite.Stage(
         name=stage_name,
         episodes=5,
         robot=robot,
-        map="map1",
+        map=map,
         tm_robots=Constants.TaskMode.TM_Robots.RANDOM,
         tm_obstacles=Constants.TaskMode.TM_Obstacles.RANDOM,
         config={},
@@ -1068,14 +1068,14 @@ def test_env_key_components():
     from arena_evaluation.benchmark.runner import env_key
     step = _make_step_for("planner_a", "indoor", robot="jackal")
     key = env_key(step, "gazebo")
-    assert key == ("planner_a", "jackal", "gazebo")
+    assert key == ("planner_a", "jackal", "map1", "gazebo")
 
 
 def test_env_key_simulator_none():
     from arena_evaluation.benchmark.runner import env_key
     step = _make_step_for("planner_a", "indoor", robot="jackal")
     key = env_key(step, None)
-    assert key == ("planner_a", "jackal", None)
+    assert key == ("planner_a", "jackal", "map1", None)
 
 
 # ---------------------------------------------------------------------------
@@ -1171,3 +1171,104 @@ def test_flatten_typed_values():
     assert by_name["a_bool"].value.bool_value is True
     assert by_name["a_float"].value.type == ParameterType.PARAMETER_DOUBLE
     assert by_name["a_float"].value.double_value == pytest.approx(3.14)
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkProgressDisplay tests
+# ---------------------------------------------------------------------------
+
+def test_progress_display_slot_lifecycle():
+    from arena_evaluation.benchmark.progress_display import BenchmarkProgressDisplay
+
+    p = BenchmarkProgressDisplay(
+        title="Test Benchmark",
+        total_steps=10,
+        env_n=2,
+        run_id="run-123",
+    )
+    assert p.total_steps == 10
+    assert p.completed_steps == 0
+
+    # update slot
+    p.update_slot(
+        slot_index=0,
+        env_id=0,
+        contestant="dwb",
+        stage="s01",
+        step_key="dwb/s01",
+        ep_idx=0,
+        ep_total=3,
+        state="RUNNING",
+    )
+    assert 0 in p.active_slots
+    assert p.active_slots[0]["contestant"] == "dwb"
+    assert p.active_slots[0]["state"] == "RUNNING"
+
+    # update state
+    p.update_slot_state(0, "CLEANING_UP")
+    assert p.active_slots[0]["state"] == "CLEANING_UP"
+
+    # render
+    renderable = p._render()
+    assert renderable is not None
+
+    # step completed
+    p.log_step_completed(
+        step_key="dwb/s01",
+        status="ok",
+        contestant="dwb",
+        stage="s01",
+        episodes_run=3,
+        episodes_total=3,
+        episodes_failed=0,
+        elapsed_sec=5.2,
+    )
+    assert p.completed_steps == 1
+    assert p.ok_steps == 1
+
+    # clear slot
+    p.clear_slot(0)
+    assert 0 not in p.active_slots
+
+
+def test_progress_display_render_empty_and_with_slots():
+    from arena_evaluation.benchmark.progress_display import BenchmarkProgressDisplay
+
+    p = BenchmarkProgressDisplay(
+        title="Test Benchmark",
+        total_steps=5,
+        env_n=1,
+        run_id="run-456",
+    )
+    # render with no slots
+    tbl_empty = p._render()
+    assert tbl_empty is not None
+
+    # add slot and render
+    p.update_slot(0, 0, "teb", "s02", "teb/s02", 1, 5, "RUNNING")
+    tbl_slots = p._render()
+    assert tbl_slots is not None
+
+
+def test_runner_start_and_restart_arena_defined():
+    from arena_evaluation.benchmark.runner import BenchmarkRunner
+    assert hasattr(BenchmarkRunner, "_start_arena")
+    assert hasattr(BenchmarkRunner, "_restart_arena")
+
+
+def test_world_batch_ordering():
+    from arena_evaluation.benchmark.runner import group_pending
+    steps = [
+        _make_step_for("p1", "s1", map="hospital_1"),
+        _make_step_for("p2", "s2", map="hospital_1"),
+        _make_step_for("p1", "s3", map="hospital_2"),
+        _make_step_for("p1", "s4", map="office_1"),
+    ]
+    world_maps = list(dict.fromkeys(s.stage.map for s in steps))
+    assert world_maps == ["hospital_1", "hospital_2", "office_1"]
+    
+    h1_steps = [s for s in steps if s.stage.map == "hospital_1"]
+    blocks = group_pending(h1_steps, "gazebo")
+    assert len(blocks) == 2
+
+

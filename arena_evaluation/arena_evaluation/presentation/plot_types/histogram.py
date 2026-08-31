@@ -21,7 +21,8 @@ class HistogramRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return None
 
-        pdf = df_filtered.to_pandas().dropna(subset=[x_col])
+        keep = [c for c in [x_col, diff_col] if c in df_filtered.columns]
+        pdf = df_filtered.select(keep).to_pandas().dropna(subset=[x_col])
         if pdf.empty:
             return None
 
@@ -66,7 +67,6 @@ class HistogramRenderer(BasePlotRenderer):
             x="bin_center",
             y="count",
             color=color_arg,
-            title=self.spec.title,
             template="plotly_white",
         )
         
@@ -91,7 +91,8 @@ class HistogramRenderer(BasePlotRenderer):
         if diff_col not in df_filtered.columns:
             return
 
-        pdf = df_filtered.to_pandas().dropna(subset=[x_col])
+        keep = [c for c in [x_col, diff_col] if c in df_filtered.columns]
+        pdf = df_filtered.select(keep).to_pandas().dropna(subset=[x_col])
         if pdf.empty:
             return
 

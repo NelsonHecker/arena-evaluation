@@ -9,19 +9,7 @@ if typing.TYPE_CHECKING:
 
 
 class ProxemicsCalculator(BaseMetricCalculator):
-    """
-    Calculates proxemics metrics (distance to pedestrians).
-    
-    Metrics:
-    - num_pedestrians: Number of pedestrians in the episode
-    - time_in_personal_space: Steps where a pedestrian is within personal space
-    - time_in_personal_space_total: Total seconds in personal space
-    - avg_velocity_in_personal_space: Average velocity when in personal space
-    
-    Uses Hall's proxemics:
-    Intimate space: < 0.45m
-    Personal space: 0.45m - 1.2m
-    """
+    """Calculates proxemics and personal space intrusion metrics."""
     
     NAME = "proxemics"
     CATEGORY = "social"

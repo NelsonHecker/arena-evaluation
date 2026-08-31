@@ -1,66 +1,44 @@
 # Metrics
 
-Auto-discovered metric calculators for the Arena evaluation pipeline. Every
-`BaseMetricCalculator` subclass in this package is registered by
-`MetricRegistry` and executed in topological order (Kahn's algorithm on
-`DEPENDS_ON`). Results are written to `combined_metrics.parquet`, one row per
-episode.
+Metric calculators for the Arena evaluation pipeline. Subclasses of `BaseMetricCalculator` are registered by `MetricRegistry` and executed in topological order based on `DEPENDS_ON`. Results are saved to `combined_metrics.parquet`, one row per episode.
 
 ## Categories
 
 | Folder | Focus |
 |---|---|
-| `social/` | Robot/pedestrian interaction: social forces, proxemics, gaze, disturbance |
-| `ecological/` | Energy, acoustics, world-condition compliance |
+| `social/` | Robot and pedestrian interaction: social forces, proxemics, gaze, disturbance |
+| `ecological/` | Energy, acoustics, world condition compliance |
 | `performance/` | Path, motion, time, collision, efficiency, clearance |
-| `naturalness/` | Trajectory naturalness against the unobstructed baseline |
+| `naturalness/` | Trajectory naturalness against unobstructed baselines |
 
-## Calculator contract
+## Calculator Interface
 
 Each calculator declares:
 
-- `NAME`, `CATEGORY`, `REQUIRES_PEDSIM`, `DEPENDS_ON` (execution-order edges),
-  `REQUIRED_TOPICS` (topic gates; list/tuple entries mean "any of"),
-  `UNITS`, `PRIMARY_OUTPUTS` (headline keys for default comparisons),
-  `OUTPUT_DIRECTIONS` ("lower" / "higher" per output)
-- `output_keys()` - exhaustive list of produced keys
-- `calculate(episode, prior_results)` - returns every key, `None`-filled on
-  error or missing data; `prior_results` contains the accumulated outputs of
-  all upstream calculators
+- `NAME`, `CATEGORY`, `REQUIRES_PEDSIM`, `DEPENDS_ON` (execution order edges), `REQUIRED_TOPICS` (topic gates; list or tuple entries indicate alternative acceptable topics), `UNITS`, `PRIMARY_OUTPUTS` (keys for default comparisons), `OUTPUT_DIRECTIONS` ("lower" or "higher" per output).
+- `output_keys()`: List of produced metric keys.
+- `calculate(episode, prior_results)`: Computes metric dictionary with all declared keys (filled with `None` on missing data or errors).
 
 ## Conventions
 
-- **Multi-rate:** `AlignedEpisodeBundle.topics` carries raw native-rate topic
-  frames (odom, tf_gt, peds, scan, cmd_vel, power, energy, acoustics).
-  Rate-sensitive calculators compute on their own time base; `episode.data`
-  remains the odom-aligned frame for robot-trajectory metrics.
-- **Ground truth first:** `resolve_native_pose` prefers the tf_gt world pose;
-  odom is the fallback. Ground-truth velocity is derived by differentiating
-  GT positions.
-- **Proxemic distances:** the `*_zone` metrics use the edge-to-edge distance
-  `d_eff = d_center - (r_robot + r_ped)` against Hall's zones (0.45 / 1.2 /
-  3.6 m), comparable across robot footprints. The legacy `proxemics`
-  calculator measures center-to-center, hence the separate key names.
-- **Energy:** reported in watt-hours; `specific_cost_of_transport` uses the
-  total energy consumed.
-- **Reference-based metrics** (`pfi`, `mar`, `ped_path_deflection_m`) are
-  computed post-hoc in `pipeline.process_benchmark` against the reference
-  runs (unobstructed_robot / unhindered_peds), not inside the calculators.
+- **Multi-rate data:** `AlignedEpisodeBundle.topics` contains native-rate topic dataframes. Rate-sensitive calculators compute on their native time base; `episode.data` is aligned to the odom time axis for trajectory metrics.
+- **Ground truth priority:** `resolve_native_pose` uses `tf_gt` ground truth pose when available, falling back to odom. Ground truth velocity is computed by differentiating ground truth positions.
+- **Proxemic distance:** `*_zone` metrics calculate edge-to-edge distance `d_eff = d_center - (r_robot + r_ped)` based on Hall's proxemic zones (0.45 m, 1.2 m, 3.6 m). The legacy `proxemics` calculator uses center-to-center distance.
+- **Energy units:** Energy is reported in watt-hours (Wh). `specific_cost_of_transport` uses total energy consumed.
+- **Reference metrics:** Reference metrics (`pfi`, `mar`, `ped_path_deflection_m`) are computed across runs in `pipeline.process_benchmark`.
 
-## Data sources
+## Data Sources
 
-Per-topic parquets (`topics/<topic>.parquet`) are extracted by `MCAPReader`
-and aligned by `TopicAligner` (backward asof, 100 ms tolerance, onto the odom
-axis).
+Per-topic Parquet files are extracted by `MCAPReader` and aligned by `TopicAligner` onto the odom time axis.
 
-## Invocation
+## Usage
 
 ```bash
-arena evaluation run --benchmark-dir <run_id>                          # extract + metrics
-arena evaluation run --benchmark-dir <run_id> --report-manifest <name> # + report
+arena evaluation run --benchmark-dir <run_id>                          # extract and metrics
+arena evaluation run --benchmark-dir <run_id> --report-manifest <name> # with report
 ```
 
-List registered calculators:
+Listing registered calculators:
 
 ```python
 from arena_evaluation.processing.metrics.registry import MetricRegistry
@@ -70,3 +48,4 @@ reg = MetricRegistry(RobotParams())
 for m in reg.list_metrics():
     print(m["name"], m["outputs"])
 ```
+

@@ -161,8 +161,10 @@ def _params_to_json(params: list) -> str:
     for p in params:
         try:
             value = Parameter.from_parameter_msg(p).value
-            if isinstance(value, np.ndarray):
+            if hasattr(value, "tolist"):
                 value = value.tolist()
+            elif isinstance(value, (bytes, bytearray)):
+                value = list(value)
         except Exception:
             value = str(p.value)
         rows.append({"name": p.name, "value": value})

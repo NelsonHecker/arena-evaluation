@@ -39,11 +39,7 @@ class BasePlotRenderer(ABC):
         return resolve_differentiate(self.spec, df)
 
     def _apply_filters(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Apply filters defined in the PlotSpec.
-
-        Scalar values match equality; list/tuple/set values match membership
-        (e.g. ``filter: {planner: [dwb, teb]}`` selects only those runs).
-        """
+        """Apply scalar and sequence filter predicates from PlotSpec."""
         if not self.spec.filter:
             return df
 
@@ -51,8 +47,33 @@ class BasePlotRenderer(ABC):
         for k, v in self.spec.filter.items():
             if k not in res_df.columns:
                 continue
-            if isinstance(v, (list, tuple, set)):
+            if res_df.schema[k] == pl.List:
+                if isinstance(v, (list, tuple, set)):
+                    v_list = list(v)
+                    if v_list:
+                        res_df = res_df.filter(
+                            pl.any_horizontal([pl.col(k).list.contains(x) for x in v_list])
+                        )
+                    else:
+                        res_df = res_df.filter(pl.lit(False))
+                else:
+                    res_df = res_df.filter(pl.col(k).list.contains(v))
+            elif isinstance(v, (list, tuple, set)):
                 res_df = res_df.filter(pl.col(k).is_in(list(v)))
             else:
                 res_df = res_df.filter(pl.col(k) == v)
+        return res_df
+
+    def _apply_row_filters(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Apply filters to scalar/exploded columns after list expansion."""
+        if not self.spec.filter:
+            return df
+
+        res_df = df
+        for k, v in self.spec.filter.items():
+            if k in res_df.columns and res_df.schema[k] != pl.List:
+                if isinstance(v, (list, tuple, set)):
+                    res_df = res_df.filter(pl.col(k).is_in(list(v)))
+                else:
+                    res_df = res_df.filter(pl.col(k) == v)
         return res_df

@@ -173,6 +173,11 @@ class Contest:
         if isinstance(obj, list):
             return cls._parse_list(name, obj)
         if isinstance(obj, dict):
+            if "contestants" in obj and isinstance(obj["contestants"], list):
+                contest_name = str(obj.get("name") or name)
+                description = obj.get("description")
+                sub = cls._parse_list(contest_name, obj["contestants"])
+                return cls(name=contest_name, description=description, contestants=sub.contestants)
             return cls._parse_sweep(name, obj)
         raise ValueError(f"contest must be list or dict, got {type(obj).__name__}")
 

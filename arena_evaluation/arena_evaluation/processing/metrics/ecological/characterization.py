@@ -37,6 +37,11 @@ _ACOUSTIC_DEFAULTS = {
 }
 
 
+# Head of a dwell where the robot is still accelerating, so not yet steady state.
+_TRANSIENT_S = 1.5  # s, linear, lateral and arc dwells
+_TRANSIENT_ANGULAR_S = 1.0  # s, in-place pivots
+
+
 def _leq_power(dba: pl.Series) -> pl.Series:
     """Linear acoustic power proxy 10^(L/10), L_Aeq = 10*log10(mean(x))."""
     return 10.0 ** (dba / 10.0)
@@ -55,9 +60,18 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_power_mech_w": "W",
         "timeseries_char_dba": "dBA",
         "timeseries_char_vx_achieved": "m/s",
+        "timeseries_char_vy_achieved": "m/s",
+        "timeseries_char_wz_achieved": "rad/s",
+        "timeseries_char_accel_achieved": "m/s^2",
+        "timeseries_char_accel_target": "m/s^2",
+        "timeseries_char_efficiency": "",
         "timeseries_char_vx_target": "m/s",
+        "timeseries_char_vy_target": "m/s",
         "timeseries_char_wz_target": "rad/s",
+        "timeseries_char_turn_radius_m": "m",
         "timeseries_char_energy_intensity": "J/m",
+        "timeseries_char_energy_per_rad": "J/rad",
+        "char_phase_coverage": "",
     }
 
     _TIMESERIES_KEYS = [
@@ -66,32 +80,78 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_power_mech_w",
         "timeseries_char_dba",
         "timeseries_char_vx_achieved",
+        "timeseries_char_vy_achieved",
+        "timeseries_char_wz_achieved",
+        "timeseries_char_accel_achieved",
+        "timeseries_char_accel_target",
+        "timeseries_char_efficiency",
         "timeseries_char_phase_kind",
         "timeseries_char_vx_target",
+        "timeseries_char_vy_target",
         "timeseries_char_wz_target",
+        "timeseries_char_turn_radius_m",
         "timeseries_char_energy_intensity",
+        "timeseries_char_energy_per_rad",
         "timeseries_char_leq_power",
     ]
 
+    # Fraction of samples whose recorded label the rebuilt schedule recognised.
+    _SUMMARY_KEYS = ["char_phase_coverage"]
+
+    _PHASE_MAP_SCHEMA = {
+        "phase_label": pl.Utf8,
+        "phase_kind": pl.Utf8,
+        "vx_target": pl.Float64,
+        "vy_target": pl.Float64,
+        "wz_target": pl.Float64,
+        "turn_radius_m": pl.Float64,
+        "accel_target": pl.Float64,
+    }
+
+    _phase_coverage: float = 1.0
+
     @classmethod
     def output_keys(cls) -> list[str]:
-        return list(cls._TIMESERIES_KEYS)
+        return [*cls._TIMESERIES_KEYS, *cls._SUMMARY_KEYS]
 
     def _phase_map(self) -> pl.DataFrame:
-        """Schedule name to (kind, vx_target, wz_target) for this robot's envelope."""
-        from task_generator.tasks.robots.characterization.schedule import (
-            build_schedule,
-            resolve_envelope,
-        )
+        """Schedule labels and their targets, rebuilt from the same envelope the sweep used."""
+        try:
+            from task_generator.tasks.robots.characterization.schedule import (
+                PhaseKind,
+                build_schedule,
+                resolve_envelope,
+            )
+        except ImportError:
+            logger.warning("task_generator is not importable, characterization phases fall back to cmd_vel classification")
+            return pl.DataFrame(schema=self._PHASE_MAP_SCHEMA)
 
         envelope = resolve_envelope(self.robot_params.model)
-        schedule = build_schedule(vx_max=envelope["vx_max"], wz_max=envelope["wz_max"])
-        return pl.DataFrame(
-            [
-                {"phase_label": p.name, "phase_kind": p.kind.value, "vx_target": p.vx_target, "wz_target": p.wz_target}
-                for p in schedule
-            ]
+        schedule = build_schedule(
+            vx_max=float(envelope["vx_max"]),
+            vy_max=float(envelope["vy_max"]),
+            wz_max=float(envelope["wz_max"]),
+            radius=float(envelope["radius"]),
+            is_holonomic=bool(envelope["is_holonomic"]),
         )
+
+        rows = []
+        for p in schedule:
+            accel = p.vx_target / p.ramp_s if p.ramp_s > 0.0 else 0.0
+            if p.kind is PhaseKind.RAMP_DOWN:
+                accel = -accel
+            rows.append(
+                {
+                    "phase_label": p.name,
+                    "phase_kind": p.kind.value,
+                    "vx_target": p.vx_target,
+                    "vy_target": p.vy_target,
+                    "wz_target": p.wz_target,
+                    "turn_radius_m": p.radius_m,
+                    "accel_target": accel,
+                }
+            )
+        return pl.DataFrame(rows, schema=self._PHASE_MAP_SCHEMA)
 
     def _attach_phases(self, df: pl.DataFrame) -> pl.DataFrame:
         out = df
@@ -101,25 +161,72 @@ class CharacterizationCalculator(BaseMetricCalculator):
             out = out.with_columns(pl.col("label").fill_null("unknown").alias("phase_label"))
         out = out.join(self._phase_map(), on="phase_label", how="left")
 
+        unmatched = int(out["phase_kind"].null_count())
+        self._phase_coverage = 1.0 - unmatched / len(out) if len(out) else 1.0
+        if unmatched:
+            missing = sorted(set(out.filter(pl.col("phase_kind").is_null())["phase_label"].to_list()))
+            logger.warning(
+                f"characterization: {unmatched}/{len(out)} samples carry a label the rebuilt schedule does not "
+                f"contain, so they fall back to cmd_vel classification. First unmatched labels: {missing[:5]}"
+            )
+
         # Fallback classification for unmarked samples (markers never recorded).
         cmd_vx = (
             pl.col("linear_x").cast(pl.Float64).fill_null(0.0)
             if "linear_x" in out.columns else pl.lit(0.0)
+        )
+        cmd_vy = (
+            pl.col("linear_y").cast(pl.Float64).fill_null(0.0)
+            if "linear_y" in out.columns else pl.lit(0.0)
         )
         cmd_wz = (
             pl.col("angular_z").cast(pl.Float64).fill_null(0.0)
             if "angular_z" in out.columns else pl.lit(0.0)
         )
         fb_kind = (
-            pl.when((cmd_vx == 0.0) & (cmd_wz == 0.0)).then(pl.lit("idle"))
+            pl.when((cmd_vx == 0.0) & (cmd_vy == 0.0) & (cmd_wz == 0.0)).then(pl.lit("idle"))
+            .when((cmd_vy != 0.0) & (cmd_vx == 0.0) & (cmd_wz == 0.0)).then(pl.lit("lateral"))
+            .when((cmd_vx != 0.0) & (cmd_wz != 0.0)).then(pl.lit("arc"))
             .when(cmd_wz != 0.0).then(pl.lit("angular"))
             .otherwise(pl.lit("linear"))
         )
-        return out.with_columns(
+        out = out.with_columns(
             pl.col("phase_kind").fill_null(fb_kind).alias("phase_kind"),
-            pl.col("vx_target").fill_null(pl.when(cmd_vx > 0.0).then(cmd_vx).otherwise(0.0)).alias("vx_target"),
-            pl.col("wz_target").fill_null(pl.when(cmd_wz != 0.0).then(cmd_wz).otherwise(0.0)).alias("wz_target"),
+            pl.col("vx_target").fill_null(cmd_vx).alias("vx_target"),
+            pl.col("vy_target").fill_null(cmd_vy).alias("vy_target"),
+            pl.col("wz_target").fill_null(cmd_wz).alias("wz_target"),
+            pl.col("accel_target").fill_null(0.0).alias("accel_target"),
+            pl.col("turn_radius_m").fill_null(
+                pl.when((cmd_vx.abs() >= 0.05) & (cmd_wz.abs() >= 0.05))
+                .then(cmd_vx.abs() / cmd_wz.abs())
+                .otherwise(0.0)
+            ).alias("turn_radius_m"),
         )
+
+        # Split the acceleration window off the steady-state part of every dwell.
+        if "time_ns" in out.columns and len(out) > 0:
+            out = out.with_columns(
+                ((pl.col("phase_label") != pl.col("phase_label").shift(1)) |
+                 (pl.col("vx_target") != pl.col("vx_target").shift(1)) |
+                 (pl.col("vy_target") != pl.col("vy_target").shift(1)) |
+                 (pl.col("wz_target") != pl.col("wz_target").shift(1)))
+                .fill_null(True)
+                .cum_sum()
+                .alias("_phase_block_id")
+            )
+            out = out.with_columns(
+                ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_elapsed_s")
+            )
+            out = out.with_columns(
+                pl.when(pl.col("phase_kind").is_in(["linear", "lateral", "arc"]) & (pl.col("_phase_elapsed_s") < _TRANSIENT_S))
+                .then(pl.lit("transient"))
+                .when((pl.col("phase_kind") == "angular") & (pl.col("_phase_elapsed_s") < _TRANSIENT_ANGULAR_S))
+                .then(pl.lit("transient"))
+                .otherwise(pl.col("phase_kind"))
+                .alias("phase_kind")
+            )
+
+        return out
 
     def _acoustic_model(self) -> dict:
         """Profile backing the fallback model: per-robot, then shared, then built-in."""
@@ -162,7 +269,11 @@ class CharacterizationCalculator(BaseMetricCalculator):
                 + (pl.col("pos_y").diff().fill_null(0.0).cast(pl.Float64) ** 2)
             ).sqrt().clip(lower_bound=0.0).alias("_ds"),
         )
-        if "effort" in out.columns and "velocity" in out.columns:
+        if "total_mechanical_power_w" in out.columns:
+            out = out.with_columns(
+                pl.col("total_mechanical_power_w").cast(pl.Float64).fill_null(0.0).alias("_p_mech")
+            )
+        elif "effort" in out.columns and "velocity" in out.columns:
             out = out.with_columns(
                 (pl.col("effort") * pl.col("velocity")).list.eval(pl.element().abs()).list.sum()
                 .fill_null(0.0).alias("_p_mech")
@@ -217,9 +328,45 @@ class CharacterizationCalculator(BaseMetricCalculator):
         t_s = (out["time_ns"].cast(pl.Float64) - out["time_ns"].cast(pl.Float64).min()) / 1e9
         ds = out["_ds"].fill_null(0.0)
         dt = out["_dt"].fill_null(0.0)
-        out = out.with_columns(
-            pl.when(ds > 1e-6).then(out["_p_total"] * dt / ds).otherwise(None).alias("_e_per_m")
+        if "vel_linear" in out.columns:
+            speed = out["vel_linear"].cast(pl.Float64).abs().fill_null(0.0)
+        else:
+            speed = pl.when(dt > 1e-6).then(ds / dt).otherwise(0.0)
+
+        wz_achieved = (
+            out["vel_angular"].cast(pl.Float64).abs().fill_null(0.0)
+            if "vel_angular" in out.columns else pl.lit(0.0)
         )
+
+        out = out.with_columns(
+            pl.when(speed >= 0.05).then(out["_p_total"] / speed).otherwise(None).alias("_e_per_m"),
+            pl.when(wz_achieved >= 0.05).then(out["_p_total"] / wz_achieved).otherwise(None).alias("_e_per_rad"),
+            pl.when((speed >= 0.05) & (wz_achieved >= 0.05))
+            .then(speed / wz_achieved)
+            .otherwise(out["turn_radius_m"])
+            .alias("_turn_radius"),
+        )
+
+        import numpy as np
+
+        # Compute achieved linear acceleration (dv/dt)
+        if "vel_linear" in out.columns:
+            vx_arr = out["vel_linear"].cast(pl.Float64).fill_null(0.0).to_numpy()
+        else:
+            vx_arr = speed.to_numpy()
+        dt_arr = dt.to_numpy()
+
+        accel_achieved = np.zeros_like(vx_arr)
+        for i in range(1, len(vx_arr)):
+            if dt_arr[i] > 1e-4:
+                accel_achieved[i] = (vx_arr[i] - vx_arr[i - 1]) / dt_arr[i]
+
+        p_tot_arr = out["_p_total"].to_numpy()
+        p_mech_arr = out["_p_mech"].to_numpy()
+        eff_arr = np.zeros_like(p_tot_arr)
+        for i in range(len(p_tot_arr)):
+            if p_tot_arr[i] > 0.1:
+                eff_arr[i] = max(0.0, min(1.0, float(p_mech_arr[i] / p_tot_arr[i])))
 
         rows = {
             "timeseries_char_time_s": t_s.to_list(),
@@ -228,10 +375,21 @@ class CharacterizationCalculator(BaseMetricCalculator):
             "timeseries_char_dba": out["_dba"].to_list(),
             "timeseries_char_vx_achieved": out["vel_linear"].cast(pl.Float64).fill_null(0.0).to_list()
             if "vel_linear" in out.columns else [0.0] * len(out),
+            "timeseries_char_vy_achieved": out["vel_lateral"].cast(pl.Float64).fill_null(0.0).to_list()
+            if "vel_lateral" in out.columns else [0.0] * len(out),
+            "timeseries_char_wz_achieved": out["vel_angular"].cast(pl.Float64).fill_null(0.0).to_list()
+            if "vel_angular" in out.columns else [0.0] * len(out),
+            "timeseries_char_accel_achieved": accel_achieved.tolist(),
+            "timeseries_char_accel_target": out["accel_target"].fill_null(0.0).to_list(),
+            "timeseries_char_efficiency": eff_arr.tolist(),
             "timeseries_char_phase_kind": out["phase_kind"].fill_null("unknown").to_list(),
             "timeseries_char_vx_target": out["vx_target"].fill_null(0.0).to_list(),
+            "timeseries_char_vy_target": out["vy_target"].fill_null(0.0).to_list(),
             "timeseries_char_wz_target": out["wz_target"].fill_null(0.0).to_list(),
+            "timeseries_char_turn_radius_m": out["_turn_radius"].to_list(),
             "timeseries_char_energy_intensity": out["_e_per_m"].to_list(),
+            "timeseries_char_energy_per_rad": out["_e_per_rad"].to_list(),
             "timeseries_char_leq_power": _leq_power(out["_dba"].fill_null(0.0)).to_list(),
+            "char_phase_coverage": self._phase_coverage,
         }
         return rows

@@ -14,17 +14,19 @@ class EnergyMetricCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["power", "energy"]
+    REQUIRED_TOPICS = [("power", "energy", "odom")]
     
     UNITS = {
         "energy_static_wh": "Wh",
         "energy_mechanical_wh": "Wh",
         "energy_thermal_wh": "Wh",
         "energy_total_wh": "Wh",
+        "power_peak_w": "W",
         "battery_soc_final": "%",
+        "battery_soc_drop_pct": "%",
     }
 
-    PRIMARY_OUTPUTS = ["energy_total_wh", "energy_mechanical_wh"]
+    PRIMARY_OUTPUTS = ["energy_total_wh", "energy_mechanical_wh", "power_peak_w"]
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -34,7 +36,9 @@ class EnergyMetricCalculator(BaseMetricCalculator):
             "energy_mechanical_wh",
             "energy_thermal_wh",
             "energy_total_wh",
+            "power_peak_w",
             "battery_soc_final",
+            "battery_soc_drop_pct",
             # Timeseries (arrays)
             "timeseries_power_total_w",
             "timeseries_power_static_w",
@@ -93,9 +97,19 @@ class EnergyMetricCalculator(BaseMetricCalculator):
         vel = df["vel_linear"].to_numpy() if "vel_linear" in df.columns else np.zeros_like(t_s)
         vel = fill_nulls(vel)
         
-        # Battery timeseries
+        # Battery timeseries - normalized to start at 100.0% per episode
         batt = df["battery_soc_percent"].to_numpy() if "battery_soc_percent" in df.columns else np.zeros_like(t_s)
         batt = fill_nulls(batt)
+        if len(batt) > 0:
+            batt_initial = batt[0]
+            batt_final = batt[-1]
+            batt_drop = max(float(batt_initial - batt_final), 0.0)
+            batt_normalized = np.clip(100.0 - (batt_initial - batt), 0.0, 100.0)
+        else:
+            batt_initial = 0.0
+            batt_final = 0.0
+            batt_drop = 0.0
+            batt_normalized = batt
 
         # Integration for total energy consumption over the episode
         # Energy = integral of Power dt
@@ -115,20 +129,21 @@ class EnergyMetricCalculator(BaseMetricCalculator):
                 e_total = np.sum(p_total * dt) / 3600.0
         else:
             e_total = np.sum(p_total * dt) / 3600.0
-            
-        batt_final = batt[-1] if len(batt) > 0 else 0.0
+        power_peak = float(np.max(p_total)) if len(p_total) > 0 else 0.0
 
         return {
             "energy_static_wh": float(e_static),
             "energy_mechanical_wh": float(e_mech),
             "energy_thermal_wh": float(e_therm),
             "energy_total_wh": float(e_total),
+            "power_peak_w": power_peak,
             "battery_soc_final": float(batt_final),
+            "battery_soc_drop_pct": float(batt_drop),
             "timeseries_power_total_w": p_total.tolist(),
             "timeseries_power_static_w": p_static.tolist(),
             "timeseries_power_mechanical_w": p_mech.tolist(),
             "timeseries_power_thermal_w": p_therm.tolist(),
-            "timeseries_battery_soc": batt.tolist(),
+            "timeseries_battery_soc": batt_normalized.tolist(),
             "timeseries_velocity_linear": vel.tolist(),
             "timeseries_time_s": t_s.tolist(),
         }

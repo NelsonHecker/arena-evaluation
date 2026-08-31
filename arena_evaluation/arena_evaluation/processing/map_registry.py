@@ -1,27 +1,60 @@
 import os
 import yaml
 import pathlib
+import subprocess
 from PIL import Image
 
 class MapRegistry:
     @staticmethod
-    def _find_ros_map_dir(map_name: str) -> pathlib.Path | None:
-        try:
-            from ament_index_python.packages import get_package_share_directory
+    def _find_ros_map_dir(map_name: str, run_dir: pathlib.Path | None = None) -> pathlib.Path | None:
+        candidates = [map_name]
+        if "_stage" in map_name:
+            candidates.append(map_name.split("_stage")[0])
+        if "-" in map_name:
+            candidates.append(map_name.split("-")[0])
+        if "_" in map_name:
+            candidates.append(map_name.split("_")[0])
 
-            pkg_path = pathlib.Path(get_package_share_directory("arena_simulation_setup"))
-            map_dir = pkg_path / "worlds" / map_name
-            if map_dir.exists():
-                return map_dir
-        except Exception:
-            pass
-            
-        arena_dir = os.environ.get("ARENA_DIR")
-        if arena_dir:
-            map_dir = pathlib.Path(arena_dir) / "arena_simulation_setup/worlds" / map_name
-            if map_dir.exists():
-                return map_dir
-            
+        for m_name in candidates:
+            if run_dir is not None:
+                for cand_p in [
+                    pathlib.Path(run_dir) / "worlds" / m_name,
+                    pathlib.Path(run_dir) / "maps" / m_name,
+                ]:
+                    if cand_p.exists():
+                        return cand_p
+
+            try:
+                res = subprocess.run(["rospack", "find", "arena_simulation_setup"],
+                                     capture_output=True, text=True, check=False)
+                if res.returncode == 0 and res.stdout.strip():
+                    map_dir = pathlib.Path(res.stdout.strip()) / "worlds" / m_name
+                    if map_dir.exists():
+                        return map_dir
+            except Exception:
+                pass
+
+            try:
+                from ament_index_python.packages import get_package_share_directory
+
+                pkg_path = pathlib.Path(get_package_share_directory("arena_simulation_setup"))
+                map_dir = pkg_path / "worlds" / m_name
+                if map_dir.exists():
+                    return map_dir
+            except Exception:
+                pass
+
+            for ws in ("/opt/arena_ws", "/home/nelson/arena_ws"):
+                map_dir = pathlib.Path(ws) / "src" / "Arena" / "arena_simulation_setup" / "worlds" / m_name
+                if map_dir.exists():
+                    return map_dir
+
+            arena_dir = os.environ.get("ARENA_DIR")
+            if arena_dir:
+                map_dir = pathlib.Path(arena_dir) / "arena_simulation_setup/worlds" / m_name
+                if map_dir.exists():
+                    return map_dir
+
         return None
 
     @staticmethod
@@ -42,7 +75,13 @@ class MapRegistry:
             with open(meta_path, "r") as f:
                 return yaml.safe_load(f)
                 
-        ros_map_dir = MapRegistry._find_ros_map_dir(map_name)
+        if run_dir is not None:
+            try:
+                ros_map_dir = MapRegistry._find_ros_map_dir(map_name, run_dir=run_dir)
+            except TypeError:
+                ros_map_dir = MapRegistry._find_ros_map_dir(map_name)
+        else:
+            ros_map_dir = MapRegistry._find_ros_map_dir(map_name)
         if not ros_map_dir:
             return None
             

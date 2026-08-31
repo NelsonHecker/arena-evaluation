@@ -92,10 +92,7 @@ class MCAPReader:
         return res
 
     def read(self, map_name_fallback: str | None = None) -> dict[str, TopicBundle]:
-        """
-        Reads the data source and returns raw DataFrames/LazyFrames for each topic,
-        organized by robot namespace.
-        """
+        """Read data source and return raw TopicBundle by robot namespace."""
         if self.data_path.is_dir():
             mcap_files = sorted(list(self.data_path.glob("*.mcap")))
             if not mcap_files:
@@ -628,7 +625,7 @@ class MCAPReader:
 
         # Load global data
         global_bundle = TopicBundle()
-        for t_name in ("tf", "tf_static"):
+        for t_name in ("tf", "tf_static", "semantic_snapshot"):
             lf = load_parquet(topics_dir / f"{t_name}.parquet")
             if lf is not None:
                 setattr(global_bundle, t_name, lf)

@@ -1,32 +1,87 @@
-# Standard benchmark report — the default layout for arena_evaluation.
-# Mirrors the previous hardcoded presentation/viz_manifest.py default.
+# Standard benchmark report — the default comprehensive layout for arena_evaluation.
 manifest_version: "1.0"
 name: standard
 title: Standard Benchmark Report
-description: Default arena_evaluation report for benchmark metrics.
+description: Standard balanced arena_evaluation report covering performance, safety, efficiency, naturalness, motion, smoothness, social interaction, ecology, and trade-off frontiers.
 data_source: metrics
 groups:
   - {id: overview, title: Performance Overview}
   - {id: safety, title: Safety & Collision Metrics}
   - {id: efficiency, title: Efficiency Metrics}
+  - {id: naturalness, title: Trajectory Naturalness & Deviation}
   - {id: motion, title: Motion Dynamics Metrics}
   - {id: smoothness, title: Path Smoothness Metrics}
   - {id: social, title: Social & Pedestrian Interaction}
-  - {id: details, title: Detailed Run Traces & Analysis}
   - {id: ecological, title: Ecological & Energy Metrics}
+  - {id: tradeoffs, title: Multi-Objective Trade-Off Frontiers}
+  - {id: details, title: Detailed Run Traces & Analysis}
 units:
+  success: "%"
+  spl: ""
   time_to_goal: s
   path_length: m
+  path_efficiency: ""
   idling_time: s
+  relative_throughput: ""
+  collision_amount: ""
+  collision_static: ""
+  collision_dynamic: ""
+  tti_min: s
+  tti_mean: s
+  ade: m
+  fde: m
+  adtw: ""
+  mhd: m
+  frechet_distance: m
+  topological_complexity: ""
+  theta_star_length: m
   velocity_mean: m/s
   velocity_max: m/s
   acceleration_mean: m/s2
+  acceleration_max: m/s2
   jerk_mean: m/s3
+  jerk_max: m/s3
   curvature_mean: 1/m
+  curvature_max: 1/m
+  roughness_mean: rad/m
+  roughness_max: rad/m
+  angle_over_length: rad/m
+  personal_space_intrusion_integral: "m·s"
+  passing_rule_compliance: ""
+  total_time_in_personal_space: s
+  avg_velocity_in_personal_space: m/s
+  time_in_intimate_zone: s
+  time_in_personal_zone: s
+  time_in_social_zone: s
+  time_in_public_zone: s
+  psi_intimate_events: ""
+  psi_personal_events: ""
+  ci_mean: ""
+  ci_max: ""
+  social_force_mean: N
+  social_force_max: N
+  social_force_ped_mean: N
+  social_force_ped_max: N
+  ped_path_deflection_m: m
+  total_time_looking_at_pedestrians: s
+  total_time_looked_at_by_pedestrians: s
   energy_total_wh: Wh
   energy_static_wh: Wh
   energy_mechanical_wh: Wh
   energy_thermal_wh: Wh
+  specific_cost_of_transport: ""
+  e_cot: ""
+  kcsc_wh: Wh
+  kinetic_energy_demand_j: J
+  friction_dissipation_j: J
+  power_peak_w: W
+  battery_soc_drop_pct: "%"
+  aeps_linear_s: s
+  ped_max_exposure_dba: dBA
+  ped_leq_exposure_dba: dBA
+  ped_max_startle_factor: dBA/s
+  total_sound_energy_joules: J
+  total_acoustic_work_joules: J
   timeseries_power_total_w: W
   timeseries_power_static_w: W
   timeseries_power_mechanical_w: W
@@ -38,15 +93,19 @@ plots:
   # ── Overview ────────────────────────────────────────────────────────────────
   - id: overview_table
     type: table
-    title: Benchmark Overview
+    title: Benchmark Executive Overview
     data_key: "*"
     layout_group: overview
     options:
       group_by: [local_planner]
       columns:
         - {metric: success, label: Success, format: "{:.0%}"}
+        - {metric: spl, label: SPL, format: "{:.2f}"}
         - {metric: time_to_goal, label: Avg Time, format: "{:.1f}"}
         - {metric: path_length, label: Avg Path, format: "{:.1f}"}
+        - {metric: path_efficiency, label: Path Effic., format: "{:.2f}"}
+        - {metric: collision_amount, label: Collisions, format: "{:.1f}"}
+        - {metric: specific_cost_of_transport, label: S-CoT, format: "{:.2f}"}
       notes: notes.yaml
   - id: radar_local_planner
     type: radar
@@ -56,7 +115,7 @@ plots:
     auto_differentiate: false
     layout_group: overview
     options:
-      metrics: [success, path_efficiency, time_to_goal, collision_amount, roughness_mean, jerk_mean]
+      metrics: [success, spl, path_efficiency, time_to_goal, collision_amount, jerk_mean, specific_cost_of_transport]
   - id: radar_inter_planner
     type: radar
     title: Performance Overview by Inter-Planner
@@ -65,7 +124,7 @@ plots:
     auto_differentiate: false
     layout_group: overview
     options:
-      metrics: [success, path_efficiency, time_to_goal, collision_amount, roughness_mean, jerk_mean]
+      metrics: [success, spl, path_efficiency, time_to_goal, collision_amount, jerk_mean, specific_cost_of_transport]
   - id: correlation_matrix
     type: heatmap
     title: Metrics Correlation Matrix
@@ -75,6 +134,12 @@ plots:
     type: heatmap
     title: Success Rate Pivot Grid (Local vs Inter Planner)
     data_key: success
+    layout_group: overview
+    options: {x: inter_planner, y: local_planner}
+  - id: heatmap_spl_pivot
+    type: heatmap
+    title: SPL Pivot Grid (Local vs Inter Planner)
+    data_key: spl
     layout_group: overview
     options: {x: inter_planner, y: local_planner}
 
@@ -93,6 +158,20 @@ plots:
     differentiate: inter_planner
     auto_differentiate: false
     layout_group: safety
+  - id: bar_spl_local
+    type: bar
+    title: Success weighted by Path Length (SPL) by Local Planner
+    data_key: spl
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: safety
+  - id: bar_spl_inter
+    type: bar
+    title: Success weighted by Path Length (SPL) by Inter-Planner
+    data_key: spl
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: safety
   - id: box_collisions_local
     type: box
     title: Collision Amount by Local Planner
@@ -107,18 +186,34 @@ plots:
     differentiate: inter_planner
     auto_differentiate: false
     layout_group: safety
+  - id: bar_collision_breakdown
+    type: bar
+    title: Static vs Dynamic Collision Breakdown
+    data_key: collision_amount
+    differentiate: local_planner
+    layout_group: safety
+    options:
+      stacked: true
+      metrics: [collision_static, collision_dynamic]
+  - id: box_tti_min_local
+    type: box
+    title: Minimum Time to Collision (TTI min) by Local Planner
+    data_key: tti_min
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: safety
 
   # ── Efficiency & Time ───────────────────────────────────────────────────────
   - id: violin_efficiency_local
     type: violin
-    title: Path Efficiency by Local Planner
+    title: Geodesic Path Efficiency (vs Theta*) by Local Planner
     data_key: path_efficiency
     differentiate: local_planner
     auto_differentiate: false
     layout_group: efficiency
   - id: violin_efficiency_inter
     type: violin
-    title: Path Efficiency by Inter-Planner
+    title: Geodesic Path Efficiency (vs Theta*) by Inter-Planner
     data_key: path_efficiency
     differentiate: inter_planner
     auto_differentiate: false
@@ -158,13 +253,57 @@ plots:
     differentiate: local_planner
     auto_differentiate: false
     layout_group: efficiency
-  - id: histogram_path_length_inter
-    type: histogram
-    title: Path Length Distribution by Inter-Planner
-    data_key: path_length
-    differentiate: inter_planner
+  - id: box_relative_throughput_local
+    type: box
+    title: Relative Throughput (vs Unobstructed) by Local Planner
+    data_key: relative_throughput
+    differentiate: local_planner
     auto_differentiate: false
     layout_group: efficiency
+
+  # ── Trajectory Naturalness & Deviation ──────────────────────────────────────
+  - id: box_ade_local
+    type: box
+    title: Average Displacement Error (ADE vs Theta*) by Local Planner
+    data_key: ade
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: naturalness
+  - id: box_ade_inter
+    type: box
+    title: Average Displacement Error (ADE vs Theta*) by Inter-Planner
+    data_key: ade
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: naturalness
+  - id: box_fde_local
+    type: box
+    title: Final Displacement Error (FDE) by Local Planner
+    data_key: fde
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: naturalness
+  - id: box_frechet_local
+    type: box
+    title: Discrete Fréchet Distance (vs Theta*) by Local Planner
+    data_key: frechet_distance
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: naturalness
+  - id: violin_mhd_local
+    type: violin
+    title: Modified Hausdorff Distance (MHD vs Theta*) by Local Planner
+    data_key: mhd
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: naturalness
+  - id: box_topological_complexity_local
+    type: box
+    title: Topological Complexity (Net Winding Number) by Local Planner
+    data_key: topological_complexity
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: naturalness
 
   # ── Motion Dynamics ─────────────────────────────────────────────────────────
   - id: violin_velocity_local
@@ -239,20 +378,62 @@ plots:
     differentiate: inter_planner
     auto_differentiate: false
     layout_group: smoothness
+  - id: box_angle_over_length_local
+    type: box
+    title: Angle Over Length by Local Planner
+    data_key: angle_over_length
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: smoothness
 
   # ── Social & Pedestrian Interaction ─────────────────────────────────────────
+  - id: violin_psii_local
+    type: violin
+    title: Personal Space Intrusion Integral (PSII Depth) by Local Planner
+    data_key: personal_space_intrusion_integral
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: violin_psii_inter
+    type: violin
+    title: Personal Space Intrusion Integral (PSII Depth) by Inter-Planner
+    data_key: personal_space_intrusion_integral
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: bar_passing_compliance_local
+    type: bar
+    title: Passing Rule Compliance (Right-Hand Passing) by Local Planner
+    data_key: passing_rule_compliance
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: bar_passing_compliance_inter
+    type: bar
+    title: Passing Rule Compliance (Right-Hand Passing) by Inter-Planner
+    data_key: passing_rule_compliance
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: box_ci_max_local
+    type: box
+    title: Directional Collision Index (CI Max) by Local Planner
+    data_key: ci_max
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
+  - id: box_social_force_ped_max_local
+    type: box
+    title: Max Social Force on Pedestrians by Local Planner
+    data_key: social_force_ped_max
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: social
   - id: violin_personal_space_local
     type: violin
     title: Time in Personal Space by Local Planner
     data_key: total_time_in_personal_space
     differentiate: local_planner
-    auto_differentiate: false
-    layout_group: social
-  - id: violin_personal_space_inter
-    type: violin
-    title: Time in Personal Space by Inter-Planner
-    data_key: total_time_in_personal_space
-    differentiate: inter_planner
     auto_differentiate: false
     layout_group: social
   - id: box_looking_at_peds_local
@@ -262,13 +443,6 @@ plots:
     differentiate: local_planner
     auto_differentiate: false
     layout_group: social
-  - id: box_looking_at_peds_inter
-    type: box
-    title: Time Looking at Pedestrians by Inter-Planner
-    data_key: total_time_looking_at_pedestrians
-    differentiate: inter_planner
-    auto_differentiate: false
-    layout_group: social
   - id: box_looked_at_by_peds_local
     type: box
     title: Time Looked at by Pedestrians by Local Planner
@@ -276,33 +450,6 @@ plots:
     differentiate: local_planner
     auto_differentiate: false
     layout_group: social
-  - id: box_looked_at_by_peds_inter
-    type: box
-    title: Time Looked at by Pedestrians by Inter-Planner
-    data_key: total_time_looked_at_by_pedestrians
-    differentiate: inter_planner
-    auto_differentiate: false
-    layout_group: social
-
-  # ── Detailed Traces ─────────────────────────────────────────────────────────
-  - id: trajectory_plot
-    type: trajectory
-    title: Robot Trajectories
-    data_key: path
-    differentiate: local_planner
-    auto_differentiate: false
-    group_by: [stage]
-    layout_group: details
-    filter: {is_reference: false}
-  - id: pedestrian_trajectory_plot
-    type: trajectory
-    title: Pedestrian Trajectories
-    data_key: pedestrian_path
-    differentiate: local_planner
-    auto_differentiate: false
-    group_by: [stage]
-    layout_group: details
-    options: {overlay_markers: false}
 
   # ── Ecological & Energy ─────────────────────────────────────────────────────
   - id: bar_energy_breakdown
@@ -314,6 +461,41 @@ plots:
     options:
       stacked: true
       metrics: [energy_static_wh, energy_mechanical_wh, energy_thermal_wh]
+  - id: violin_scot_local
+    type: violin
+    title: Specific Cost of Transport (S-CoT) by Local Planner
+    data_key: specific_cost_of_transport
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: ecological
+  - id: violin_scot_inter
+    type: violin
+    title: Specific Cost of Transport (S-CoT) by Inter-Planner
+    data_key: specific_cost_of_transport
+    differentiate: inter_planner
+    auto_differentiate: false
+    layout_group: ecological
+  - id: box_ecot_local
+    type: box
+    title: Effective Cost of Transport (E-CoT) by Local Planner
+    data_key: e_cot
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: ecological
+  - id: box_kinetic_energy_demand_local
+    type: box
+    title: Kinetic Energy Demand (J) by Local Planner
+    data_key: kinetic_energy_demand_j
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: ecological
+  - id: box_friction_dissipation_local
+    type: box
+    title: Friction Dissipation (J) by Local Planner
+    data_key: friction_dissipation_j
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: ecological
   - id: timeseries_power
     type: timeseries
     title: Power & Battery Over Time
@@ -350,12 +532,13 @@ plots:
     data_key: ped_max_startle_factor
     differentiate: local_planner
     layout_group: ecological
-  # Acoustic field plot — fully manifest-configurable:
-  #   filter:  {planner: [dwb, teb]}      # select specific runs (list = membership)
-  #   mode:    single                     # one worst-case image (default: grid)
-  #   downsample: 2                       # solver stride (1 = full res)
-  #   vmin:    42                         # color-scale floor (default: hospital ambient)
-  #   include_reference: true             # include unhindered reference runs
+  - id: box_aeps_local
+    type: box
+    title: Acoustic Exposure in Personal Space (AEPS) by Local Planner
+    data_key: aeps_linear_s
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: ecological
   - id: acoustic_field_worst_case
     type: acoustic_field
     title: "Acoustic Impact (Worst-Case Frame)"
@@ -365,7 +548,6 @@ plots:
     layout_group: ecological
     options:
       downsample: 1
-
   - id: acoustic_field_animation
     type: acoustic_field_animation
     title: "Acoustic Field Timeline (Animated)"
@@ -378,3 +560,54 @@ plots:
       fps: 10
       max_frames: 100
       format: gif
+
+  # ── Multi-Objective Trade-Off Frontiers ─────────────────────────────────────
+  - id: scatter_spl_vs_energy
+    type: scatter
+    title: Safety-Energy Frontier (SPL vs. Total Energy)
+    data_key: energy_total_wh
+    differentiate: local_planner
+    layout_group: tradeoffs
+    options: {y: spl}
+  - id: scatter_time_vs_ecot
+    type: scatter
+    title: Efficiency-Holistic Frontier (Time to Goal vs. E-CoT)
+    data_key: time_to_goal
+    differentiate: local_planner
+    layout_group: tradeoffs
+    options: {y: e_cot}
+  - id: scatter_velocity_vs_psii
+    type: scatter
+    title: Speed-Comfort Frontier (Mean Velocity vs. PSII)
+    data_key: velocity_mean
+    differentiate: local_planner
+    layout_group: tradeoffs
+    options: {y: personal_space_intrusion_integral}
+  - id: scatter_scot_vs_efficiency
+    type: scatter
+    title: Transport Cost vs. Path Efficiency (S-CoT vs. Path Efficiency)
+    data_key: path_efficiency
+    differentiate: local_planner
+    layout_group: tradeoffs
+    options: {y: specific_cost_of_transport}
+
+  # ── Detailed Traces ─────────────────────────────────────────────────────────
+  - id: trajectory_plot
+    type: trajectory
+    title: Robot Trajectories
+    data_key: path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: details
+    filter: {is_reference: false}
+  - id: pedestrian_trajectory_plot
+    type: trajectory
+    title: Pedestrian Trajectories
+    data_key: pedestrian_path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: details
+    options: {overlay_markers: false}
+

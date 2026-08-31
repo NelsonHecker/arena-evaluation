@@ -1,0 +1,58 @@
+name: hospital_2_scenarios
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+  optim.obstacles: bbox
+stages:
+- name: s01_head_on
+  map: hospital_2
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s01_head_on
+- name: s02_overtaking
+  map: hospital_2
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s02_overtaking
+- name: s03_perpendicular_crossing
+  map: hospital_2
+  robot: jackal
+  episodes: 3
+  timeout: 60.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s03_perpendicular_crossing
+- name: s06_bidirectional_flow
+  map: hospital_2
+  robot: jackal
+  episodes: 3
+  timeout: 90.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s06_bidirectional_flow
+- name: s09_corridor_crowd
+  map: hospital_2
+  robot: jackal
+  episodes: 3
+  timeout: 120.0
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: s09_corridor_crowd

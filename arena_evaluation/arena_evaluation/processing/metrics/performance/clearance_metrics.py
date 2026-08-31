@@ -10,15 +10,7 @@ if typing.TYPE_CHECKING:
 
 
 class ClearanceMetricsCalculator(BaseMetricCalculator):
-    """Minimum distance to obstacles and pedestrians.
-
-    - Obstacle clearance is the native scan_min minus the robot radius.
-      Frames reading at or beyond the sensor max range are no detection,
-      not a far-away obstacle.
-    - Pedestrian clearance is edge-to-edge: min_dist - (r_robot + r_ped).
-    - clearance_timeseries is the per-frame combined minimum on the odom
-      axis, with native scan and peds sampled by backward-asof (100 ms).
-    """
+    """Computes minimum clearance distances to obstacles and pedestrians."""
 
     NAME = "clearance_metrics"
     CATEGORY = "performance"

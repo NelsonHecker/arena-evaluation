@@ -61,13 +61,16 @@ def _ps_lines() -> list[tuple[int, str]]:
 
 
 def _elapsed_s(pid: int) -> float | None:
-    """Seconds since process start (via /proc/<pid>/stat starttime)."""
+    """Seconds since process start (via /proc/<pid>/stat starttime and /proc/uptime)."""
     try:
+        with open("/proc/uptime", "r") as fh:
+            uptime = float(fh.read().split()[0])
         with open(f"/proc/{pid}/stat", "r") as fh:
             fields = fh.read().split()
         start_ticks = int(fields[21])
         clk = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
-        return max(0.0, time.time() - start_ticks / clk)
+        start_sec = start_ticks / clk
+        return max(0.0, uptime - start_sec)
     except Exception:
         return None
 
@@ -243,3 +246,65 @@ def latest_running_run_id() -> str | None:
             if len(token) > 10 and "-" in token and "/" not in token:
                 return token
     return None
+
+
+def kill_processes(
+    pids: list[int] | None = None,
+    force: bool = False,
+    kind: str | None = None,
+    timeout_s: float = 1.5,
+) -> list[dict]:
+    """Terminate running arena processes."""
+    import signal
+
+    my_pid = os.getpid()
+    all_procs = running_processes()
+    target_procs: list[dict] = []
+
+    if pids:
+        pid_set = set(pids)
+        for p in all_procs:
+            if p["pid"] in pid_set and p["pid"] != my_pid:
+                target_procs.append(p)
+        known_pids = {p["pid"] for p in target_procs}
+        for pid in pids:
+            if pid not in known_pids and pid != my_pid and is_pid_alive(pid):
+                target_procs.append({"pid": pid, "kind": "unknown", "command": f"pid {pid}"})
+    else:
+        for p in all_procs:
+            if p["pid"] != my_pid:
+                if kind is None or p["kind"] == kind:
+                    target_procs.append(p)
+
+    results: list[dict] = []
+    for proc in target_procs:
+        pid = proc["pid"]
+        if not is_pid_alive(pid):
+            results.append({**proc, "status": "already_dead"})
+            continue
+
+        try:
+            if force:
+                os.kill(pid, signal.SIGKILL)
+                results.append({**proc, "status": "force_killed"})
+            else:
+                os.kill(pid, signal.SIGTERM)
+                start_wait = time.time()
+                dead = False
+                while time.time() - start_wait < timeout_s:
+                    if not is_pid_alive(pid):
+                        dead = True
+                        break
+                    time.sleep(0.1)
+                if dead:
+                    results.append({**proc, "status": "killed"})
+                else:
+                    os.kill(pid, signal.SIGKILL)
+                    results.append({**proc, "status": "force_killed"})
+        except (ProcessLookupError, PermissionError) as exc:
+            if not is_pid_alive(pid):
+                results.append({**proc, "status": "killed"})
+            else:
+                results.append({**proc, "status": f"failed: {exc}"})
+
+    return results

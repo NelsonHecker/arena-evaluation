@@ -44,24 +44,18 @@ def data_file_for(data_source: str | None) -> str | None:
 
 
 def _has_values(df: "pl.DataFrame", col: str) -> bool:
-    """True when the column exists and holds at least one non-null value."""
+    """Check if column exists and contains at least one non-null value."""
     return col in df.columns and bool(df[col].is_not_null().any())
 
 
 def _default_summary_group_cols(df: "pl.DataFrame") -> list[str]:
-    """Planner-led grouping, widened by whatever else actually varies.
-
-    The planner columns lead so a summary reads as a planner comparison; the
-    remaining varying identity columns follow so a single-planner sweep across
-    robots or worlds keeps its breakdown. An empty result means the frame
-    carries no usable identity, and the caller aggregates every run into one
-    row rather than dropping the table.
-    """
+    """Determine grouping columns for summary tables."""
     from .dimension_detector import detect_varying_dims
 
     lead = next((c for c in ("local_planner", "planner") if _has_values(df, c)), None)
     rest = [c for c in detect_varying_dims(df) if c != lead and _has_values(df, c)]
     return ([lead] if lead else []) + rest
+
 
 
 def _aggregate(df: "pl.DataFrame", group_cols: list[str], agg_exprs: list) -> "pd.DataFrame":
@@ -424,6 +418,10 @@ class ReportBuilder:
         Groups planner-first, then by the other varying identity columns.
         """
         group_cols = _default_summary_group_cols(df)
+        metric_cols = [c for c in ["success", "time_to_goal", "path_length", "collision_amount"] if c in df.columns and not df[c].is_null().all()]
+        needed = [c for c in [*group_cols, *metric_cols] if c in df.columns]
+        if needed:
+            df = df.select(needed)
         df = _labelled(df, group_cols)
 
         agg_exprs = []
@@ -475,9 +473,12 @@ class ReportBuilder:
         if not group_cols:
             group_cols = _default_summary_group_cols(df)
 
-        list_cols = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns and df.schema[c] == pl.List]
+        needed = [c for c in [*group_cols, *(s.metric for s in manifest.summary)] if c in df.columns]
+        list_cols = [c for c in needed if df.schema[c] == pl.List]
         if list_cols:
-            df = df.explode(list_cols)
+            df = df.select(needed).explode(list_cols)
+        else:
+            df = df.select(needed) if needed else df
         df = _labelled(df, group_cols)
 
         agg_exprs = []

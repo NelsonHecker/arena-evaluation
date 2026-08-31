@@ -2,25 +2,39 @@
 # working point, derived entirely from the per-episode metric frame
 # (combined_metrics.parquet). The CharacterizationCalculator emits per-sample
 # timeseries_char_* list columns; the line renderer explodes them into a long
-# frame and aggregates per working point (mean ± std / L_Aeq / max).
+# frame and aggregates per physical working point (mean ± std / L_Aeq / max).
 manifest_version: "1.0"
 name: characterization
 title: Open-Loop Characterization Report
-description: Energy and acoustic performance across open-loop maneuver working points.
+description: Comprehensive energy, acoustic, dynamic surge, and actuator fidelity characterization across multi-mode operating working points.
 data_source: metrics
 groups:
-  - {id: power_curves, title: Power vs. Velocity Curves}
-  - {id: acoustic_curves, title: Acoustic Levels vs. Velocity}
-  - {id: time_traces, title: Power & Noise Over Time}
-  - {id: overview, title: Overview & Baselines}
+  - {id: overview, title: Overview & Multi-Phase Summary}
+  - {id: tracking_fidelity, title: Actuator Tracking & Velocity Fidelity}
+  - {id: power_curves, title: Power vs. Actual Velocity Curves}
+  - {id: efficiency_curves, title: Energy Intensity & Cost of Transport}
+  - {id: arc_steering, title: Curvilinear Arc Steering Performance}
+  - {id: holonomic_curves, title: Holonomic Lateral Cruising}
+  - {id: dynamic_surges, title: Dynamic Acceleration & Deceleration Surges}
+  - {id: acoustic_curves, title: Acoustic Noise Levels vs. Dynamic State}
+  - {id: acoustic_images, title: Rendered Acoustic Images & Field Animations}
+  - {id: time_traces, title: Continuous Time Profiles}
 units:
   timeseries_char_power_total_w: W
   timeseries_char_power_mech_w: W
   timeseries_char_dba: dBA
   timeseries_char_vx_achieved: m/s
+  timeseries_char_vy_achieved: m/s
+  timeseries_char_wz_achieved: rad/s
+  timeseries_char_accel_achieved: m/s^2
+  timeseries_char_accel_target: m/s^2
+  timeseries_char_efficiency: ""
   timeseries_char_vx_target: m/s
+  timeseries_char_vy_target: m/s
   timeseries_char_wz_target: rad/s
+  timeseries_char_turn_radius_m: m
   timeseries_char_energy_intensity: J/m
+  timeseries_char_energy_per_rad: J/rad
   timeseries_char_time_s: s
 summary:
   - {metric: timeseries_char_power_total_w, label: Mean Power, format: "{:.1f}"}
@@ -29,95 +43,235 @@ summary:
   - {metric: timeseries_char_energy_intensity, label: Energy Intensity, format: "{:.2f}"}
 summary_group_by: [timeseries_char_phase_kind]
 plots:
-  # ── Overview ────────────────────────────────────────────────────────────────
+  # ── Overview & Summary ──────────────────────────────────────────────────────
   - id: notes_table
     type: table
-    title: Analysis Notes
+    title: Analysis Notes & Methodology
     data_key: "*"
     layout_group: overview
     options:
       notes: notes.yaml
-  # ── Power vs. Velocity (aggregated per working point, mean ± std) ──────────
-  - id: line_power_vs_vx_linear
-    type: line
-    title: Total Power vs. Linear Velocity (mean ± std)
+  - id: bar_idle_standby_power
+    type: bar
+    title: Baseline Standby / Idle Power Draw by Robot
+    data_key: timeseries_char_power_total_w
+    differentiate: robot
+    layout_group: overview
+    filter: {timeseries_char_phase_kind: idle}
+
+  # ── Actuator Tracking & Velocity Fidelity ───────────────────────────────────
+  - id: scatter_achieved_vs_commanded_linear
+    type: scatter
+    title: Linear Velocity Fidelity (Achieved vs. Commanded)
     data_key: timeseries_char_vx_target
-    group_by: [timeseries_char_phase_kind]
-    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
-    layout_group: power_curves
-  - id: line_mech_power_vs_vx
-    type: line
-    title: Mechanical Power vs. Linear Velocity (mean ± std)
-    data_key: timeseries_char_vx_target
-    group_by: [timeseries_char_phase_kind]
-    options: {y: timeseries_char_power_mech_w, aggregate: true, mode: "lines+markers"}
-    layout_group: power_curves
-  - id: line_power_vs_wz_angular
-    type: line
-    title: Total Power vs. Angular Velocity (mean ± std)
+    differentiate: robot
+    filter: {timeseries_char_phase_kind: [linear, ramp_up, ramp_down]}
+    layout_group: tracking_fidelity
+    options: {y: timeseries_char_vx_achieved}
+  - id: scatter_achieved_vs_commanded_angular
+    type: scatter
+    title: Angular Velocity Fidelity (Achieved vs. Commanded)
     data_key: timeseries_char_wz_target
-    group_by: [timeseries_char_phase_kind]
+    differentiate: robot
+    filter: {timeseries_char_phase_kind: [angular, arc]}
+    layout_group: tracking_fidelity
+    options: {y: timeseries_char_wz_achieved}
+  - id: line_accel_achieved_vs_target
+    type: line
+    title: Dynamic Acceleration Tracking (Achieved vs. Commanded Rate)
+    data_key: timeseries_char_accel_target
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: [ramp_up, ramp_down]}
+    options: {y: timeseries_char_accel_achieved, aggregate: true, bin_x: 0.2, mode: "lines+markers"}
+    layout_group: tracking_fidelity
+
+  # ── Power vs. Actual Velocity Curves ────────────────────────────────────────
+  - id: line_power_vs_vx_achieved
+    type: line
+    title: Total Electrical Power vs. Actual Linear Speed (Cruising)
+    data_key: timeseries_char_vx_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: linear}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_mech_power_vs_vx_achieved
+    type: line
+    title: Mechanical Power vs. Actual Linear Speed (Cruising)
+    data_key: timeseries_char_vx_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: linear}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_efficiency_vs_vx_achieved
+    type: line
+    title: Drivetrain Conversion Efficiency vs. Actual Linear Speed
+    data_key: timeseries_char_vx_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: linear}
+    options: {y: timeseries_char_efficiency, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_power_vs_wz_achieved
+    type: line
+    title: Total Power vs. Actual Angular Velocity (Pivot Rotation)
+    data_key: timeseries_char_wz_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: angular}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    layout_group: power_curves
+  - id: line_mech_power_vs_wz_achieved
+    type: line
+    title: Mechanical Power vs. Actual Angular Velocity (Pivot Rotation)
+    data_key: timeseries_char_wz_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: angular}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    layout_group: power_curves
+
+  # ── Energy Intensity & Cost of Transport ────────────────────────────────────
+  - id: line_energy_intensity_vs_vx_achieved
+    type: line
+    title: Energy Intensity (J/m) vs. Actual Linear Speed (Bathtub Cruising Curve)
+    data_key: timeseries_char_vx_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: linear}
+    options: {y: timeseries_char_energy_intensity, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    layout_group: efficiency_curves
+  - id: line_energy_per_rad_vs_wz_achieved
+    type: line
+    title: Rotational Cost of Transport (J/rad) vs. Actual Angular Speed
+    data_key: timeseries_char_wz_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: angular}
+    options: {y: timeseries_char_energy_per_rad, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    layout_group: efficiency_curves
+
+  # ── Curvilinear Arc Steering Performance ────────────────────────────────────
+  - id: line_power_vs_turn_radius_arc
+    type: line
+    title: Total Power vs. Turn Radius (Curvilinear Steering)
+    data_key: timeseries_char_turn_radius_m
+    group_by: [timeseries_char_vx_target]
+    filter: {timeseries_char_phase_kind: arc}
     options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
-    layout_group: power_curves
-  - id: line_energy_intensity_vs_vx
+    layout_group: arc_steering
+  - id: line_mech_power_vs_turn_radius_arc
     type: line
-    title: Energy Intensity vs. Linear Velocity (mean ± std)
-    data_key: timeseries_char_vx_target
-    group_by: [timeseries_char_phase_kind]
-    options: {y: timeseries_char_energy_intensity, aggregate: true, mode: "lines+markers"}
-    layout_group: power_curves
+    title: Mechanical Power vs. Turn Radius (Curvilinear Steering)
+    data_key: timeseries_char_turn_radius_m
+    group_by: [timeseries_char_vx_target]
+    filter: {timeseries_char_phase_kind: arc}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, mode: "lines+markers"}
+    layout_group: arc_steering
 
-  # ── Acoustic levels vs. velocity ───────────────────────────────────────────
-  - id: line_leq_vs_vx
+  # ── Holonomic Lateral Cruising ──────────────────────────────────────────────
+  - id: line_power_vs_vy_achieved
     type: line
-    title: Equivalent Level L_Aeq vs. Linear Velocity
-    data_key: timeseries_char_vx_target
-    group_by: [timeseries_char_phase_kind]
-    options: {y: timeseries_char_dba, aggregate: true, reduce: leq, mode: "lines+markers"}
+    title: Total Power vs. Actual Lateral Speed (Holonomic)
+    data_key: timeseries_char_vy_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: lateral}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    layout_group: holonomic_curves
+  - id: line_mech_power_vs_vy_achieved
+    type: line
+    title: Mechanical Power vs. Actual Lateral Speed (Holonomic)
+    data_key: timeseries_char_vy_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: lateral}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    layout_group: holonomic_curves
+
+  # ── Dynamic Acceleration & Braking Surges ───────────────────────────────────
+  - id: line_power_vs_accel_achieved
+    type: line
+    title: Dynamic Surge Power vs. Actual Acceleration (m/s²)
+    data_key: timeseries_char_accel_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: [ramp_up, ramp_down]}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    layout_group: dynamic_surges
+  - id: line_dynamic_braking_surges
+    type: line
+    title: Power Draw During Emergency Braking Steps
+    data_key: timeseries_char_time_s
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: brake}
+    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
+    layout_group: dynamic_surges
+
+  # ── Acoustic Noise Levels vs. Dynamic State ─────────────────────────────────
+  - id: line_leq_vs_vx_achieved
+    type: line
+    title: Equivalent Level L_Aeq vs. Actual Linear Speed (Cruising)
+    data_key: timeseries_char_vx_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: linear}
+    options: {y: timeseries_char_dba, aggregate: true, bin_x: 0.05, reduce: leq, mode: "lines+markers"}
     layout_group: acoustic_curves
-  - id: line_lafmax_vs_vx
+  - id: line_lafmax_vs_vx_achieved
     type: line
-    title: Peak Level L_AFmax vs. Linear Velocity
-    data_key: timeseries_char_vx_target
-    group_by: [timeseries_char_phase_kind]
-    options: {y: timeseries_char_dba, aggregate: true, reduce: max, mode: "lines+markers"}
+    title: Peak Sound Level L_AFmax vs. Actual Linear Speed (Cruising)
+    data_key: timeseries_char_vx_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: linear}
+    options: {y: timeseries_char_dba, aggregate: true, bin_x: 0.05, reduce: max, mode: "lines+markers"}
+    layout_group: acoustic_curves
+  - id: line_leq_vs_wz_achieved
+    type: line
+    title: Equivalent Level L_Aeq vs. Actual Angular Speed (Pivot Rotation)
+    data_key: timeseries_char_wz_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: angular}
+    options: {y: timeseries_char_dba, aggregate: true, bin_x: 0.1, reduce: leq, mode: "lines+markers"}
+    layout_group: acoustic_curves
+  - id: line_noise_vs_accel_achieved
+    type: line
+    title: Acoustic Sound Level (dBA) vs. Actual Acceleration (m/s²)
+    data_key: timeseries_char_accel_achieved
+    group_by: [robot]
+    filter: {timeseries_char_phase_kind: [ramp_up, ramp_down]}
+    options: {y: timeseries_char_dba, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
     layout_group: acoustic_curves
 
-  # ── Time traces (per episode, time-relative so episodes overlay) ───────────
+  # ── Rendered Acoustic Images & Field Animations ─────────────────────────────
+  - id: acoustic_field_animation
+    type: acoustic_field_animation
+    title: Acoustic Field Timeline (Every 0.5s @ 24 fps)
+    data_key: timeseries_char_dba
+    layout_group: acoustic_images
+    options:
+      downsample: 2
+      time_step_s: 0.5
+      fps: 24
+      max_frames: 1000
+      format: gif
+
+  # ── Continuous Time Profiles ────────────────────────────────────────────────
   - id: line_power_over_time
     type: line
-    title: Total Power Over Time (per episode)
+    title: Total Electrical Power Over Time (mean ± std)
     data_key: timeseries_char_time_s
-    group_by: [episode]
-    options: {y: timeseries_char_power_total_w, time_relative: true, max_points_per_trace: 5000}
+    group_by: [robot]
+    options: {y: timeseries_char_power_total_w, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
     layout_group: time_traces
   - id: line_mech_power_over_time
     type: line
-    title: Mechanical Power Over Time (per episode)
+    title: Mechanical Drivetrain Power Over Time (mean ± std)
     data_key: timeseries_char_time_s
-    group_by: [episode]
-    options: {y: timeseries_char_power_mech_w, time_relative: true, max_points_per_trace: 5000}
+    group_by: [robot]
+    options: {y: timeseries_char_power_mech_w, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
     layout_group: time_traces
   - id: line_dba_over_time
     type: line
-    title: Acoustic Level Over Time (per episode)
+    title: Acoustic Noise Level (dBA) Over Time (mean ± std)
     data_key: timeseries_char_time_s
-    group_by: [episode]
-    options: {y: timeseries_char_dba, time_relative: true, max_points_per_trace: 5000}
+    group_by: [robot]
+    options: {y: timeseries_char_dba, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
     layout_group: time_traces
-
-  # ── Overview & baselines ────────────────────────────────────────────────────
-  - id: bar_idle_standby_power
-    type: bar
-    title: Standby Power by Robot (idle phases)
-    data_key: timeseries_char_power_total_w
-    differentiate: timeseries_char_phase_kind
-    layout_group: overview
-    filter: {timeseries_char_phase_kind: idle}
-  - id: scatter_achieved_vs_commanded
-    type: scatter
-    title: Achieved vs. Commanded Linear Velocity
-    data_key: timeseries_char_vx_target
-    differentiate: timeseries_char_phase_kind
-    layout_group: overview
-    options: {y: timeseries_char_vx_achieved}
+  - id: line_vx_achieved_over_time
+    type: line
+    title: Actual Linear Velocity Over Time (mean ± std)
+    data_key: timeseries_char_time_s
+    group_by: [robot]
+    options: {y: timeseries_char_vx_achieved, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
+    layout_group: time_traces

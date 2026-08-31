@@ -269,6 +269,63 @@ def test_contest_parse_list_dict_cap_no_driver():
 
 
 # ---------------------------------------------------------------------------
+# Contest.parse - dict-wrapped list form (name + contestants)
+# ---------------------------------------------------------------------------
+
+def test_contest_parse_dict_with_contestants_list():
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = {
+        "name": "social_planners_core",
+        "contestants": [
+            {
+                "name": "dwb-replan-time",
+                "mobile": {
+                    "driver": "nav2",
+                    "local_planner": "dwb",
+                    "inter_planner": "navigate_w_replanning_time",
+                },
+            },
+            {
+                "name": "teb-replan-time",
+                "mobile": {
+                    "driver": "nav2",
+                    "local_planner": "teb",
+                    "inter_planner": "navigate_w_replanning_time",
+                },
+            },
+        ],
+    }
+    result = Contest.parse("social_planners_core", obj)
+
+    assert isinstance(result, Contest)
+    assert result.name == "social_planners_core"
+    assert len(result.contestants) == 2
+    assert result.contestants[0].name == "dwb-replan-time"
+    assert result.contestants[0].args["mobile"]["local_planner"] == "dwb"
+    assert result.contestants[1].name == "teb-replan-time"
+    assert result.contestants[1].args["mobile"]["local_planner"] == "teb"
+
+
+def test_contest_parse_dict_with_contestants_list_and_description():
+    from arena_evaluation.benchmark.config import Contest
+
+    obj = {
+        "name": "my_contest",
+        "description": "A test contest",
+        "contestants": [
+            {"name": "p1", "mobile": {"driver": "nav2", "local_planner": "dwb"}},
+        ],
+    }
+    result = Contest.parse("fallback_name", obj)
+
+    assert result.name == "my_contest"
+    assert result.description == "A test contest"
+    assert len(result.contestants) == 1
+    assert result.contestants[0].name == "p1"
+
+
+# ---------------------------------------------------------------------------
 # Contest.parse - sweep form
 # ---------------------------------------------------------------------------
 

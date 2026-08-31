@@ -11,15 +11,7 @@ if typing.TYPE_CHECKING:
 
 
 class GazeMetricsCalculator(BaseMetricCalculator):
-    """
-    Calculates gaze-related social metrics.
-    
-    Metrics:
-    - time_looking_at_peds: Steps where robot looks at a pedestrian
-    - time_looking_at_peds_total: Total seconds looking at pedestrians
-    - time_looked_at_by_peds: Steps where pedestrian looks at robot
-    - time_looked_at_by_peds_total: Total seconds looked at by pedestrians
-    """
+    """Calculates mutual and directional gaze metrics between robot and pedestrians."""
     
     NAME = "gaze_metrics"
     CATEGORY = "social"

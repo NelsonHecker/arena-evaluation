@@ -14,9 +14,7 @@ if typing.TYPE_CHECKING:
 
 
 class MetricRegistry:
-    """
-    Discovers, validates, and executes metric calculators in topological order.
-    """
+    """Discovers, validates, and executes metric calculators in topological order."""
     def __init__(self, robot_params: RobotParams, world: str | None = None):
         self.robot_params = robot_params
         self.world = world
@@ -66,10 +64,7 @@ class MetricRegistry:
         return units
 
     def _compute_execution_order(self) -> list[list[str]]:
-        """
-        Computes the topological sort of calculators using Kahn's algorithm.
-        Groups independent calculators into execution stages.
-        """
+        """Compute topological sort of calculators using Kahn's algorithm."""
         in_degree = {name: 0 for name in self.calculators}
         adj_list = defaultdict(list)
 
@@ -129,7 +124,8 @@ class MetricRegistry:
         self,
         episode: AlignedEpisodeBundle,
         pedsim_available: bool = True,
-        available_topics: set[str] | None = None
+        available_topics: set[str] | None = None,
+        progress_callback: typing.Callable[[str, int, int], None] | None = None,
     ) -> dict[str, typing.Any]:
         """Executes all calculators in topological order."""
         results = {}
@@ -159,8 +155,12 @@ class MetricRegistry:
                 if "total_level_af_dba" in cols:
                     available_topics.add("acoustics")
         
+        total_calcs = sum(len(stage) for stage in self.execution_stages)
+        calc_idx = 0
+
         for stage in self.execution_stages:
             for calc_name in stage:
+                calc_idx += 1
                 calc = self.calculators[calc_name]
                 
                 # Check topic dependencies
@@ -187,6 +187,12 @@ class MetricRegistry:
                         results[key] = None
                     continue
                 
+                if progress_callback is not None:
+                    try:
+                        progress_callback(calc_name, calc_idx, total_calcs)
+                    except Exception:
+                        pass
+
                 try:
                     # Pass a read-only view of prior results
                     calc_out = calc.calculate(episode, dict(results))

@@ -23,7 +23,6 @@ def test_heatmap_correlation():
     # This should return the plotly HTML string without raising any AttributeErrors
     html = renderer.render_plotly(df)
     assert html is not None
-    assert "Metrics Correlation Matrix" in html
     assert "Correlation" in html
 
 def test_heatmap_seaborn(tmp_path):

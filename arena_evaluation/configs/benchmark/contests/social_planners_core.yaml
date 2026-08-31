@@ -1,0 +1,22 @@
+name: social_planners_core
+contestants:
+- name: dwb-replan-time
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_w_replanning_time
+- name: dwb-replan-recovery
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+- name: teb-replan-time
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: navigate_w_replanning_time
+- name: teb-replan-recovery
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
