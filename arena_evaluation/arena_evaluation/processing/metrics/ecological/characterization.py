@@ -194,14 +194,23 @@ class CharacterizationCalculator(BaseMetricCalculator):
             pl.col("turn_radius_m").fill_null(pl.when((cmd_vx.abs() >= 0.05) & (cmd_wz.abs() >= 0.05)).then(cmd_vx.abs() / cmd_wz.abs()).otherwise(0.0)).alias("turn_radius_m"),
         )
 
-        # Split the acceleration window off the steady-state part of every dwell.
+        # Split the transient windows off the steady-state part of every dwell:
+        # the accelerating head, plus the trailing decel/cutoff on long blocks.
         if "time_ns" in out.columns and len(out) > 0:
             out = out.with_columns(((pl.col("phase_label") != pl.col("phase_label").shift(1)) | (pl.col("vx_target") != pl.col("vx_target").shift(1)) | (pl.col("vy_target") != pl.col("vy_target").shift(1)) | (pl.col("wz_target") != pl.col("wz_target").shift(1))).fill_null(True).cum_sum().alias("_phase_block_id"))
-            out = out.with_columns(((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_elapsed_s"))
             out = out.with_columns(
-                pl.when(pl.col("phase_kind").is_in(["linear", "lateral", "arc"]) & (pl.col("_phase_elapsed_s") < _TRANSIENT_S))
+                ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_elapsed_s"),
+                ((pl.col("time_ns").max().over("_phase_block_id") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_total_duration_s"),
+            )
+            is_trans_dwell = pl.col("phase_label").str.starts_with("linear_vx_") | pl.col("phase_label").str.starts_with("lateral_vy_") | pl.col("phase_label").str.starts_with("arc_vx_")
+            is_angular_dwell = pl.col("phase_label").str.starts_with("angular_wz_")
+            is_long_block = pl.col("_phase_total_duration_s") >= 4.0
+            t_out = pl.min_horizontal(pl.lit(0.8), pl.col("_phase_total_duration_s") * 0.15)
+            in_tail = is_long_block & (pl.col("_phase_elapsed_s") > (pl.col("_phase_total_duration_s") - t_out))
+            out = out.with_columns(
+                pl.when(is_trans_dwell & ((pl.col("_phase_elapsed_s") < _TRANSIENT_S) | in_tail))
                 .then(pl.lit("transient"))
-                .when((pl.col("phase_kind") == "angular") & (pl.col("_phase_elapsed_s") < _TRANSIENT_ANGULAR_S))
+                .when(is_angular_dwell & ((pl.col("_phase_elapsed_s") < _TRANSIENT_ANGULAR_S) | in_tail))
                 .then(pl.lit("transient"))
                 .otherwise(pl.col("phase_kind"))
                 .alias("phase_kind")

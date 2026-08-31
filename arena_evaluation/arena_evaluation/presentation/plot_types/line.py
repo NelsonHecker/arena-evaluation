@@ -46,6 +46,18 @@ class LineRenderer(BasePlotRenderer):
             df_filtered = df_filtered.with_columns(
                 ((pl.col(x_col) / bx).round() * bx).round(4).alias(x_col)
             )
+
+        trim_p = float(opts.get("trim_percentile", 0.0) or (1.0 - float(opts.get("inliers", 1.0))))
+        if 0.0 < trim_p < 0.5 and len(df_filtered) > 0 and y_col in df_filtered.columns:
+            group_keys = [c for c in [x_col, *group_cols] if c in df_filtered.columns]
+            p_low = trim_p / 2.0
+            p_high = 1.0 - (trim_p / 2.0)
+            if group_keys:
+                df_filtered = df_filtered.filter(
+                    (pl.col(y_col) >= pl.col(y_col).quantile(p_low).over(group_keys))
+                    & (pl.col(y_col) <= pl.col(y_col).quantile(p_high).over(group_keys))
+                )
+
         if opts.get("aggregate") and len(df_filtered) > 0:
             agg_cols = [x_col, *group_cols]
             reduce_ = opts.get("reduce", "mean")
@@ -58,10 +70,22 @@ class LineRenderer(BasePlotRenderer):
                     pl.col(y_col).max().alias(y_col)
                 )
             else:
-                df_filtered = df_filtered.group_by(agg_cols).agg(
-                    pl.col(y_col).mean().alias(y_col),
-                    pl.col(y_col).std().alias("__std__"),
-                )
+                error_mode = str(opts.get("error_mode", "std")).lower()
+                if error_mode in ("ci95", "ci_95", "ci"):
+                    df_filtered = df_filtered.group_by(agg_cols).agg(
+                        pl.col(y_col).mean().alias(y_col),
+                        (1.96 * pl.col(y_col).std() / pl.col(y_col).count().sqrt()).fill_null(0.0).alias("__std__"),
+                    )
+                elif error_mode == "sem":
+                    df_filtered = df_filtered.group_by(agg_cols).agg(
+                        pl.col(y_col).mean().alias(y_col),
+                        (pl.col(y_col).std() / pl.col(y_col).count().sqrt()).fill_null(0.0).alias("__std__"),
+                    )
+                else:
+                    df_filtered = df_filtered.group_by(agg_cols).agg(
+                        pl.col(y_col).mean().alias(y_col),
+                        pl.col(y_col).std().alias("__std__"),
+                    )
                 error_col = "__std__"
 
         pdf = df_filtered.select(
@@ -75,6 +99,8 @@ class LineRenderer(BasePlotRenderer):
     @staticmethod
     def _trace_data(pdf, x_col, y_col, error_col, opts, time_to_s, time_relative):
         """Downsample + transform one trace's frame -> (x, y, err) arrays."""
+        import numpy as np
+
         max_points = int(opts.get("max_points_per_trace", 5000))
         if len(pdf) > max_points and max_points > 0:
             stride = max(1, len(pdf) // max_points)
@@ -93,6 +119,19 @@ class LineRenderer(BasePlotRenderer):
         x, y = x[order], y[order]
         if err is not None:
             err = err[order]
+
+        if opts.get("smooth") and len(y) >= 3:
+            w = int(opts.get("smooth_window", 3))
+            w = max(2, min(w, len(y)))
+            kernel = np.ones(w) / w
+            pad_left = w // 2
+            pad_right = w - 1 - pad_left
+            padded_y = np.pad(y, (pad_left, pad_right), mode="edge")
+            y = np.convolve(padded_y, kernel, mode="valid")
+            if err is not None:
+                padded_err = np.pad(err, (pad_left, pad_right), mode="edge")
+                err = np.convolve(padded_err, kernel, mode="valid")
+
         return x, y, err
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
@@ -109,6 +148,14 @@ class LineRenderer(BasePlotRenderer):
         time_to_s = bool(opts.get("time_to_s", False))
         time_relative = bool(opts.get("time_relative", False))
         max_traces = int(opts.get("max_traces", 40))
+
+        error_mode = str(opts.get("error_mode", "std")).lower()
+        if error_mode in ("ci95", "ci_95", "ci"):
+            band_suffix = "± 95% CI"
+        elif opts.get("smooth"):
+            band_suffix = "± 1σ (smoothed)"
+        else:
+            band_suffix = "± 1σ"
 
         fig = go.Figure()
         colors = _color_cycle()
@@ -149,7 +196,7 @@ class LineRenderer(BasePlotRenderer):
                         fill="toself",
                         fillcolor=_with_alpha(color, 0.2),
                         line=dict(width=0),
-                        name=f"{label} ± 1σ",
+                        name=f"{label} {band_suffix}",
                         legendgroup=label,
                         showlegend=False,
                     ))

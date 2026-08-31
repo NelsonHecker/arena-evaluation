@@ -273,3 +273,23 @@ def test_duplicate_recorded_schedule_rows_do_not_duplicate_samples():
     out = _calc().calculate(ep, {})
     assert len(out["timeseries_char_time_s"]) == 2
     assert out["timeseries_char_vx_target"] == [0.55, 0.55]
+
+
+def test_steady_state_bidirectional_windowing():
+    # 5s dwell block with 6 points (t=0 to 5s):
+    # t=0, 1s (< 1.5s): transient
+    # t=2s, 3s, 4s (steady state): linear
+    # t=5s (> 5.0 - 0.75s = 4.25s): transient (trailing decel/settle trim)
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000, 4_000_000_000, 5_000_000_000],
+            "pos_x": [0.0, 0.25, 0.50, 0.75, 1.0, 1.25],
+            "pos_y": [0.0] * 6,
+            "vel_linear": [0.0, 0.25, 0.25, 0.25, 0.25, 0.0],
+            "total_power_w": [500.0, 200.0, 42.2, 42.2, 42.2, 150.0],
+            "label": ["linear_vx_0.25"] * 6,
+        }
+    )
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    assert out["timeseries_char_phase_kind"] == ["transient", "transient", "linear", "linear", "linear", "transient"]
