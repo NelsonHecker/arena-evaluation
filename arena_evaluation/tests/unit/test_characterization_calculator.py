@@ -31,6 +31,7 @@ def test_output_keys_and_units():
     assert calc.UNITS["timeseries_char_dba"] == "dBA"
     assert calc.UNITS["timeseries_char_wz_achieved"] == "rad/s"
     assert calc.UNITS["timeseries_char_energy_per_rad"] == "J/rad"
+    assert "char_phase_coverage" in keys
     assert len(keys) == len(set(keys))
 
 
@@ -67,7 +68,8 @@ def test_calculate_produces_timeseries():
     out = calc.calculate(_sample_episode(), {})
     assert out["timeseries_char_time_s"] == [0.0, 1.0, 2.0, 3.0]
     assert out["timeseries_char_power_total_w"] == [50.0, 55.0, 60.0, 65.0]
-    assert out["timeseries_char_phase_kind"] == ["linear", "linear", "linear", "linear"]
+    assert out["timeseries_char_phase_kind"] == ["ramp_apex", "ramp_apex", "ramp_apex", "ramp_apex"]
+    assert out["char_phase_coverage"] == 1.0
     assert out["timeseries_char_vx_target"] == [0.25, 0.25, 0.5, 0.5]
     # P_mech = Sigma|tau*omega|: 2.0*0.5 + 2.0*0.5 = 2.0 at t=1s
     assert out["timeseries_char_power_mech_w"][1] == 2.0
@@ -104,11 +106,13 @@ def test_arc_and_lateral_characterization_phases():
             "vel_angular": [0.5, 0.5, 1.0, 1.0],
             "total_power_w": [60.0, 60.0, 75.0, 75.0],
             "total_level_af_dba": [45.0, 45.0, 50.0, 50.0],
-            "label": ["arc_vx_0.50_r_1.00_left", "arc_vx_0.50_r_1.00_left", "arc_vx_1.00_r_1.00_left", "arc_vx_1.00_r_1.00_left"],
+            "label": ["arc_vx_0.50_r_0.67_left", "arc_vx_0.50_r_0.67_left", "arc_vx_1.00_r_0.67_left", "arc_vx_1.00_r_0.67_left"],
         }
     )
     ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
     out = _calc().calculate(ep, {})
+    # Jackal's arc radii scale off its 0.267 m footprint, so these labels exist.
+    assert out["char_phase_coverage"] == 1.0
     assert out["timeseries_char_turn_radius_m"][0] == 1.0
     # Energy per rad: 60W / 0.5 rad/s = 120 J/rad
     assert abs(out["timeseries_char_energy_per_rad"][0] - 120.0) < 1e-4
@@ -151,3 +155,43 @@ def test_energy_intensity_speed_threshold_gating():
     assert out["timeseries_char_energy_intensity"][1] is None
     assert out["timeseries_char_energy_intensity"][2] is not None
 
+
+
+def test_accel_target_is_signed_by_direction_of_change():
+    # ramp_down decelerates from its target to rest, so its acceleration is the
+    # negative of the ramp_up that reached that target.
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 500_000_000, 1_000_000_000, 1_500_000_000],
+            "pos_x": [0.0, 0.5, 1.0, 1.5],
+            "pos_y": [0.0, 0.0, 0.0, 0.0],
+            "vel_linear": [1.0, 0.5, -1.0, -0.5],
+            "total_power_w": [60.0, 60.0, 60.0, 60.0],
+            "label": ["ramp_up_vx_1.00", "ramp_down_vx_1.00", "ramp_up_vx_-1.00", "ramp_down_vx_-1.00"],
+        }
+    )
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    assert out["char_phase_coverage"] == 1.0
+    assert out["timeseries_char_accel_target"] == [1.0, -1.0, -1.0, 1.0]
+
+
+def test_unmatched_labels_lower_phase_coverage():
+    # A label the rebuilt schedule lacks means the offline envelope disagrees
+    # with the one the sweep ran, and the fallback classifies the sample instead.
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 1_000_000_000],
+            "pos_x": [0.0, 0.5],
+            "pos_y": [0.0, 0.0],
+            "vel_linear": [0.5, 0.5],
+            "total_power_w": [60.0, 60.0],
+            "linear_x": [0.5, 0.5],
+            "angular_z": [0.0, 0.0],
+            "label": ["linear_vx_0.50", "linear_vx_99.00"],
+        }
+    )
+    ep = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal")
+    out = _calc().calculate(ep, {})
+    assert out["char_phase_coverage"] == 0.5
+    assert out["timeseries_char_phase_kind"][1] in ("linear", "transient")

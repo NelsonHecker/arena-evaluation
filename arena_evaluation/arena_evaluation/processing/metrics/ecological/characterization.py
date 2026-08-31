@@ -37,6 +37,11 @@ _ACOUSTIC_DEFAULTS = {
 }
 
 
+# Head of a dwell where the robot is still accelerating, so not yet steady state.
+_TRANSIENT_S = 1.5  # s, linear, lateral and arc dwells
+_TRANSIENT_ANGULAR_S = 1.0  # s, in-place pivots
+
+
 def _leq_power(dba: pl.Series) -> pl.Series:
     """Linear acoustic power proxy 10^(L/10), L_Aeq = 10*log10(mean(x))."""
     return 10.0 ** (dba / 10.0)
@@ -66,6 +71,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_turn_radius_m": "m",
         "timeseries_char_energy_intensity": "J/m",
         "timeseries_char_energy_per_rad": "J/rad",
+        "char_phase_coverage": "",
     }
 
     _TIMESERIES_KEYS = [
@@ -89,51 +95,63 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "timeseries_char_leq_power",
     ]
 
+    # Fraction of samples whose recorded label the rebuilt schedule recognised.
+    _SUMMARY_KEYS = ["char_phase_coverage"]
+
+    _PHASE_MAP_SCHEMA = {
+        "phase_label": pl.Utf8,
+        "phase_kind": pl.Utf8,
+        "vx_target": pl.Float64,
+        "vy_target": pl.Float64,
+        "wz_target": pl.Float64,
+        "turn_radius_m": pl.Float64,
+        "accel_target": pl.Float64,
+    }
+
+    _phase_coverage: float = 1.0
+
     @classmethod
     def output_keys(cls) -> list[str]:
-        return list(cls._TIMESERIES_KEYS)
+        return [*cls._TIMESERIES_KEYS, *cls._SUMMARY_KEYS]
 
     def _phase_map(self) -> pl.DataFrame:
-        """Schedule name to (kind, vx_target, vy_target, wz_target, turn_radius_m) for this robot's envelope."""
+        """Schedule labels and their targets, rebuilt from the same envelope the sweep used."""
         try:
             from task_generator.tasks.robots.characterization.schedule import (
+                PhaseKind,
                 build_schedule,
                 resolve_envelope,
             )
-
-            envelope = resolve_envelope(self.robot_params.model)
-            schedule = build_schedule(
-                vx_max=float(envelope["vx_max"]),
-                vy_max=float(envelope["vy_max"]),
-                wz_max=float(envelope["wz_max"]),
-                is_holonomic=bool(envelope["is_holonomic"]),
-            )
-            return pl.DataFrame(
-                [
-                    {
-                        "phase_label": p.name,
-                        "phase_kind": p.kind.value,
-                        "vx_target": p.vx_target,
-                        "vy_target": p.vy_target,
-                        "wz_target": p.wz_target,
-                        "turn_radius_m": p.radius_m,
-                        "accel_target": float(p.vx_target / p.ramp_s) if p.ramp_s > 0 else 0.0,
-                    }
-                    for p in schedule
-                ]
-            )
         except ImportError:
-            return pl.DataFrame(
-                schema={
-                    "phase_label": pl.Utf8,
-                    "phase_kind": pl.Utf8,
-                    "vx_target": pl.Float64,
-                    "vy_target": pl.Float64,
-                    "wz_target": pl.Float64,
-                    "turn_radius_m": pl.Float64,
-                    "accel_target": pl.Float64,
+            logger.warning("task_generator is not importable, characterization phases fall back to cmd_vel classification")
+            return pl.DataFrame(schema=self._PHASE_MAP_SCHEMA)
+
+        envelope = resolve_envelope(self.robot_params.model)
+        schedule = build_schedule(
+            vx_max=float(envelope["vx_max"]),
+            vy_max=float(envelope["vy_max"]),
+            wz_max=float(envelope["wz_max"]),
+            radius=float(envelope["radius"]),
+            is_holonomic=bool(envelope["is_holonomic"]),
+        )
+
+        rows = []
+        for p in schedule:
+            accel = p.vx_target / p.ramp_s if p.ramp_s > 0.0 else 0.0
+            if p.kind is PhaseKind.RAMP_DOWN:
+                accel = -accel
+            rows.append(
+                {
+                    "phase_label": p.name,
+                    "phase_kind": p.kind.value,
+                    "vx_target": p.vx_target,
+                    "vy_target": p.vy_target,
+                    "wz_target": p.wz_target,
+                    "turn_radius_m": p.radius_m,
+                    "accel_target": accel,
                 }
             )
+        return pl.DataFrame(rows, schema=self._PHASE_MAP_SCHEMA)
 
     def _attach_phases(self, df: pl.DataFrame) -> pl.DataFrame:
         out = df
@@ -142,6 +160,15 @@ class CharacterizationCalculator(BaseMetricCalculator):
         else:
             out = out.with_columns(pl.col("label").fill_null("unknown").alias("phase_label"))
         out = out.join(self._phase_map(), on="phase_label", how="left")
+
+        unmatched = int(out["phase_kind"].null_count())
+        self._phase_coverage = 1.0 - unmatched / len(out) if len(out) else 1.0
+        if unmatched:
+            missing = sorted(set(out.filter(pl.col("phase_kind").is_null())["phase_label"].to_list()))
+            logger.warning(
+                f"characterization: {unmatched}/{len(out)} samples carry a label the rebuilt schedule does not "
+                f"contain, so they fall back to cmd_vel classification. First unmatched labels: {missing[:5]}"
+            )
 
         # Fallback classification for unmarked samples (markers never recorded).
         cmd_vx = (
@@ -176,11 +203,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             ).alias("turn_radius_m"),
         )
 
-        # Isolate initial transient acceleration window from steady-state cruise:
-        # - linear_vx_* steps: first 1.5s is acceleration & PID settling
-        # - lateral_vy_* steps: first 1.5s is acceleration settling
-        # - arc_vx_* steps: first 1.5s is arc entry settling
-        # - angular_wz_* steps: first 1.0s is rotational acceleration
+        # Split the acceleration window off the steady-state part of every dwell.
         if "time_ns" in out.columns and len(out) > 0:
             out = out.with_columns(
                 ((pl.col("phase_label") != pl.col("phase_label").shift(1)) |
@@ -194,14 +217,10 @@ class CharacterizationCalculator(BaseMetricCalculator):
             out = out.with_columns(
                 ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_elapsed_s")
             )
-            is_linear_dwell = pl.col("phase_label").str.starts_with("linear_vx_")
-            is_lateral_dwell = pl.col("phase_label").str.starts_with("lateral_vy_")
-            is_arc_dwell = pl.col("phase_label").str.starts_with("arc_vx_")
-            is_angular_dwell = pl.col("phase_label").str.starts_with("angular_wz_")
             out = out.with_columns(
-                pl.when((is_linear_dwell | is_lateral_dwell | is_arc_dwell) & (pl.col("_phase_elapsed_s") < 1.5))
+                pl.when(pl.col("phase_kind").is_in(["linear", "lateral", "arc"]) & (pl.col("_phase_elapsed_s") < _TRANSIENT_S))
                 .then(pl.lit("transient"))
-                .when(is_angular_dwell & (pl.col("_phase_elapsed_s") < 1.0))
+                .when((pl.col("phase_kind") == "angular") & (pl.col("_phase_elapsed_s") < _TRANSIENT_ANGULAR_S))
                 .then(pl.lit("transient"))
                 .otherwise(pl.col("phase_kind"))
                 .alias("phase_kind")
@@ -371,5 +390,6 @@ class CharacterizationCalculator(BaseMetricCalculator):
             "timeseries_char_energy_intensity": out["_e_per_m"].to_list(),
             "timeseries_char_energy_per_rad": out["_e_per_rad"].to_list(),
             "timeseries_char_leq_power": _leq_power(out["_dba"].fill_null(0.0)).to_list(),
+            "char_phase_coverage": self._phase_coverage,
         }
         return rows
