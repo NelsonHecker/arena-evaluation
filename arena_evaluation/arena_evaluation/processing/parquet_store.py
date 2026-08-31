@@ -8,6 +8,22 @@ from ..storage.schemas import RunMetadata, TopicBundle
 from ..storage.exceptions import SchemaViolationError
 
 
+def _without_empty_structs(value: object) -> object:
+    """Empty dicts infer as zero-field structs, which Parquet cannot represent."""
+    if isinstance(value, dict):
+        if not value:
+            return None
+        return {k: _without_empty_structs(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_without_empty_structs(v) for v in value]
+    return value
+
+
+def _writable_rows(rows: list[dict]) -> list[dict]:
+    """Metric rows with empty dicts replaced by None, so an episode with no doors writes."""
+    return [{k: _without_empty_structs(v) for k, v in row.items()} for row in rows]
+
+
 class ParquetStore:
     """
     Reads and writes metric DataFrames to Parquet format, embedding metadata in the footer.
@@ -34,6 +50,19 @@ class ParquetStore:
             
         import pyarrow.parquet as pq
         pq.write_table(table, dest)
+
+
+    @staticmethod
+    def write_rows(
+        rows: list[dict],
+        dest: pathlib.Path,
+        *,
+        schema_overrides: dict | None = None,
+        metadata: RunMetadata | None = None,
+    ) -> None:
+        """Build a frame from metric rows and write it, dropping empty dicts on the way."""
+        df = pl.DataFrame(_writable_rows(rows), schema_overrides=schema_overrides)
+        ParquetStore.write(df, dest, metadata)
 
     @staticmethod
     def read(source: pathlib.Path) -> tuple[pl.DataFrame, dict | None]:

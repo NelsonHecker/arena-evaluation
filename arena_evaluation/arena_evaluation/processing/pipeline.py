@@ -353,8 +353,9 @@ class ProcessingPipeline:
 
             if all_results:
                 try:
-                    df_ep = pl.DataFrame(all_results, schema_overrides=_METRIC_DTYPES)
-                    ParquetStore.write(df_ep, episode_dir / "metrics.parquet")
+                    ParquetStore.write_rows(
+                        all_results, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES
+                    )
                 except Exception:
                     pass
 
@@ -497,6 +498,5 @@ class ProcessingPipeline:
                             row["mar"] = round(float(pfi_val / robot_dev), 4)
 
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
-        df = pl.DataFrame(all_metrics, schema_overrides=_METRIC_DTYPES)
-        ParquetStore.write(df, combined_path)
+        ParquetStore.write_rows(all_metrics, combined_path, schema_overrides=_METRIC_DTYPES)
         print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")
