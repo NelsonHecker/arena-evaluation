@@ -73,7 +73,7 @@ _TERMINAL_OUTCOMES = {
 import arena_evaluation_msgs.srv as arena_evaluation_srvs
 
 from .metadata import IngestionMetadata
-from ..storage.manifest import MetadataWriter
+from arena_evaluation.storage.manifest import MetadataWriter
 
 
 class DataRecorderNode(Node):
@@ -601,7 +601,6 @@ class DataRecorderNode(Node):
                         self.current_metadata.robot_model.append(robot.model)
 
                     try:
-                        from ..storage.manifest import MetadataWriter
                         MetadataWriter.write(self.current_metadata, self.current_metadata_path)
                     except Exception as e:
                         self.get_logger().warn(f"Failed to write episode metadata: {e}")

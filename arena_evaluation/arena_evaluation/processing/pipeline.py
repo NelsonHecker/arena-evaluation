@@ -14,8 +14,13 @@ import traceback
 import multiprocessing
 import concurrent.futures
 
-from ..storage.schemas import RobotParams, EpisodeDescriptor, TopicBundle, AlignedEpisodeBundle
-from ..storage.folder_manager import FolderManager
+from arena_evaluation.storage.folder_manager import FolderManager
+from arena_evaluation.storage.schemas import (
+    AlignedEpisodeBundle,
+    EpisodeDescriptor,
+    RobotParams,
+    TopicBundle,
+)
 
 def _worker_init():
     import os
@@ -155,12 +160,11 @@ def _collect_native_topics(bundle) -> dict:
     return topics
 
 
-from ..storage.manifest import MetadataWriter
-from ..benchmark.profiler import PipelineProfiler
-
-from .mcap_reader import MCAPReader
-from .topic_aligner import TopicAligner
-from .parquet_store import ParquetStore, TopicParquetStore
+from arena_evaluation.benchmark.profiler import PipelineProfiler
+from arena_evaluation.processing.mcap_reader import MCAPReader
+from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquetStore
+from arena_evaluation.processing.topic_aligner import TopicAligner
+from arena_evaluation.storage.manifest import MetadataWriter
 
 # Columns whose values are all-None (no kind in the recording) or all-empty
 # (no collisions) would otherwise infer as Null / List(Null) and clash with
@@ -376,7 +380,7 @@ class ProcessingPipeline:
                         ep_metrics["local_planner"] = metadata.local_planner
                         ep_metrics["inter_planner"] = metadata.inter_planner or ""
                     else:
-                        from ..presentation.dimension_detector import split_planner_name
+                        from arena_evaluation.presentation.dimension_detector import split_planner_name
                         lp, ip = split_planner_name(ep.planner)
                         ep_metrics["local_planner"] = lp
                         ep_metrics["inter_planner"] = ip

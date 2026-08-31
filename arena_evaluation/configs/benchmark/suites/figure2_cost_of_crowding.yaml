@@ -1,0 +1,42 @@
+﻿name: figure2_cost_of_crowding
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_0_unhindered
+  map: hospital_1
+  robot: jackal
+  episodes: 10
+  timeout: 140.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig2_ward_tour_0peds
+
+- name: stage_1_social
+  map: hospital_1
+  robot: jackal
+  episodes: 10
+  timeout: 140.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig2_ward_tour_2peds
+
+- name: stage_2_crowded
+  map: hospital_1
+  robot: jackal
+  episodes: 10
+  timeout: 140.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig2_ward_tour_4peds

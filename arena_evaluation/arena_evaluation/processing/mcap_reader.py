@@ -11,7 +11,7 @@ from mcap_ros2.decoder import DecoderFactory
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ..storage.schemas import TopicBundle
+from arena_evaluation.storage.schemas import TopicBundle
 
 
 # Topic -> explicit PyArrow schema.  Only needed when RecordBatch.from_pydict

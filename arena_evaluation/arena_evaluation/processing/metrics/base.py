@@ -8,8 +8,7 @@ import numpy as np
 import numpy as np
 import polars as pl
 
-if typing.TYPE_CHECKING:
-    from ...storage.schemas import AlignedEpisodeBundle, RobotParams
+from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 
 class BaseMetricCalculator(ABC):

@@ -37,11 +37,12 @@ units:
   timeseries_char_energy_per_rad: J/rad
   timeseries_char_time_s: s
 summary:
-  - {metric: timeseries_char_power_total_w, label: Mean Power, format: "{:.1f}"}
+  - {metric: timeseries_char_speed_achieved, label: Mean Speed, format: "{:.2f}"}
+  - {metric: timeseries_char_power_total_w, label: Total Power, format: "{:.1f}"}
   - {metric: timeseries_char_power_mech_w, label: Mech Power, format: "{:.1f}"}
-  - {metric: timeseries_char_dba, label: Mean Level, format: "{:.1f}"}
+  - {metric: timeseries_char_dba, label: Sound Level, format: "{:.1f}"}
   - {metric: timeseries_char_energy_intensity, label: Energy Intensity, format: "{:.2f}"}
-summary_group_by: [timeseries_char_phase_kind]
+summary_group_by: [timeseries_char_phase_kind, timeseries_char_speed_target]
 plots:
   # ── Overview & Summary ──────────────────────────────────────────────────────
   - id: notes_table
@@ -51,6 +52,21 @@ plots:
     layout_group: overview
     options:
       notes: notes.yaml
+  - id: steady_state_working_points_table
+    type: table
+    title: Steady-State Cruise Operating Points (Power, Efficiency & Noise)
+    data_key: timeseries_char_speed_target
+    layout_group: overview
+    filter: {timeseries_char_phase_kind: linear}
+    options:
+      group_by: [robot, timeseries_char_speed_target]
+      columns:
+        - {metric: timeseries_char_speed_achieved, label: "Achieved Speed (m/s)", format: "{:.2f}"}
+        - {metric: timeseries_char_power_total_w, label: "Total Power (W)", format: "{:.1f}"}
+        - {metric: timeseries_char_power_mech_w, label: "Mech Power (W)", format: "{:.1f}"}
+        - {metric: timeseries_char_efficiency, label: "Efficiency", format: "{:.2f}"}
+        - {metric: timeseries_char_dba, label: "Sound Level (dBA)", format: "{:.1f}"}
+        - {metric: timeseries_char_energy_intensity, label: "Energy Intensity (J/m)", format: "{:.2f}"}
   - id: bar_idle_standby_power
     type: bar
     title: Baseline Standby / Idle Power Draw by Robot

@@ -45,7 +45,7 @@ _HEARTBEAT_S = 30.0
 # EpisodeRecord.outcome_state labels (task_generator_msgs/msg/EpisodeRecord.msg)
 _EPISODE_OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
 
-from ..storage.planner_names import split_planner_name
+from arena_evaluation.storage.planner_names import split_planner_name
 from .config import Contest, Suite
 from .state import (
     Manifest,

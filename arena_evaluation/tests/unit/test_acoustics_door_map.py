@@ -494,3 +494,59 @@ def test_door_segments_and_build_pixel_tl_integration(tmp_path):
     assert np.all(opened[mask] == 0.0)
     # neighbours beyond the door remain wall-blocked
     assert np.all(opened[5, 0:10] == 47.0)
+
+
+def test_acoustic_exposure_ingests_telemetry_source_dba(monkeypatch):
+    """Test that AcousticExposureCalculator directly ingests published source_dba without synthetic modifications."""
+    import polars as pl
+    from arena_evaluation.processing.metrics.ecological.acoustic_exposure import AcousticExposureCalculator
+    from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+
+    # Stub solver, map loading, and doors
+    monkeypatch.setattr(
+        "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_attenuations",
+        lambda **kwargs: np.array([10.0], dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        "arena_evaluation.processing.metrics.ecological.acoustic_exposure.door_segments",
+        lambda *args, **kwargs: {},
+    )
+
+    # 5 frames published by AcousticsPublisher:
+    # 0: normal driving (50 dBA) -> exposure 40 dBA
+    # 1: collision impact frame (100 dBA) -> exposure 90 dBA
+    # 2: ongoing collision (50 dBA) -> exposure 40 dBA
+    # 3: cleared (50 dBA) -> exposure 40 dBA
+    # 4: new impact frame (100 dBA) -> exposure 90 dBA
+    df = pl.DataFrame(
+        {
+            "time_ns": [0, 100_000_000, 200_000_000, 300_000_000, 400_000_000],
+            "pos_x_gt": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "pos_y_gt": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "total_level_af_dba": [50.0, 100.0, 50.0, 50.0, 100.0],
+            "peds_positions": [
+                [{"id": 1, "x": 2.0, "y": 0.0}],
+                [{"id": 1, "x": 2.0, "y": 0.0}],
+                [{"id": 1, "x": 2.0, "y": 0.0}],
+                [{"id": 1, "x": 2.0, "y": 0.0}],
+                [{"id": 1, "x": 2.0, "y": 0.0}],
+            ],
+        }
+    )
+    episode = AlignedEpisodeBundle(episode_id=0, data=df, start_pos=[], goal_pos=[], robot_name="env_0_jackal", map="map_empty")
+    calc = AcousticExposureCalculator(RobotParams())
+    monkeypatch.setattr(calc, "_get_map_occupancy", lambda m, run_dir=None: (np.zeros((10, 10), dtype=np.int8), 0.1, (0.0, 0.0, 0.0)))
+    out = calc.calculate(episode, {})
+
+    exposures = out["timeseries_acoustic_exposure_dba"]
+    # Frame 0: 50 - 10 = 40 dBA
+    assert abs(exposures[0][0] - 40.0) < 1e-3
+    # Frame 1: 100 - 10 = 90 dBA (impact sound propagated through geometry)
+    assert abs(exposures[1][0] - 90.0) < 1e-3
+    # Frame 2: 50 - 10 = 40 dBA
+    assert abs(exposures[2][0] - 40.0) < 1e-3
+    # Frame 3: 50 - 10 = 40 dBA
+    assert abs(exposures[3][0] - 40.0) < 1e-3
+    # Frame 4: 100 - 10 = 90 dBA
+    assert abs(exposures[4][0] - 90.0) < 1e-3
+

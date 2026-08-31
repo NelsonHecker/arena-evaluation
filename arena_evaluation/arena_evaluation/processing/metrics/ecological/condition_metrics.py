@@ -9,13 +9,16 @@ from collections import defaultdict
 import numpy as np
 import polars as pl
 
-from ..base import BaseMetricCalculator
-from .compliance_metrics import _extract_zone_geometry, _offset_zones, _reconstruct_events, _zone_membership, _ZoneGeometry
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.ecological.compliance_metrics import (
+    _ZoneGeometry,
+    _extract_zone_geometry,
+    _offset_zones,
+    _reconstruct_events,
+    _zone_membership,
+)
 
-if typing.TYPE_CHECKING:
-    from arena_simulation_setup.shared.conditions import EntityAtom, MembershipAtom
-
-    from ....storage.schemas import AlignedEpisodeBundle
+from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 logger = logging.getLogger(__name__)
 
