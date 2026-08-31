@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+import json
+import logging
 import pathlib
 import math
 import typing
@@ -13,37 +16,57 @@ import pyarrow.parquet as pq
 
 from ..storage.schemas import TopicBundle
 
+_log = logging.getLogger(__name__)
+_BUNDLE_FIELDS = frozenset(f.name for f in dataclasses.fields(TopicBundle))
+
 
 # Topic -> explicit PyArrow schema.  Only needed when RecordBatch.from_pydict
 # cannot infer column types from data (e.g. semantic_snapshot where each row
 # populates exactly one value_* column, leaving the rest None).
 _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
-    "semantic_snapshot": pa.schema([
-        ("time_ns", pa.int64()),
-        ("env_id", pa.int64()),
-        ("world", pa.string()),
-        ("entity", pa.string()),
-        ("kind", pa.string()),
-        ("field", pa.string()),
-        ("field_kind", pa.string()),
-        ("value_str", pa.string()),
-        ("value_num", pa.float64()),
-        ("value_bool", pa.bool_()),
-        ("value_list", pa.list_(pa.string())),
-    ]),
-    "collision_events": pa.schema([
-        ("time_ns", pa.int64()),
-        ("collision_event", pa.int64()),
-        ("collision_wall", pa.int64()),
-        ("collision_static", pa.int64()),
-        ("collision_pedestrian", pa.int64()),
-        ("collision_obstacle_ids", pa.list_(pa.string())),
-    ]),
+    "semantic_snapshot": pa.schema(
+        [
+            ("time_ns", pa.int64()),
+            ("env_id", pa.int64()),
+            ("world", pa.string()),
+            ("entity", pa.string()),
+            ("kind", pa.string()),
+            ("field", pa.string()),
+            ("field_kind", pa.string()),
+            ("value_str", pa.string()),
+            ("value_num", pa.float64()),
+            ("value_bool", pa.bool_()),
+            ("value_list", pa.list_(pa.string())),
+        ]
+    ),
+    "collision_events": pa.schema(
+        [
+            ("time_ns", pa.int64()),
+            ("collision_event", pa.int64()),
+            ("collision_wall", pa.int64()),
+            ("collision_static", pa.int64()),
+            ("collision_pedestrian", pa.int64()),
+            ("collision_obstacle_ids", pa.list_(pa.string())),
+        ]
+    ),
+    "characterization_schedule": pa.schema(
+        [
+            ("phase_label", pa.string()),
+            ("phase_kind", pa.string()),
+            ("vx_target", pa.float64()),
+            ("vy_target", pa.float64()),
+            ("wz_target", pa.float64()),
+            ("duration_s", pa.float64()),
+            ("ramp_s", pa.float64()),
+            ("turn_radius_m", pa.float64()),
+        ]
+    ),
 }
 
 
 class MCAPReader:
     """Reads an MCAP file and produces a TopicBundle of raw DataFrames."""
+
     def __init__(self, data_path: pathlib.Path):
         self.data_path = data_path
 
@@ -99,7 +122,7 @@ class MCAPReader:
                 raise FileNotFoundError(f"No MCAP file found in directory: {self.data_path}")
         else:
             mcap_files = [self.data_path]
-            
+
         for path_item in mcap_files:
             if not path_item.exists():
                 raise FileNotFoundError(f"MCAP file not found: {path_item}")
@@ -126,22 +149,20 @@ class MCAPReader:
                 "initialpose": defaultdict(list),
                 "tf_gt": defaultdict(list),
                 "characterization_phase": defaultdict(list),
+                "characterization_schedule": defaultdict(list),
             }
-            
+
         def new_env_data():
-            return {
-                "peds": defaultdict(list),
-                "episode_record": defaultdict(list)
-            }
-        
+            return {"peds": defaultdict(list), "episode_record": defaultdict(list)}
+
         env_data = defaultdict(new_env_data)
-        
+
         global_data = {
             "tf": defaultdict(list),
             "tf_static": defaultdict(list),
             "semantic_snapshot": defaultdict(list),
         }
-        
+
         robot_data = defaultdict(new_robot_data)
 
         from mcap.reader import NonSeekingReader
@@ -155,54 +176,48 @@ class MCAPReader:
 
         def flush_buffers():
             for topic_name, topic_data in global_data.items():
-                if not topic_data or len(topic_data.get("time_ns", [])) == 0:
+                if not topic_data or not any(len(column) for column in topic_data.values()):
                     continue
-                
+
                 schema_override = _TOPIC_SCHEMAS.get(topic_name)
                 batch = pa.RecordBatch.from_pydict(dict(topic_data), schema=schema_override)
                 writer_key = ("__global__", topic_name)
-                
+
                 if writer_key not in writers:
                     final_path = topics_dir / f"{topic_name}.parquet"
-                    writers[writer_key] = pq.ParquetWriter(
-                        final_path, schema=batch.schema, compression="zstd"
-                    )
+                    writers[writer_key] = pq.ParquetWriter(final_path, schema=batch.schema, compression="zstd")
                 writers[writer_key].write_batch(batch)
                 topic_data.clear()
-                
+
             for env_name, e_data in env_data.items():
                 for topic_name, topic_data in e_data.items():
-                    if not topic_data or len(topic_data.get("time_ns", [])) == 0:
+                    if not topic_data or not any(len(column) for column in topic_data.values()):
                         continue
-                        
+
                     batch = pa.RecordBatch.from_pydict(dict(topic_data))
                     writer_key = (env_name, topic_name)
-                    
+
                     if writer_key not in writers:
                         env_dir = topics_dir / env_name
                         env_dir.mkdir(parents=True, exist_ok=True)
                         final_path = env_dir / f"{topic_name}.parquet"
-                        writers[writer_key] = pq.ParquetWriter(
-                            final_path, schema=batch.schema, compression="zstd"
-                        )
+                        writers[writer_key] = pq.ParquetWriter(final_path, schema=batch.schema, compression="zstd")
                     writers[writer_key].write_batch(batch)
                     topic_data.clear()
-                
+
             for robot_name, r_data in robot_data.items():
                 for topic_name, topic_data in r_data.items():
-                    if not topic_data or len(topic_data.get("time_ns", [])) == 0:
+                    if not topic_data or not any(len(column) for column in topic_data.values()):
                         continue
-                        
+
                     batch = pa.RecordBatch.from_pydict(dict(topic_data), schema=_TOPIC_SCHEMAS.get(topic_name))
                     writer_key = (robot_name, topic_name)
-                    
+
                     if writer_key not in writers:
                         robot_dir = topics_dir / robot_name
                         robot_dir.mkdir(parents=True, exist_ok=True)
                         final_path = robot_dir / f"{topic_name}.parquet"
-                        writers[writer_key] = pq.ParquetWriter(
-                            final_path, schema=batch.schema, compression="zstd"
-                        )
+                        writers[writer_key] = pq.ParquetWriter(final_path, schema=batch.schema, compression="zstd")
                     writers[writer_key].write_batch(batch)
                     topic_data.clear()
 
@@ -210,7 +225,7 @@ class MCAPReader:
             for mfile in mcap_files:
                 with open(mfile, "rb") as f:
                     reader = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
-                    
+
                     msg_count = 0
                     decoders = {}
                     collision_kind_schema_cache: dict[int, bool] = {}
@@ -230,22 +245,24 @@ class MCAPReader:
                             msg_count += 1
                         except Exception as e:
                             import logging
+
                             logging.getLogger(__name__).warning(f"Error reading MCAP message on {channel.topic} at index {msg_count}: {e}")
                             continue
 
                         topic = channel.topic
                         ts_ns = message.log_time
                         appended = False
-                        
+
                         parts = [p for p in topic.strip('/').split('/') if p]
-                    
+
                         env_key = "env_0"
                         match = re.search(r'(env_\d+)', topic)
                         if match:
                             env_key = match.group(1)
-                        
+
                         def get_robot_name(parts, env_key):
-                            if len(parts) < 2: return f"{env_key}_unknown"
+                            if len(parts) < 2:
+                                return f"{env_key}_unknown"
                             base = parts[-2]
                             if base == env_key:
                                 return env_key
@@ -254,27 +271,22 @@ class MCAPReader:
                             elif base == "power_publisher":
                                 base = parts[-3] if len(parts) >= 3 else base
                             return f"{env_key}_{base}"
-                        
+
                         # Odom
                         if topic.endswith("/odom") and "velocity_controller" not in topic:
                             robot_name = get_robot_name(parts, env_key)
-                                
+
                             target = robot_data[robot_name]["odom"]
                             target["time_ns"].append(ts_ns)
                             target["pos_x"].append(ros_msg.pose.pose.position.x)
                             target["pos_y"].append(ros_msg.pose.pose.position.y)
-                        
-                            yaw = self._quaternion_to_yaw(
-                                ros_msg.pose.pose.orientation.x,
-                                ros_msg.pose.pose.orientation.y,
-                                ros_msg.pose.pose.orientation.z,
-                                ros_msg.pose.pose.orientation.w
-                            )
+
+                            yaw = self._quaternion_to_yaw(ros_msg.pose.pose.orientation.x, ros_msg.pose.pose.orientation.y, ros_msg.pose.pose.orientation.z, ros_msg.pose.pose.orientation.w)
                             target["yaw"].append(yaw)
                             target["vel_linear"].append(ros_msg.twist.twist.linear.x)
                             target["vel_angular"].append(ros_msg.twist.twist.angular.z)
                             appended = True
-                    
+
                         # Scan
                         elif topic.endswith("/scan") or topic.endswith("/lidar"):
                             robot_name = get_robot_name(parts, env_key)
@@ -284,7 +296,7 @@ class MCAPReader:
                             target["scan_min"].append(ros_msg.range_min)
                             target["scan_range_max"].append(ros_msg.range_max)
                             appended = True
-                        
+
                         # Cmd_vel
                         elif topic.endswith("/cmd_vel"):
                             robot_name = get_robot_name(parts, env_key)
@@ -307,25 +319,25 @@ class MCAPReader:
                             target["velocity"].append(list(ros_msg.velocity))
                             target["effort"].append(list(ros_msg.effort))
                             appended = True
-    
+
                         # Pedestrians
                         elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
                             target = env_data[env_key]["peds"]
                             target["time_ns"].append(ts_ns)
-                            
+
                             if schema.name == "arena_people_msgs/msg/Pedestrians":
                                 agents = ros_msg.pedestrians
                                 is_pose2d = False
                             else:
                                 agents = [a for a in ros_msg.agents if a.kind == 0]
                                 is_pose2d = True
-    
+
                             target["num_pedestrians"].append(len(agents))
-                            
+
                             positions = []
                             headings = []
                             twists = []
-                            
+
                             for p in agents:
                                 if is_pose2d:
                                     positions.extend([p.pose.x, p.pose.y, 0.0])
@@ -334,25 +346,20 @@ class MCAPReader:
                                 else:
                                     # Positions: flattened list [x1, y1, z1, x2, y2, z2, ...]
                                     positions.extend([p.pose.position.x, p.pose.position.y, p.pose.position.z])
-                                    
+
                                     # Headings: calculate yaw from quaternion
-                                    yaw = self._quaternion_to_yaw(
-                                        p.pose.orientation.x,
-                                        p.pose.orientation.y,
-                                        p.pose.orientation.z,
-                                        p.pose.orientation.w
-                                    )
+                                    yaw = self._quaternion_to_yaw(p.pose.orientation.x, p.pose.orientation.y, p.pose.orientation.z, p.pose.orientation.w)
                                     headings.append(yaw)
-                                    
+
                                     # Twists: flattened list of linear velocities [vx1, vy1, vz1, vx2, vy2, vz2, ...]
                                     twists.extend([p.twist.linear.x, p.twist.linear.y, p.twist.linear.z])
-                                    
+
                             target["peds_positions"].append(positions)
                             target["peds_headings"].append(headings)
                             target["peds_twists"].append(twists)
-                            
+
                             appended = True
-    
+
                         # Acoustics (ego-noise estimates from the M4 model)
                         elif topic.endswith("/acoustics"):
                             robot_name = get_robot_name(parts, env_key)
@@ -374,6 +381,17 @@ class MCAPReader:
                             target["label"].append(str(ros_msg.data))
                             appended = True
 
+                        # Characterization schedule: the phase table the sweep actually ran, latest wins
+                        elif topic.endswith("/characterization_schedule"):
+                            rows = self._schedule_rows(str(ros_msg.data))
+                            if rows is not None:
+                                robot_name = get_robot_name(parts, env_key)
+                                target = robot_data[robot_name]["characterization_schedule"]
+                                target.clear()
+                                for column, values in rows.items():
+                                    target[column].extend(values)
+                                appended = True
+
                         # Episode records
                         elif topic.endswith("/state/episode"):
                             target = env_data[env_key]["episode_record"]
@@ -382,10 +400,11 @@ class MCAPReader:
                             target["outcome_state"].append(ros_msg.outcome_state)
                             target["outcome_info"].append(ros_msg.outcome_info)
                             target["goal_uuid"].append(ros_msg.goal_uuid)
-                            
+
                             robots_yaml = ""
                             try:
                                 import yaml
+
                                 robots_dict = {}
                                 for p in ros_msg.robots_params:
                                     robots_dict[p.name] = self._param_value_to_py(p.value)
@@ -395,7 +414,7 @@ class MCAPReader:
                                 pass
                             target["robots_params"].append(robots_yaml)
                             appended = True
-    
+
                         # Semantic snapshot (latched, one row per annotated entity)
                         elif topic.endswith("/state/semantics"):
                             target = global_data["semantic_snapshot"]
@@ -433,7 +452,7 @@ class MCAPReader:
                             target["collision_pedestrian"].append(pedestrian_count)
                             target["collision_obstacle_ids"].append(sorted({ev.obstacle_id for ev in ros_msg.events}))
                             appended = True
-                            
+
                         # Collision Monitor State (Nav2)
                         elif topic.endswith("/collision_monitor_state"):
                             robot_name = get_robot_name(parts, env_key)
@@ -442,7 +461,7 @@ class MCAPReader:
                             target["action_type"].append(ros_msg.action_type)
                             target["polygon_name"].append(ros_msg.polygon_name)
                             appended = True
-    
+
                         # Power
                         elif topic.endswith("/power_publisher/power"):
                             robot_name = get_robot_name(parts, env_key)
@@ -457,7 +476,7 @@ class MCAPReader:
                             target["joint_thermal_power_w"].append(list(ros_msg.joint_thermal_power_w))
                             target["joint_total_power_w"].append(list(ros_msg.joint_total_power_w))
                             appended = True
-    
+
                         # Energy
                         elif topic.endswith("/power_publisher/energy"):
                             robot_name = get_robot_name(parts, env_key)
@@ -466,7 +485,7 @@ class MCAPReader:
                             target["total_energy_consumed_wh"].append(ros_msg.total_energy_consumed_wh)
                             target["battery_soc_percent"].append(ros_msg.battery_soc_percent)
                             appended = True
-    
+
                         # Global plan
                         elif topic.endswith("/plan") or topic.endswith("/global_plan"):
                             robot_name = get_robot_name(parts, env_key)
@@ -478,17 +497,12 @@ class MCAPReader:
                             for pose_stamped in ros_msg.poses:
                                 poses_x.append(pose_stamped.pose.position.x)
                                 poses_y.append(pose_stamped.pose.position.y)
-                                poses_yaw.append(self._quaternion_to_yaw(
-                                    pose_stamped.pose.orientation.x,
-                                    pose_stamped.pose.orientation.y,
-                                    pose_stamped.pose.orientation.z,
-                                    pose_stamped.pose.orientation.w
-                                ))
+                                poses_yaw.append(self._quaternion_to_yaw(pose_stamped.pose.orientation.x, pose_stamped.pose.orientation.y, pose_stamped.pose.orientation.z, pose_stamped.pose.orientation.w))
                             target["poses_x"].append(poses_x)
                             target["poses_y"].append(poses_y)
                             target["poses_yaw"].append(poses_yaw)
                             appended = True
-                            
+
                         # Initialpose
                         elif topic.endswith("/initialpose"):
                             robot_name = get_robot_name(parts, env_key)
@@ -496,14 +510,9 @@ class MCAPReader:
                             target["time_ns"].append(ts_ns)
                             target["pos_x"].append(ros_msg.pose.pose.position.x)
                             target["pos_y"].append(ros_msg.pose.pose.position.y)
-                            target["yaw"].append(self._quaternion_to_yaw(
-                                ros_msg.pose.pose.orientation.x,
-                                ros_msg.pose.pose.orientation.y,
-                                ros_msg.pose.pose.orientation.z,
-                                ros_msg.pose.pose.orientation.w
-                            ))
+                            target["yaw"].append(self._quaternion_to_yaw(ros_msg.pose.pose.orientation.x, ros_msg.pose.pose.orientation.y, ros_msg.pose.pose.orientation.z, ros_msg.pose.pose.orientation.w))
                             appended = True
-                            
+
                         # TF processing
                         elif topic in ("/tf", "tf", "/tf_static", "tf_static"):
                             target_dict = global_data["tf_static"] if "static" in topic else global_data["tf"]
@@ -519,40 +528,26 @@ class MCAPReader:
                                 target_dict["rot_z"].append(t.transform.rotation.z)
                                 target_dict["rot_w"].append(t.transform.rotation.w)
                                 appended = True
-    
+
                                 # Detect ground-truth map/world/odom -> base_link transform if available
                                 parent = t.header.frame_id.strip('/')
                                 child = t.child_frame_id.strip('/')
                                 parent_lower = parent.lower()
                                 child_lower = child.lower()
-                                
-                                is_world_frame = (
-                                    parent_lower in ("map", "world", "odom") or
-                                    parent_lower.endswith("/map") or
-                                    parent_lower.endswith("/world") or
-                                    parent_lower.endswith("/odom")
-                                )
-                                is_base_frame = (
-                                    child_lower.endswith("base_link") or
-                                    child_lower.endswith("base_footprint") or
-                                    "base_link" in child_lower or
-                                    "base_footprint" in child_lower
-                                )
-                                
+
+                                is_world_frame = parent_lower in ("map", "world", "odom") or parent_lower.endswith("/map") or parent_lower.endswith("/world") or parent_lower.endswith("/odom")
+                                is_base_frame = child_lower.endswith("base_link") or child_lower.endswith("base_footprint") or "base_link" in child_lower or "base_footprint" in child_lower
+
                                 # Filter by env_prefix if detected
                                 if env_prefix and env_prefix not in child_lower:
                                     continue
-                                    
+
                                 if is_world_frame and is_base_frame:
                                     child_parts = child.split('/')
-                                    robot_name = get_robot_name(child_parts, env_key)
-                                                                   
-                                    yaw_val = self._quaternion_to_yaw(
-                                        t.transform.rotation.x,
-                                        t.transform.rotation.y,
-                                        t.transform.rotation.z,
-                                        t.transform.rotation.w
-                                    )
+                                    # /tf carries every env, so the env comes from the frame, not the topic.
+                                    robot_name = get_robot_name(child_parts, self._frame_env(child, env_key))
+
+                                    yaw_val = self._quaternion_to_yaw(t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w)
                                     target = robot_data[robot_name]["tf_gt"]
                                     target["time_ns"].append(ts_ns)
                                     target["pos_x_gt"].append(t.transform.translation.x)
@@ -560,7 +555,7 @@ class MCAPReader:
                                     target["yaw_gt"].append(yaw_val)
                                     target["frame_id"].append(parent)
                                     appended = True
-    
+
                         if appended:
                             accumulated_count += 1
                             if accumulated_count >= 10000:
@@ -574,9 +569,40 @@ class MCAPReader:
         return self.load_bundles(topics_dir, map_name_fallback=map_name_fallback)
 
     @staticmethod
+    def _frame_env(frame: str, default: str) -> str:
+        """The env_N segment of a frame id, else default."""
+        match = re.search(r"(env_\d+)", frame)
+        return match.group(1) if match else default
+
+    @staticmethod
+    def _schedule_rows(payload: str) -> dict[str, list] | None:
+        """Columns of a recorded characterization schedule, None when the payload is not one."""
+        rows: dict[str, list] = defaultdict(list)
+        try:
+            for phase in json.loads(payload)["phases"]:
+                rows["phase_label"].append(str(phase["name"]))
+                rows["phase_kind"].append(str(phase["kind"]))
+                rows["vx_target"].append(float(phase["vx_target"]))
+                rows["vy_target"].append(float(phase["vy_target"]))
+                rows["wz_target"].append(float(phase["wz_target"]))
+                rows["duration_s"].append(float(phase["duration_s"]))
+                rows["ramp_s"].append(float(phase["ramp_s"]))
+                rows["turn_radius_m"].append(float(phase["radius_m"]))
+        except (ValueError, KeyError, TypeError) as e:
+            _log.warning(f"characterization_schedule payload rejected: {e!r}")
+            return None
+        return dict(rows)
+
+    @staticmethod
     def _append_semantic_field(
-        target: dict, ts_ns: int, env_id: int, world: str, entity: str, kind: str,
-        field: str, field_kind: str,
+        target: dict,
+        ts_ns: int,
+        env_id: int,
+        world: str,
+        entity: str,
+        kind: str,
+        field: str,
+        field_kind: str,
         value_str: str | None = None,
         value_num: float | None = None,
         value_bool: bool | None = None,
@@ -599,22 +625,18 @@ class MCAPReader:
     def _append_semantic_entity(target: dict, ts_ns: int, env_id: int, world: str, ent) -> None:
         """Flatten one SemanticEntityState into long-format rows."""
         for name, value in zip(ent.discrete_names, ent.discrete_values):
-            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind,
-                                              name, "discrete", value_str=str(value))
+            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, name, "discrete", value_str=str(value))
         for name, value in zip(ent.continuous_names, ent.continuous_values):
-            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind,
-                                              name, "continuous", value_num=float(value))
+            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, name, "continuous", value_num=float(value))
         for name, value in zip(ent.predicate_names, ent.predicate_values):
-            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind,
-                                              name, "predicate", value_bool=bool(value))
-        MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind,
-                                          "members", "members", value_list=list(ent.members))
+            MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, name, "predicate", value_bool=bool(value))
+        MCAPReader._append_semantic_field(target, ts_ns, env_id, world, ent.entity, ent.kind, "members", "members", value_list=list(ent.members))
 
     @staticmethod
     def load_bundles(topics_dir: pathlib.Path, map_name_fallback: str | None = None) -> dict[str, TopicBundle]:
         # Reconstruct dict[str, TopicBundle]
         bundles = {}
-        
+
         def load_parquet(path):
             if path.exists():
                 lf = pl.scan_parquet(path)
@@ -632,7 +654,7 @@ class MCAPReader:
 
         # Build each robot's bundle
         robot_dirs = [d for d in topics_dir.iterdir() if d.is_dir()]
-        
+
         # Calculate env offsets
         env_offsets = {}
         if global_bundle.tf_static is not None:
@@ -649,7 +671,7 @@ class MCAPReader:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
                 pass
-                
+
         if global_bundle.tf is not None:
             try:
                 tf_df = global_bundle.tf.collect()
@@ -664,36 +686,36 @@ class MCAPReader:
                             env_offsets[match.group(1)] = (row["trans_x"], row["trans_y"])
             except Exception:
                 pass
-                
+
         # Fallback for env_0 if tf_static recording missed it
         if "env_0" not in env_offsets:
             env_offsets["env_0"] = (5.0, 5.0)
-        
+
         # If no explicit robot dirs but we have data, maybe it was named "unknown"
         for robot_dir in robot_dirs:
             robot_name = robot_dir.name
-            
+
             # Skip pure environment directories (e.g. env_0) if odom.parquet is absent and other robot directories exist
             if not (robot_dir / "odom.parquet").exists():
                 if any((d / "odom.parquet").exists() for d in robot_dirs if d != robot_dir):
                     continue
 
             rb = TopicBundle()
-            
+
             match = re.search(r'(env_\d+)', robot_name)
             env_key = match.group(1) if match else "env_0"
             ox, oy = env_offsets.get(env_key, (0.0, 0.0))
-            
+
             # Copy global references
             rb.tf = global_bundle.tf
             rb.tf_static = global_bundle.tf_static
             rb.semantic_snapshot = global_bundle.semantic_snapshot
-            
+
             # Load env references
             env_dir = topics_dir / env_key
             rb.peds = load_parquet(env_dir / "peds.parquet")
             rb.episode_record = load_parquet(env_dir / "episode_record.parquet")
-            
+
             mx, my = 0.0, 0.0
             map_name = None
             if rb.episode_record is not None:
@@ -703,27 +725,29 @@ class MCAPReader:
                         map_name = str(ep_df["map"][0])
                 except Exception:
                     pass
-            
+
             if not map_name and map_name_fallback:
                 map_name = map_name_fallback
 
             if map_name:
                 try:
                     from arena_evaluation.processing.map_registry import MapRegistry
+
                     map_meta = MapRegistry.get_map_metadata(map_name, run_dir=topics_dir.parent)
                     if map_meta and "origin" in map_meta and map_meta["origin"]:
                         mx, my = float(map_meta["origin"][0]), float(map_meta["origin"][1])
                 except Exception:
                     pass
-            
+
             total_ox = ox + mx
             total_oy = oy + my
-            
+
             if rb.episode_record is not None and (total_ox != 0.0 or total_oy != 0.0):
                 try:
                     import json
+
                     ep_df = rb.episode_record.collect() if isinstance(rb.episode_record, pl.LazyFrame) else rb.episode_record
-                    
+
                     if len(ep_df) > 0:
                         new_starts = []
                         new_goals = []
@@ -738,60 +762,46 @@ class MCAPReader:
                                 g[1] -= total_oy
                             new_starts.append(json.dumps(s))
                             new_goals.append(json.dumps(g))
-                            
-                        ep_df = ep_df.with_columns([
-                            pl.Series("start_pos", new_starts),
-                            pl.Series("goal_pos", new_goals)
-                        ])
+
+                        ep_df = ep_df.with_columns([pl.Series("start_pos", new_starts), pl.Series("goal_pos", new_goals)])
                         rb.episode_record = ep_df.lazy() if isinstance(rb.episode_record, pl.LazyFrame) else ep_df
                 except Exception as e:
                     import logging
+
                     logging.getLogger(__name__).warning(f"Failed to offset episode_record coordinates: {e}")
                     pass
-            
+
             if rb.peds is not None and (total_ox != 0.0 or total_oy != 0.0):
                 try:
-                    rb.peds = rb.peds.with_columns([
-                        pl.col("peds_positions").list.eval(
-                            pl.when(pl.int_range(0, pl.element().len()) % 3 == 0).then(pl.element() - total_ox)
-                            .when(pl.int_range(0, pl.element().len()) % 3 == 1).then(pl.element() - total_oy)
-                            .otherwise(pl.element())
-                        )
-                    ])
+                    rb.peds = rb.peds.with_columns([pl.col("peds_positions").list.eval(pl.when(pl.int_range(0, pl.element().len()) % 3 == 0).then(pl.element() - total_ox).when(pl.int_range(0, pl.element().len()) % 3 == 1).then(pl.element() - total_oy).otherwise(pl.element()))])
                 except Exception:
                     pass
-            
-            ROBOT_TOPIC_NAMES = ("odom", "scan", "cmd_vel", "joint_states", "collision_events", "collision_monitor_state", "power", "energy", "plan", "initialpose", "tf_gt")
-            for t_name in ROBOT_TOPIC_NAMES:
-                lf = load_parquet(robot_dir / f"{t_name}.parquet")
-                if lf is not None:
-                    if (total_ox != 0.0 or total_oy != 0.0):
-                        if t_name == "initialpose":
-                            try:
-                                lf = lf.with_columns([
-                                    (pl.col("pos_x") - total_ox).alias("pos_x"),
-                                    (pl.col("pos_y") - total_oy).alias("pos_y")
-                                ])
-                            except Exception:
-                                pass
-                        elif t_name == "tf_gt":
-                            try:
-                                lf = lf.with_columns([
-                                    (pl.col("pos_x_gt") - total_ox).alias("pos_x_gt"),
-                                    (pl.col("pos_y_gt") - total_oy).alias("pos_y_gt")
-                                ])
-                            except Exception:
-                                pass
-                        elif t_name == "plan":
-                            try:
-                                lf = lf.with_columns([
-                                    pl.col("poses_x").list.eval(pl.element() - total_ox),
-                                    pl.col("poses_y").list.eval(pl.element() - total_oy)
-                                ])
-                            except Exception:
-                                pass
-                    setattr(rb, t_name, lf)
-                    
+
+            for parquet in sorted(robot_dir.glob("*.parquet")):
+                t_name = parquet.stem
+                if t_name not in _BUNDLE_FIELDS:
+                    continue
+                lf = load_parquet(parquet)
+                if lf is None:
+                    continue
+                if total_ox != 0.0 or total_oy != 0.0:
+                    if t_name == "initialpose":
+                        try:
+                            lf = lf.with_columns([(pl.col("pos_x") - total_ox).alias("pos_x"), (pl.col("pos_y") - total_oy).alias("pos_y")])
+                        except Exception:
+                            pass
+                    elif t_name == "tf_gt":
+                        try:
+                            lf = lf.with_columns([(pl.col("pos_x_gt") - total_ox).alias("pos_x_gt"), (pl.col("pos_y_gt") - total_oy).alias("pos_y_gt")])
+                        except Exception:
+                            pass
+                    elif t_name == "plan":
+                        try:
+                            lf = lf.with_columns([pl.col("poses_x").list.eval(pl.element() - total_ox), pl.col("poses_y").list.eval(pl.element() - total_oy)])
+                        except Exception:
+                            pass
+                setattr(rb, t_name, lf)
+
             bundles[robot_name] = rb
-            
+
         return bundles

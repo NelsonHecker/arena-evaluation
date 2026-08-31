@@ -60,7 +60,6 @@ plots:
         - {metric: kinetic_energy_demand_j, label: Kinetic Demand (J), format: "{:.1f}"}
         - {metric: friction_dissipation_j, label: Friction Work (J), format: "{:.1f}"}
         - {metric: ped_leq_exposure_dba, label: Leq Noise (dBA), format: "{:.1f}"}
-      notes: notes.yaml
   - id: radar_ecological
     type: radar
     title: Multi-Axis Ecological & Energetic Profile

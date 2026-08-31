@@ -123,38 +123,14 @@ class MetricRegistry:
     def run(
         self,
         episode: AlignedEpisodeBundle,
+        *,
+        available_topics: set[str],
         pedsim_available: bool = True,
-        available_topics: set[str] | None = None,
         progress_callback: typing.Callable[[str, int, int], None] | None = None,
     ) -> dict[str, typing.Any]:
         """Executes all calculators in topological order."""
         results = {}
 
-        if available_topics is None:
-            available_topics = set(["odom"])
-            if episode.data is not None:
-                cols = set(episode.data.columns)
-                if "scan_ranges" in cols or "scan_min" in cols:
-                    available_topics.add("scan")
-                if "linear_x" in cols or "cmd_linear" in cols or "cmd_vel" in cols:
-                    available_topics.add("cmd_vel")
-                if "joint_vel_left" in cols or "joint_vel_right" in cols or "joint_velocities" in cols:
-                    available_topics.add("joint_states")
-                if "peds_positions" in cols:
-                    available_topics.add("peds")
-                if "collision_event" in cols:
-                    available_topics.add("collision_events")
-                if "action_type" in cols:
-                    available_topics.add("collision_monitor_state")
-                if "pos_x_gt" in cols:
-                    available_topics.add("tf_gt")
-                if "total_power_w" in cols:
-                    available_topics.add("power")
-                if "total_energy_consumed_wh" in cols or "battery_soc_percent" in cols:
-                    available_topics.add("energy")
-                if "total_level_af_dba" in cols:
-                    available_topics.add("acoustics")
-        
         total_calcs = sum(len(stage) for stage in self.execution_stages)
         calc_idx = 0
 

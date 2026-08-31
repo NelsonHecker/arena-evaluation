@@ -62,7 +62,6 @@ plots:
         - {metric: social_force_ped_max, label: Max Ped Force, format: "{:.2f}"}
         - {metric: ped_path_deflection_m, label: Ped Deflect., format: "{:.2f}"}
         - {metric: aeps_linear_s, label: AEPS (s), format: "{:.2f}"}
-      notes: notes.yaml
   - id: radar_social
     type: radar
     title: Multi-Axis Social Interaction Profile

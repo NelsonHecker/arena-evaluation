@@ -6,12 +6,13 @@ if TYPE_CHECKING:
     import polars as pl
 
 from pydantic import BaseModel, Field
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import typing
 
 
 class RunMetadata(BaseModel):
     """Metadata for a single episode, serialized to episode_XXX.yaml."""
+
     benchmark_id: str
     planner: str
     robot_model: list[str] = Field(default_factory=list)
@@ -62,6 +63,7 @@ class RunMetadata(BaseModel):
 @dataclass(frozen=True)
 class RobotParams:
     """Robot physical parameters loaded at runtime."""
+
     model: str = "unknown"
     robot_radius: float = 0.25
     laser_min_range: float = 0.0
@@ -87,9 +89,7 @@ class RobotParams:
         component_masses: dict[str, float] = {}
 
         try:
-            robot_dir = os.path.join(
-                get_package_share_directory("arena_robots"), "robots", model
-            )
+            robot_dir = os.path.join(get_package_share_directory("arena_robots"), "robots", model)
         except Exception:
             return cls(model=model)
 
@@ -101,8 +101,7 @@ class RobotParams:
                 return {}
 
         radius = float(_read(os.path.join(robot_dir, "caps", "mobile.yaml")).get("radius", radius))
-        base_mass = float(_read(os.path.join(robot_dir, "model_params.yaml"))
-                          .get("mass", {}).get("base_kg", base_mass))
+        base_mass = float(_read(os.path.join(robot_dir, "model_params.yaml")).get("mass", {}).get("base_kg", base_mass))
 
         components_root = os.path.join(os.path.dirname(os.path.dirname(robot_dir)), "components")
         for kind, entries in _read(os.path.join(robot_dir, "assembly.yaml")).get("defaults", {}).items():
@@ -127,6 +126,7 @@ class RobotParams:
 @dataclass(frozen=True)
 class RunDescriptor:
     """Descriptor for a single run directory."""
+
     run_dir: str
     benchmark_id: str
     planner: str
@@ -136,6 +136,7 @@ class RunDescriptor:
 @dataclass(frozen=True)
 class EpisodeDescriptor:
     """Descriptor for an episode directory in flat storage."""
+
     episode_dir: str
     benchmark_id: str
     episode_id: int
@@ -149,6 +150,7 @@ class EpisodeDescriptor:
 @dataclass
 class TopicBundle:
     """Raw topic dataframes extracted from MCAP."""
+
     odom: pl.DataFrame | None = None
     scan: pl.DataFrame | None = None
     cmd_vel: pl.DataFrame | None = None
@@ -162,16 +164,22 @@ class TopicBundle:
     acoustics: pl.DataFrame | None = None
     plan: pl.DataFrame | None = None
     characterization_phase: pl.DataFrame | None = None
+    characterization_schedule: pl.DataFrame | None = None
     initialpose: pl.DataFrame | None = None
     tf: pl.DataFrame | None = None
     tf_static: pl.DataFrame | None = None
     tf_gt: pl.DataFrame | None = None
     semantic_snapshot: pl.DataFrame | None = None
 
+    def available(self) -> set[str]:
+        """Names of the topics this bundle carries."""
+        return {f.name for f in fields(self) if getattr(self, f.name) is not None}
+
 
 @dataclass
 class AlignedEpisodeBundle:
     """Aligned topic data for a single episode."""
+
     episode_id: int
     data: pl.DataFrame
     start_pos: list[float]
@@ -180,6 +188,8 @@ class AlignedEpisodeBundle:
     robot_name: str | None = None
     semantic_snapshot: pl.DataFrame | None = None
     conditions: list[dict] | None = None
+    # Final EpisodeRecord.outcome_state of the recording, None when no record was captured.
+    outcome_state: int | None = None
     run: typing.Any = None
     folder_manager: typing.Any = None
     peds: pl.DataFrame | None = None
@@ -189,6 +199,7 @@ class AlignedEpisodeBundle:
 
 class PlotSpec(BaseModel):
     """Specification for a single plot in a report manifest."""
+
     id: str
     type: str
     title: str
@@ -200,4 +211,3 @@ class PlotSpec(BaseModel):
     options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
     data_source: str | None = None
-

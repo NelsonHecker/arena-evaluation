@@ -1,4 +1,5 @@
 """Unit tests for arena_evaluation.ingestion.topics (topic registry)."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -45,6 +46,7 @@ _TOPIC_EXPECTATIONS = [
     ("energy", "/power_publisher/energy", "Energy", True, False),
     ("acoustics", "/acoustics", "Acoustics", True, False),
     ("characterization_phase", "/characterization_phase", "String", False, False),
+    ("characterization_schedule", "/characterization_schedule", "String", False, True),
     ("collision_monitor_state", "/collision_monitor_state", "CollisionMonitorState", False, False),
 ]
 
@@ -73,17 +75,19 @@ def test_get_topics_topic_definition_properties(key, name, msg_name, throttled, 
 
 
 def test_get_topics_namespace_and_parent_namespace():
-    topics = get_topics("env_0", "arena_0")
+    # parent_namespace is the recorder's own namespace, the task generator node's
+    # fully qualified name. Pedestrians are published one level up, by the env.
+    topics = get_topics("env_0", "arena_0/task_generator_node")
     assert topics["cmd_vel"].name_template == "/env_0/cmd_vel"
     assert topics["joint_states"].name_template == "/env_0/joint_states"
     assert topics["plan"].name_template == "/env_0/plan"
-    assert topics["goal_pose"].name_template == "/arena_0/goal_pose"
-    assert topics["initialpose"].name_template == "/arena_0/initialpose"
+    assert topics["goal_pose"].name_template == "/arena_0/task_generator_node/goal_pose"
+    assert topics["initialpose"].name_template == "/arena_0/task_generator_node/initialpose"
     assert topics["peds"].name_template == "/arena_0/arena_peds"
-    assert topics["agent_states"].name_template == "/arena_0/agent_states"
-    assert topics["episode_record"].name_template == "/arena_0/state/episode"
-    assert topics["robots_fleet"].name_template == "/arena_0/state/robots"
-    assert topics["semantic_snapshot"].name_template == "/arena_0/state/semantics"
+    assert topics["agent_states"].name_template == "/arena_0/task_generator_node/agent_states"
+    assert topics["episode_record"].name_template == "/arena_0/task_generator_node/state/episode"
+    assert topics["robots_fleet"].name_template == "/arena_0/task_generator_node/state/robots"
+    assert topics["semantic_snapshot"].name_template == "/arena_0/task_generator_node/state/semantics"
     assert topics["power"].name_template == "/env_0/power_publisher/power"
     assert topics["energy"].name_template == "/env_0/power_publisher/energy"
     assert topics["collision_events"].name_template == "/env_0/collision_events"
@@ -132,9 +136,7 @@ def test_topic_definition_dataclass_defaults_and_overrides():
     assert td.throttle_rate_hz == 10.0
     assert td.qos_transient_local is False
 
-    over = TopicDefinition(
-        "/y", Twist, throttled=False, throttle_rate_hz=30.0, qos_transient_local=True
-    )
+    over = TopicDefinition("/y", Twist, throttled=False, throttle_rate_hz=30.0, qos_transient_local=True)
     assert over.throttled is False
     assert over.throttle_rate_hz == 30.0
     assert over.qos_transient_local is True

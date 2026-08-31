@@ -21,7 +21,7 @@ _T = typing.TypeVar("_T")
 import attrs
 import rclpy
 import yaml
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from arena_evaluation_msgs.msg import BenchmarkState
 from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
@@ -244,6 +244,36 @@ def resolve_planner_identity(contestant: Contest.Contestant) -> tuple[str, str]:
             ip = mobile.get("inter_planner")
             return str(lp), str(ip) if ip else "none"
     return split_planner_name(contestant.name)
+
+
+def _preflight_contest(contest: Contest) -> list[str]:
+    """Check nav2 contestants reference a local_planner/inter_planner that actually exists."""
+    problems: list[str] = []
+    try:
+        share = pathlib.Path(get_package_share_directory("arena_robots")) / "config" / "nav2"
+    except PackageNotFoundError:
+        return ["arena_robots is not installed, cannot validate nav2 contestants"]
+
+    for contestant in contest.contestants:
+        mobile = contestant.args.get("mobile")
+        if not isinstance(mobile, dict) or mobile.get("driver") != "nav2":
+            continue
+
+        lp = mobile.get("local_planner")
+        if lp:
+            path = share / "controllers" / lp / "controller_config.yaml"
+            if not path.is_file():
+                available = sorted(d.name for d in (share / "controllers").iterdir() if d.is_dir())
+                problems.append(f"{contestant.name}: local_planner {lp!r} has no {path} (available: {available})")
+
+        ip = mobile.get("inter_planner")
+        if ip and ip != "none":
+            path = share / "interplanners" / ip / "interplanner_config.yaml"
+            if not path.is_file():
+                available = sorted(d.name for d in (share / "interplanners").iterdir() if d.is_dir())
+                problems.append(f"{contestant.name}: inter_planner {ip!r} has no {path} (available: {available})")
+
+    return problems
 
 
 def env_key(step: Step, simulator: str | None) -> tuple:
@@ -588,6 +618,10 @@ class BenchmarkRunner(ArenaMixinNode):
                     return task.result()
 
                 total_waited += check_interval
+                if total_waited >= max_total_timeout:
+                    _log.error(f"{what} exceeded max timeout of {max_total_timeout:.0f}s")
+                    task.cancel()
+                    raise TimeoutError(f"{what} exceeded max timeout of {max_total_timeout:.0f}s")
 
                 has_progress = False
                 sample_line = ""
@@ -628,10 +662,6 @@ class BenchmarkRunner(ArenaMixinNode):
                     _log.info(f"still loading {what} ({total_waited:.0f}s elapsed, active: {sample_line})")
                 else:
                     silent_s = time.monotonic() - last_activity
-                    if total_waited >= max_total_timeout:
-                        _log.error(f"{what} exceeded max timeout of {max_total_timeout:.0f}s")
-                        task.cancel()
-                        raise TimeoutError(f"{what} exceeded max timeout of {max_total_timeout:.0f}s")
                     if silent_s >= inactivity_timeout:
                         _log.error(f"{what} stalled: no progress for {silent_s:.0f}s (total: {total_waited:.0f}s)")
                         task.cancel()
@@ -1819,6 +1849,12 @@ def cli_main(argv: list[str] | None = None) -> int:
         simulator = arena_passthrough.get("sim", None)
 
         steps = _all_steps(contest, suite, scale_episodes)
+        if not args.resume:
+            problems = _preflight_contest(contest)
+            if problems:
+                for problem in problems:
+                    print(f"benchmark: {problem}", file=sys.stderr)
+                return 2
         if not steps:
             print(
                 f"benchmark: empty grid (suite={suite.name!r} contest={contest.name!r} produced no steps)",

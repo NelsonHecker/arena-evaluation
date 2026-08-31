@@ -5,6 +5,8 @@ task_generator (owned by the TM_Characterization robot task mode); the offline
 calculator imports the same module so labels never drift.
 """
 
+import dataclasses
+import json
 import pathlib
 
 import pytest
@@ -18,6 +20,7 @@ from task_generator.tasks.robots.characterization.schedule import (
     IDLE_DURATION_S,
     LINEAR_DWELL_S,
     MODES,
+    SWEEP_DEFAULTS,
     VX_MAX,
     PhaseKind,
     build_schedule,
@@ -104,7 +107,7 @@ def test_settle_and_apex_carry_their_own_kinds():
     phases = build_schedule()
     by_name = {p.name: p for p in phases}
     assert {p.kind for p in phases if "_settle_" in p.name} == {PhaseKind.SETTLE}
-    assert by_name["ramp_apex_vx_1.00"].kind == PhaseKind.RAMP_APEX
+    assert by_name["ramp_apex_vx_1.00_h_1.00"].kind == PhaseKind.RAMP_APEX
     assert by_name["brake_approach_vx_2.00"].kind == PhaseKind.BRAKE_APPROACH
     assert all(p.kind == PhaseKind.IDLE for p in phases if p.name.startswith("idle_"))
 
@@ -232,3 +235,40 @@ def test_schedule_uses_resolved_envelope(tmp_path: pathlib.Path):
     assert max(p.wz_target for p in angular) == 4.0
     arcs = [p for p in phases if p.kind == PhaseKind.ARC]
     assert max(p.radius_m for p in arcs) == pytest.approx(max(ARC_RADIUS_FACTORS) * 0.6)
+
+
+def test_ramp_horizons_produce_distinct_families():
+    phases = build_schedule(ramp_horizons_s=[0.5, 2.0])
+    ups = [p for p in phases if p.kind == PhaseKind.RAMP_UP]
+    assert {p.ramp_s for p in ups} == {0.5, 2.0}
+    names_by_horizon = {h: {p.name for p in ups if p.ramp_s == h} for h in (0.5, 2.0)}
+    for horizon, names in names_by_horizon.items():
+        assert names
+        assert all(name.endswith(f"_h_{horizon:.2f}") for name in names)
+    assert names_by_horizon[0.5].isdisjoint(names_by_horizon[2.0])
+
+
+def test_custom_arc_factors_change_targets_and_respect_the_rated_wz_limit():
+    phases = build_schedule(
+        vx_max=2.0, wz_max=2.5, radius=0.5,
+        arc_speed_factors=[0.5], arc_radius_factors=[2.0],
+    )
+    arcs = [p for p in phases if p.kind == PhaseKind.ARC]
+    assert arcs
+    assert {round(p.vx_target, 6) for p in arcs} == {1.0}
+    assert {round(p.radius_m, 6) for p in arcs} == {1.0}
+    assert all(abs(p.wz_target) <= 2.5 for p in arcs)
+
+
+def test_sweep_defaults_keys_are_accepted_by_build_schedule():
+    assert set(SWEEP_DEFAULTS) == {"arc_speed_factors", "arc_radius_factors", "ramp_horizons_s"}
+    assert build_schedule(**SWEEP_DEFAULTS) == build_schedule()
+
+
+def test_phase_json_roundtrip_serialises_kind_as_a_plain_string():
+    # This is the publish format: the sweep node dumps dataclasses.asdict(phase).
+    phase = build_schedule(modes=["linear"])[0]
+    decoded = json.loads(json.dumps(dataclasses.asdict(phase)))
+    assert decoded["kind"] == phase.kind.value
+    assert isinstance(decoded["kind"], str)
+    assert decoded["name"] == phase.name

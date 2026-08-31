@@ -16,8 +16,9 @@ units:
   success: "%"
   spl: ""
   collision_amount: ""
-  collision_static: ""
-  collision_dynamic: ""
+  collision_amount_wall: ""
+  collision_amount_static: ""
+  collision_amount_pedestrian: ""
   tti_min: s
   tti_mean: s
   movement_towards_peds_ratio: ""
@@ -50,11 +51,11 @@ plots:
         - {metric: success, label: Success, format: "{:.0%}"}
         - {metric: spl, label: SPL, format: "{:.2f}"}
         - {metric: collision_amount, label: Total Collisions, format: "{:.1f}"}
-        - {metric: collision_static, label: Static Collisions, format: "{:.1f}"}
-        - {metric: collision_dynamic, label: Dynamic Collisions, format: "{:.1f}"}
+        - {metric: collision_amount_wall, label: Wall Collisions, format: "{:.1f}"}
+        - {metric: collision_amount_static, label: Static Collisions, format: "{:.1f}"}
+        - {metric: collision_amount_pedestrian, label: Pedestrian Collisions, format: "{:.1f}"}
         - {metric: tti_min, label: Min TTI, format: "{:.2f}"}
         - {metric: ci_max, label: Max CI, format: "{:.2f}"}
-      notes: notes.yaml
   - id: radar_safety
     type: radar
     title: Multi-Axis Safety & Hazard Profile
@@ -110,13 +111,13 @@ plots:
     layout_group: collision_analysis
   - id: bar_collision_breakdown
     type: bar
-    title: Static vs. Dynamic Obstacle Collision Breakdown
+    title: Collision Breakdown by Obstacle Type
     data_key: collision_amount
     differentiate: local_planner
     layout_group: collision_analysis
     options:
       stacked: true
-      metrics: [collision_static, collision_dynamic]
+      metrics: [collision_amount_wall, collision_amount_static, collision_amount_pedestrian]
   - id: heatmap_success_pivot
     type: heatmap
     title: Success Rate Pivot Grid (Local vs Inter Planner)
