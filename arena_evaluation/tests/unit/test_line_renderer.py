@@ -113,3 +113,50 @@ def test_line_bin_x_aggregation():
     html = LineRenderer(spec).render_plotly(df)
     assert html is not None
     assert "toself" in html  # has confidence band from 2-sample std at each bin
+
+
+def test_line_ci95_and_smoothing():
+    df = pl.DataFrame(
+        {
+            "vx": [0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
+            "power": [50.0, 52.0, 48.0, 50.0, 80.0, 82.0, 78.0, 80.0],
+            "robot": ["jackal"] * 8,
+        }
+    )
+    spec = PlotSpec(
+        id="t_ci95",
+        type="line",
+        title="CI 95 Power",
+        data_key="vx",
+        group_by=["robot"],
+        options={"y": "power", "aggregate": True, "bin_x": 0.5, "error_mode": "ci95", "smooth": True},
+    )
+    html = LineRenderer(spec).render_plotly(df)
+    assert html is not None
+    assert "95% CI" in html
+    assert "toself" in html
+
+
+def test_line_outlier_trimming():
+    # Extreme impulse spike 1000.0 at vx=0.5 should be trimmed by trim_percentile
+    df = pl.DataFrame(
+        {
+            "vx": [0.5] * 20,
+            "power": [50.0] * 19 + [1000.0],
+            "robot": ["jackal"] * 20,
+        }
+    )
+    spec = PlotSpec(
+        id="t_trim",
+        type="line",
+        title="Trimmed Power",
+        data_key="vx",
+        group_by=["robot"],
+        options={"y": "power", "aggregate": True, "bin_x": 0.5, "trim_percentile": 0.1},
+    )
+    prepared = LineRenderer(spec)._prepare(df)
+    assert prepared is not None
+    pdf = prepared[0]
+    # The mean should be 50.0 (the 1000.0 spike was trimmed out)
+    assert abs(pdf["power"].iloc[0] - 50.0) < 1e-3
+

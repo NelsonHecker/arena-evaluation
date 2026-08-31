@@ -57,7 +57,8 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
 
     def __init__(self, robot_params):
         super().__init__(robot_params)
-        self._rolling_resistance = self._load_rolling_resistance(robot_params.model)
+        model = getattr(robot_params, 'model', None) if robot_params else None
+        self._rolling_resistance = self._load_rolling_resistance(model) if model else 0.015
 
     @staticmethod
     def _load_rolling_resistance(model: str) -> float:

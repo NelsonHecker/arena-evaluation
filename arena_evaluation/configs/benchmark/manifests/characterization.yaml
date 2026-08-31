@@ -92,7 +92,7 @@ plots:
     data_key: timeseries_char_vx_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: linear}
-    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.05, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: power_curves
   - id: line_mech_power_vs_vx_achieved
     type: line
@@ -100,7 +100,7 @@ plots:
     data_key: timeseries_char_vx_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: linear}
-    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.05, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: power_curves
   - id: line_efficiency_vs_vx_achieved
     type: line
@@ -108,7 +108,7 @@ plots:
     data_key: timeseries_char_vx_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: linear}
-    options: {y: timeseries_char_efficiency, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    options: {y: timeseries_char_efficiency, aggregate: true, bin_x: 0.05, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: power_curves
   - id: line_power_vs_wz_achieved
     type: line
@@ -116,7 +116,7 @@ plots:
     data_key: timeseries_char_wz_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: angular}
-    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.1, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: power_curves
   - id: line_mech_power_vs_wz_achieved
     type: line
@@ -124,7 +124,7 @@ plots:
     data_key: timeseries_char_wz_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: angular}
-    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.1, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: power_curves
 
   # ── Energy Intensity & Cost of Transport ────────────────────────────────────
@@ -134,7 +134,7 @@ plots:
     data_key: timeseries_char_vx_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: linear}
-    options: {y: timeseries_char_energy_intensity, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    options: {y: timeseries_char_energy_intensity, aggregate: true, bin_x: 0.05, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: efficiency_curves
   - id: line_energy_per_rad_vs_wz_achieved
     type: line
@@ -142,7 +142,7 @@ plots:
     data_key: timeseries_char_wz_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: angular}
-    options: {y: timeseries_char_energy_per_rad, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    options: {y: timeseries_char_energy_per_rad, aggregate: true, bin_x: 0.1, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: efficiency_curves
 
   # ── Curvilinear Arc Steering Performance ────────────────────────────────────
@@ -152,7 +152,7 @@ plots:
     data_key: timeseries_char_turn_radius_m
     group_by: [timeseries_char_vx_target]
     filter: {timeseries_char_phase_kind: arc}
-    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
+    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers", error_mode: ci95, smooth: true}
     layout_group: arc_steering
   - id: line_mech_power_vs_turn_radius_arc
     type: line
@@ -160,7 +160,7 @@ plots:
     data_key: timeseries_char_turn_radius_m
     group_by: [timeseries_char_vx_target]
     filter: {timeseries_char_phase_kind: arc}
-    options: {y: timeseries_char_power_mech_w, aggregate: true, mode: "lines+markers"}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, mode: "lines+markers", error_mode: ci95, smooth: true}
     layout_group: arc_steering
 
   # ── Holonomic Lateral Cruising ──────────────────────────────────────────────
@@ -170,7 +170,7 @@ plots:
     data_key: timeseries_char_vy_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: lateral}
-    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.05, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: holonomic_curves
   - id: line_mech_power_vs_vy_achieved
     type: line
@@ -178,7 +178,7 @@ plots:
     data_key: timeseries_char_vy_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: lateral}
-    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.05, mode: "lines+markers"}
+    options: {y: timeseries_char_power_mech_w, aggregate: true, bin_x: 0.05, mode: "lines+markers", error_mode: ci95, smooth: true, trim_percentile: 0.05}
     layout_group: holonomic_curves
 
   # ── Dynamic Acceleration & Braking Surges ───────────────────────────────────
@@ -188,7 +188,7 @@ plots:
     data_key: timeseries_char_accel_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: [ramp_up, ramp_down]}
-    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    options: {y: timeseries_char_power_total_w, aggregate: true, bin_x: 0.1, mode: "lines+markers", error_mode: ci95, smooth: true}
     layout_group: dynamic_surges
   - id: line_dynamic_braking_surges
     type: line
@@ -196,7 +196,7 @@ plots:
     data_key: timeseries_char_time_s
     group_by: [robot]
     filter: {timeseries_char_phase_kind: brake}
-    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers"}
+    options: {y: timeseries_char_power_total_w, aggregate: true, mode: "lines+markers", error_mode: ci95, smooth: true}
     layout_group: dynamic_surges
 
   # ── Acoustic Noise Levels vs. Dynamic State ─────────────────────────────────
@@ -230,7 +230,7 @@ plots:
     data_key: timeseries_char_accel_achieved
     group_by: [robot]
     filter: {timeseries_char_phase_kind: [ramp_up, ramp_down]}
-    options: {y: timeseries_char_dba, aggregate: true, bin_x: 0.1, mode: "lines+markers"}
+    options: {y: timeseries_char_dba, aggregate: true, bin_x: 0.1, mode: "lines+markers", error_mode: ci95, smooth: true}
     layout_group: acoustic_curves
 
   # ── Rendered Acoustic Images & Field Animations ─────────────────────────────
@@ -249,29 +249,30 @@ plots:
   # ── Continuous Time Profiles ────────────────────────────────────────────────
   - id: line_power_over_time
     type: line
-    title: Total Electrical Power Over Time (mean ± std)
+    title: Total Electrical Power Over Time (mean ± 95% CI)
     data_key: timeseries_char_time_s
     group_by: [robot]
-    options: {y: timeseries_char_power_total_w, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
+    options: {y: timeseries_char_power_total_w, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000, error_mode: ci95, smooth: true}
     layout_group: time_traces
   - id: line_mech_power_over_time
     type: line
-    title: Mechanical Drivetrain Power Over Time (mean ± std)
+    title: Mechanical Drivetrain Power Over Time (mean ± 95% CI)
     data_key: timeseries_char_time_s
     group_by: [robot]
-    options: {y: timeseries_char_power_mech_w, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
+    options: {y: timeseries_char_power_mech_w, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000, error_mode: ci95, smooth: true}
     layout_group: time_traces
   - id: line_dba_over_time
     type: line
-    title: Acoustic Noise Level (dBA) Over Time (mean ± std)
+    title: Acoustic Noise Level (dBA) Over Time (mean ± 95% CI)
     data_key: timeseries_char_time_s
     group_by: [robot]
-    options: {y: timeseries_char_dba, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
+    options: {y: timeseries_char_dba, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000, error_mode: ci95, smooth: true}
     layout_group: time_traces
   - id: line_vx_achieved_over_time
     type: line
-    title: Actual Linear Velocity Over Time (mean ± std)
+    title: Actual Linear Velocity Over Time (mean ± 95% CI)
     data_key: timeseries_char_time_s
     group_by: [robot]
-    options: {y: timeseries_char_vx_achieved, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000}
+    options: {y: timeseries_char_vx_achieved, time_relative: true, aggregate: true, bin_x: 0.1, max_points_per_trace: 5000, error_mode: ci95, smooth: true}
     layout_group: time_traces
+

@@ -176,11 +176,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
             ).alias("turn_radius_m"),
         )
 
-        # Isolate initial transient acceleration window from steady-state cruise:
-        # - linear_vx_* steps: first 1.5s is acceleration & PID settling
-        # - lateral_vy_* steps: first 1.5s is acceleration settling
-        # - arc_vx_* steps: first 1.5s is arc entry settling
-        # - angular_wz_* steps: first 1.0s is rotational acceleration
+        # Isolate steady-state golden window from transient acceleration and deceleration:
+        # - linear_vx_*, lateral_vy_*, arc_vx_*: trim initial acceleration/settling (1.5s) and trailing cutoff (0.8s on long blocks)
+        # - angular_wz_*: trim initial rotational spin-up (1.0s) and trailing cutoff
         if "time_ns" in out.columns and len(out) > 0:
             out = out.with_columns(
                 ((pl.col("phase_label") != pl.col("phase_label").shift(1)) |
@@ -192,16 +190,23 @@ class CharacterizationCalculator(BaseMetricCalculator):
                 .alias("_phase_block_id")
             )
             out = out.with_columns(
-                ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_elapsed_s")
+                ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_elapsed_s"),
+                ((pl.col("time_ns").max().over("_phase_block_id") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / 1e9).alias("_phase_total_duration_s"),
             )
             is_linear_dwell = pl.col("phase_label").str.starts_with("linear_vx_")
             is_lateral_dwell = pl.col("phase_label").str.starts_with("lateral_vy_")
             is_arc_dwell = pl.col("phase_label").str.starts_with("arc_vx_")
             is_angular_dwell = pl.col("phase_label").str.starts_with("angular_wz_")
+            is_trans_dwell = is_linear_dwell | is_lateral_dwell | is_arc_dwell
+
+            # On longer dwell phases (>= 4s), trim trailing decel/cutoff as well
+            is_long_block = pl.col("_phase_total_duration_s") >= 4.0
+            t_out = pl.min_horizontal(pl.lit(0.8), pl.col("_phase_total_duration_s") * 0.15)
+
             out = out.with_columns(
-                pl.when((is_linear_dwell | is_lateral_dwell | is_arc_dwell) & (pl.col("_phase_elapsed_s") < 1.5))
+                pl.when(is_trans_dwell & ((pl.col("_phase_elapsed_s") < 1.5) | (is_long_block & (pl.col("_phase_elapsed_s") > (pl.col("_phase_total_duration_s") - t_out)))))
                 .then(pl.lit("transient"))
-                .when(is_angular_dwell & (pl.col("_phase_elapsed_s") < 1.0))
+                .when(is_angular_dwell & ((pl.col("_phase_elapsed_s") < 1.0) | (is_long_block & (pl.col("_phase_elapsed_s") > (pl.col("_phase_total_duration_s") - t_out)))))
                 .then(pl.lit("transient"))
                 .otherwise(pl.col("phase_kind"))
                 .alias("phase_kind")
