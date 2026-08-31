@@ -86,9 +86,7 @@ def build_resources_list() -> list[Resource]:
     ]
 
 
-def read_resource_content(
-    params: ReadResourceRequestParams, bridge: EvalBridge
-) -> ReadResourceResult:
+def read_resource_content(params: ReadResourceRequestParams, bridge: EvalBridge) -> ReadResourceResult:
     """Handle resource read requests."""
     try:
         payload = _read(str(params.uri), bridge)
@@ -147,7 +145,7 @@ def _read(uri: str, bridge: EvalBridge) -> object:
 
     prefix = "arena_eval://benchmarks/"
     if uri.startswith(prefix):
-        rest = uri[len(prefix):]
+        rest = uri[len(prefix) :]
         parts = rest.split("/", 1)
         benchmark_id = parts[0]
         sub = parts[1] if len(parts) > 1 else ""
@@ -179,22 +177,10 @@ def _read(uri: str, bridge: EvalBridge) -> object:
             if df is None:
                 return {"error": "No combined_metrics.parquet found"}
             planner_col = "local_planner" if "local_planner" in df.columns else "planner"
-            planners = (
-                df[planner_col].drop_nulls().unique().to_list()
-                if planner_col in df.columns else []
-            )
-            stages = (
-                df["stage"].drop_nulls().unique().to_list()
-                if "stage" in df.columns else []
-            )
-            maps_list = (
-                df["map"].drop_nulls().unique().to_list()
-                if "map" in df.columns else []
-            )
-            succ = (
-                float(df["success"].drop_nulls().mean())
-                if "success" in df.columns else None
-            )
+            planners = df[planner_col].drop_nulls().unique().to_list() if planner_col in df.columns else []
+            stages = df["stage"].drop_nulls().unique().to_list() if "stage" in df.columns else []
+            maps_list = df["map"].drop_nulls().unique().to_list() if "map" in df.columns else []
+            succ = float(df["success"].drop_nulls().mean()) if "success" in df.columns else None
             return {
                 "benchmark_id": benchmark_id,
                 "n_rows": len(df),

@@ -31,18 +31,10 @@ class BaseMetricCalculator(ABC):
         """Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame."""
         if episode.data is not None and len(episode.data) > 0:
             if "pos_x_gt" in episode.data.columns:
-                episode.data = episode.data.filter(
-                    pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() &
-                    pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() &
-                    pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan()
-                )
+                episode.data = episode.data.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
             elif "pos_x" in episode.data.columns:
-                episode.data = episode.data.filter(
-                    pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan() &
-                    pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan() &
-                    pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan()
-                )
-        
+                episode.data = episode.data.filter(pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan() & pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan() & pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan())
+
         if episode.data is not None and len(episode.data) > 0:
             if "pos_x_gt" in episode.data.columns:
                 odom_x = episode.data["pos_x_gt"].to_numpy().copy()
@@ -61,33 +53,33 @@ class BaseMetricCalculator(ABC):
             raw_odom_y0 = odom_y[0] if len(odom_y) > 0 else 0.0
             raw_odom_yaw0 = odom_yaw[0] if len(odom_yaw) > 0 else 0.0
             if len(odom_x) > 1:
-                dists = np.sqrt(np.diff(odom_x)**2 + np.diff(odom_y)**2)
+                dists = np.sqrt(np.diff(odom_x) ** 2 + np.diff(odom_y) ** 2)
                 jumps = np.where(dists > 0.5)[0]
-                
+
                 if len(jumps) > 0:
                     split_indices = jumps + 1
                     segments_x = np.split(odom_x, split_indices)
                     segments_y = np.split(odom_y, split_indices)
-                    
+
                     best_seg_idx = -1
                     best_len = -1.0
-                    
+
                     for i in range(len(segments_x)):
                         seg_x = segments_x[i]
                         seg_y = segments_y[i]
                         if len(seg_x) < 2:
                             seg_len = 0.0
                         else:
-                            seg_len = np.sum(np.sqrt(np.diff(seg_x)**2 + np.diff(seg_y)**2))
-                        
+                            seg_len = np.sum(np.sqrt(np.diff(seg_x) ** 2 + np.diff(seg_y) ** 2))
+
                         if seg_len >= 0.2 and seg_len > best_len:
                             best_len = seg_len
                             best_seg_idx = i
-                    
+
                     if best_seg_idx != -1:
                         start_idx = 0 if best_seg_idx == 0 else int(split_indices[best_seg_idx - 1])
                         end_idx = int(split_indices[best_seg_idx]) if best_seg_idx < len(split_indices) - 1 else len(odom_x)
-                        
+
                         odom_x = odom_x[start_idx:end_idx]
                         odom_y = odom_y[start_idx:end_idx]
                         odom_yaw = odom_yaw[start_idx:end_idx]
@@ -97,22 +89,22 @@ class BaseMetricCalculator(ABC):
             odom_x = np.array([], dtype=np.float64)
             odom_y = np.array([], dtype=np.float64)
             odom_yaw = np.array([], dtype=np.float64)
-        
+
         if episode.start_pos and len(episode.start_pos) >= 2 and len(odom_x) > 0:
             start_x, start_y = episode.start_pos[0], episode.start_pos[1]
             start_yaw = episode.start_pos[2] if len(episode.start_pos) >= 3 else 0.0
-            
+
             odom_x0 = raw_odom_x0
             odom_y0 = raw_odom_y0
             odom_yaw0 = raw_odom_yaw0
-            
+
             theta = start_yaw - odom_yaw0
             cos_t = np.cos(theta)
             sin_t = np.sin(theta)
-            
+
             dx = odom_x - odom_x0
             dy = odom_y - odom_y0
-            
+
             odom_x_trans = start_x + dx * cos_t - dy * sin_t
             odom_y_trans = start_y + dx * sin_t + dy * cos_t
             odom_yaw_trans = odom_yaw + theta
@@ -129,16 +121,14 @@ class BaseMetricCalculator(ABC):
             pos_x = odom_x_trans
             pos_y = odom_y_trans
             yaw = odom_yaw_trans
-            
+
         return pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans
 
     def native_topics(self, episode: "AlignedEpisodeBundle") -> dict:
         """Raw native-rate topic frames keyed by topic name; {} when absent."""
         return episode.topics if isinstance(episode.topics, dict) else {}
 
-    def resolve_native_pose(
-        self, episode: "AlignedEpisodeBundle"
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def resolve_native_pose(self, episode: "AlignedEpisodeBundle") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Ground-truth-first robot pose on the native odom time axis.
 
         Returns (pos_x, pos_y, yaw, time_ns) float64 arrays.
@@ -223,16 +213,17 @@ class BaseMetricCalculator(ABC):
             return px, py, ya
 
         import polars as pl
-        df_ref = pl.DataFrame({
-            "time_ns": t_sorted,
-            "pos_x": x_sorted,
-            "pos_y": y_sorted,
-            "yaw": yaw_sorted,
-        })
-        df_query = pl.DataFrame({"time_ns": times_ns})
-        merged = df_query.join_asof(
-            df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns
+
+        df_ref = pl.DataFrame(
+            {
+                "time_ns": t_sorted,
+                "pos_x": x_sorted,
+                "pos_y": y_sorted,
+                "yaw": yaw_sorted,
+            }
         )
+        df_query = pl.DataFrame({"time_ns": times_ns})
+        merged = df_query.join_asof(df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
         px = np.nan_to_num(merged["pos_x"].to_numpy(), nan=0.0)
         py = np.nan_to_num(merged["pos_y"].to_numpy(), nan=0.0)
         ya = np.nan_to_num(merged["yaw"].to_numpy(), nan=0.0)
@@ -258,20 +249,19 @@ class BaseMetricCalculator(ABC):
             return np.interp(query_times_ns, t_sorted, v_sorted)
 
         import polars as pl
-        df_ref = pl.DataFrame({
-            "time_ns": t_sorted,
-            "val": v_sorted,
-        })
-        df_query = pl.DataFrame({"time_ns": query_times_ns})
-        merged = df_query.join_asof(
-            df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns
+
+        df_ref = pl.DataFrame(
+            {
+                "time_ns": t_sorted,
+                "val": v_sorted,
+            }
         )
+        df_query = pl.DataFrame({"time_ns": query_times_ns})
+        merged = df_query.join_asof(df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
         return merged["val"].to_numpy()
 
     @staticmethod
-    def speed_from_pose(
-        pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray
-    ) -> np.ndarray:
+    def speed_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> np.ndarray:
         """GT speed (m/s) by finite-differencing GT positions."""
         n = len(pos_x)
         speed = np.zeros(n)
@@ -283,9 +273,7 @@ class BaseMetricCalculator(ABC):
         return np.nan_to_num(speed, nan=0.0)
 
     @staticmethod
-    def velocity_from_pose(
-        pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def velocity_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """GT velocity vector (m/s) by finite-differencing GT positions."""
         n = len(pos_x)
         vx = np.zeros(n)
@@ -308,7 +296,7 @@ class BaseMetricCalculator(ABC):
                 peds_raw = ast.literal_eval(peds_raw)
             except (ValueError, SyntaxError):
                 return np.empty((0, 2))
-        
+
         if isinstance(peds_raw, (list, tuple, np.ndarray)):
             if len(peds_raw) == 0:
                 return np.empty((0, 2))
@@ -324,32 +312,34 @@ class BaseMetricCalculator(ABC):
                 if pts:
                     return np.array(pts, dtype=np.float64)
                 return np.empty((0, 2))
-            
+
             try:
                 flat = [float(v) for v in peds_raw if v is not None]
             except (ValueError, TypeError):
                 return np.empty((0, 2))
-            
+
             if len(flat) == 0:
                 return np.empty((0, 2))
-                
-            if num_peds_hint and num_peds_hint > 0:
-                if len(flat) == num_peds_hint * 3:
-                    return np.array(flat, dtype=np.float64).reshape(num_peds_hint, 3)
-                elif len(flat) == num_peds_hint * 2:
-                    return np.array(flat, dtype=np.float64).reshape(num_peds_hint, 2)
-                elif len(flat) >= num_peds_hint * 2:
-                    stride = len(flat) // num_peds_hint
-                    pts = [flat[k*stride : k*stride+2] for k in range(num_peds_hint)]
+
+            # The hint arrives as a float column after the asof join, NaN where no sample matched.
+            hint = int(num_peds_hint) if num_peds_hint is not None and num_peds_hint == num_peds_hint else 0
+            if hint > 0:
+                if len(flat) == hint * 3:
+                    return np.array(flat, dtype=np.float64).reshape(hint, 3)
+                elif len(flat) == hint * 2:
+                    return np.array(flat, dtype=np.float64).reshape(hint, 2)
+                elif len(flat) >= hint * 2:
+                    stride = len(flat) // hint
+                    pts = [flat[k * stride : k * stride + 2] for k in range(hint)]
                     return np.array(pts, dtype=np.float64)
                 else:
                     return np.empty((0, 2))
-            
+
             if len(flat) % 3 == 0:
                 return np.array(flat, dtype=np.float64).reshape(-1, 3)
             elif len(flat) % 2 == 0:
                 return np.array(flat, dtype=np.float64).reshape(-1, 2)
-                
+
         return np.empty((0, 2))
 
     @classmethod
@@ -359,10 +349,6 @@ class BaseMetricCalculator(ABC):
         pass
 
     @abstractmethod
-    def calculate(
-        self,
-        episode: "AlignedEpisodeBundle",
-        prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: "AlignedEpisodeBundle", prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         """Calculate metrics for a single episode."""
         pass

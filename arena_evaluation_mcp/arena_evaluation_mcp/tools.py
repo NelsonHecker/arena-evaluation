@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import yaml
+
 try:
     from mcp.types import CallToolRequestParams, CallToolResult, TextContent, Tool
 except ImportError:
+
     class Tool:  # type: ignore
         def __init__(self, name: str, description: str, inputSchema: dict):
             self.name = name
@@ -33,6 +35,7 @@ except ImportError:
     class CallToolRequestParams:  # type: ignore
         pass
 
+
 from .common import run_status, validate_path_component
 
 if TYPE_CHECKING:
@@ -41,21 +44,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-
 def build_tools_list(bridge: EvalBridge) -> list[Tool]:
     """Return the complete list of registered tools."""
 
     _manifests = bridge.discover_available_manifests()
 
     return [
-        #Discovery
+        # Discovery
         Tool(
             name="list_available_maps",
             description="List runnable world/map names (static worlds catalog + generated worlds + "
-                        "recorded maps). Also returns suite_referenced_maps: names used in existing "
-                        "suite configs that are NOT verified runnable worlds. Relationship: use "
-                        "'maps' for new suites; suite_referenced_maps entries absent from 'maps' "
-                        "may fail at spawn unless generated at build time.",
+            "recorded maps). Also returns suite_referenced_maps: names used in existing "
+            "suite configs that are NOT verified runnable worlds. Relationship: use "
+            "'maps' for new suites; suite_referenced_maps entries absent from 'maps' "
+            "may fail at spawn unless generated at build time.",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
@@ -65,9 +67,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         ),
         Tool(
             name="list_available_planners",
-            description="Contest authoring reference: local planner names (nav2 controllers), "
-                        "global planner names, inter planner names, mobile driver names, and cap "
-                        "keys - everything valid inside create_contest.",
+            description="Contest authoring reference: local planner names (nav2 controllers), global planner names, inter planner names, mobile driver names, and cap keys - everything valid inside create_contest.",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
@@ -93,20 +93,20 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         Tool(
             name="list_running_processes",
             description="List arena-related OS processes currently running: benchmark runners, "
-                        "the arena CLI wrapper, Gazebo simulation, arena/recorder nodes, and "
-                        "world generators. Each entry has pid, kind, elapsed_s (seconds since "
-                        "start), and the command line. Use this to check whether a benchmark "
-                        "is actually running, whether simulation processes are still up, or to "
-                        "spot stuck/orphaned processes before stopping them.",
+            "the arena CLI wrapper, Gazebo simulation, arena/recorder nodes, and "
+            "world generators. Each entry has pid, kind, elapsed_s (seconds since "
+            "start), and the command line. Use this to check whether a benchmark "
+            "is actually running, whether simulation processes are still up, or to "
+            "spot stuck/orphaned processes before stopping them.",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="kill_processes",
             description="Terminate running arena OS processes (benchmark runner, Gazebo simulation, "
-                        "arena/recorder nodes, world generators). Sends SIGTERM first with automatic "
-                        "escalation to SIGKILL (-9) if the process does not terminate within the timeout. "
-                        "Optionally target specific PIDs, filter by process kind, or pass force=True to "
-                        "send SIGKILL immediately. Use this to clean up wedged, stuck, or orphaned processes.",
+            "arena/recorder nodes, world generators). Sends SIGTERM first with automatic "
+            "escalation to SIGKILL (-9) if the process does not terminate within the timeout. "
+            "Optionally target specific PIDs, filter by process kind, or pass force=True to "
+            "send SIGKILL immediately. Use this to clean up wedged, stuck, or orphaned processes.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -131,19 +131,18 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         Tool(
             name="get_benchmark_console",
             description="Tail the console log of a benchmark run. Reads the benchmark's own "
-                        "runner.log inside its run directory (benchmarks/<run_id>/runner.log, "
-                        "written by the benchmark runner for every run). Omitting run_id uses "
-                        "the most recently started benchmark runner. Returns the last N lines, "
-                        "the log file path, the runner PID, and whether the runner is still "
-                        "alive. Use while a benchmark runs to watch live progress, or after "
-                        "completion to inspect the output.",
+            "runner.log inside its run directory (benchmarks/<run_id>/runner.log, "
+            "written by the benchmark runner for every run). Omitting run_id uses "
+            "the most recently started benchmark runner. Returns the last N lines, "
+            "the log file path, the runner PID, and whether the runner is still "
+            "alive. Use while a benchmark runs to watch live progress, or after "
+            "completion to inspect the output.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "run_id": {
                         "type": "string",
-                        "description": "Run id to tail (e.g. '20260811-031709-hospital_complex-basic'). "
-                                       "Default: most recently started running benchmark.",
+                        "description": "Run id to tail (e.g. '20260811-031709-hospital_complex-basic'). Default: most recently started running benchmark.",
                     },
                     "lines": {
                         "type": "integer",
@@ -155,9 +154,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         ),
         Tool(
             name="list_benchmark_runs",
-            description="List existing benchmark runs with status metadata. Optional filters: "
-                        "exact suite / contest name, run status, or a case-insensitive substring "
-                        "of the run_id.",
+            description="List existing benchmark runs with status metadata. Optional filters: exact suite / contest name, run status, or a case-insensitive substring of the run_id.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -181,29 +178,24 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                     },
                     "query": {
                         "type": "string",
-                        "description": "Case-insensitive substring of the run_id "
-                                       "(e.g. '20260809' or 'corridor').",
+                        "description": "Case-insensitive substring of the run_id (e.g. '20260809' or 'corridor').",
                     },
                 },
             },
         ),
         Tool(
             name="list_available_suites",
-            description="List bundled benchmark suite config stems (e.g. basic, characterization, "
-                        "all_maps_random). Read one with get_config_template(kind='suite').",
+            description="List bundled benchmark suite config stems (e.g. basic, characterization, all_maps_random). Read one with get_config_template(kind='suite').",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="list_available_contests",
-            description="List bundled contest config stems (e.g. basic, allplanners, drl_vs_nav2). "
-                        "Read one with get_config_template(kind='contest').",
+            description="List bundled contest config stems (e.g. basic, allplanners, drl_vs_nav2). Read one with get_config_template(kind='contest').",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="get_config_template",
-            description="Read the full content of a bundled (or custom) suite / contest / manifest "
-                        "YAML so the agent can see the exact schema conventions. For manifests, "
-                        "custom files written into a benchmark dir are found too.",
+            description="Read the full content of a bundled (or custom) suite / contest / manifest YAML so the agent can see the exact schema conventions. For manifests, custom files written into a benchmark dir are found too.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -214,8 +206,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                     },
                     "name": {
                         "type": "string",
-                        "description": "Config stem (e.g. 'basic', 'allplanners', 'standard', "
-                                       "'characterization').",
+                        "description": "Config stem (e.g. 'basic', 'allplanners', 'standard', 'characterization').",
                     },
                 },
                 "required": ["kind", "name"],
@@ -223,9 +214,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         ),
         Tool(
             name="inspect_map",
-            description="Inspect a map: world bounds, walkable zone polygons (rooms), and the "
-                        "available scenarios with REAL robot start/goal coordinates and pedestrian "
-                        "configs - so spawn points and routes can be chosen that don't intersect walls.",
+            description="Inspect a map: world bounds, walkable zone polygons (rooms), and the available scenarios with REAL robot start/goal coordinates and pedestrian configs - so spawn points and routes can be chosen that don't intersect walls.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -240,27 +229,24 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         Tool(
             name="describe_task_mode",
             description="Documentation for tm_robots / tm_obstacles task modes: purpose, config "
-                        "keys (e.g. scenario 'file', random dynamic/static/interactive), complete "
-                        "YAML examples with concrete values, pedestrian/obstacle model names, and "
-                        "construction guidance (seed-based reproducible paths, and: do NOT infer "
-                        "structure from previous benchmark configs). With no mode, returns the "
-                        "full catalog.",
+            "keys (e.g. scenario 'file', random dynamic/static/interactive), complete "
+            "YAML examples with concrete values, pedestrian/obstacle model names, and "
+            "construction guidance (seed-based reproducible paths, and: do NOT infer "
+            "structure from previous benchmark configs). With no mode, returns the "
+            "full catalog.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "description": "Optional mode name (e.g. 'scenario', 'guided', 'random'). "
-                                       "Omit for the full catalog.",
+                        "description": "Optional mode name (e.g. 'scenario', 'guided', 'random'). Omit for the full catalog.",
                     },
                 },
             },
         ),
         Tool(
             name="describe_metric",
-            description="Details for one metric: category, output keys, units, dependencies, "
-                        "required topics, pedsim requirement, and whether lower is better "
-                        "(for ranking).",
+            description="Details for one metric: category, output keys, units, dependencies, required topics, pedsim requirement, and whether lower is better (for ranking).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -272,7 +258,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "required": ["metric_name"],
             },
         ),
-        #Configure
+        # Configure
         Tool(
             name="create_suite",
             description=(
@@ -309,11 +295,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                         "type": "string",
                         "enum": ["install", "source"],
                         "default": "install",
-                        "description": "install (default): arena_evaluation install "
-                                       "share - immediately visible to the runner. "
-                                       "source: the arena_evaluation source tree "
-                                       "(versioned in the repo) - needs "
-                                       "'arena build arena_evaluation' to be runnable.",
+                        "description": "install (default): arena_evaluation install share - immediately visible to the runner. source: the arena_evaluation source tree (versioned in the repo) - needs 'arena build arena_evaluation' to be runnable.",
                     },
                 },
                 "required": ["name", "yaml_content"],
@@ -343,11 +325,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                         "type": "string",
                         "enum": ["install", "source"],
                         "default": "install",
-                        "description": "install (default): arena_evaluation install "
-                                       "share - immediately visible to the runner. "
-                                       "source: the arena_evaluation source tree "
-                                       "(versioned in the repo) - needs "
-                                       "'arena build arena_evaluation' to be runnable.",
+                        "description": "install (default): arena_evaluation install share - immediately visible to the runner. source: the arena_evaluation source tree (versioned in the repo) - needs 'arena build arena_evaluation' to be runnable.",
                     },
                 },
                 "required": ["name", "yaml_content"],
@@ -424,12 +402,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         ),
         Tool(
             name="create_scenario",
-            description=(
-                "Create or update a scenario YAML for a map. Pass map_name (e.g. 'hospital_1'), "
-                "scenario_name (e.g. 's01_head_on'), and the complete scenario yaml_content. "
-                "Validates robot goals and dynamic obstacles before writing. Writes directly to "
-                "the arena_simulation_setup scenarios directory."
-            ),
+            description=("Create or update a scenario YAML for a map. Pass map_name (e.g. 'hospital_1'), scenario_name (e.g. 's01_head_on'), and the complete scenario yaml_content. Validates robot goals and dynamic obstacles before writing. Writes directly to the arena_simulation_setup scenarios directory."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -440,8 +413,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                         "type": "string",
                         "enum": ["both", "install", "source"],
                         "default": "both",
-                        "description": "Where to write: both (default, immediately runnable & tracked in repo), "
-                                       "install (share dir only), or source (repo only).",
+                        "description": "Where to write: both (default, immediately runnable & tracked in repo), install (share dir only), or source (repo only).",
                     },
                 },
                 "required": ["map_name", "scenario_name", "yaml_content"],
@@ -449,10 +421,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
         ),
         Tool(
             name="validate_scenario",
-            description=(
-                "Validate a scenario YAML string against the Scenario schema. Optionally pass "
-                "map_name to check coordinates against world bounds."
-            ),
+            description=("Validate a scenario YAML string against the Scenario schema. Optionally pass map_name to check coordinates against world bounds."),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -462,7 +431,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "required": ["yaml_content"],
             },
         ),
-        #Execute
+        # Execute
         Tool(
             name="run_benchmark",
             description=(
@@ -479,7 +448,8 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                     "suite": {"type": "string", "description": "Suite name stem."},
                     "contest": {"type": "string", "description": "Contest name stem."},
                     "scale_episodes": {
-                        "type": "number", "default": 1.0,
+                        "type": "number",
+                        "default": 1.0,
                         "description": "Scale factor for episode counts.",
                     },
                     "run_id": {
@@ -487,33 +457,30 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                         "description": "Custom run ID. Auto-generated if omitted.",
                     },
                     "sim": {
-                        "type": "string", "enum": ["gazebo", "isaac", "dummy"],
+                        "type": "string",
+                        "enum": ["gazebo", "isaac", "dummy"],
                         "default": "gazebo",
                         "description": "Simulator backend (sim:=...). Defaults to gazebo.",
                     },
                     "headless": {
-                        "type": "boolean", "default": True,
-                        "description": "Launch the simulation headless (no GUI). "
-                                       "Defaults to true.",
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Launch the simulation headless (no GUI). Defaults to true.",
                     },
                     "env_n": {
-                        "type": "integer", "default": 2,
-                        "description": "Number of parallel envs (env.n:=...). "
-                                       "Defaults to 2.",
+                        "type": "integer",
+                        "default": 2,
+                        "description": "Number of parallel envs (env.n:=...). Defaults to 2.",
                     },
                     "optim_obstacles": {
                         "type": "string",
                         "enum": ["full", "bbox", "none"],
                         "default": "bbox",
-                        "description": "Obstacle optimization level "
-                                       "(optim.obstacles:=...). Defaults to bbox.",
+                        "description": "Obstacle optimization level (optim.obstacles:=...). Defaults to bbox.",
                     },
                     "extra_passthrough": {
                         "type": "object",
-                        "description": "Additional launch args as {key: value} - "
-                                       "each becomes key:=value, e.g. "
-                                       "{\"task.fail_on_collision\": true} -> "
-                                       "task.fail_on_collision:=true.",
+                        "description": "Additional launch args as {key: value} - each becomes key:=value, e.g. {\"task.fail_on_collision\": true} -> task.fail_on_collision:=true.",
                     },
                 },
                 "required": ["suite", "contest"],
@@ -547,7 +514,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "required": ["benchmark_id"],
             },
         ),
-        #Read
+        # Read
         Tool(
             name="read_benchmark_status",
             description="Read manifest.yaml + .benchmark_state.json + progress.csv for a benchmark.",
@@ -615,11 +582,13 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "properties": {
                     "benchmark_id": {"type": "string", "description": "The benchmark run ID."},
                     "group_by": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "Column names to group by.",
                     },
                     "metrics": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "Metric columns to aggregate (mean).",
                     },
                     "filter": {
@@ -634,7 +603,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "required": ["benchmark_id"],
             },
         ),
-        #Analyze
+        # Analyze
         Tool(
             name="compare_planners",
             description="Compare planners on metrics and return ranked comparison with normalized scores.",
@@ -643,19 +612,23 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "properties": {
                     "benchmark_id": {"type": "string", "description": "The benchmark run ID."},
                     "planners": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "List of planner names to compare.",
                     },
                     "metrics": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "Metric columns to compare.",
                     },
                     "group_by_stage": {
-                        "type": "boolean", "default": False,
+                        "type": "boolean",
+                        "default": False,
                         "description": "Break down comparison by stage.",
                     },
                     "normalize": {
-                        "type": "boolean", "default": True,
+                        "type": "boolean",
+                        "default": True,
                         "description": "Return normalized ranks (0-1).",
                     },
                 },
@@ -670,7 +643,8 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "properties": {
                     "benchmark_id": {"type": "string", "description": "The benchmark run ID."},
                     "metrics": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "Metric columns to correlate.",
                     },
                 },
@@ -686,11 +660,13 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                     "benchmark_id": {"type": "string", "description": "The benchmark run ID."},
                     "n": {"type": "integer", "default": 3},
                     "metrics": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "Metric columns for composite score.",
                     },
                     "weights": {
-                        "type": "array", "items": {"type": "number"},
+                        "type": "array",
+                        "items": {"type": "number"},
                         "description": "Weights for each metric. Omit for equal weights.",
                     },
                 },
@@ -706,7 +682,8 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                     "benchmark_id": {"type": "string", "description": "The benchmark run ID."},
                     "dimension": {"type": "string"},
                     "metrics": {
-                        "type": "array", "items": {"type": "string"},
+                        "type": "array",
+                        "items": {"type": "string"},
                         "description": "Metric columns to aggregate (mean).",
                     },
                 },
@@ -724,7 +701,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
                 "required": ["benchmark_id"],
             },
         ),
-        #Write Notes
+        # Write Notes
         Tool(
             name="write_notes",
             description="Write or update notes.yaml in a benchmark directory. Notes feed into table-type plots.",
@@ -769,9 +746,7 @@ def build_tools_list(bridge: EvalBridge) -> list[Tool]:
     ]
 
 
-async def dispatch_tool_call(
-    params: CallToolRequestParams, bridge: EvalBridge
-) -> CallToolResult:
+async def dispatch_tool_call(params: CallToolRequestParams, bridge: EvalBridge) -> CallToolResult:
     """Route a tool call request to its handler and return the result."""
     name = params.name
     args = params.arguments or {}
@@ -793,17 +768,17 @@ async def dispatch_tool_call(
 def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, Any]:
     """Route a tool call to its handler function."""
 
-    #Discovery
+    # Discovery
     if name == "list_available_maps":
         return {
             "maps": bridge.discover_available_maps(),
             "suite_referenced_maps": bridge.discover_suite_map_names(),
             "note": "maps = verified runnable worlds (sim worlds catalog + generated "
-                    "worlds + recorded). suite_referenced_maps = names used in "
-                    "existing suite configs; entries NOT in maps (e.g. "
-                    "arena_corridor) exist only in suite YAMLs and may fail at "
-                    "spawn unless generated at build time. Use maps for new "
-                    "suites; treat suite_referenced_maps as unverified.",
+            "worlds + recorded). suite_referenced_maps = names used in "
+            "existing suite configs; entries NOT in maps (e.g. "
+            "arena_corridor) exist only in suite YAMLs and may fail at "
+            "spawn unless generated at build time. Use maps for new "
+            "suites; treat suite_referenced_maps as unverified.",
         }
 
     if name == "list_available_robots":
@@ -885,34 +860,32 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
         )
         return {"runs": runs[:limit], "n_matches": len(runs)}
 
-    #Configure
+    # Configure
     if name == "create_suite":
         if args["name"] in bridge.list_suite_stems():
-            return {"suite_valid": False,
-                    "error": f"suite '{args['name']}' already exists as a bundled "
-                             "config - pick a new name to avoid clobbering it"}
+            return {"suite_valid": False, "error": f"suite '{args['name']}' already exists as a bundled config - pick a new name to avoid clobbering it"}
         location = args.get("location", "install")
         result = _create_config(
-            args, bridge, "suite", _validate_suite,
+            args,
+            bridge,
+            "suite",
+            _validate_suite,
             lambda n: bridge.suite_path(n, location=location),
         )
         if result.get("suite_valid"):
-            result["map_warnings"] = _warn_unknown_maps(
-                args["yaml_content"], bridge
-            )
-            result["model_warnings"] = _warn_unknown_models(
-                args["yaml_content"], bridge
-            )
+            result["map_warnings"] = _warn_unknown_maps(args["yaml_content"], bridge)
+            result["model_warnings"] = _warn_unknown_models(args["yaml_content"], bridge)
         return result
 
     if name == "create_contest":
         if args["name"] in bridge.list_contest_stems():
-            return {"contest_valid": False,
-                    "error": f"contest '{args['name']}' already exists as a bundled "
-                             "config - pick a new name to avoid clobbering it"}
+            return {"contest_valid": False, "error": f"contest '{args['name']}' already exists as a bundled config - pick a new name to avoid clobbering it"}
         location = args.get("location", "install")
         return _create_config(
-            args, bridge, "contest", _validate_contest,
+            args,
+            bridge,
+            "contest",
+            _validate_contest,
             lambda n: bridge.contest_path(n, location=location),
         )
 
@@ -922,9 +895,7 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
     if name == "validate_suite":
         result = _validate_suite(args.get("yaml_content", ""))
         if result.get("valid"):
-            result["model_warnings"] = _warn_unknown_models(
-                args.get("yaml_content", ""), bridge
-            )
+            result["model_warnings"] = _warn_unknown_models(args.get("yaml_content", ""), bridge)
         return result
 
     if name == "validate_contest":
@@ -943,7 +914,7 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
             bridge=bridge,
         )
 
-    #Execute
+    # Execute
     if name == "run_benchmark":
         return _run_benchmark(args, bridge)
 
@@ -953,7 +924,7 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
     if name == "run_report":
         return _run_report(args, bridge)
 
-    #Read
+    # Read
     if name == "read_benchmark_status":
         return _read_benchmark_status(args, bridge)
 
@@ -972,7 +943,7 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
     if name == "query_metrics_data":
         return _query_metrics_data(args, bridge)
 
-    #Analyze
+    # Analyze
     if name == "compare_planners":
         return _compare_planners(args, bridge)
 
@@ -988,7 +959,7 @@ def _dispatch(name: str, args: dict[str, Any], bridge: EvalBridge) -> dict[str, 
     if name == "summarize_benchmark":
         return _summarize_benchmark(args, bridge)
 
-    #Write Notes
+    # Write Notes
     if name == "write_notes":
         return _write_notes(args, bridge)
 
@@ -1006,6 +977,7 @@ def _validate_suite(yaml_content: str) -> dict:
         if not isinstance(data, dict):
             return {"valid": False, "error": f"Expected a mapping, got {type(data).__name__}"}
         from arena_evaluation.benchmark.config import Suite
+
         Suite.parse("_validate", data)
         n_stages = len(data.get("stages", []))
         return {"valid": True, "n_stages": n_stages}
@@ -1021,9 +993,9 @@ def _validate_contest(yaml_content: str) -> dict:
         if not isinstance(data, (list, dict)):
             return {"valid": False, "error": f"Expected list or mapping, got {type(data).__name__}"}
         from arena_evaluation.benchmark.config import Contest
+
         contest = Contest.parse("_validate", data)
-        return {"valid": True, "n_contestants": len(contest.contestants),
-                "contestants": [c.name for c in contest.contestants]}
+        return {"valid": True, "n_contestants": len(contest.contestants), "contestants": [c.name for c in contest.contestants]}
     except Exception as exc:
         return {"valid": False, "error": str(exc)}
 
@@ -1036,6 +1008,7 @@ def _validate_manifest(yaml_content: str) -> dict:
         if not isinstance(data, dict):
             return {"valid": False, "error": f"Expected a mapping, got {type(data).__name__}"}
         from arena_evaluation.presentation.viz_manifest import VizManifest
+
         vm = VizManifest.model_validate(data)
         return {"valid": True, "n_plots": len(vm.plots), "n_groups": len(vm.groups)}
     except Exception as exc:
@@ -1087,9 +1060,7 @@ def _validate_scenario(
                         if isinstance(pt, (list, tuple)) and len(pt) >= 2:
                             x, y = float(pt[0]), float(pt[1])
                             if not (min_x - 1.0 <= x <= max_x + 1.0) or not (min_y - 1.0 <= y <= max_y + 1.0):
-                                warnings.append(
-                                    f"{label} ({x}, {y}) is outside map bounds X:[{min_x}, {max_x}], Y:[{min_y}, {max_y}]"
-                                )
+                                warnings.append(f"{label} ({x}, {y}) is outside map bounds X:[{min_x}, {max_x}], Y:[{min_y}, {max_y}]")
 
                     for idx, r in enumerate(robots):
                         _check_pt(r.get("start"), f"robots[{idx}].start")
@@ -1179,22 +1150,15 @@ def _warn_unknown_models(yaml_content: str, bridge: EvalBridge) -> list[str]:
         cfg = (stage or {}).get("config") or {}
         rnd = cfg.get("random") or {}
         checks = (
-            ("dynamic", peds,
-             "pedestrian - the simulator silently falls back to 'arenian'"),
-            ("static", objs,
-             "static object - unknown models may fail to spawn"),
-            ("interactive", objs,
-             "interactive object - unknown models may fail to spawn"),
+            ("dynamic", peds, "pedestrian - the simulator silently falls back to 'arenian'"),
+            ("static", objs, "static object - unknown models may fail to spawn"),
+            ("interactive", objs, "interactive object - unknown models may fail to spawn"),
         )
         for key, catalog, what in checks:
             models = (rnd.get(key) or {}).get("models") or []
             for m in models:
                 if m not in catalog:
-                    warnings.append(
-                        f"stage '{stage_name}': {key} model '{m}' is not in the "
-                        f"bundled catalog {sorted(catalog)} - {what}. Fetch extra "
-                        f"models via `arena_models net fetch` or fix the typo."
-                    )
+                    warnings.append(f"stage '{stage_name}': {key} model '{m}' is not in the bundled catalog {sorted(catalog)} - {what}. Fetch extra models via `arena_models net fetch` or fix the typo.")
     return warnings
 
 
@@ -1207,19 +1171,18 @@ def _warn_unknown_maps(yaml_content: str, bridge: EvalBridge) -> list[str]:
         for stage in (data or {}).get("stages", []) or []:
             m = (stage or {}).get("map")
             if m and m not in known:
-                warnings.append(
-                    f"stage '{stage.get('name', '?')}': map '{m}' is not in the "
-                    "known worlds catalog - may fail at spawn unless generated "
-                    "at build time"
-                )
+                warnings.append(f"stage '{stage.get('name', '?')}': map '{m}' is not in the known worlds catalog - may fail at spawn unless generated at build time")
     except (yaml.YAMLError, AttributeError) as exc:
         logger.warning("cannot scan suite YAML for map warnings: %s", exc)
     return warnings
 
 
 def _create_config(
-    args: dict, bridge: EvalBridge, kind: str,
-    validator: Callable[[str], dict], path_resolver: Callable[[str], pathlib.Path],
+    args: dict,
+    bridge: EvalBridge,
+    kind: str,
+    validator: Callable[[str], dict],
+    path_resolver: Callable[[str], pathlib.Path],
 ) -> dict:
     name = args["name"]
     yaml_content = args["yaml_content"]
@@ -1242,11 +1205,10 @@ def _create_manifest(args: dict, bridge: EvalBridge) -> dict:
     if template and not yaml_content:
         try:
             from arena_evaluation.presentation.manifest_registry import resolve_manifest
+
             vm = resolve_manifest(template, benchmark_dir=None)
             vm.name = name
-            yaml_content = yaml.safe_dump(
-                vm.model_dump(exclude_none=True), sort_keys=False
-            )
+            yaml_content = yaml.safe_dump(vm.model_dump(exclude_none=True), sort_keys=False)
         except Exception as exc:
             return {"valid": False, "error": f"Failed to load template '{template}': {exc}"}
 
@@ -1300,11 +1262,7 @@ def _run_benchmark(args: dict, bridge: EvalBridge) -> dict:
     proc = bridge.run_cli_background(*cmd_args)
     bridge._bg_processes[run_id] = proc
 
-    launch_config = {
-        a.split(":=", 1)[0]: a.split(":=", 1)[1]
-        for a in cmd_args
-        if ":=" in a
-    }
+    launch_config = {a.split(":=", 1)[0]: a.split(":=", 1)[1] for a in cmd_args if ":=" in a}
     return {
         "run_id": run_id,
         "status": "running",
@@ -1343,17 +1301,13 @@ def _run_report(args: dict, bridge: EvalBridge) -> dict:
     cmd_args = ["report", "--benchmark-dir", benchmark_id]
     manifest = args.get("report_manifest", "")
     if manifest:
-        stem = validate_path_component(
-            manifest[:-5] if manifest.endswith(".yaml") else manifest
-        )
+        stem = validate_path_component(manifest[:-5] if manifest.endswith(".yaml") else manifest)
         cand = bridge.benchmark_dir(benchmark_id) / f"{stem}.yaml"
         cmd_args.extend(["--report-manifest", str(cand) if cand.is_file() else stem])
 
     try:
         result = bridge.run_cli(*cmd_args, timeout=600)
-        report_path = str(
-            bridge.benchmark_dir(benchmark_id) / "report.html"
-        )
+        report_path = str(bridge.benchmark_dir(benchmark_id) / "report.html")
         return {
             "status": "completed" if result.returncode == 0 else "failed",
             "returncode": result.returncode,
@@ -1363,7 +1317,6 @@ def _run_report(args: dict, bridge: EvalBridge) -> dict:
         }
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "error": "Report generation timed out"}
-
 
 
 def _read_benchmark_status(args: dict, bridge: EvalBridge) -> dict:
@@ -1387,9 +1340,7 @@ def _read_benchmark_status(args: dict, bridge: EvalBridge) -> dict:
         "steps_partial": statuses.count("partial"),
         "steps_in_progress": statuses.count("in_progress"),
         "n_episodes": n_episodes,
-        "has_combined_metrics": (
-            bridge.benchmark_dir(bid) / "combined_metrics.parquet"
-        ).exists(),
+        "has_combined_metrics": (bridge.benchmark_dir(bid) / "combined_metrics.parquet").exists(),
         "has_report": (bridge.benchmark_dir(bid) / "report.html").exists(),
     }
 
@@ -1408,8 +1359,10 @@ def _read_combined_metrics(args: dict, bridge: EvalBridge) -> dict:
             s = df[col].drop_nulls()
             if len(s) > 0:
                 stats[col] = {
-                    "dtype": dtype, "null_count": null_count,
-                    "min": float(s.min()), "max": float(s.max()),
+                    "dtype": dtype,
+                    "null_count": null_count,
+                    "min": float(s.min()),
+                    "max": float(s.max()),
                     "mean": float(s.mean()),
                 }
         elif dtype == "List":
@@ -1417,13 +1370,17 @@ def _read_combined_metrics(args: dict, bridge: EvalBridge) -> dict:
         else:
             unique = df[col].drop_nulls().unique().to_list()
             stats[col] = {
-                "dtype": dtype, "null_count": null_count,
-                "unique_values": unique[:20], "n_unique": len(unique),
+                "dtype": dtype,
+                "null_count": null_count,
+                "unique_values": unique[:20],
+                "n_unique": len(unique),
             }
 
     return {
-        "benchmark_id": bid, "n_rows": len(df),
-        "n_columns": len(df.columns), "columns": df.columns,
+        "benchmark_id": bid,
+        "n_rows": len(df),
+        "n_columns": len(df.columns),
+        "columns": df.columns,
         "column_stats": stats,
     }
 
@@ -1481,14 +1438,10 @@ def _query_metrics_data(args: dict, bridge: EvalBridge) -> dict:
     group_cols = [g for g in group_by if g in df.columns]
     metric_cols = [m for m in metrics if m in df.columns]
     if not group_cols or not metric_cols:
-        return {"error": "No valid group_by or metric columns found",
-                "available_columns": df.columns}
+        return {"error": "No valid group_by or metric columns found", "available_columns": df.columns}
 
     needed = list(dict.fromkeys([*group_cols, *metric_cols, *([sort_by] if sort_by and sort_by in df.columns else [])]))
-    list_cols = [
-        c for c in needed
-        if c in df.columns and df.schema[c] == pl.List
-    ]
+    list_cols = [c for c in needed if c in df.columns and df.schema[c] == pl.List]
     if list_cols:
         df = df.select(needed).explode(list_cols)
     else:
@@ -1501,8 +1454,10 @@ def _query_metrics_data(args: dict, bridge: EvalBridge) -> dict:
         result = result.sort(sort_by, descending=True)
 
     return {
-        "benchmark_id": bid, "n_rows": len(result),
-        "columns": result.columns, "data": result.to_dicts(),
+        "benchmark_id": bid,
+        "n_rows": len(result),
+        "columns": result.columns,
+        "data": result.to_dicts(),
     }
 
 
@@ -1572,9 +1527,7 @@ def _describe_metric(args: dict, bridge: EvalBridge) -> dict:
             }
             for k in m["outputs"]
         },
-        "lower_is_better": all(
-            _is_lower_better(k, declarations) for k in m["outputs"]
-        ),
+        "lower_is_better": all(_is_lower_better(k, declarations) for k in m["outputs"]),
     }
 
 
@@ -1600,10 +1553,7 @@ def _compare_planners_frame(
         group_cols.append("stage")
 
     needed = list(dict.fromkeys([*group_cols, *metric_cols]))
-    list_cols = [
-        c for c in needed
-        if c in df.columns and df.schema[c] == pl.List
-    ]
+    list_cols = [c for c in needed if c in df.columns and df.schema[c] == pl.List]
     if list_cols:
         df = df.select(needed).explode(list_cols)
     else:
@@ -1638,7 +1588,8 @@ def _compare_planners_frame(
 
     return {
         "planner_column": planner_col,
-        "n_planners": len(rankings), "metrics_compared": metric_cols,
+        "n_planners": len(rankings),
+        "metrics_compared": metric_cols,
         "rankings": rankings,
     }
 
@@ -1668,8 +1619,7 @@ def _correlation_frame(df: pl.DataFrame, metrics: list[str]) -> dict:
     corr_df = df.select(metrics).to_pandas().corr()
     matrix = {}
     for i, mi in enumerate(metrics):
-        matrix[mi] = {mj: round(float(corr_df.iloc[i, j]), 3)
-                       for j, mj in enumerate(metrics)}
+        matrix[mi] = {mj: round(float(corr_df.iloc[i, j]), 3) for j, mj in enumerate(metrics)}
     return {"metrics": metrics, "correlation_matrix": matrix}
 
 
@@ -1695,8 +1645,7 @@ def _find_top_n_frame(
     planner_col = "local_planner" if "local_planner" in df.columns else "planner"
 
     needed = list(dict.fromkeys([planner_col, *metrics]))
-    list_cols = [c for c in needed
-                 if c in df.columns and df.schema[c] == pl.List]
+    list_cols = [c for c in needed if c in df.columns and df.schema[c] == pl.List]
     if list_cols:
         df = df.select(needed).explode(list_cols)
     else:
@@ -1721,9 +1670,9 @@ def _find_top_n_frame(
 
     total_weight = sum(weights) if weights else 1.0
     ranked = sorted(
-        [{"planner": k, "composite_score": round(v / total_weight, 3)}
-         for k, v in scores.items()],
-        key=lambda x: x["composite_score"], reverse=True,
+        [{"planner": k, "composite_score": round(v / total_weight, 3)} for k, v in scores.items()],
+        key=lambda x: x["composite_score"],
+        reverse=True,
     )
     return {"top_n": ranked[:n]}
 
@@ -1758,14 +1707,10 @@ def _aggregate_by_dimension(args: dict, bridge: EvalBridge) -> dict:
     if metric_cols:
         metric_cols = [m for m in metric_cols if m in df.columns]
     else:
-        metric_cols = [
-            c for c in df.columns
-            if str(df[c].dtype).startswith(("Float", "Int"))
-        ]
+        metric_cols = [c for c in df.columns if str(df[c].dtype).startswith(("Float", "Int"))]
 
     needed = list(dict.fromkeys([dim, *metric_cols]))
-    list_cols = [c for c in needed
-                 if c in df.columns and df.schema[c] == pl.List]
+    list_cols = [c for c in needed if c in df.columns and df.schema[c] == pl.List]
     if list_cols:
         df = df.select(needed).explode(list_cols)
     else:
@@ -1775,8 +1720,10 @@ def _aggregate_by_dimension(args: dict, bridge: EvalBridge) -> dict:
     result = df.group_by(dim).agg(agg).sort(dim)
 
     return {
-        "benchmark_id": bid, "dimension": dim,
-        "n_groups": len(result), "metrics": metric_cols,
+        "benchmark_id": bid,
+        "dimension": dim,
+        "n_groups": len(result),
+        "metrics": metric_cols,
         "data": result.to_dicts(),
     }
 
@@ -1800,10 +1747,13 @@ def _summarize_benchmark(args: dict, bridge: EvalBridge) -> dict:
             pdf = df.filter(pl.col(planner_col) == p)
             n = len(pdf)
             succ = pdf["success"].drop_nulls().mean() if "success" in pdf.columns else None
-            planner_stats.append({
-                "planner": p, "n_episodes": n,
-                "success_rate": round(float(succ), 3) if succ is not None else None,
-            })
+            planner_stats.append(
+                {
+                    "planner": p,
+                    "n_episodes": n,
+                    "success_rate": round(float(succ), 3) if succ is not None else None,
+                }
+            )
 
     lines = [
         f"Benchmark: {bid}",
@@ -1815,11 +1765,10 @@ def _summarize_benchmark(args: dict, bridge: EvalBridge) -> dict:
         "Per-Planner Summary:",
     ]
     for ps in sorted(planner_stats, key=lambda x: x.get("success_rate", 0) or 0, reverse=True):
-        sr = f"{ps['success_rate']*100:.1f}%" if ps["success_rate"] is not None else "N/A"
+        sr = f"{ps['success_rate'] * 100:.1f}%" if ps["success_rate"] is not None else "N/A"
         lines.append(f"  {ps['planner']}: {ps['n_episodes']} episodes, success rate {sr}")
 
-    return {"benchmark_id": bid, "summary": "\n".join(lines),
-            "planner_stats": planner_stats, "status": status}
+    return {"benchmark_id": bid, "summary": "\n".join(lines), "planner_stats": planner_stats, "status": status}
 
 
 def _load_notes_file(path: pathlib.Path) -> list[dict]:
@@ -1869,8 +1818,11 @@ def _write_notes(args: dict, bridge: EvalBridge) -> dict:
 
 
 def _append_insight(args: dict, bridge: EvalBridge) -> dict:
-    return _write_notes({
-        "benchmark_id": args["benchmark_id"],
-        "notes": [{"label": args["label"], "value": args["value"]}],
-        "mode": "append",
-    }, bridge)
+    return _write_notes(
+        {
+            "benchmark_id": args["benchmark_id"],
+            "notes": [{"label": args["label"], "value": args["value"]}],
+            "mode": "append",
+        },
+        bridge,
+    )

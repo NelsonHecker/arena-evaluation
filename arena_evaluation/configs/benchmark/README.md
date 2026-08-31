@@ -155,8 +155,11 @@ stages:
 
 The `characterization` robot task mode (in `task_generator`) drives `cmd_vel` directly through the
 robot's rated envelope - idle blocks, 0.25->vx_max linear steps with 5 s out-and-back dwells,
-transient ramps, pivot rates - tagging every maneuver with `characterization_phase` markers. Run it
-like any benchmark and analyse with the characterization report manifest:
+transient ramps, pivot rates - tagging every maneuver with `characterization_phase` markers. It also
+latches the full schedule as a `characterization_schedule` table, which the report's
+`CharacterizationCalculator` joins against so phase labels match exactly, with `char_phase_coverage`
+reporting the fraction that did. Run it like any benchmark and analyse with the characterization
+report manifest:
 
 ```bash
 arena evaluation benchmark --suite characterization --contest characterization

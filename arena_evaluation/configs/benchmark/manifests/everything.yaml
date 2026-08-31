@@ -39,8 +39,9 @@ units:
   idling_time: s
   relative_throughput: ""
   collision_amount: ""
-  collision_static: ""
-  collision_dynamic: ""
+  collision_amount_wall: ""
+  collision_amount_static: ""
+  collision_amount_pedestrian: ""
   tti_min: s
   tti_mean: s
   movement_towards_peds_ratio: ""
@@ -133,7 +134,6 @@ plots:
         - {metric: specific_cost_of_transport, label: S-CoT, format: "{:.2f}"}
         - {metric: e_cot, label: E-CoT, format: "{:.2f}"}
         - {metric: ped_leq_exposure_dba, label: Leq (dBA), format: "{:.1f}"}
-      notes: notes.yaml
 
   - id: radar_master_local_planner
     type: radar
@@ -275,13 +275,13 @@ plots:
 
   - id: bar_collision_breakdown
     type: bar
-    title: Obstacle Collision Breakdown (Static vs. Dynamic)
+    title: Collision Breakdown by Obstacle Type
     data_key: collision_amount
     differentiate: local_planner
     layout_group: safety_and_collisions
     options:
       stacked: true
-      metrics: [collision_static, collision_dynamic]
+      metrics: [collision_amount_wall, collision_amount_static, collision_amount_pedestrian]
 
   - id: box_tti_min_local
     type: box

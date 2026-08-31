@@ -7,14 +7,19 @@ from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
+# task_generator_msgs/msg/EpisodeRecord outcome_state values.
+_OUTCOME_SUCCESS = 2
+_OUTCOME_RESULTS = {3: "FAILED", 4: "CANCELLED", 5: "FATAL"}
+
+
 class CollisionMetricsCalculator(BaseMetricCalculator):
     """Calculates collision counts, determines episode success status, and computes SPL."""
-    
+
     NAME = "collision_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics", "path_metrics", "trajectory_naturalness"]
     REQUIRED_TOPICS = [("collision_monitor_state", "collision_events"), ("tf_gt", "odom")]
-    
+
     UNITS = {
         "collision_amount": "",
         "collision_amount_wall": "",
@@ -29,10 +34,10 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
 
     PRIMARY_OUTPUTS = ["success", "collision_amount", "spl"]
     OUTPUT_DIRECTIONS = {"success": "higher", "spl": "higher"}
-    
+
     TIMEOUT_THRESHOLD_S = 180.0
     MAX_COLLISIONS = 3
-    
+
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
@@ -65,7 +70,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         if np.isnan(counts).all():
             return None
         return cls._count_rising_edges(np.nan_to_num(counts, nan=0.0) > 0)
-        
+
     @staticmethod
     def _hit_obstacles(episode: AlignedEpisodeBundle) -> list[str]:
         if episode.data is None or "collision_obstacle_ids" not in episode.data.columns:
@@ -76,22 +81,18 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
                 hit.update(i for i in ids if i)
         return sorted(hit)
 
-    def calculate(
-        self,
-        episode: AlignedEpisodeBundle,
-        prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
-        
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+
         collision_amount = 0
         collisions = []
         result = "GOAL_REACHED"
         success = True
-                    
+
         if episode.data is not None and "action_type" in episode.data.columns:
             action_types = episode.data["action_type"].to_numpy()
-            is_stopped = (action_types == 1)
+            is_stopped = action_types == 1
             nav2_collisions = self._count_rising_edges(is_stopped)
-            
+
             if nav2_collisions > collision_amount:
                 collision_amount = nav2_collisions
 
@@ -99,7 +100,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
             events_count = episode.data["collision_event"].to_numpy()
             valid_counts = np.nan_to_num(events_count.astype(float), nan=0.0)
             arena_collisions = self._count_rising_edges(valid_counts > 0)
-            
+
             if arena_collisions > collision_amount:
                 collision_amount = arena_collisions
 
@@ -107,9 +108,9 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         collision_amount_static = self._column_rising_edges(episode, "collision_static")
         collision_amount_pedestrian = self._column_rising_edges(episode, "collision_pedestrian")
         collision_obstacles = self._hit_obstacles(episode)
-                
+
         time_to_goal = prior_results.get("time_to_goal")
-        
+
         if time_to_goal is not None and float(time_to_goal) >= self.TIMEOUT_THRESHOLD_S:
             result = "TIMEOUT"
             success = False
@@ -122,6 +123,12 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         else:
             result = "GOAL_REACHED"
             success = True
+
+        # The runtime's verdict wins over anything derived from the trace.
+        if episode.outcome_state is not None and episode.outcome_state != _OUTCOME_SUCCESS:
+            success = False
+            if result == "GOAL_REACHED":
+                result = _OUTCOME_RESULTS.get(episode.outcome_state, "FAILED")
 
         # Calculate Success weighted by Path Length (SPL)
         # SPL = Success * (L_0 / max(L_actual, L_0))
@@ -142,7 +149,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
                 spl = 1.0
         else:
             spl = 0.0
-            
+
         return {
             "collision_amount": collision_amount,
             "collision_amount_wall": collision_amount_wall,
@@ -154,4 +161,3 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
             "success": success,
             "spl": float(spl),
         }
-

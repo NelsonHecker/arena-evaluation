@@ -51,22 +51,12 @@ plots:
     data_key: "*"
     layout_group: overview
     options:
-      notes: notes.yaml
-  - id: steady_state_working_points_table
-    type: table
-    title: Steady-State Cruise Operating Points (Power, Efficiency & Noise)
-    data_key: timeseries_char_speed_target
-    layout_group: overview
-    filter: {timeseries_char_phase_kind: linear}
-    options:
-      group_by: [robot, timeseries_char_speed_target]
-      columns:
-        - {metric: timeseries_char_speed_achieved, label: "Achieved Speed (m/s)", format: "{:.2f}"}
-        - {metric: timeseries_char_power_total_w, label: "Total Power (W)", format: "{:.1f}"}
-        - {metric: timeseries_char_power_mech_w, label: "Mech Power (W)", format: "{:.1f}"}
-        - {metric: timeseries_char_efficiency, label: "Efficiency", format: "{:.2f}"}
-        - {metric: timeseries_char_dba, label: "Sound Level (dBA)", format: "{:.1f}"}
-        - {metric: timeseries_char_energy_intensity, label: "Energy Intensity (J/m)", format: "{:.2f}"}
+      notes:
+        - {label: Working points, value: "Every sample carries the phase label the sweep published on characterization_phase, resolved against the characterization_schedule table recorded with the episode. Labels the table lacks fall back to cmd_vel classification and lower char_phase_coverage."}
+        - {label: Steady state, value: "The first 1.5 s of every linear, lateral and arc dwell (1.0 s of every pivot) is tagged transient and excluded from the cruising curves."}
+        - {label: Envelope, value: "Speeds, pivot rates and arc radii come from the robot's caps/mobile.yaml. Sweeps end exactly on the rated limits and arcs are skipped when their required yaw rate exceeds the rated angular limit."}
+        - {label: Ramps, value: "accel_target is the commanded rate vx/horizon, signed negative on ramp_down. Apex holds (ramp_apex) and brake approaches are separate kinds and never enter the acceleration plots."}
+        - {label: Power, value: "Total electrical power is the power_publisher estimate. Mechanical power is sum |tau * omega| over joint_states. Acoustic level falls back to a joint-state drivetrain model when no acoustics topic was recorded."}
   - id: bar_idle_standby_power
     type: bar
     title: Baseline Standby / Idle Power Draw by Robot

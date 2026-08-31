@@ -37,8 +37,9 @@ units:
   mar: ""
   pfi: m
   collision_amount: ""
-  collision_static: ""
-  collision_dynamic: ""
+  collision_amount_wall: ""
+  collision_amount_static: ""
+  collision_amount_pedestrian: ""
   tti_min: s
   tti_mean: s
   movement_towards_peds_ratio: ""
@@ -133,8 +134,9 @@ plots:
         - {metric: success, label: "Success Rate (%)", format: "{:.1f}%"}
         - {metric: spl, label: "SPL Score", format: "{:.3f}"}
         - {metric: collision_amount, label: "Total Collisions", format: "{:.2f}"}
-        - {metric: collision_static, label: "Static Collisions", format: "{:.2f}"}
-        - {metric: collision_dynamic, label: "Dynamic Collisions", format: "{:.2f}"}
+        - {metric: collision_amount_wall, label: "Wall Collisions", format: "{:.2f}"}
+        - {metric: collision_amount_static, label: "Static Collisions", format: "{:.2f}"}
+        - {metric: collision_amount_pedestrian, label: "Pedestrian Collisions", format: "{:.2f}"}
         - {metric: tti_min, label: "Min TTI (s)", format: "{:.2f}"}
         - {metric: time_to_goal, label: "Mean Time to Goal (s)", format: "{:.2f}"}
         - {metric: personal_space_intrusion_integral, label: "PSII (m·s)", format: "{:.3f}"}
@@ -151,13 +153,13 @@ plots:
 
   - id: bar_collision_breakdown
     type: bar
-    title: Static vs. Dynamic Obstacle Collision Breakdown
+    title: Collision Breakdown by Obstacle Type
     data_key: collision_amount
     differentiate: local_planner
     layout_group: executive_failure_triage
     options:
       stacked: true
-      metrics: [collision_static, collision_dynamic]
+      metrics: [collision_amount_wall, collision_amount_static, collision_amount_pedestrian]
 
   - id: box_tti_min_local
     type: box
@@ -771,7 +773,7 @@ plots:
   # ============================================================================
   - id: traj_static_collision_overlay
     type: trajectory
-    title: "Spatial Map Overlay: Robot Paths with Static Obstacle Collisions"
+    title: "Spatial Map Overlay: Robot Paths with Collision Markers"
     data_key: path
     differentiate: local_planner
     group_by: [map]

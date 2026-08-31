@@ -91,22 +91,24 @@ class EvalBridge:
             if status and status != run_status_value:
                 continue
 
-            runs.append({
-                "run_id": run_id,
-                "suite": suite_name,
-                "contest": contest_name,
-                "created_at": data.get("created_at", ""),
-                "simulator": data.get("simulator", ""),
-                "status": run_status_value,
-                "steps_total": len(steps),
-                "steps_ok": statuses.count("ok"),
-                "steps_failed": statuses.count("failed"),
-                "steps_partial": statuses.count("partial"),
-                "steps_in_progress": statuses.count("in_progress"),
-                "running_pid": None,
-                "has_combined_metrics": (run_path / "combined_metrics.parquet").exists(),
-                "has_report": (run_path / "report.html").exists(),
-            })
+            runs.append(
+                {
+                    "run_id": run_id,
+                    "suite": suite_name,
+                    "contest": contest_name,
+                    "created_at": data.get("created_at", ""),
+                    "simulator": data.get("simulator", ""),
+                    "status": run_status_value,
+                    "steps_total": len(steps),
+                    "steps_ok": statuses.count("ok"),
+                    "steps_failed": statuses.count("failed"),
+                    "steps_partial": statuses.count("partial"),
+                    "steps_in_progress": statuses.count("in_progress"),
+                    "running_pid": None,
+                    "has_combined_metrics": (run_path / "combined_metrics.parquet").exists(),
+                    "has_report": (run_path / "report.html").exists(),
+                }
+            )
 
         try:
             from arena_evaluation.benchmark.debug import running_pids_by_run_id
@@ -119,7 +121,6 @@ class EvalBridge:
                 r["running_pid"] = pids.get(r["run_id"])
 
         return runs
-
 
     @staticmethod
     def _clean_robot_name(name: str) -> str:
@@ -178,9 +179,7 @@ class EvalBridge:
                 return {"kind": kind, "name": stem, "path": str(f), "content": f.read_text()}
         return None
 
-    def _collect_key_values(
-        self, node: object, key_suffix: str, values: set[str]
-    ) -> None:
+    def _collect_key_values(self, node: object, key_suffix: str, values: set[str]) -> None:
         """Recursively collect string values of keys ending in key_suffix."""
         if isinstance(node, dict):
             for k, v in node.items():
@@ -241,18 +240,12 @@ class EvalBridge:
         try:
             from ament_index_python.packages import get_package_share_directory
 
-            gen = (
-                pathlib.Path(get_package_share_directory("arena_simulation_setup"))
-                / "worlds" / ".generated"
-            )
+            gen = pathlib.Path(get_package_share_directory("arena_simulation_setup")) / "worlds" / ".generated"
         except (ImportError, LookupError) as exc:
             logger.warning("generated worlds unavailable: %s", exc)
         else:
             if gen.is_dir():
-                maps_set.update(
-                    p.name for p in gen.iterdir()
-                    if p.is_dir() and (p / "world.yaml").is_file()
-                )
+                maps_set.update(p.name for p in gen.iterdir() if p.is_dir() and (p / "world.yaml").is_file())
 
         return sorted(m for m in maps_set if m and not m.startswith("."))
 
@@ -272,23 +265,22 @@ class EvalBridge:
             from task_generator.constants import Constants
 
             return {
-                "tm_robots": [
-                    m.value for m in Constants.TaskMode.TM_Robots
-                ],
-                "tm_obstacles": [
-                    m.value for m in Constants.TaskMode.TM_Obstacles
-                ],
+                "tm_robots": [m.value for m in Constants.TaskMode.TM_Robots],
+                "tm_obstacles": [m.value for m in Constants.TaskMode.TM_Obstacles],
             }
         except ImportError:
             return {
                 "tm_robots": [
-                    "random", "explore", "guided", "stationary",
-                    "scenario", "characterization", "demo",
+                    "random",
+                    "explore",
+                    "guided",
+                    "stationary",
+                    "scenario",
+                    "characterization",
+                    "demo",
                 ],
-                "tm_obstacles": ["parametrized", "random", "scenario",
-                                 "environment", "prompt"],
+                "tm_obstacles": ["parametrized", "random", "scenario", "environment", "prompt"],
             }
-
 
     def pedestrian_models(self) -> dict:
         """Available pedestrian (dynamic) model names.
@@ -308,10 +300,8 @@ class EvalBridge:
         local = self._share_subdirs("arena_simulation_setup", "assets/Common/Object")
         return {
             "bundled": sorted(local),
-            "note": "Empty models list in config.random.static.models uses ALL "
-                    "available object identifiers.",
+            "note": "Empty models list in config.random.static.models uses ALL available object identifiers.",
         }
-
 
     TASK_MODE_REFERENCE = {
         "guidance": {
@@ -336,16 +326,11 @@ class EvalBridge:
                 "scenarios). For 'same path, different peds' comparisons the "
                 "random+seed approach is simpler and needs no file authoring."
             ),
-            "construction": (
-                "Construct suite YAML directly from the schemas and examples below "
-                "with concrete values. Do NOT infer structure from previously "
-                "existing benchmark configs - they may use outdated patterns."
-            ),
+            "construction": ("Construct suite YAML directly from the schemas and examples below with concrete values. Do NOT infer structure from previously existing benchmark configs - they may use outdated patterns."),
         },
         "tm_robots": {
             "random": {
-                "purpose": "Robot start/goal sampled from free space, seeded by the "
-                           "stage seed. Same seed + same map + same robot = same path.",
+                "purpose": "Robot start/goal sampled from free space, seeded by the stage seed. Same seed + same map + same robot = same path.",
                 "config_keys": {},
                 "example": (
                     "stages:\n"
@@ -365,41 +350,13 @@ class EvalBridge:
                 ),
             },
             "scenario": {
-                "purpose": "Robot follows a SCRIPTED fixed route (start pose + "
-                           "goto/gesture phases) from the world's scenario file - "
-                           "use this for an authored route independent of seeding.",
-                "config_keys": {
-                    "file": "scenario name, resolved to "
-                            "worlds/<map>/scenarios/<file>/scenario.yaml "
-                            "(e.g. 'default', 'flow'). Shared with tm_obstacles: "
-                            "scenario."
-                },
-                "file_format": (
-                    "robots: [{start: [x, y, yaw], phases: [{goto: [x, y, yaw]}]}]\n"
-                    "static: [{name, model, pose: [x, y, yaw]}]\n"
-                    "dynamic: [{name, model, pose, waypoints: [[x, y, yaw], ...]}]\n"
-                    "regions: {<name>: {type: source|sink, polygon: [{x, y}, ...]}}"
-                ),
-                "example": (
-                    "stages:\n"
-                    "  - name: scripted_route\n"
-                    "    map: hospital_1\n"
-                    "    robot: jackal\n"
-                    "    tm_robots: scenario\n"
-                    "    tm_obstacles: random\n"
-                    "    episodes: 3\n"
-                    "    config:\n"
-                    "      scenario:\n"
-                    "        file: default\n"
-                    "      random:\n"
-                    "        dynamic: {min: 5, max: 10, models: [arenian]}"
-                ),
+                "purpose": "Robot follows a SCRIPTED fixed route (start pose + goto/gesture phases) from the world's scenario file - use this for an authored route independent of seeding.",
+                "config_keys": {"file": "scenario name, resolved to worlds/<map>/scenarios/<file>/scenario.yaml (e.g. 'default', 'flow'). Shared with tm_obstacles: scenario."},
+                "file_format": ("robots: [{start: [x, y, yaw], phases: [{goto: [x, y, yaw]}]}]\nstatic: [{name, model, pose: [x, y, yaw]}]\ndynamic: [{name, model, pose, waypoints: [[x, y, yaw], ...]}]\nregions: {<name>: {type: source|sink, polygon: [{x, y}, ...]}}"),
+                "example": ("stages:\n  - name: scripted_route\n    map: hospital_1\n    robot: jackal\n    tm_robots: scenario\n    tm_obstacles: random\n    episodes: 3\n    config:\n      scenario:\n        file: default\n      random:\n        dynamic: {min: 5, max: 10, models: [arenian]}"),
             },
             "guided": {
-                "purpose": "Robot driven to waypoints supplied LIVE via the set_goal() "
-                           "service by an external controller. The suite config CANNOT "
-                           "pre-script waypoints - not usable for autonomous benchmark "
-                           "runs.",
+                "purpose": "Robot driven to waypoints supplied LIVE via the set_goal() service by an external controller. The suite config CANNOT pre-script waypoints - not usable for autonomous benchmark runs.",
                 "config_keys": {},
                 "example": None,
             },
@@ -414,10 +371,7 @@ class EvalBridge:
                 "example": None,
             },
             "characterization": {
-                "purpose": "Open-loop cmd_vel sweep through the robot's rated envelope "
-                           "(idle, ramps, pivots). Drives cmd_vel directly; no planner "
-                           "required. Use references: false in the suite and the "
-                           "'characterization' report manifest.",
+                "purpose": "Open-loop cmd_vel sweep through the robot's rated envelope (idle, ramps, pivots). Drives cmd_vel directly; no planner required. Use references: false in the suite and the 'characterization' report manifest.",
                 "config_keys": {},
                 "example": (
                     "stages:\n"
@@ -435,47 +389,30 @@ class EvalBridge:
                     "references: false"
                 ),
             },
-            "demo": {"purpose": "Demo/scripted behavior.", "config_keys": {},
-                     "example": None},
+            "demo": {"purpose": "Demo/scripted behavior.", "config_keys": {}, "example": None},
         },
         "tm_obstacles": {
             "random": {
                 "purpose": "Randomly placed obstacles/pedestrians per episode.",
                 "config_keys": {
-                    "dynamic": "PEDESTRIANS: {min, max, models: [...]} - count range "
-                               "sampled per episode; models from the Human catalog "
-                               "(bundled: ['arenian']).",
-                    "static": "Inanimate obstacles: {min, max, models: [...]} - "
-                              "empty models = ALL available object models.",
-                    "interactive": "Inanimate obstacles, same pool as static, "
-                                   "default {min: 0, max: 0} (disabled).",
+                    "dynamic": "PEDESTRIANS: {min, max, models: [...]} - count range sampled per episode; models from the Human catalog (bundled: ['arenian']).",
+                    "static": "Inanimate obstacles: {min, max, models: [...]} - empty models = ALL available object models.",
+                    "interactive": "Inanimate obstacles, same pool as static, default {min: 0, max: 0} (disabled).",
                 },
-                "example": (
-                    "config:\n"
-                    "  random:\n"
-                    "    dynamic: {min: 8, max: 12, models: [arenian]}\n"
-                    "    static: {min: 3, max: 5, models: []}\n"
-                    "    interactive: {min: 0, max: 0, models: []}"
-                ),
+                "example": ("config:\n  random:\n    dynamic: {min: 8, max: 12, models: [arenian]}\n    static: {min: 3, max: 5, models: []}\n    interactive: {min: 0, max: 0, models: []}"),
             },
             "scenario": {
-                "purpose": "Loads static/dynamic entities from the world's scenario "
-                           "file (same 'file' key as tm_robots: scenario).",
+                "purpose": "Loads static/dynamic entities from the world's scenario file (same 'file' key as tm_robots: scenario).",
                 "config_keys": {"file": "scenario name (e.g. 'default', 'flow')."},
                 "example": ("config:\n  scenario:\n    file: default"),
             },
             "parametrized": {
                 "purpose": "Obstacle counts/types from an XML config.",
-                "config_keys": {
-                    "file": "XML name resolved to arena_bringup/configs/"
-                            "parametrized/<file>.xml"
-                },
+                "config_keys": {"file": "XML name resolved to arena_bringup/configs/parametrized/<file>.xml"},
                 "example": ("config:\n  parametrized:\n    file: default"),
             },
-            "environment": {"purpose": "Uses environment-provided obstacles.",
-                            "config_keys": {}, "example": None},
-            "prompt": {"purpose": "Obstacles defined by prompt.",
-                       "config_keys": {}, "example": None},
+            "environment": {"purpose": "Uses environment-provided obstacles.", "config_keys": {}, "example": None},
+            "prompt": {"purpose": "Obstacles defined by prompt.", "config_keys": {}, "example": None},
         },
     }
 
@@ -493,11 +430,7 @@ class EvalBridge:
                         "group": group,
                         "valid_modes": modes,
                     }
-            return {"error": f"unknown mode '{mode}'",
-                    "guidance": guidance,
-                    "valid_modes": modes,
-                    "pedestrian_models": self.pedestrian_models(),
-                    "static_object_models": self.static_object_models()}
+            return {"error": f"unknown mode '{mode}'", "guidance": guidance, "valid_modes": modes, "pedestrian_models": self.pedestrian_models(), "static_object_models": self.static_object_models()}
         return {
             "guidance": guidance,
             "catalog": catalog,
@@ -505,7 +438,6 @@ class EvalBridge:
             "pedestrian_models": self.pedestrian_models(),
             "static_object_models": self.static_object_models(),
         }
-
 
     def planner_catalog(self) -> dict:
         """Drivers + local/global/inter planner names from the sim configs."""
@@ -515,18 +447,9 @@ class EvalBridge:
             from ament_index_python.packages import get_package_share_directory
 
             base = pathlib.Path(get_package_share_directory("arena_robots")) / "config" / "nav2"
-            local = sorted(
-                p.name for p in (base / "controllers").glob("*")
-                if p.is_dir()
-            ) if (base / "controllers").is_dir() else []
-            global_ = sorted(
-                p.name for p in (base / "planners").glob("*")
-                if p.is_dir()
-            ) if (base / "planners").is_dir() else []
-            inter = sorted(
-                p.name for p in (base / "interplanners").glob("*")
-                if p.is_dir()
-            ) if (base / "interplanners").is_dir() else []
+            local = sorted(p.name for p in (base / "controllers").glob("*") if p.is_dir()) if (base / "controllers").is_dir() else []
+            global_ = sorted(p.name for p in (base / "planners").glob("*") if p.is_dir()) if (base / "planners").is_dir() else []
+            inter = sorted(p.name for p in (base / "interplanners").glob("*") if p.is_dir()) if (base / "interplanners").is_dir() else []
         except (ImportError, LookupError) as exc:
             logger.warning("nav2 planner catalog unavailable: %s", exc)
             local, global_, inter = [], [], []
@@ -537,7 +460,6 @@ class EvalBridge:
             "global_planners": global_,
             "inter_planners": inter,
         }
-
 
     def inspect_map(self, map_name: str) -> dict:
         """Metadata for a map: bounds, zones, scenarios with coordinates."""
@@ -550,8 +472,7 @@ class EvalBridge:
             logger.warning("map lookup failed for %s: %s", map_name, exc)
             world_dir = None
         if world_dir is None:
-            return {"map": map_name,
-                    "error": "map not found in arena_simulation_setup/worlds/"}
+            return {"map": map_name, "error": "map not found in arena_simulation_setup/worlds/"}
         info["world_dir"] = str(world_dir)
 
         try:
@@ -582,11 +503,12 @@ class EvalBridge:
                 xs = [c["x"] for c in corners if isinstance(c, dict) and "x" in c]
                 ys = [c["y"] for c in corners if isinstance(c, dict) and "y" in c]
                 if xs and ys:
-                    zones.append({
-                        "name": zone.get("name", "?"),
-                        "bounds": {"x": [round(min(xs), 2), round(max(xs), 2)],
-                                   "y": [round(min(ys), 2), round(max(ys), 2)]},
-                    })
+                    zones.append(
+                        {
+                            "name": zone.get("name", "?"),
+                            "bounds": {"x": [round(min(xs), 2), round(max(xs), 2)], "y": [round(min(ys), 2), round(max(ys), 2)]},
+                        }
+                    )
         info["zones"] = zones
         if zones:
             all_x = [b["bounds"]["x"] for b in zones]
@@ -637,18 +559,20 @@ class EvalBridge:
         bundled: set[str] = set(available_manifests())
 
         _IGNORED = {
-            "manifest", "notes", "report_manifest", "viz_manifest",
-            "combined_metrics", "metrics", "simulation_profile",
+            "manifest",
+            "notes",
+            "report_manifest",
+            "viz_manifest",
+            "combined_metrics",
+            "metrics",
+            "simulation_profile",
         }
         for bid in self._all_benchmark_ids():
             bdir = self._data_root / bid
             if not bdir.is_dir():
                 continue
             try:
-                bundled.update(
-                    p.stem for p in bdir.glob("*.yaml")
-                    if p.stem not in _IGNORED
-                )
+                bundled.update(p.stem for p in bdir.glob("*.yaml") if p.stem not in _IGNORED)
             except OSError as exc:
                 logger.warning("failed to scan %s for manifests: %s", bdir, exc)
                 continue
@@ -664,7 +588,6 @@ class EvalBridge:
         MetricRegistry.discover_calculators_cls()
         registry = MetricRegistry(None)
         return registry.list_metrics()
-
 
     def load_combined_metrics(self, benchmark_id: str) -> pl.DataFrame | None:
         """Load combined_metrics.parquet for a benchmark."""
@@ -710,10 +633,7 @@ class EvalBridge:
             return None
         try:
             text = path.read_text()
-            lines = [
-                l for l in text.splitlines()
-                if l.strip() and not l.strip().startswith("#")
-            ]
+            lines = [l for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
             reader = csv.DictReader(io.StringIO("\n".join(lines)))
             return list(reader)
         except (OSError, csv.Error) as exc:
@@ -733,16 +653,10 @@ class EvalBridge:
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
-            return [
-                {"label": str(k), "value": str(v)}
-                for k, v in data.items()
-            ]
+            return [{"label": str(k), "value": str(v)} for k, v in data.items()]
         return [{"label": "", "value": str(data)}]
 
-    _CLI_WRAPPER = (
-        "cd /opt/arena_ws && source /opt/arena_ws/source > /dev/null 2>&1 "
-        "&& arena evaluation"
-    )
+    _CLI_WRAPPER = "cd /opt/arena_ws && source /opt/arena_ws/source > /dev/null 2>&1 && arena evaluation"
 
     @classmethod
     def _cli_command(cls, *args: str) -> list[str]:
@@ -750,17 +664,18 @@ class EvalBridge:
         import shlex
 
         return [
-            "bash", "-c",
+            "bash",
+            "-c",
             f"{cls._CLI_WRAPPER} {shlex.join(args)}",
         ]
 
-    def run_cli(
-        self, *args: str, timeout: int = 600
-    ) -> subprocess.CompletedProcess:
+    def run_cli(self, *args: str, timeout: int = 600) -> subprocess.CompletedProcess:
         """Execute an arena evaluation CLI command synchronously."""
         return subprocess.run(
             self._cli_command(*args),
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
 
     def run_cli_background(self, *args: str) -> subprocess.Popen:
@@ -852,22 +767,16 @@ class EvalBridge:
             return {"error": "run_id is required"}
         proc = self._bg_processes.get(run_id)
         if proc is None:
-            return {"error":
-                    f"run '{run_id}' is not tracked by this server (it was "
-                    "started before the server restarted)"}
+            return {"error": f"run '{run_id}' is not tracked by this server (it was started before the server restarted)"}
         if proc.poll() is not None:
-            return {"run_id": run_id, "stopped": "already exited",
-                    "returncode": proc.returncode}
+            return {"run_id": run_id, "stopped": "already exited", "returncode": proc.returncode}
 
         pgid = proc.pid  # runner was spawned with start_new_session=True
         cmdline = self._proc_cmdline(pgid)
         if "evaluation benchmark" not in cmdline:
-            return {"error":
-                    f"pid {pgid} recorded for run '{run_id}' is not a "
-                    f"benchmark runner: {cmdline!r}"}
+            return {"error": f"pid {pgid} recorded for run '{run_id}' is not a benchmark runner: {cmdline!r}"}
 
-        sigs = ([signal.SIGKILL] if force
-                else [signal.SIGINT, signal.SIGTERM, signal.SIGKILL])
+        sigs = [signal.SIGKILL] if force else [signal.SIGINT, signal.SIGTERM, signal.SIGKILL]
         for sig in sigs:
             try:
                 os.killpg(pgid, sig)
@@ -879,12 +788,8 @@ class EvalBridge:
                 break
         proc.poll()
 
-        leftover = [
-            {"pid": p, "cmdline": self._proc_cmdline(p)[:100]}
-            for p in self._pgid_members(pgid)
-        ]
+        leftover = [{"pid": p, "cmdline": self._proc_cmdline(p)[:100]} for p in self._pgid_members(pgid)]
         return {"run_id": run_id, "stopped": leftover or "stopped"}
-
 
     def benchmark_dir(self, benchmark_id: str) -> pathlib.Path:
         """Return the resolved benchmark directory. Rejects path-traversing ids."""
@@ -906,14 +811,10 @@ class EvalBridge:
         cand = here.parents[3] / "arena_evaluation" / "arena_evaluation"
         if (cand / "configs" / "benchmark").is_dir():
             return cand
-        fallback = pathlib.Path(
-            "/opt/arena_ws/src/Arena/arena_evaluation/arena_evaluation"
-        )
+        fallback = pathlib.Path("/opt/arena_ws/src/Arena/arena_evaluation/arena_evaluation")
         return fallback
 
-    def _config_write_target(
-        self, kind: str, name: str, location: str = "install"
-    ) -> pathlib.Path:
+    def _config_write_target(self, kind: str, name: str, location: str = "install") -> pathlib.Path:
         """Absolute path where a new suite/contest YAML should be written."""
         from arena_evaluation.presentation.manifest_registry import (
             share_dir,
@@ -959,9 +860,7 @@ class EvalBridge:
                 return cand_path
         return None
 
-    def scenario_write_targets(
-        self, map_name: str, scenario_name: str, location: str = "both"
-    ) -> list[pathlib.Path]:
+    def scenario_write_targets(self, map_name: str, scenario_name: str, location: str = "both") -> list[pathlib.Path]:
         """Resolve write targets for a scenario file."""
         map_name = validate_path_component(map_name)
         scenario_name = validate_path_component(scenario_name)
@@ -969,10 +868,7 @@ class EvalBridge:
 
         # 1. Source target
         src_root = self._arena_simulation_setup_source_root()
-        src_target = (
-            src_root / "worlds" / map_name / "scenarios" / scenario_name / "scenario.yaml"
-            if src_root is not None else None
-        )
+        src_target = src_root / "worlds" / map_name / "scenarios" / scenario_name / "scenario.yaml" if src_root is not None else None
 
         # 2. Install share target
         install_target = None
@@ -995,13 +891,10 @@ class EvalBridge:
         else:  # "both" (default)
             if src_target:
                 targets.append(src_target)
-            if install_target and (
-                not src_target or install_target.resolve() != src_target.resolve()
-            ):
+            if install_target and (not src_target or install_target.resolve() != src_target.resolve()):
                 targets.append(install_target)
 
         return targets
-
 
     def _all_benchmark_ids(self) -> list[str]:
         """Return all benchmark directory names."""

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import dataclasses
 
+
 @dataclasses.dataclass
 class TopicDefinition:
     """Definition of a topic to record."""
+
     name_template: str
     msg_type: type
     throttled: bool = True
@@ -27,8 +29,12 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
 
     ns = f"/{namespace}" if namespace else ""
     p_ns = f"/{parent_namespace}" if parent_namespace else ""
-    if ns == "/": ns = ""
-    if p_ns == "/": p_ns = ""
+    if ns == "/":
+        ns = ""
+    if p_ns == "/":
+        p_ns = ""
+    # The human simulator publishes under the task generator's namespace, one level above its node name.
+    env_ns = p_ns.rsplit("/", 1)[0]
 
     topics = {
         "cmd_vel": TopicDefinition(f"{ns}/cmd_vel", Twist, throttled=True),
@@ -38,7 +44,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "initialpose": TopicDefinition(f"{p_ns}/initialpose", PoseWithCovarianceStamped, throttled=False),
         "tf": TopicDefinition("/tf", TFMessage, throttled=True),
         "tf_static": TopicDefinition("/tf_static", TFMessage, throttled=False, qos_transient_local=True),
-        "peds": TopicDefinition(f"{p_ns}/arena_peds", Pedestrians, throttled=True),
+        "peds": TopicDefinition(f"{env_ns}/arena_peds", Pedestrians, throttled=True),
         "agent_states": TopicDefinition(f"{p_ns}/agent_states", AgentStates, throttled=True),
         "episode_record": TopicDefinition(f"{p_ns}/state/episode", EpisodeRecord, throttled=False, qos_transient_local=True),
         "robots_fleet": TopicDefinition(f"{p_ns}/state/robots", RobotFleet, throttled=False, qos_transient_local=True),
@@ -48,6 +54,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "energy": TopicDefinition(f"{ns}/power_publisher/energy", Energy, throttled=True),
         "acoustics": TopicDefinition(f"{ns}/acoustics", Acoustics, throttled=True),
         "characterization_phase": TopicDefinition(f"{ns}/characterization_phase", String, throttled=False),
+        "characterization_schedule": TopicDefinition(f"{ns}/characterization_schedule", String, throttled=False, qos_transient_local=True),
         "collision_monitor_state": TopicDefinition(f"{ns}/collision_monitor_state", CollisionMonitorState, throttled=False),
     }
 
