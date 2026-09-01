@@ -7,6 +7,7 @@ import typing
 import attrs
 
 from .config import Contest, Suite
+from .lockstep import LockstepSummary
 
 
 @attrs.frozen
@@ -48,3 +49,4 @@ class StepResult:
     episodes_run: int = 0
     episodes_failed: int = 0
     episodes_total: int = 0
+    lockstep: LockstepSummary | None = None

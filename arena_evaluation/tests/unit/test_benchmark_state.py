@@ -413,6 +413,10 @@ _HEADERS = [
     "outcome_state", "outcome_info", "started_at", "ended_at", "runtime_s",
     "robots_params_json", "obstacles_params_json",
     "error_kind", "error_detail",
+    "lockstep_stalls",
+    "lockstep_max_stall_s",
+    "lockstep_rtf",
+    "lockstep_beats",
 ]
 
 

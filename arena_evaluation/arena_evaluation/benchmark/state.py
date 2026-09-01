@@ -14,6 +14,7 @@ import numpy as np
 import yaml
 from rclpy.parameter import Parameter
 
+from .lockstep import BEAT_PREFIXES, LockstepSummary
 from .step import StepErrorKind, StepResult
 
 
@@ -130,6 +131,7 @@ class StateFile:
                     error_detail=error_detail,
                     episodes_run=val.get("episodes_run", 0),
                     episodes_failed=val.get("episodes_failed", 0),
+                    lockstep=LockstepSummary.from_dict(val["lockstep"]) if val.get("lockstep") else None,
                 )
             return cls(path, steps)
         return cls(path, {})
@@ -146,6 +148,7 @@ class StateFile:
                     "error_detail": v.error_detail,
                     "episodes_run": v.episodes_run,
                     "episodes_failed": v.episodes_failed,
+                    "lockstep": v.lockstep.to_dict() if v.lockstep is not None else None,
                 }
                 for k, v in steps.items()
             }
@@ -178,7 +181,8 @@ class ProgressLog:
         "world,seed,tm_robots,tm_obstacles,tm_modules,robots,"
         "outcome_state,outcome_info,started_at,ended_at,runtime_s,"
         "robots_params_json,obstacles_params_json,"
-        "error_kind,error_detail"
+        "error_kind,error_detail,"
+        "lockstep_stalls,lockstep_max_stall_s,lockstep_rtf,lockstep_beats"
     )
 
     def __init__(self, path: pathlib.Path) -> None:
@@ -208,6 +212,7 @@ class ProgressLog:
         reference_type: str | None = None,
         error_kind: StepErrorKind | None = None,
         error_detail: str | None = None,
+        lockstep: LockstepSummary | None = None,
     ) -> None:
         rec = episode_record
         runtime = round(ended_at - started_at, 3)
@@ -237,6 +242,10 @@ class ProgressLog:
             _params_to_json(rec.obstacles_params),
             error_kind.value if error_kind is not None else "",
             error_detail or "",
+            lockstep.stalls if lockstep is not None else "",
+            round(lockstep.max_stall_s, 3) if lockstep is not None else "",
+            round(lockstep.rtf, 3) if lockstep is not None else "",
+            ",".join(ch for ch in lockstep.channels if ch.startswith(BEAT_PREFIXES)) if lockstep is not None else "",
         ])
         self._fh.flush()
 

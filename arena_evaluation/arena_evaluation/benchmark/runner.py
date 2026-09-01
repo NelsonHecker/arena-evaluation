@@ -25,7 +25,7 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from arena_evaluation_msgs.msg import BenchmarkState
 from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
-from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
+from arena_runtime_msgs.msg import EnvRecord, EnvRegistry, LockstepStatus
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
 from arena_simulation_setup.tree import ResolverVerdict
 
@@ -54,6 +54,7 @@ from .state import (
     compute_config_hash,
     find_most_recent_resumable,
 )
+from .lockstep import LockstepMonitor, LockstepSummary, format_report
 from .step import Step, StepErrorKind, StepResult
 from .progress_display import BenchmarkProgressDisplay
 from .tree import ContestIdentifier, SuiteIdentifier
@@ -523,6 +524,7 @@ class BenchmarkRunner(ArenaMixinNode):
         arena_passthrough: dict[str, str] | None = None,
         noexit: bool = False,
         suite_bundle_dir: pathlib.Path | None = None,
+        lockstep_verdict: bool = False,
     ) -> None:
         super().__init__("arena_benchmark_runner")
         self._suite = suite
@@ -537,6 +539,8 @@ class BenchmarkRunner(ArenaMixinNode):
         self._retry_failed = retry_failed
         self._arena_passthrough: dict[str, str] = dict(arena_passthrough or {})
         self._noexit = noexit
+        self._lockstep_verdict = lockstep_verdict
+        self._lockstep = LockstepMonitor()
         self._total_groups = 0
         self._completed_groups = 0
 
@@ -558,6 +562,7 @@ class BenchmarkRunner(ArenaMixinNode):
         self._triggered_episodes: dict[int, set[int]] = {}
 
         self.create_subscription(EnvRegistry, "/arena/state/envs", self._on_envs, _LATCHED)
+        self.create_subscription(LockstepStatus, "/arena/state/lockstep", self._on_lockstep, _LATCHED)
         self._state_pub = self.create_publisher(BenchmarkState, STATE_TOPIC, _LATCHED)
 
         self._arena_proc: subprocess.Popen | None = None
@@ -582,6 +587,9 @@ class BenchmarkRunner(ArenaMixinNode):
             if env_id not in new_ids:
                 self._env_gone_events[env_id].set()
         self._env_records = {e.env_id: e for e in msg.envs}
+
+    def _on_lockstep(self, msg: LockstepStatus) -> None:
+        self._lockstep.observe(msg, time.time())
 
     def _build_launch_args(self, step: Step) -> list[str]:
         return build_launch_args(step, self._simulator, passthrough=self._arena_passthrough)
@@ -867,7 +875,33 @@ class BenchmarkRunner(ArenaMixinNode):
         started = time.time()
         episodes_run = 0
         episodes_failed = 0
+        lockstep: LockstepSummary | None = None
+        window: list[object] = []
         ac = self._episode_action_clients[env_id]
+
+        def _fold_window() -> LockstepSummary | None:
+            nonlocal lockstep
+            if not window:
+                return None
+            summary = self._lockstep.close(window.pop(), time.time())
+            lockstep = summary if lockstep is None else lockstep.merge(summary)
+            return summary
+
+        def _result(status: str, error_kind: StepErrorKind | None = None, error_detail: str | None = None) -> StepResult:
+            _fold_window()
+            return StepResult(
+                step.key,
+                status,
+                env_id,
+                started,
+                time.time(),
+                error_kind,
+                error_detail,
+                episodes_run=episodes_run,
+                episodes_failed=episodes_failed,
+                episodes_total=step.episodes,
+                lockstep=lockstep,
+            )
 
         try:
             for ep_idx in range(step.episodes):
@@ -886,6 +920,8 @@ class BenchmarkRunner(ArenaMixinNode):
                 goal.world = step.stage.map
                 goal.seed = (step.stage.seed + ep_idx) if step.stage.seed is not None else ep_idx
 
+                window.append((step.key, ep_idx))
+                self._lockstep.open(window[-1], time.time())
                 ep_started_sim = self.sim_time.to_seconds()
                 ep_started_wall = time.time()
 
@@ -897,35 +933,13 @@ class BenchmarkRunner(ArenaMixinNode):
                 except asyncio.TimeoutError:
                     episodes_failed += 1
                     _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} send_goal timed out after 15s; abandoning env")
-                    return StepResult(
-                        step.key,
-                        "failed",
-                        env_id,
-                        started,
-                        time.time(),
-                        StepErrorKind.ENV_SETUP,
-                        f"send_goal timed out after 15s on env {env_id}",
-                        episodes_run=episodes_run,
-                        episodes_failed=episodes_failed,
-                        episodes_total=step.episodes,
-                    )
+                    return _result("failed", StepErrorKind.ENV_SETUP, f"send_goal timed out after 15s on env {env_id}")
                 except (_EnvDied, asyncio.CancelledError):
                     raise
                 except Exception as exc:
                     episodes_failed += 1
                     _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} goal rejected ({exc}); env action server is wedged, abandoning env")
-                    return StepResult(
-                        step.key,
-                        "failed",
-                        env_id,
-                        started,
-                        time.time(),
-                        StepErrorKind.ENV_SETUP,
-                        f"run_episode goal rejected: {exc}",
-                        episodes_run=episodes_run,
-                        episodes_failed=episodes_failed,
-                        episodes_total=step.episodes,
-                    )
+                    return _result("failed", StepErrorKind.ENV_SETUP, f"run_episode goal rejected: {exc}")
 
                 timeout_s = step.stage.timeout
                 if step.is_reference and step.reference_type == "unhindered_peds" and step.stage.timeout_peds is not None:
@@ -949,20 +963,10 @@ class BenchmarkRunner(ArenaMixinNode):
                         raise
                     except TimeoutError:
                         _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} cancel did not settle in {_CANCEL_SETTLE_S}s; env is wedged, abandoning env")
-                        return StepResult(
-                            step.key,
-                            "failed",
-                            env_id,
-                            started,
-                            time.time(),
-                            StepErrorKind.ENV_SETUP,
-                            "run_episode cancel did not settle; env wedged",
-                            episodes_run=episodes_run,
-                            episodes_failed=episodes_failed,
-                            episodes_total=step.episodes,
-                        )
+                        return _result("failed", StepErrorKind.ENV_SETUP, "run_episode cancel did not settle; env wedged")
                     except Exception as exc:
                         _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} error awaiting cancel ({exc}); advancing")
+                    _fold_window()
                     continue
                 ep_ended_sim = self.sim_time.to_seconds()
                 ep_ended_wall = time.time()
@@ -972,24 +976,14 @@ class BenchmarkRunner(ArenaMixinNode):
 
                 if result.state == RunEpisode.Result.FATAL:
                     _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} FATAL: {result.info} -- aborting step")
-                    return StepResult(
-                        step.key,
-                        "failed",
-                        env_id,
-                        started,
-                        time.time(),
-                        StepErrorKind.ROBOT_SETUP,
-                        f"env reported FATAL: {result.info}",
-                        episodes_run=episodes_run,
-                        episodes_failed=episodes_failed,
-                        episodes_total=step.episodes,
-                    )
+                    return _result("failed", StepErrorKind.ROBOT_SETUP, f"env reported FATAL: {result.info}")
 
                 recs = self._episode_records.get(env_id, {})
                 rec = recs.get(episode_id)
                 if rec is None:
                     episodes_failed += 1
                     _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} no EpisodeRecord for episode_id={episode_id}; counted as failed")
+                    _fold_window()
                     continue
 
                 episodes_run += 1
@@ -1035,6 +1029,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     else:
                         parent_ep_id = self._parent_episode_map.get(("__stage__", step.stage.name, ep_idx))
 
+                ep_lockstep = _fold_window()
                 ts_iso = datetime.datetime.now(tz=datetime.UTC).isoformat()
                 self._run_dir.progress.append(
                     ts_iso=ts_iso,
@@ -1050,37 +1045,16 @@ class BenchmarkRunner(ArenaMixinNode):
                     parent_episode_id=parent_ep_id,
                     is_reference=step.is_reference,
                     reference_type=step.reference_type,
+                    lockstep=ep_lockstep,
                 )
         except _EnvDied as exc:
             _log.warning(f"{step.key} env={env_id} env died mid-step after run={episodes_run}, failed={episodes_failed}: {exc}")
-            return StepResult(
-                step.key,
-                "failed",
-                env_id,
-                started,
-                time.time(),
-                StepErrorKind.ENV_SETUP,
-                repr(exc),
-                episodes_run=episodes_run,
-                episodes_failed=episodes_failed,
-                episodes_total=step.episodes,
-            )
+            return _result("failed", StepErrorKind.ENV_SETUP, repr(exc))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             _log.exception(f"{step.key} env={env_id} unexpected error mid-step after run={episodes_run}, failed={episodes_failed}")
-            return StepResult(
-                step.key,
-                "failed",
-                env_id,
-                started,
-                time.time(),
-                StepErrorKind.INTERNAL,
-                repr(exc),
-                episodes_run=episodes_run,
-                episodes_failed=episodes_failed,
-                episodes_total=step.episodes,
-            )
+            return _result("failed", StepErrorKind.INTERNAL, repr(exc))
 
         if episodes_run == 0:
             status = "failed"
@@ -1091,18 +1065,7 @@ class BenchmarkRunner(ArenaMixinNode):
         else:
             status = "failed"
 
-        return StepResult(
-            step.key,
-            status,
-            env_id,
-            started,
-            time.time(),
-            None,
-            None,
-            episodes_run=episodes_run,
-            episodes_failed=episodes_failed,
-            episodes_total=step.episodes,
-        )
+        return _result(status)
 
     async def _spawn_and_setup_env(self, launch_step: Step, *, inactivity_timeout: float = 120.0) -> tuple[int, str] | None:
         """Spawn one env booting launch_step's world and set up its clients.
@@ -1536,7 +1499,8 @@ class BenchmarkRunner(ArenaMixinNode):
         def _flush_step_result(res: StepResult) -> bool:
             results[res.key] = res
             elapsed = (res.ended_at or time.time()) - res.started_at
-            _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={elapsed:.1f}s")
+            lockstep_note = f" {res.lockstep.short()}" if res.lockstep is not None and res.lockstep.active else ""
+            _log.info(f"[{res.status}] {res.key} env={res.env_id} episodes={res.episodes_run}/{res.episodes_total} (failed={res.episodes_failed}) t={elapsed:.1f}s{lockstep_note}")
             self._run_dir.state.write(results)
             self._publish_state(results, steps_total)
 
@@ -1639,7 +1603,18 @@ class BenchmarkRunner(ArenaMixinNode):
                 self._run_dir.progress.dedupe_in_place()
                 self._publish_state(results, steps_total)
 
-        return 1 if aborted_systemic else 0
+        rows = [
+            (step_map[k].contestant.name if k in step_map else k, step_map[k].stage.name if k in step_map else "", r.lockstep)
+            for k, r in results.items()
+            if r.lockstep is not None and r.lockstep.active
+        ]
+        lockstep_failed = False
+        if rows:
+            print(f"\nbenchmark: lockstep report\n{format_report(rows)}", flush=True)
+            lockstep_failed = any(summary.verdict == "fail" for _, _, summary in rows)
+        if aborted_systemic:
+            return 1
+        return 3 if self._lockstep_verdict and lockstep_failed else 0
 
 
 def _all_steps(contest: Contest, suite: Suite, scale_episodes: float) -> list[Step]:
@@ -1781,6 +1756,11 @@ def cli_main(argv: list[str] | None = None) -> int:
         "--profile",
         action="store_true",
         help="Enable system resource profiling. Writes simulation_profile.yaml with peak/mean CPU, GPU, RAM, and disk I/O stats.",
+    )
+    p.add_argument(
+        "--lockstep-verdict",
+        action="store_true",
+        help="Exit 3 when a step's lockstep report fails (a stall of 5 s or more, or no planner beat registered).",
     )
     p.add_argument(
         "--noexit",
@@ -1940,6 +1920,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             arena_passthrough=arena_passthrough,
             noexit=args.noexit,
             suite_bundle_dir=suite_bundle_dir,
+            lockstep_verdict=args.lockstep_verdict,
         )
     except KeyboardInterrupt:
         return 130
