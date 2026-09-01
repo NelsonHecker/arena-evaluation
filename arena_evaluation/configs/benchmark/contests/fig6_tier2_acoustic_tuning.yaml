@@ -1,0 +1,65 @@
+name: fig6_tier2_acoustic_tuning
+description: "Tier 2: Express (1.5m/s), Standard (0.8m/s), and Acoustic-Tamed (0.35m/s) Anchor Planners evaluated across 4 Routing Policies"
+contestants:
+  # =========================================================================
+  # DWB Anchor (3 Kinematic Regimes)
+  # =========================================================================
+  - name: dwb-express
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.50
+    linear_acc: 2.50
+    linear_decel: -2.50
+    max_angular_vel: 1.80
+    angular_acc: 3.20
+
+  - name: dwb-standard
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 1.50
+    linear_decel: -1.50
+    max_angular_vel: 1.20
+    angular_acc: 2.00
+
+  - name: dwb-acoustic-tamed
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    linear_acc: 0.75
+    linear_decel: -0.75
+    max_angular_vel: 0.80
+    angular_acc: 1.00
+
+  # =========================================================================
+  # Regulated Pure Pursuit Anchor (3 Kinematic Regimes)
+  # =========================================================================
+  - name: rpp-express
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.50
+    max_angular_vel: 1.80
+
+  - name: rpp-standard
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    max_angular_vel: 1.20
+
+  - name: rpp-acoustic-tamed
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    max_angular_vel: 0.80

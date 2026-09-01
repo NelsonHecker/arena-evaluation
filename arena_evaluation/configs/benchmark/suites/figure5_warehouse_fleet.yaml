@@ -1,0 +1,18 @@
+name: figure5_warehouse_fleet
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: open_warehouse_fleet_picking
+  map: warehouse_fulfillment_hub
+  robot: jackal
+  episodes: 10
+  timeout: 180.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig5_open_warehouse_picking

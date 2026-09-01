@@ -1,0 +1,25 @@
+name: library_random_flow
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+  - name: library_random_3peds_stage
+    map: library_archive_hub
+    robot: jackal
+    episodes: 1
+    timeout: 300.0
+    seed: 101
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic:
+          min: 3
+          max: 3
+          models:
+            - arenian
+        static:
+          min: 0
+          max: 0

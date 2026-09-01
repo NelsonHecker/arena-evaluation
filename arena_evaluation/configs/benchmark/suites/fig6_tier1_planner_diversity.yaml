@@ -1,0 +1,120 @@
+name: fig6_tier1_planner_diversity
+description: 'Tier 1: Multi-Planner Benchmark on the Direct 10-Book Retrieval Mission,
+  split into 10 chained single-book episodes (a stuck leg fails only its own book).'
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+  optim.obstacles: bbox
+stages:
+- name: stage1_direct_shortest_vector_book_01
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 100.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_01
+- name: stage1_direct_shortest_vector_book_02
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 110.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_02
+- name: stage1_direct_shortest_vector_book_03
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 230.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_03
+- name: stage1_direct_shortest_vector_book_04
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 250.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_04
+- name: stage1_direct_shortest_vector_book_05
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_05
+- name: stage1_direct_shortest_vector_book_06
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 250.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_06
+- name: stage1_direct_shortest_vector_book_07
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_07
+- name: stage1_direct_shortest_vector_book_08
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 150.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_08
+- name: stage1_direct_shortest_vector_book_09
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 230.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_09
+- name: stage1_direct_shortest_vector_book_10
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 120.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_10

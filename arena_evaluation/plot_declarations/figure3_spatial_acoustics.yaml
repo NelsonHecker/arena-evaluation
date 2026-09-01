@@ -1,0 +1,66 @@
+# Figure 3: 2D Spatial Acoustic Propagation & Worst-Case Emissions Manifest
+# Eikonal Wave Propagation & Dynamic Doorway Leakage (DIN 4109-1 / ISO 1996)
+manifest_version: "1.0"
+name: figure3_spatial_acoustics
+title: "Figure 3: Spatial Acoustic Propagation & Worst-Case Emissions"
+description: "Side-by-side spatial acoustics comparison of loudest vs. quietest planners at worst-case frame with doorway transmission states."
+data_source: metrics
+groups:
+  - {id: spatial_acoustics, title: "Worst-Case Acoustic Propagation Field"}
+  - {id: acoustic_distributions, title: "Acoustic Exposure and Startle Metrics"}
+units:
+  ped_max_exposure_dba: "dBA"
+  ped_leq_exposure_dba: "dBA"
+  ped_max_startle_factor: "dBA/s"
+  total_sound_energy_joules: "J"
+  acoustic_surge_index: ""
+plots:
+  - id: acoustic_field_loudest_worst_case
+    type: acoustic_field
+    title: "Panel 3A: Loudest Planner Worst-Case Frame (Doorway Open TL=0dB)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: spatial_acoustics
+    options:
+      downsample: 1
+      overlay_trajectories: true
+      planner_filter: loudest
+      show_who_contour: true
+      who_threshold_dba: 35.0
+      colormap: "Turbo"
+      vmin: 20.0
+      vmax: 65.0
+
+  - id: acoustic_field_quietest_worst_case
+    type: acoustic_field
+    title: "Panel 3B: Quietest Planner Worst-Case Frame (Doorway Closed TL=32dB)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: spatial_acoustics
+    options:
+      downsample: 1
+      overlay_trajectories: true
+      planner_filter: quietest
+      show_who_contour: true
+      who_threshold_dba: 35.0
+      colormap: "Turbo"
+      vmin: 20.0
+      vmax: 65.0
+
+  - id: box_ped_exposure_comparison
+    type: box
+    title: "Bedside & Corridor Pedestrian Sound Exposure (dBA)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    layout_group: acoustic_distributions
+    options:
+      show_who_limit: 35.0
+
+  - id: box_startle_factor_comparison
+    type: box
+    title: "Max Acoustic Startle Factor (dBA/s)"
+    data_key: ped_max_startle_factor
+    differentiate: local_planner
+    layout_group: acoustic_distributions

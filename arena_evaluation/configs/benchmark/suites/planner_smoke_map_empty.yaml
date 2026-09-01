@@ -1,0 +1,30 @@
+name: planner_smoke_map_empty
+description: "Planner smoke test: run any contest of planners on map_empty (30x23 m, random task mode, zero peds/obstacles), 1 episode per planner. Goal = does the planner stack actually navigate at all, without the fig6 stage in the way. Per-episode SUCCESS means the stack works; TIMEOUT (180s) on an empty map means the planner/config is broken. Run with: arena evaluation benchmark --suite planner_smoke_map_empty --contest <contest>"
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+  optim.obstacles: bbox
+stages:
+  - name: empty_random_1ep
+    map: map_empty
+    robot: jackal
+    episodes: 1
+    timeout: 180.0
+    seed: 101
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic:
+          min: 0
+          max: 0
+          models: [arenian]
+        interactive:
+          min: 0
+          max: 0
+          models: [shelf]
+        static:
+          min: 0
+          max: 0
+          models: [shelf]

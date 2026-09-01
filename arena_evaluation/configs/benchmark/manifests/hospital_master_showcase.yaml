@@ -1,0 +1,186 @@
+# ==============================================================================
+# HOSPITAL MASTER SHOWCASE REPORT: Multi-Domain Benchmark Analytics
+# ==============================================================================
+manifest_version: "1.0"
+name: hospital_master_showcase
+title: "Hospital 1 Comprehensive Multi-Domain Evaluation Report"
+description: "Exhaustive evaluation across navigation efficiency, social proxemics, electromechanical energy budgets, and spatial acoustics in clinical hospital corridors."
+data_source: metrics
+
+groups:
+  - {id: executive_overview, title: "1. Multi-Domain Executive Summary & Radar Profiles"}
+  - {id: navigation_performance, title: "2. Navigation Performance & Geodesic Efficiency"}
+  - {id: social_proxemics, title: "3. Social Comfort, Proxemics & Personal Space Intrusion (PSII)"}
+  - {id: energy_and_battery, title: "4. Subsystem Electrical Energy Breakdown & Transport Cost"}
+  - {id: acoustic_emissions, title: "5. Clinical Acoustics & Patient Ward Sound Exposure"}
+  - {id: spatial_trajectories, title: "6. Spatial Robot Navigation & Pedestrian Trajectory Overlays"}
+  - {id: multi_objective_tradeoffs, title: "7. Multi-Objective Trade-Off Frontiers"}
+
+units:
+  success: "%"
+  spl: ""
+  time_to_goal: s
+  path_length: m
+  path_efficiency: ""
+  velocity_mean: m/s
+  velocity_max: m/s
+  acceleration_mean: m/s2
+  jerk_mean: m/s3
+  energy_total_wh: Wh
+  energy_static_wh: Wh
+  energy_mechanical_wh: Wh
+  energy_thermal_wh: Wh
+  specific_cost_of_transport: ""
+  e_cot: ""
+  kcsc_wh: Wh
+  battery_soc_drop_pct: "%"
+  personal_space_intrusion_integral: "m·s"
+  total_time_in_personal_space: s
+  aeps_linear_s: s
+  ped_max_exposure_dba: dBA
+  ped_leq_exposure_dba: dBA
+  ped_max_startle_factor: dBA/s
+  total_sound_energy_joules: J
+
+plots:
+  # ── Group 1: Executive Overview ─────────────────────────────────────────────
+  - id: executive_summary_table
+    type: table
+    title: "Master Planner Performance Scorecard"
+    data_key: "*"
+    layout_group: executive_overview
+    options:
+      group_by: [local_planner]
+      columns:
+        - {metric: success, label: "Success (%)", format: "{:.1f}%"}
+        - {metric: time_to_goal, label: "Time (s)", format: "{:.1f}"}
+        - {metric: path_efficiency, label: "Path Eff.", format: "{:.2f}"}
+        - {metric: personal_space_intrusion_integral, label: "PSII (m·s)", format: "{:.2f}"}
+        - {metric: energy_total_wh, label: "Total Energy (Wh)", format: "{:.2f}"}
+        - {metric: specific_cost_of_transport, label: "S-CoT", format: "{:.2f}"}
+        - {metric: kcsc_wh, label: "KCSC (Wh)", format: "{:.2f}"}
+        - {metric: ped_leq_exposure_dba, label: "Noise Leq (dBA)", format: "{:.1f}"}
+
+  - id: radar_multi_domain
+    type: radar
+    title: "Comprehensive Multi-Domain Profile Across Planners"
+    data_key: "*"
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: executive_overview
+    options:
+      metrics: [path_efficiency, velocity_mean, personal_space_intrusion_integral, specific_cost_of_transport, kcsc_wh, ped_leq_exposure_dba]
+
+  # ── Group 2: Navigation Performance ─────────────────────────────────────────
+  - id: box_time_to_goal
+    type: box
+    title: "Mission Transit Duration Across Density Stages (s)"
+    data_key: time_to_goal
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: navigation_performance
+
+  - id: bar_path_efficiency
+    type: bar
+    title: "Mean Path Efficiency Relative to Geodesic Optimum"
+    data_key: path_efficiency
+    differentiate: local_planner
+    layout_group: navigation_performance
+
+  # ── Group 3: Social Proxemics ───────────────────────────────────────────────
+  - id: box_psii_density
+    type: box
+    title: "Personal Space Intrusion Integral (PSII in m·s vs Pedestrian Density)"
+    data_key: personal_space_intrusion_integral
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: social_proxemics
+
+  - id: box_time_in_personal_zone
+    type: box
+    title: "Dwell Time Inside Human Personal Space Buffer (s)"
+    data_key: total_time_in_personal_space
+    differentiate: local_planner
+    layout_group: social_proxemics
+
+  # ── Group 4: Energy & Battery Budget ────────────────────────────────────────
+  - id: bar_energy_subsystem_breakdown
+    type: bar
+    title: "Subsystem Energy Budget (Mechanical Work vs Idle Compute vs Motor Heat)"
+    data_key: energy_total_wh
+    differentiate: local_planner
+    layout_group: energy_and_battery
+    options:
+      group_by: [local_planner]
+      subsystems: [energy_mechanical_wh, energy_static_wh, energy_thermal_wh]
+
+  - id: box_kcsc_scaling
+    type: box
+    title: "Kinematic Cost of Social Compliance (KCSC in Wh) Across Crowd Densities"
+    data_key: kcsc_wh
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: energy_and_battery
+
+  # ── Group 5: Acoustic Emissions ─────────────────────────────────────────────
+  - id: acoustic_field_peak_frame
+    type: acoustic_field
+    title: "Spatial Acoustic Propagation Field in Hospital Corridors (Peak Frame)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: acoustic_emissions
+    options:
+      downsample: 1
+      overlay_trajectories: true
+
+  - id: box_ped_leq
+    type: box
+    title: "Continuous Equivalent Sound Level Delivered to Corridors (L_Aeq dBA)"
+    data_key: ped_leq_exposure_dba
+    differentiate: local_planner
+    layout_group: acoustic_emissions
+
+  # ── Group 6: Spatial Trajectories ───────────────────────────────────────────
+  - id: spatial_robot_trajectories
+    type: trajectory
+    title: "Spatial Jackal Trajectories Over Hospital Floorplan"
+    data_key: path
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: spatial_trajectories
+    filter: {is_reference: false}
+
+  - id: spatial_pedestrian_encounters
+    type: trajectory
+    title: "Pedestrian Patrol Routes & Dynamic Interaction Intersections"
+    data_key: pedestrian_path
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: spatial_trajectories
+    options: {overlay_markers: false}
+
+  # ── Group 7: Multi-Objective Trade-Off Frontiers ────────────────────────────
+  - id: scatter_time_vs_energy
+    type: scatter
+    title: "Pareto Frontier: Mission Duration (s) vs. Energy Expenditure (Wh)"
+    data_key: time_to_goal
+    differentiate: local_planner
+    layout_group: multi_objective_tradeoffs
+    options: {y: energy_total_wh}
+
+  - id: scatter_social_vs_energy
+    type: scatter
+    title: "Pareto Frontier: Social Intrusion (PSII) vs. Compliance Cost (KCSC Wh)"
+    data_key: personal_space_intrusion_integral
+    differentiate: local_planner
+    layout_group: multi_objective_tradeoffs
+    options: {y: kcsc_wh}
+
+  - id: scatter_speed_vs_noise
+    type: scatter
+    title: "Pareto Frontier: Velocity (m/s) vs. Acoustic Disturbance (Leq dBA)"
+    data_key: velocity_mean
+    differentiate: local_planner
+    layout_group: multi_objective_tradeoffs
+    options: {y: ped_leq_exposure_dba}

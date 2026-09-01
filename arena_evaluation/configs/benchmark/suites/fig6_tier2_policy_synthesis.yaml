@@ -1,0 +1,451 @@
+name: fig6_tier2_policy_synthesis
+description: "Tier 2: Macro Routing Policies & Acoustic Spillover Deep-Dive \u2014\
+  \ every policy split into 10 chained single-book episodes (a stuck leg fails only\
+  \ its own book)."
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+  optim.obstacles: bbox
+stages:
+- name: stage1_direct_shortest_vector_book_01
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 100.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_01
+- name: stage1_direct_shortest_vector_book_02
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 110.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_02
+- name: stage1_direct_shortest_vector_book_03
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 230.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_03
+- name: stage1_direct_shortest_vector_book_04
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 250.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_04
+- name: stage1_direct_shortest_vector_book_05
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_05
+- name: stage1_direct_shortest_vector_book_06
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 250.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_06
+- name: stage1_direct_shortest_vector_book_07
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_07
+- name: stage1_direct_shortest_vector_book_08
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 150.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_08
+- name: stage1_direct_shortest_vector_book_09
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 230.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_09
+- name: stage1_direct_shortest_vector_book_10
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 120.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_direct_book_10
+- name: stage2_arterial_highway_book_01
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 170.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_01
+- name: stage2_arterial_highway_book_02
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 240.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_02
+- name: stage2_arterial_highway_book_03
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 370.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_03
+- name: stage2_arterial_highway_book_04
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 380.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_04
+- name: stage2_arterial_highway_book_05
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 260.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_05
+- name: stage2_arterial_highway_book_06
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 350.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_06
+- name: stage2_arterial_highway_book_07
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 440.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_07
+- name: stage2_arterial_highway_book_08
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 230.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_08
+- name: stage2_arterial_highway_book_09
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 380.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_09
+- name: stage2_arterial_highway_book_10
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 210.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_highway_book_10
+- name: stage3_clockwise_loop_book_01
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 240.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_01
+- name: stage3_clockwise_loop_book_02
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_02
+- name: stage3_clockwise_loop_book_03
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 420.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_03
+- name: stage3_clockwise_loop_book_04
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 460.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_04
+- name: stage3_clockwise_loop_book_05
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 340.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_05
+- name: stage3_clockwise_loop_book_06
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 410.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_06
+- name: stage3_clockwise_loop_book_07
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 530.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_07
+- name: stage3_clockwise_loop_book_08
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 340.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_08
+- name: stage3_clockwise_loop_book_09
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 420.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_09
+- name: stage3_clockwise_loop_book_10
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 340.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_loop_book_10
+- name: stage4_acoustic_buffer_book_01
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 170.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_01
+- name: stage4_acoustic_buffer_book_02
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 240.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_02
+- name: stage4_acoustic_buffer_book_03
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 450.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_03
+- name: stage4_acoustic_buffer_book_04
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 380.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_04
+- name: stage4_acoustic_buffer_book_05
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 260.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_05
+- name: stage4_acoustic_buffer_book_06
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 350.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_06
+- name: stage4_acoustic_buffer_book_07
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 440.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_07
+- name: stage4_acoustic_buffer_book_08
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 230.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_08
+- name: stage4_acoustic_buffer_book_09
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 460.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_09
+- name: stage4_acoustic_buffer_book_10
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 1
+  timeout: 210.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig6_retrieval_policy_acoustic_book_10

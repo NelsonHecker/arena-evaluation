@@ -1,0 +1,228 @@
+# ==============================================================================
+# LIBRARY ARCHIVE ANALYTICS MANIFEST: High-Density Archival Logistics & Acoustic Field
+# ==============================================================================
+# Dedicated visualization and analytics manifest for library_archive_hub evaluations.
+# Visualizes spatial fleet trajectories across narrow book stacks, Eikonal acoustic
+# propagation leakage into quiet reading lounges, subsystem energy budgets, and battery SOC.
+# ==============================================================================
+
+manifest_version: "1.0"
+name: library_archive_analytics
+title: "Library Archive Fleet Logistics, Acoustic & Energetic Report"
+description: "Comprehensive analytics for high-density document retrieval: 2D spatial trajectories, acoustic pressure fields, quiet study lounge AEPS, and battery autonomy scaling."
+data_source: metrics
+
+groups:
+  - {id: executive_overview, title: "1. Executive Fleet Logistics & Operational Summary"}
+  - {id: spatial_trajectories, title: "2. Spatial Fleet Trajectories & Navigable Corridor Traces"}
+  - {id: environmental_acoustics, title: "3. Spatial Acoustic Fields & Quiet Study Lounge Disturbance"}
+  - {id: energy_and_battery, title: "4. Subsystem Energy Breakdown & Autonomy Autopsy"}
+  - {id: time_series_telemetry, title: "5. Synchronized Power, Velocity & Battery Depletion Timeseries"}
+  - {id: trade_off_frontiers, title: "6. Multi-Objective Trade-Off Frontiers (Speed vs Decibels vs Joules)"}
+
+units:
+  success: "%"
+  spl: ""
+  time_to_goal: s
+  path_length: m
+  path_efficiency: ""
+  idling_time: s
+  velocity_mean: m/s
+  velocity_max: m/s
+  energy_total_wh: Wh
+  energy_static_wh: Wh
+  energy_mechanical_wh: Wh
+  energy_thermal_wh: Wh
+  specific_cost_of_transport: ""
+  e_cot: ""
+  kcsc_wh: Wh
+  battery_soc_drop_pct: "%"
+  aeps_linear_s: s
+  ped_max_exposure_dba: dBA
+  ped_leq_exposure_dba: dBA
+  ped_max_startle_factor: dBA/s
+  total_sound_energy_joules: J
+  personal_space_intrusion_integral: "m·s"
+  total_time_in_personal_space: s
+  timeseries_power_total_w: W
+  timeseries_power_static_w: W
+  timeseries_power_mechanical_w: W
+  timeseries_power_thermal_w: W
+  timeseries_battery_soc: "%"
+  timeseries_time_s: s
+  timeseries_velocity_linear: m/s
+
+plots:
+  # ============================================================================
+  # 1. Executive Fleet Logistics & Operational Summary
+  # ============================================================================
+  - id: fleet_summary_table
+    type: table
+    title: "Library Retrieval Executive Performance Scorecard"
+    data_key: "*"
+    layout_group: executive_overview
+    options:
+      group_by: [local_planner]
+      columns:
+        - {metric: success, label: "Success Rate (%)", format: "{:.1f}%"}
+        - {metric: time_to_goal, label: "Mission Time (s)", format: "{:.1f}"}
+        - {metric: path_length, label: "Haulage Distance (m)", format: "{:.1f}"}
+        - {metric: energy_total_wh, label: "Energy Consumed (Wh)", format: "{:.2f}"}
+        - {metric: specific_cost_of_transport, label: "S-CoT", format: "{:.2f}"}
+        - {metric: kcsc_wh, label: "KCSC Overhead (Wh)", format: "{:.2f}"}
+        - {metric: aeps_linear_s, label: "Study Lounge AEPS (s)", format: "{:.2f}"}
+        - {metric: ped_leq_exposure_dba, label: "Peak Noise Leq (dBA)", format: "{:.1f}"}
+
+  - id: radar_fleet_profile
+    type: radar
+    title: "Multi-Domain Fleet Radar Profile (Efficiency vs Acoustics vs Energy)"
+    data_key: "*"
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: executive_overview
+    options:
+      metrics: [path_efficiency, velocity_mean, specific_cost_of_transport, kcsc_wh, ped_leq_exposure_dba, aeps_linear_s]
+
+  # ============================================================================
+  # 2. Spatial Fleet Trajectories & Navigable Corridor Traces
+  # ============================================================================
+  - id: amr_spatial_trajectories
+    type: trajectory
+    title: "Spatial AMR Fleet Navigation Trajectories Over Library Floorplan"
+    data_key: path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: spatial_trajectories
+    filter: {is_reference: false}
+
+  - id: pedestrian_interaction_paths
+    type: trajectory
+    title: "Pedestrian Cross-Aisle & Corridor Patrol Trajectories"
+    data_key: pedestrian_path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: spatial_trajectories
+    options: {overlay_markers: false}
+
+  # ============================================================================
+  # 3. Spatial Acoustic Fields & Quiet Study Lounge Disturbance
+  # ============================================================================
+  - id: acoustic_field_spatial_snapshot
+    type: acoustic_field
+    title: "Spatial Acoustic Propagation Field (Peak Emission Frame Over Stacks & Lounge)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: environmental_acoustics
+    options:
+      downsample: 1
+      overlay_trajectories: true
+
+  - id: acoustic_field_animated_timeline
+    type: acoustic_field_animation
+    title: "Dynamic Acoustic Emission Leakage (Animated Video / GIF)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: environmental_acoustics
+    options:
+      downsample: 2
+      fps: 10
+      max_frames: 120
+      overlay_trajectories: true
+      format: gif
+
+  - id: box_aeps_study_receptors
+    type: box
+    title: "Acoustic Exposure in Personal Space (AEPS at Seated Study Carrels)"
+    data_key: aeps_linear_s
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: environmental_acoustics
+
+  - id: box_acoustic_leq_distribution
+    type: box
+    title: "Equivalent Continuous Sound Level (L_Aeq in dBA across Receptors)"
+    data_key: ped_leq_exposure_dba
+    differentiate: local_planner
+    layout_group: environmental_acoustics
+
+  # ============================================================================
+  # 4. Subsystem Energy Breakdown & Autonomy Autopsy
+  # ============================================================================
+  - id: bar_energy_subsystem_breakdown
+    type: bar
+    title: "Subsystem Energy Budget Breakdown (Traction vs Idle vs Thermal Dissipation)"
+    data_key: energy_total_wh
+    differentiate: local_planner
+    layout_group: energy_and_battery
+    options:
+      group_by: [local_planner]
+      subsystems: [energy_mechanical_wh, energy_static_wh, energy_thermal_wh]
+
+  - id: box_kcsc_distribution
+    type: box
+    title: "Kinematic Cost of Social Compliance (KCSC in Wh per Mission)"
+    data_key: kcsc_wh
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: energy_and_battery
+
+  - id: box_scot_distribution
+    type: box
+    title: "Specific Cost of Transport (S-CoT Dimensionless Transport Cost)"
+    data_key: specific_cost_of_transport
+    differentiate: local_planner
+    layout_group: energy_and_battery
+
+  # ============================================================================
+  # 5. Synchronized Power, Velocity & Battery Depletion Timeseries
+  # ============================================================================
+  - id: timeseries_power_and_battery
+    type: timeseries
+    title: "Instantaneous Power Draw & Battery SOC Depletion Curve Across Picks"
+    data_key: timeseries_power_total_w
+    differentiate: local_planner
+    layout_group: time_series_telemetry
+    group_by: [stage]
+    options:
+      x: timeseries_time_s
+      metrics: [timeseries_power_total_w, timeseries_power_static_w, timeseries_power_mechanical_w, timeseries_power_thermal_w, timeseries_battery_soc]
+
+  - id: timeseries_velocity_profile
+    type: timeseries
+    title: "AMR Linear Speed Profile During Aisle Navigation & Docking Maneuvers"
+    data_key: timeseries_velocity_linear
+    differentiate: local_planner
+    layout_group: time_series_telemetry
+    group_by: [stage]
+    options: {x: timeseries_time_s}
+
+  # ============================================================================
+  # 6. Multi-Objective Trade-Off Frontiers (Speed vs Decibels vs Joules)
+  # ============================================================================
+  - id: scatter_speed_vs_acoustics
+    type: scatter
+    title: "Throughput-Acoustic Frontier (Mean Velocity vs. Study Lounge AEPS)"
+    data_key: velocity_mean
+    differentiate: local_planner
+    layout_group: trade_off_frontiers
+    options: {y: aeps_linear_s}
+
+  - id: scatter_compliance_vs_autonomy
+    type: scatter
+    title: "Social Deceleration vs. Energy Overhead (PSII vs. KCSC in Wh)"
+    data_key: personal_space_intrusion_integral
+    differentiate: local_planner
+    layout_group: trade_off_frontiers
+    options: {y: kcsc_wh}
+
+  - id: scatter_energy_vs_sound
+    type: scatter
+    title: "Joules vs. Decibels Frontier (Total Energy in Wh vs. Peak Leq Noise)"
+    data_key: energy_total_wh
+    differentiate: local_planner
+    layout_group: trade_off_frontiers
+    options: {y: ped_leq_exposure_dba}

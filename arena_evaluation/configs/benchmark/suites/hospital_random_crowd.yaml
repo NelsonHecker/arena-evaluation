@@ -1,0 +1,25 @@
+name: hospital_random_crowd
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+  - name: hospital_random_4peds_stage
+    map: hospital_1
+    robot: jackal
+    episodes: 1
+    timeout: 300.0
+    seed: 101
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic:
+          min: 4
+          max: 4
+          models:
+            - arenian
+        static:
+          min: 0
+          max: 0

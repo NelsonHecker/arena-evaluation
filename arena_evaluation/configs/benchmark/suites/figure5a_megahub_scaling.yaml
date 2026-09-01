@@ -1,0 +1,18 @@
+name: figure5a_megahub_scaling
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: megahub_longhaul_stage
+  map: logistics_hub_80m
+  robot: jackal
+  episodes: 10
+  timeout: 220.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig5a_megahub_longhaul

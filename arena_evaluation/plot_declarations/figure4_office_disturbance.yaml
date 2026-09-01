@@ -1,0 +1,43 @@
+# Figure 4: Open Office Desk Cluster Service & Worker Disturbance Manifest
+manifest_version: "1.0"
+name: figure4_office_disturbance
+title: "Figure 4: Open Office Desk Cluster Service & Worker Disturbance"
+description: "Spatial desk interaction map with seated worker AEPS badges and Speed vs. AEPS Pareto Frontier."
+data_source: metrics
+groups:
+  - {id: office_spatial, title: "Spatial Desk Interaction & AEPS Dose Map"}
+  - {id: pareto_tradeoff, title: "Commute Speed vs. Worker Acoustic Dose Pareto Frontier"}
+units:
+  velocity_mean: "m/s"
+  aeps_linear_s: "s"
+  personal_space_intrusion_integral: "m·s"
+  time_to_goal: "s"
+plots:
+  - id: office_trajectory_desk_badges
+    type: trajectory
+    title: "Panel 4A: Spatial Desk Trajectory & Worker AEPS Dose Map"
+    data_key: path
+    differentiate: local_planner
+    layout_group: office_spatial
+    options:
+      show_map: true
+      overlay_markers: true
+      overlay_desk_badges: true
+      desk_coordinates:
+        - {name: "Desk A (Aisle)", pos: [24.0, 18.0]}
+        - {name: "Desk B (Aisle)", pos: [30.0, 18.0]}
+        - {name: "Desk C (Near Goal)", pos: [36.0, 22.0]}
+        - {name: "Desk D (Control)", pos: [42.0, 22.0]}
+
+  - id: pareto_speed_vs_aeps
+    type: scatter
+    title: "Panel 4B: Speed vs. AEPS Disturbance Pareto Frontier"
+    data_key: velocity_mean
+    differentiate: local_planner
+    layout_group: pareto_tradeoff
+    options:
+      y: aeps_linear_s
+      size: personal_space_intrusion_integral
+      show_pareto_front: true
+      xlabel: "Mean Commute Speed (m/s)"
+      ylabel: "Worker Acoustic Exposure Dose AEPS (Pa²·s)"

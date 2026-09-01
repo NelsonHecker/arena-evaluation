@@ -1,0 +1,58 @@
+name: hospital_showcase_random
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+  - name: stage1_unhindered_baseline
+    map: hospital_1
+    robot: jackal
+    episodes: 3
+    timeout: 120.0
+    seed: 101
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic: {min: 0, max: 0}
+        static: {min: 0, max: 0}
+
+  - name: stage2_sparse_pedestrians
+    map: hospital_1
+    robot: jackal
+    episodes: 3
+    timeout: 150.0
+    seed: 102
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic: {min: 2, max: 3, models: [arenian]}
+        static: {min: 3, max: 5}
+
+  - name: stage3_moderate_clinic_rush
+    map: hospital_1
+    robot: jackal
+    episodes: 3
+    timeout: 180.0
+    seed: 103
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic: {min: 5, max: 8, models: [arenian]}
+        static: {min: 8, max: 12}
+
+  - name: stage4_crowded_corridor_stress
+    map: hospital_1
+    robot: jackal
+    episodes: 3
+    timeout: 240.0
+    seed: 104
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic: {min: 10, max: 14, models: [arenian]}
+        static: {min: 12, max: 18}

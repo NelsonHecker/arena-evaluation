@@ -1,0 +1,54 @@
+name: figure5b_policy_synthesis
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+  - name: stage1_direct_shortest_path
+    map: library_archive_hub
+    robot: jackal
+    episodes: 1
+    timeout: 900.0
+    seed: 101
+    tm_robots: scenario
+    tm_obstacles: scenario
+    config:
+      scenario:
+        file: fig5b_policy_direct_10picks
+
+  - name: stage2_central_highway
+    map: library_archive_hub
+    robot: jackal
+    episodes: 1
+    timeout: 900.0
+    seed: 101
+    tm_robots: scenario
+    tm_obstacles: scenario
+    config:
+      scenario:
+        file: fig5b_policy_highway_10picks
+
+  - name: stage3_acoustic_shielded
+    map: library_archive_hub
+    robot: jackal
+    episodes: 1
+    timeout: 900.0
+    seed: 101
+    tm_robots: scenario
+    tm_obstacles: scenario
+    config:
+      scenario:
+        file: fig5b_policy_acoustic_10picks
+
+  - name: stage4_one_way_loop
+    map: library_archive_hub
+    robot: jackal
+    episodes: 1
+    timeout: 900.0
+    seed: 101
+    tm_robots: scenario
+    tm_obstacles: scenario
+    config:
+      scenario:
+        file: fig5b_policy_loop_10picks

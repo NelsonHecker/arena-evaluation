@@ -1,0 +1,18 @@
+name: figure5b_library_retrieval
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: library_book_retrieval_stage
+  map: library_archive_hub
+  robot: jackal
+  episodes: 1
+  timeout: 210.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig5b_retrieval_01_picks

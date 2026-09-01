@@ -1,0 +1,145 @@
+# Figure 2: The 6-Panel Cost of Crowding Master Grid Manifest
+# Multi-Planner Trajectory Overlays & Synchronized Multi-Metric Distributions
+manifest_version: "1.0"
+name: figure2_cost_of_crowding
+title: "Figure 2: The Cost of Crowding Master Grid"
+description: "6-panel master grid linking trajectory geometry to synchronized energy and acoustic distribution surges across crowd densities."
+data_source: metrics
+groups:
+  - {id: trajectories, title: "Row 1: Trajectory Overlays Across Crowd Densities"}
+  - {id: metrics_energy, title: "Row 2: Synchronized Energy & Power Metrics"}
+  - {id: metrics_acoustics, title: "Row 2: Synchronized Acoustic & Psychoacoustic Metrics"}
+  - {id: metrics_social, title: "Row 2: Synchronized Social Proxemic Metrics"}
+units:
+  energy_per_meter: "Wh/m"
+  specific_cost_of_transport: ""
+  standstill_energy_penalty_wh: "Wh"
+  kinetic_energy_demand_j: "J"
+  power_peak_w: "W"
+  acoustic_surge_index: ""
+  ped_max_exposure_dba: "dBA"
+  ped_leq_exposure_dba: "dBA"
+  ped_max_startle_factor: "dBA/s"
+  aeps_linear_s: "s"
+  personal_space_intrusion_integral: "m·s"
+  social_force_ped_max: "N"
+  relative_throughput: ""
+plots:
+  # ── Row 1: Trajectory Overlays per Stage ─────────────────────────────────────
+  - id: trajectory_stage_0
+    type: trajectory
+    title: "Panel 2A: Trajectories (0 Pedestrians)"
+    data_key: path
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: trajectories
+    options:
+      show_map: true
+      overlay_markers: true
+      stage_filter: stage_0_unhindered
+      pedestrian_path_key: pedestrian_path
+
+  - id: trajectory_stage_1
+    type: trajectory
+    title: "Panel 2B: Trajectories (2 Pedestrians)"
+    data_key: path
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: trajectories
+    options:
+      show_map: true
+      overlay_markers: true
+      stage_filter: stage_1_social
+      pedestrian_path_key: pedestrian_path
+
+  - id: trajectory_stage_2
+    type: trajectory
+    title: "Panel 2C: Trajectories (4 Pedestrians)"
+    data_key: path
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: trajectories
+    options:
+      show_map: true
+      overlay_markers: true
+      stage_filter: stage_2_crowded
+      pedestrian_path_key: pedestrian_path
+
+  # ── Row 2: Synchronized Multi-Metric Distributions ───────────────────────────
+  - id: violin_energy_per_meter_locked
+    type: violin
+    title: "Energy per Meter (Wh/m)"
+    data_key: energy_per_meter
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_energy
+    options:
+      synchronize_y_axis: true
+      show_box: true
+      show_points: "outliers"
+
+  - id: violin_scot_locked
+    type: violin
+    title: "Specific Cost of Transport (S-CoT)"
+    data_key: specific_cost_of_transport
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_energy
+    options:
+      synchronize_y_axis: true
+      show_box: true
+
+  - id: violin_standstill_penalty_locked
+    type: violin
+    title: "Standstill Idling Penalty (Wh)"
+    data_key: standstill_energy_penalty_wh
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_energy
+    options:
+      synchronize_y_axis: true
+      show_box: true
+
+  - id: violin_asi_locked
+    type: violin
+    title: "Acoustic Surge Index (ASI)"
+    data_key: acoustic_surge_index
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_acoustics
+    options:
+      synchronize_y_axis: true
+      show_box: true
+
+  - id: violin_ped_max_exposure_locked
+    type: violin
+    title: "Peak Pedestrian Sound Exposure (dBA)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_acoustics
+    options:
+      synchronize_y_axis: true
+      show_box: true
+
+  - id: violin_psii_locked
+    type: violin
+    title: "Personal Space Intrusion (m·s)"
+    data_key: personal_space_intrusion_integral
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_social
+    options:
+      synchronize_y_axis: true
+      show_box: true
+
+  - id: violin_relative_throughput_locked
+    type: violin
+    title: "Relative Throughput"
+    data_key: relative_throughput
+    differentiate: local_planner
+    group_by: [stage]
+    layout_group: metrics_social
+    options:
+      synchronize_y_axis: true
+      show_box: true

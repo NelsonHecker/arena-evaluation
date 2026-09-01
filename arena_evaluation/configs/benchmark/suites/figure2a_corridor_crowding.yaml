@@ -1,0 +1,42 @@
+name: figure2a_corridor_crowding
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_0_unhindered
+  map: hospital_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig2a_corridor_0peds
+
+- name: stage_1_social
+  map: hospital_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig2a_corridor_2peds
+
+- name: stage_2_crowded
+  map: hospital_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig2a_corridor_4peds

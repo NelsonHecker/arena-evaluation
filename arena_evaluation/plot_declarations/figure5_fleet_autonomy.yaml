@@ -1,0 +1,58 @@
+# Figure 5: Fleet Logistics & Battery Autonomy Scaling Manifest
+manifest_version: "1.0"
+name: figure5_fleet_autonomy
+title: "Figure 5: Fleet Logistics & Battery Autonomy Scaling"
+description: "Mission capacity decay scaling, subsystem energy decomposition, and multi-axis operational radar comparison."
+data_source: metrics
+groups:
+  - {id: autonomy_scaling, title: "Operational Task Autonomy Scaling"}
+  - {id: energy_budget, title: "Subsystem Energy Budget Breakdown"}
+  - {id: multi_axis_profile, title: "Multi-Objective Operational Radar Profile"}
+units:
+  energy_total_wh: "Wh"
+  energy_static_wh: "Wh"
+  energy_mechanical_wh: "Wh"
+  energy_thermal_wh: "Wh"
+  friction_dissipation_j: "J"
+  specific_cost_of_transport: ""
+  relative_throughput: ""
+  acoustic_surge_index: ""
+  personal_space_intrusion_integral: "m·s"
+  success: "%"
+plots:
+  - id: autonomy_decay_curve
+    type: line
+    title: "Panel 5A: Operational Tasks per Battery Charge vs. Crowd Density"
+    data_key: num_pedestrians
+    differentiate: local_planner
+    layout_group: autonomy_scaling
+    options:
+      y: tasks_per_charge
+      show_error_bands: true
+      xlabel: "Corridor Pedestrian Density (N)"
+      ylabel: "Missions / Ward Rooms Completed per Charge"
+
+  - id: subsystem_energy_breakdown
+    type: bar
+    title: "Panel 5B: Subsystem Energy Decomposition Breakdown (%)"
+    data_key: energy_total_wh
+    differentiate: local_planner
+    layout_group: energy_budget
+    options:
+      stacked: true
+      metrics: [energy_static_wh, energy_mechanical_wh, energy_thermal_wh, friction_dissipation_j]
+
+  - id: radar_operational_profile
+    type: radar
+    title: "Panel 5C: Multi-Axis Operational Trade-Off Radar"
+    data_key: "*"
+    differentiate: local_planner
+    layout_group: multi_axis_profile
+    options:
+      metrics:
+        - relative_throughput
+        - specific_cost_of_transport
+        - tasks_per_charge
+        - acoustic_surge_index
+        - personal_space_intrusion_integral
+        - success
