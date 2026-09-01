@@ -333,6 +333,7 @@ class ProcessingPipeline:
 
                 conditions = None
                 outcome_state = None
+                outcome_info = None
                 if bundle.episode_record is not None:
                     er = bundle.episode_record
                     if isinstance(er, pl.LazyFrame):
@@ -347,7 +348,10 @@ class ProcessingPipeline:
                         except Exception:
                             conditions = None
                         if "outcome_state" in er.columns and "time_ns" in er.columns:
-                            outcome_state = int(er.sort("time_ns")["outcome_state"][-1])
+                            er_sorted = er.sort("time_ns")
+                            outcome_state = int(er_sorted["outcome_state"][-1])
+                            if "outcome_info" in er_sorted.columns:
+                                outcome_info = er_sorted["outcome_info"][-1]
 
                 aligned_ep = AlignedEpisodeBundle(
                     episode_id=ep.episode_id,
@@ -359,6 +363,7 @@ class ProcessingPipeline:
                     semantic_snapshot=semantic_snapshot_df,
                     conditions=conditions,
                     outcome_state=outcome_state,
+                    outcome_info=outcome_info,
                     map=ep.map,
                     topics=topics,
                 )

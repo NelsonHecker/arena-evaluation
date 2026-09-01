@@ -210,8 +210,9 @@ def test_literature_spl_and_path_efficiency():
     assert res_detour_eff["path_efficiency"] == 0.5
 
     # Case 3: Collision / Failure (Success = False)
-    prior_fail = {"path_length": 10.0, "theta_star_length": 10.0, "time_to_goal": None, "collision_amount": 1}
-    res_fail_coll = calc_coll.calculate(ep_success, prior_fail)
+    ep_fail = AlignedEpisodeBundle(1, pl.DataFrame(), [0, 0, 0], [10, 0, 0], outcome_info="collision")
+    prior_fail = {"path_length": 10.0, "theta_star_length": 10.0, "time_to_goal": None}
+    res_fail_coll = calc_coll.calculate(ep_fail, prior_fail)
     assert res_fail_coll["spl"] == 0.0
 
 

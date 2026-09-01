@@ -19,7 +19,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     NAME = "collision_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics", "path_metrics", "trajectory_naturalness"]
-    REQUIRED_TOPICS = [("collision_monitor_state", "collision_events"), ("tf_gt", "odom")]
+    REQUIRED_TOPICS = ["collision_events", ("tf_gt", "odom")]
 
     UNITS = {
         "collision_amount": "",
@@ -84,27 +84,11 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
 
-        collision_amount = 0
         collisions = []
         result = "GOAL_REACHED"
         success = True
 
-        if episode.data is not None and "action_type" in episode.data.columns:
-            action_types = episode.data["action_type"].to_numpy()
-            is_stopped = action_types == 1
-            nav2_collisions = self._count_rising_edges(is_stopped)
-
-            if nav2_collisions > collision_amount:
-                collision_amount = nav2_collisions
-
-        if episode.data is not None and "collision_event" in episode.data.columns:
-            events_count = episode.data["collision_event"].to_numpy()
-            valid_counts = np.nan_to_num(events_count.astype(float), nan=0.0)
-            arena_collisions = self._count_rising_edges(valid_counts > 0)
-
-            if arena_collisions > collision_amount:
-                collision_amount = arena_collisions
-
+        collision_amount = self._column_rising_edges(episode, "collision_event") or 0
         collision_amount_wall = self._column_rising_edges(episode, "collision_wall")
         collision_amount_static = self._column_rising_edges(episode, "collision_static")
         collision_amount_pedestrian = self._column_rising_edges(episode, "collision_pedestrian")
@@ -115,18 +99,18 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         if time_to_goal is not None and float(time_to_goal) >= self.TIMEOUT_THRESHOLD_S:
             result = "TIMEOUT"
             success = False
-        elif collision_amount >= self.MAX_COLLISIONS or prior_results.get("collision_amount", 0) >= self.MAX_COLLISIONS:
+        elif collision_amount >= self.MAX_COLLISIONS:
             result = "COLLISION"
-            success = False
-        elif time_to_goal is None and "time_to_goal" in prior_results:
-            result = "COLLISION" if collision_amount > 0 or prior_results.get("collision_amount", 0) > 0 else "FAILED"
             success = False
         else:
             result = "GOAL_REACHED"
             success = True
 
         # The runtime's verdict wins over anything derived from the trace.
-        if episode.outcome_state is not None and episode.outcome_state != _OUTCOME_SUCCESS:
+        if episode.outcome_info == "collision":
+            result = "COLLISION"
+            success = False
+        elif episode.outcome_state is not None and episode.outcome_state != _OUTCOME_SUCCESS:
             success = False
             if result == "GOAL_REACHED":
                 result = _OUTCOME_RESULTS.get(episode.outcome_state, "FAILED")
