@@ -14,6 +14,7 @@ class LineRenderer(BasePlotRenderer):
 
     def _prepare(self, df: pl.DataFrame):
         """Validate and return (pdf, x_col, y_col, group_cols, error_col, opts) or None."""
+        error_col: str | None = None
         df_filtered = self._apply_filters(df)
         x_col = self.spec.data_key
         y_col = self.spec.options.get("y")
@@ -31,7 +32,7 @@ class LineRenderer(BasePlotRenderer):
                 group_cols = [diff_col]
 
         filter_keys = [k for k in (self.spec.filter or {}).keys() if k in df_filtered.columns]
-        keep = list(dict.fromkeys([c for c in [x_col, y_col, *group_cols, error_col, *filter_keys] if c]))
+        keep = list(dict.fromkeys([c for c in [x_col, y_col, *group_cols, *filter_keys] if c]))
         list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
         if list_cols:
             df_filtered = df_filtered.select(keep).explode(list_cols)

@@ -207,6 +207,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             is_linear_dwell = pl.col("phase_label").str.starts_with("linear_vx_")
             is_lateral_dwell = pl.col("phase_label").str.starts_with("lateral_vy_")
             is_arc_dwell = pl.col("phase_label").str.starts_with("arc_vx_")
+            is_trans_dwell = is_linear_dwell | is_lateral_dwell | is_arc_dwell
             is_angular_dwell = pl.col("phase_label").str.starts_with("angular_wz_")
             is_long_block = pl.col("_phase_total_duration_s") >= 4.0
             t_out = pl.min_horizontal(pl.lit(0.8), pl.col("_phase_total_duration_s") * 0.15)
@@ -214,7 +215,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             out = out.with_columns(
                 pl.when(is_settle)
                 .then(pl.lit("transient"))
-                .when(is_trans_dwell & ((pl.col("_phase_elapsed_s") < 1.5) | (is_long_block & (pl.col("_phase_elapsed_s") > (pl.col("_phase_total_duration_s") - t_out)))))
+                .when(is_trans_dwell & ((pl.col("_phase_elapsed_s") < _TRANSIENT_S) | in_tail))
                 .then(pl.lit("transient"))
                 .when(is_angular_dwell & ((pl.col("_phase_elapsed_s") < _TRANSIENT_ANGULAR_S) | in_tail))
                 .then(pl.lit("transient"))
@@ -315,7 +316,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         out = out.with_columns(
             pl.when(speed >= 0.05).then(out["_p_total"] / speed).otherwise(None).alias("_e_per_m"),
             pl.when(wz_achieved >= 0.05).then(out["_p_total"] / wz_achieved).otherwise(None).alias("_e_per_rad"),
-            pl.when((speed >= 0.05) & (wz_achieved >= 0.05)).then(speed / wz_achieved).otherwise(out["turn_radius_m"]).alias("_turn_radius"),
+            out["turn_radius_m"].fill_null(0.0).alias("_turn_radius"),
         )
 
         import numpy as np

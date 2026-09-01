@@ -1155,7 +1155,14 @@ class AcousticFieldRenderer(BasePlotRenderer):
             # Update door contours, remove old, redraw current
             if show_doors and open_door_masks[rg_idx].any():
                 if open_door_contour is not None:
-                    open_door_contour.remove()
+                    try:
+                        open_door_contour.remove()
+                    except (AttributeError, TypeError):
+                        for coll in getattr(open_door_contour, "collections", []):
+                            try:
+                                coll.remove()
+                            except Exception:
+                                pass
                 open_door_contour = ax.contour(cx, cy, open_door_masks[rg_idx].astype(np.uint8),
                                                levels=[0.5], colors=["#00ff00"],
                                                linewidths=2.0, alpha=0.9)
