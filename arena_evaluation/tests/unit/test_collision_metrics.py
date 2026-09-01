@@ -142,3 +142,39 @@ def test_recorded_success_keeps_the_derived_result():
 
     assert results["success"] is True
     assert results["result"] == "GOAL_REACHED"
+
+
+def test_action_type_stop_zones_no_longer_count_as_collisions():
+    df = pl.DataFrame(
+        {
+            "collision_event": [0, 0, 0, 0, 0],
+            "action_type": [0, 1, 1, 0, 1],
+        }
+    )
+
+    episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
+    calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
+
+    results = calc.calculate(episode, {"time_to_goal": 10.0})
+
+    assert results["collision_amount"] == 0
+    assert results["result"] == "GOAL_REACHED"
+    assert results["success"] is True
+
+
+def test_outcome_info_collision_overrides_result():
+    df = pl.DataFrame({"collision_event": [0, 0, 0]})
+    episode = AlignedEpisodeBundle(
+        episode_id=1,
+        data=df,
+        start_pos=[],
+        goal_pos=[],
+        outcome_state=3,
+        outcome_info="collision",
+    )
+    calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
+
+    results = calc.calculate(episode, {"time_to_goal": 10.0})
+
+    assert results["result"] == "COLLISION"
+    assert results["success"] is False

@@ -190,6 +190,7 @@ class AlignedEpisodeBundle:
     conditions: list[dict] | None = None
     # Final EpisodeRecord.outcome_state of the recording, None when no record was captured.
     outcome_state: int | None = None
+    outcome_info: str | None = None
     run: typing.Any = None
     folder_manager: typing.Any = None
     peds: pl.DataFrame | None = None
