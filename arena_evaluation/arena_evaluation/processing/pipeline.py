@@ -101,6 +101,8 @@ def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
     import polars as pl
     import numpy as np
 
+    from .pose_segments import teleport_jumps
+
     if aligned_df is None or len(aligned_df) == 0:
         return aligned_df
 
@@ -115,8 +117,8 @@ def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
     odom_x = aligned_df["pos_x_gt" if use_gt else "pos_x"].to_numpy()
     odom_y = aligned_df["pos_y_gt" if use_gt else "pos_y"].to_numpy()
     if len(odom_x) > 1:
-        dists = np.sqrt(np.diff(odom_x) ** 2 + np.diff(odom_y) ** 2)
-        jumps = np.where(dists > 0.5)[0]
+        stamp_col = "stamp_ns_gt" if use_gt else "stamp_ns"
+        jumps = teleport_jumps(odom_x, odom_y, aligned_df[stamp_col].to_numpy() if stamp_col in aligned_df.columns else None)
         if len(jumps) > 0:
             split_indices = jumps + 1
             segments_x = np.split(odom_x, split_indices)

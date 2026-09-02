@@ -39,7 +39,7 @@ bundle = MCAPReader(path).read()
 
 | Topic | Polars Columns |
 |---|---|
-| odom | `time_ns`, `pos_x`, `pos_y`, `yaw`, `vel_linear`, `vel_angular` |
+| odom | `time_ns`, `stamp_ns`, `pos_x`, `pos_y`, `yaw`, `vel_linear`, `vel_angular` |
 | scan | `time_ns`, `scan_ranges`, `scan_min` |
 | cmd_vel | `time_ns`, `linear_x`, `linear_y`, `linear_z`, `angular_x`, `angular_y`, `angular_z` |
 | joint_states | `time_ns`, `name`, `position`, `velocity`, `effort` |
@@ -52,7 +52,7 @@ bundle = MCAPReader(path).read()
 | collision_events | `time_ns`, `collision_event` |
 | collision_monitor_state | `time_ns`, `action_type`, `polygon_name` |
 | tf / tf_static | `time_ns`, frame/child/trans/rot columns |
-| tf_gt | `time_ns`, `pos_x_gt`, `pos_y_gt`, `yaw_gt`, `frame_id` |
+| tf_gt | `time_ns`, `stamp_ns_gt`, `pos_x_gt`, `pos_y_gt`, `yaw_gt`, `frame_id` |
 
 ---
 

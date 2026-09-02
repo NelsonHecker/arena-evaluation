@@ -78,6 +78,11 @@ class MCAPReader:
         return math.atan2(siny_cosp, cosy_cosp)
 
     @staticmethod
+    def _stamp_ns(header) -> int:
+        """Header stamp (sim time) in ns."""
+        return int(header.stamp.sec) * 1_000_000_000 + int(header.stamp.nanosec)
+
+    @staticmethod
     def _param_value_to_py(val) -> typing.Any:
         p_type = val.type
         if p_type == 1:
@@ -278,6 +283,7 @@ class MCAPReader:
 
                             target = robot_data[robot_name]["odom"]
                             target["time_ns"].append(ts_ns)
+                            target["stamp_ns"].append(self._stamp_ns(ros_msg.header))
                             target["pos_x"].append(ros_msg.pose.pose.position.x)
                             target["pos_y"].append(ros_msg.pose.pose.position.y)
 
@@ -550,6 +556,7 @@ class MCAPReader:
                                     yaw_val = self._quaternion_to_yaw(t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w)
                                     target = robot_data[robot_name]["tf_gt"]
                                     target["time_ns"].append(ts_ns)
+                                    target["stamp_ns_gt"].append(self._stamp_ns(t.header))
                                     target["pos_x_gt"].append(t.transform.translation.x)
                                     target["pos_y_gt"].append(t.transform.translation.y)
                                     target["yaw_gt"].append(yaw_val)
