@@ -117,7 +117,7 @@ def test_step_equality_and_hash():
 
 def test_step_error_kind_members_and_values():
     assert {k.value for k in StepErrorKind} == {
-        "env_setup", "robot_setup", "episode_timeout", "cancelled", "internal",
+        "env_setup", "robot_setup", "episode_timeout", "sim_dead", "cancelled", "internal",
     }
 
 

@@ -50,6 +50,71 @@ Run output structure in `$ARENA_DATA_DIR/benchmarks/<run_id>/`:
 `-- report_manifest.yaml       # Used report manifest
 ```
 
+## Liveness
+
+Every wait the runner does on the runtime or an env is raced against three signals:
+
+- the env disappearing from `/arena/state/envs` (`_EnvDied`),
+- `/arena/state/sim` reporting `alive: false` (`_SimDied`, latched `arena_runtime_msgs/SimState`),
+- the `arena_runtime.launch.py` subprocess exiting (`_SimDied`, reason `arena_runtime exited rc=N`).
+
+Log-growth watching stays only as the fallback around spawn, for "nothing is dead but nothing moves".
+
+`SimState` carries a wall-time `header.stamp`. The runner remembers when it started the current
+`arena_runtime` and ignores any dead message stamped before that, so the latched death of the
+previous runtime cannot kill the new one. `_restart_arena` clears the latch as well.
+
+A step interrupted by a sim death is recorded `failed` with `error_kind=sim_dead`, which is
+part of the systemic set. Exactly one worker restarts the runtime per death (an asyncio lock
+plus a generation counter); the others wait for the new generation and then spawn a fresh env.
+
+A cell that ends `failed` with a systemic kind (`sim_dead`, `env_setup`, `robot_setup`) is
+retried up to `--retries` times (default 1, `0` never retries, `-1` retries forever). Every
+retry runs on a fresh env: the current env is despawned, the cell goes back to the head of its
+block queue, and a sim death recovers the runtime first. A retried attempt is not recorded, so
+only a cell's final outcome reaches `progress.csv`, the state file and the progress display.
+A cell that exhausts its retries is recorded failed and the queue moves on with a fresh env.
+`--max-sim-deaths` (default 3) is the breaker that always stands: that many distinct sim deaths
+abort the run (exit 1) whatever `--retries` allows. A cell that exhausts its retries while no
+episode has run anywhere aborts the run as a setup failure.
+
+A despawn whose service call or registry wait times out marks the sim dead with reason
+`despawn timed out`: that is the inference rule for a hung sim that never raised a flag.
+`_despawn_env` is a no-op once the sim is dead.
+
+A spawn that stalls past `--spawn-budget` despawns not just the env it registered a response
+for, but every env that showed up on `/arena/state/envs` during the wait and never went
+`ready`: `arena_node` reserves an env before it activates, so a spawn that stalls before
+`SpawnEnv` returns can still leave a live, unregistered env behind.
+
+Episode budgets are sim time, enforced by the task generator through its `timeout` parameter
+(a timed-out episode arrives as a normal FAILED `EpisodeRecord` with `outcome_info='timeout'`).
+The runner keeps only a stall guard: while an episode result is pending it samples the sim
+clock once a second and gives up after 60 wall seconds of a frozen clock outside a reset
+(`<env_ns>/state/resetting`), cancelling the goal exactly like the old wall-clock timeout and
+recording `episode_timeout` / `sim stalled 60s`.
+
+A watchdog beats the runner's own event loop. After 120 s of no beat it writes one line to
+`runner.log`, SIGTERMs the arena launch process group and exits 4.
+
+`--strict` exits 3 when any cell ended with an error kind or ran fewer episodes than
+requested, whatever the episode outcomes were. It is the wedge check behind
+`arena planners test --preflight`.
+
+`--spawn-budget` (default 600s) caps how long a single env spawn is allowed to run before
+the runner gives up, on top of the inactivity heuristic.
+
+`--efficacy FRACTION` adds an outcome check: a non-SUCCESS episode is weak when the closed
+fraction of its starting goal distance, `(goal_dist_start - goal_dist_min) / goal_dist_start`
+from the `EpisodeRecord`, is below `FRACTION`. It catches a planner that drives badly without
+ever erroring, which `--strict` cannot see. When set, the run ends with a
+`benchmark: preflight verdict` table (contestant, stage, verdict, episodes run/total, weak
+count, worst progress) and exits 3 if any cell is `wedged` (an error kind or an incomplete
+episode count) or `weak` (at least one weak episode).
+
+Exit codes: `0` ok, `1` systemic abort, `2` config error or crash, `3` lockstep, strict or
+efficacy verdict, `4` runner hung (deadman), `130` interrupted.
+
 ## Programmatic Usage
 
 ```python

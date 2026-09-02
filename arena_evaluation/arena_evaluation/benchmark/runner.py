@@ -25,25 +25,32 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from arena_evaluation_msgs.msg import BenchmarkState
 from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
-from arena_runtime_msgs.msg import EnvRecord, EnvRegistry, LockstepStatus
+from arena_rclpy_mixins.spin import start_loop_watchdog
+from arena_runtime_msgs.msg import EnvRecord, EnvRegistry, LockstepStatus, SimState
 from arena_runtime_msgs.srv import DespawnEnv, SpawnEnv
 from arena_simulation_setup.tree import ResolverVerdict
 
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
-from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.srv import GetParameters, SetParameters
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
+from std_msgs.msg import Bool
 from task_generator.constants import Constants
 from task_generator_msgs.action import RunEpisode
 from task_generator_msgs.msg import EpisodeRecord
 from task_generator_msgs.srv import QueueEpisode
 
 STATE_TOPIC = "/arena/benchmark/state"
+SIM_STATE_TOPIC = "/arena/state/sim"
 
 _CANCEL_SETTLE_S = 30.0
 _HEARTBEAT_S = 30.0
 _ARENA_SIGINT_GRACE_S = 15.0
 _ARENA_SIGTERM_GRACE_S = 5.0
 _ARENA_ORPHAN_GRACE_S = 1.0
+_SIM_STALL_S = 60.0
+_MAX_SIM_DEATHS = 3
+_LOOP_DEADLINE_S = 120.0
+_HUNG_EXIT_CODE = 4
 
 # EpisodeRecord.outcome_state labels (task_generator_msgs/msg/EpisodeRecord.msg)
 _EPISODE_OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
@@ -58,7 +65,7 @@ from .state import (
     compute_config_hash,
     find_most_recent_resumable,
 )
-from .lockstep import LockstepMonitor, LockstepSummary, format_report
+from .lockstep import LockstepMonitor, LockstepSummary, format_report, format_table
 from .step import Step, StepErrorKind, StepResult
 from .progress_display import BenchmarkProgressDisplay
 from .tree import ContestIdentifier, SuiteIdentifier
@@ -99,6 +106,33 @@ def _proc_tree(root: int) -> dict[int, int]:
                 tree[child] = starts[child]
                 stack.append(child)
     return tree
+
+
+def _orphaned_env_ids(known: set[int], records: typing.Mapping[int, object], registered: typing.Sequence[int]) -> list[int]:
+    """Env ids to despawn after a stalled spawn: registered first, then any env reserved during the wait that never went ready."""
+    ids = list(dict.fromkeys(registered))
+    for env_id, rec in records.items():
+        if env_id in known or env_id in ids:
+            continue
+        if not rec.ready:
+            ids.append(env_id)
+    return ids
+
+
+def closed_fraction(goal_dist_start: float, goal_dist_min: float) -> float:
+    """Fraction of the starting goal distance closed by the closest approach, 0 when there was no goal."""
+    if goal_dist_start <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, (goal_dist_start - goal_dist_min) / goal_dist_start))
+
+
+def cell_verdict(result: StepResult) -> str:
+    """Efficacy classification for one cell: wedged (never finished), weak (finished but drove badly), or ok."""
+    if result.error_kind is not None or result.episodes_run < result.episodes_total:
+        return "wedged"
+    if result.episodes_weak > 0:
+        return "weak"
+    return "ok"
 
 
 class _WithSteps(typing.Protocol):
@@ -444,8 +478,7 @@ _LATCHED = QoSProfile(
     durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
 )
 
-_SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP)
-_MAX_CONSECUTIVE_SYSTEMIC = 3
+_SYSTEMIC = (StepErrorKind.ENV_SETUP, StepErrorKind.ROBOT_SETUP, StepErrorKind.SIM_DEAD)
 
 _SPAWN_CHATTER_PATTERNS = (
     "waiting on env_",
@@ -471,6 +504,55 @@ def _is_substantive_log_line(line: str) -> bool:
 
 class _EnvDied(Exception):
     """Raised when an env disappears from /arena/state/envs while the runner was waiting on it."""
+
+
+class _SimDied(Exception):
+    """Raised when the sim reports itself dead or the arena runtime exits while the runner was waiting."""
+
+
+class _SimStalled(Exception):
+    """Raised when the sim clock stops advancing outside a reset while an episode is running."""
+
+
+def _requeue_front(q: asyncio.Queue[Step], step: Step) -> None:
+    """Put step back at the head of q."""
+    rest: list[Step] = []
+    while not q.empty():
+        rest.append(q.get_nowait())
+    q.put_nowait(step)
+    for s in rest:
+        q.put_nowait(s)
+
+
+@attrs.define
+class _RetryBudget:
+    """Retry bookkeeping: `retries` attempts per step key, a hard cap of sim deaths per run."""
+
+    retries: int = 1
+    max_sim_deaths: int = _MAX_SIM_DEATHS
+    generations: set[int] = attrs.field(factory=set)
+    attempts: collections.Counter = attrs.field(factory=collections.Counter)
+
+    @property
+    def sim_deaths(self) -> int:
+        return len(self.generations)
+
+    @property
+    def limit(self) -> str:
+        """The retry cap as it is logged."""
+        return "inf" if self.retries < 0 else str(self.retries)
+
+    def record(self, step_key: str | None, *, sim_death_generation: int | None) -> tuple[bool, bool]:
+        """Count one systemic failure. Returns (may_retry, run_must_abort)."""
+        if sim_death_generation is not None:
+            self.generations.add(sim_death_generation)
+            if self.sim_deaths >= self.max_sim_deaths:
+                return False, True
+        if step_key is None:
+            return False, False
+        spent = self.attempts[step_key]
+        self.attempts[step_key] = spent + 1
+        return self.retries < 0 or spent < self.retries, False
 
 
 class BenchmarkRunner(ArenaMixinNode):
@@ -505,11 +587,13 @@ class BenchmarkRunner(ArenaMixinNode):
 
         prev_sigint = signal.signal(signal.SIGINT, _sig_handler)
         prev_sigterm = signal.signal(signal.SIGTERM, _sig_handler)
+        watchdog_stop: threading.Event | None = None
 
         async def _run_app():
-            nonlocal node
+            nonlocal node, watchdog_stop
             node = cls(*args, **kwargs)
             node.event_loop = loop
+            watchdog_stop = start_loop_watchdog(loop, node, deadline_s=_LOOP_DEADLINE_S, on_deadline=node._deadman)
             executor.add_node(node)
             try:
                 await node.setup()
@@ -525,6 +609,8 @@ class BenchmarkRunner(ArenaMixinNode):
         except (KeyboardInterrupt, asyncio.CancelledError):
             cls.exit_code = 130
         finally:
+            if watchdog_stop is not None:
+                watchdog_stop.set()
             # Ensure arena runtime subprocess is terminated cleanly
             if node is not None:
                 with contextlib.suppress(Exception):
@@ -566,6 +652,11 @@ class BenchmarkRunner(ArenaMixinNode):
         noexit: bool = False,
         suite_bundle_dir: pathlib.Path | None = None,
         lockstep_verdict: bool = False,
+        strict: bool = False,
+        retries: int = 1,
+        max_sim_deaths: int = _MAX_SIM_DEATHS,
+        spawn_budget: float = 600.0,
+        efficacy: float | None = None,
     ) -> None:
         super().__init__("arena_benchmark_runner")
         self._suite = suite
@@ -581,6 +672,11 @@ class BenchmarkRunner(ArenaMixinNode):
         self._arena_passthrough: dict[str, str] = dict(arena_passthrough or {})
         self._noexit = noexit
         self._lockstep_verdict = lockstep_verdict
+        self._strict = strict
+        self._retries = retries
+        self._max_sim_deaths = max_sim_deaths
+        self._spawn_budget = spawn_budget
+        self._efficacy = efficacy
         self._lockstep = LockstepMonitor()
         self._total_groups = 0
         self._completed_groups = 0
@@ -596,13 +692,25 @@ class BenchmarkRunner(ArenaMixinNode):
         self._total_groups = 0
         self._episode_action_clients: dict[int, ActionClientWrapper] = {}
         self._queue_clients: dict[int, ClientWrapper] = {}
+        self._param_clients: dict[int, ClientWrapper] = {}
+        self._param_get_clients: dict[int, ClientWrapper] = {}
 
         self._episode_records: dict[int, dict[int, EpisodeRecord]] = {}
         self._env_subs: dict[int, list] = {}
         self._recorder_clients: dict[int, ClientWrapper] = {}
         self._triggered_episodes: dict[int, set[int]] = {}
+        self._env_resetting: dict[int, bool] = {}
+
+        self._sim_dead = asyncio.Event()
+        self._sim_dead_reason = ""
+        self._sim_generation = 0
+        self._sim_recover_lock = asyncio.Lock()
+        self._retry_budget = _RetryBudget(retries=self._retries, max_sim_deaths=self._max_sim_deaths)
+        self._runtime_started_at = 0.0
+        self._arena_watch: asyncio.Task | None = None
 
         self.create_subscription(EnvRegistry, "/arena/state/envs", self._on_envs, _LATCHED)
+        self.create_subscription(SimState, SIM_STATE_TOPIC, self._on_sim_state, _LATCHED)
         self.create_subscription(LockstepStatus, "/arena/state/lockstep", self._on_lockstep, _LATCHED)
         self._state_pub = self.create_publisher(BenchmarkState, STATE_TOPIC, _LATCHED)
 
@@ -620,14 +728,52 @@ class BenchmarkRunner(ArenaMixinNode):
             record_root=self._run_dir.path,
         )
 
+    def _set_event(self, event: asyncio.Event) -> None:
+        """Set an asyncio.Event from any thread. Off the loop thread, executor callbacks included, the set is scheduled on it."""
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self.event_loop:
+            event.set()
+            return
+        self.event_loop.call_soon_threadsafe(event.set)
+
     def _on_envs(self, msg: EnvRegistry) -> None:
         new_ids = {e.env_id for e in msg.envs}
         for env_id in new_ids:
-            self._env_visible_events.setdefault(env_id, asyncio.Event()).set()
+            self._set_event(self._env_visible_events.setdefault(env_id, asyncio.Event()))
         for env_id in list(self._env_gone_events):
             if env_id not in new_ids:
-                self._env_gone_events[env_id].set()
+                self._set_event(self._env_gone_events[env_id])
         self._env_records = {e.env_id: e for e in msg.envs}
+
+    def _on_sim_state(self, msg: SimState) -> None:
+        if msg.alive:
+            return
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if stamp < self._runtime_started_at:
+            _log.debug(f"ignoring stale sim death stamped {stamp:.3f}, this runtime started at {self._runtime_started_at:.3f}")
+            return
+        self._mark_sim_dead(msg.reason or "sim reported dead")
+
+    def _mark_sim_dead(self, reason: str) -> None:
+        """Latch the sim as dead. Every wait wrapped in _await_alive unblocks with _SimDied."""
+        if not self._sim_dead.is_set():
+            _log.error(f"sim is dead: {reason}")
+        self._sim_dead_reason = reason
+        self._set_event(self._sim_dead)
+
+    def _deadman(self) -> None:
+        """Loop-watchdog callback: the event loop is hung, take the runtime down and exit."""
+        with contextlib.suppress(OSError):
+            with (self._run_dir.path / "runner.log").open("a") as fh:
+                fh.write(f"benchmark: runner event loop hung for {_LOOP_DEADLINE_S:.0f}s, killing arena runtime and exiting {_HUNG_EXIT_CODE}\n")
+        p = self._arena_proc
+        if p is not None and p.poll() is None:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+        os._exit(_HUNG_EXIT_CODE)
 
     def _on_lockstep(self, msg: LockstepStatus) -> None:
         self._lockstep.observe(msg, time.time())
@@ -735,27 +881,25 @@ class BenchmarkRunner(ArenaMixinNode):
             task.cancel()
             raise
 
-    async def _await_or_env_died(self, env_id: int, awaitable: typing.Awaitable[_T]) -> _T:
-        """Race awaitable against env death. Raises _EnvDied if env_id disappears first."""
-        death = self._env_gone_events.setdefault(env_id, asyncio.Event())
+    async def _await_alive(self, awaitable: typing.Awaitable[_T], *, env_id: int | None = None, what: str) -> _T:
+        """Race awaitable against sim death and, when env_id is given, that env disappearing."""
         op_task = asyncio.ensure_future(awaitable)
-        death_task = asyncio.ensure_future(death.wait())
+        sim_task = asyncio.ensure_future(self._sim_dead.wait())
+        watch = [sim_task]
+        if env_id is not None:
+            watch.append(asyncio.ensure_future(self._env_gone_events.setdefault(env_id, asyncio.Event()).wait()))
         try:
-            done, pending = await asyncio.wait({op_task, death_task}, return_when=asyncio.FIRST_COMPLETED)
-            if death_task in done and op_task not in done:
-                for t in pending:
-                    t.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-                raise _EnvDied(f"env {env_id} disappeared from /arena/state/envs")
-            if not death_task.done():
-                death_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await death_task
-            return op_task.result()
-        except asyncio.CancelledError:
-            op_task.cancel()
-            death_task.cancel()
-            raise
+            done, _ = await asyncio.wait({op_task, *watch}, return_when=asyncio.FIRST_COMPLETED)
+            if op_task in done:
+                return op_task.result()
+            if sim_task in done:
+                raise _SimDied(self._sim_dead_reason)
+            raise _EnvDied(f"env {env_id} disappeared from /arena/state/envs while waiting for {what}")
+        finally:
+            for t in (op_task, *watch):
+                t.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.gather(op_task, *watch, return_exceptions=True)
 
     async def _wait_env_gone(self, env_id: int, *, timeout: float | None) -> bool:
         ev = asyncio.Event()
@@ -780,8 +924,11 @@ class BenchmarkRunner(ArenaMixinNode):
         self._episode_records[env_id] = {}
 
         queue_client = self.create_client_wrapper(QueueEpisode, f"{env_ns_root}/config/queue_episode")
-        await self._await_hb(queue_client.ensure(timeout_sec=None), f"queue_episode service on env {env_id}")
+        what = f"queue_episode service on env {env_id}"
+        await self._await_alive(self._await_hb(queue_client.ensure(timeout_sec=None), what), env_id=env_id, what=what)
         self._queue_clients[env_id] = queue_client
+        self._param_clients[env_id] = self.create_client_wrapper(SetParameters, f"{env_ns_root}/set_parameters")
+        self._param_get_clients[env_id] = self.create_client_wrapper(GetParameters, f"{env_ns_root}/get_parameters")
 
         self._recorder_clients[env_id] = self.create_client_wrapper(RecordEpisode, f"{env_ns_root}/start_episode")
         self._triggered_episodes[env_id] = set()
@@ -811,7 +958,14 @@ class BenchmarkRunner(ArenaMixinNode):
             _on_episode_record,
             10,
         )
-        self._env_subs[env_id] = [sub_ep]
+
+        self._env_resetting[env_id] = False
+
+        def _on_resetting(msg: Bool) -> None:
+            self._env_resetting[env_id] = msg.data
+
+        sub_reset = self.create_subscription(Bool, f"{env_ns_root}/state/resetting", _on_resetting, _LATCHED)
+        self._env_subs[env_id] = [sub_ep, sub_reset]
 
     def _teardown_env_clients(self, env_id: int) -> None:
         """Destroy per-env subscriptions, action client, and queue_episode client."""
@@ -823,12 +977,26 @@ class BenchmarkRunner(ArenaMixinNode):
         qc = self._queue_clients.pop(env_id, None)
         if qc is not None:
             qc.client.destroy()
+        pc = self._param_clients.pop(env_id, None)
+        if pc is not None:
+            pc.client.destroy()
+        gc = self._param_get_clients.pop(env_id, None)
+        if gc is not None:
+            gc.client.destroy()
         rc = self._recorder_clients.pop(env_id, None)
         if rc is not None:
             rc.client.destroy()
         self._triggered_episodes.pop(env_id, None)
         self._episode_records.pop(env_id, None)
         self._env_visible_events.pop(env_id, None)
+        self._env_resetting.pop(env_id, None)
+
+    @staticmethod
+    def _episode_budget(step: Step) -> float:
+        """Sim-second budget the task generator enforces for one episode of step."""
+        if step.is_reference and step.reference_type == "unhindered_peds" and step.stage.timeout_peds is not None:
+            return step.stage.timeout_peds
+        return step.stage.timeout
 
     async def _push_stage_config(self, env_id: int, step: Step) -> None:
         queue = self._queue_clients[env_id]
@@ -859,21 +1027,43 @@ class BenchmarkRunner(ArenaMixinNode):
             elif step.reference_type == "unhindered_peds":
                 req.tm_robots = "stationary"
                 rob_params = [Parameter(name="pos_x", value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)), Parameter(name="pos_y", value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0))]
-                param_client = self.create_client_wrapper(SetParameters, f"/arena/env_{env_id}/task_generator_node/set_parameters")
+                param_client = self._param_clients[env_id]
                 set_req = SetParameters.Request()
                 set_req.parameters = [Parameter(name="task.stationary.pos_x", value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0)), Parameter(name="task.stationary.pos_y", value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=1000.0))]
-                with contextlib.suppress(Exception):
-                    await param_client.call_timeout(set_req, timeout_sec=5.0)
+                try:
+                    await self._await_alive(param_client.call_timeout(set_req, timeout_sec=5.0), env_id=env_id, what=f"stationary params on env {env_id}")
+                except (_SimDied, _EnvDied, asyncio.CancelledError):
+                    raise
+                except Exception as exc:
+                    _log.warning(f"[env {env_id}] stationary params for {step.key} failed: {exc}")
 
         req.obstacles_params = obs_params
         req.robots_params = rob_params
         _log.info(f"[env {env_id}] pushing stage config for {step.key} (map={step.stage.map}, tm_robots={req.tm_robots}, tm_obstacles={req.tm_obstacles})")
-        resp = await queue.call_timeout(req, timeout_sec=10.0)
+        resp = await self._await_alive(queue.call_timeout(req, timeout_sec=10.0), env_id=env_id, what=f"queue_episode on env {env_id}")
         if resp is None:
             raise RuntimeError(f"queue_episode service call timed out after 10s on env {env_id} for {step.key}")
         if not resp.success:
             raise RuntimeError(f"queue_episode failed for {step.key}: {resp.error_msg}")
-        _log.info(f"[env {env_id}] stage config applied for {step.key}")
+
+        budget = self._episode_budget(step)
+        get_resp = await self._await_alive(self._param_get_clients[env_id].call_timeout(GetParameters.Request(names=["timeout"]), timeout_sec=10.0), env_id=env_id, what=f"episode timeout param type on env {env_id}")
+        if get_resp is None or not get_resp.values:
+            raise RuntimeError(f"get_parameters(timeout) failed on env {env_id} for {step.key}")
+        if get_resp.values[0].type == ParameterType.PARAMETER_INTEGER:
+            budget_value = ParameterValue(type=ParameterType.PARAMETER_INTEGER, integer_value=round(budget))
+        else:
+            budget_value = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(budget))
+        timeout_client = self._param_clients[env_id]
+        timeout_req = SetParameters.Request()
+        timeout_req.parameters = [Parameter(name="timeout", value=budget_value)]
+        timeout_resp = await self._await_alive(timeout_client.call_timeout(timeout_req, timeout_sec=10.0), env_id=env_id, what=f"episode timeout param on env {env_id}")
+        if timeout_resp is None:
+            raise RuntimeError(f"set_parameters(timeout) timed out after 10s on env {env_id} for {step.key}")
+        if not all(r.successful for r in timeout_resp.results):
+            reasons = "; ".join(r.reason for r in timeout_resp.results if not r.successful)
+            raise RuntimeError(f"set_parameters(timeout={budget}s) rejected on env {env_id} for {step.key}: {reasons}")
+        _log.info(f"[env {env_id}] stage config applied for {step.key} (episode budget {budget:.0f}s sim)")
 
     async def _run_episodes(
         self,
@@ -885,6 +1075,9 @@ class BenchmarkRunner(ArenaMixinNode):
         started = time.time()
         episodes_run = 0
         episodes_failed = 0
+        episodes_weak = 0
+        worst_progress: float | None = None
+        stalled = False
         lockstep: LockstepSummary | None = None
         window: list[object] = []
         ac = self._episode_action_clients[env_id]
@@ -909,6 +1102,8 @@ class BenchmarkRunner(ArenaMixinNode):
                 error_detail,
                 episodes_run=episodes_run,
                 episodes_failed=episodes_failed,
+                episodes_weak=episodes_weak,
+                episodes_worst_progress=worst_progress,
                 episodes_total=step.episodes,
                 lockstep=lockstep,
             )
@@ -936,40 +1131,35 @@ class BenchmarkRunner(ArenaMixinNode):
                 ep_started_wall = time.time()
 
                 try:
-                    goal_handle = await self._await_or_env_died(
-                        env_id,
+                    goal_handle = await self._await_alive(
                         asyncio.wait_for(ac.send_goal(goal), timeout=15.0),
+                        env_id=env_id,
+                        what=f"run_episode goal on env {env_id}",
                     )
                 except asyncio.TimeoutError:
                     episodes_failed += 1
                     _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} send_goal timed out after 15s; abandoning env")
                     return _result("failed", StepErrorKind.ENV_SETUP, f"send_goal timed out after 15s on env {env_id}")
-                except (_EnvDied, asyncio.CancelledError):
+                except (_SimDied, _EnvDied, asyncio.CancelledError):
                     raise
                 except Exception as exc:
                     episodes_failed += 1
                     _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} goal rejected ({exc}); env action server is wedged, abandoning env")
                     return _result("failed", StepErrorKind.ENV_SETUP, f"run_episode goal rejected: {exc}")
 
-                timeout_s = step.stage.timeout
-                if step.is_reference and step.reference_type == "unhindered_peds" and step.stage.timeout_peds is not None:
-                    timeout_s = step.stage.timeout_peds
-
                 try:
-                    result_obj = await asyncio.wait_for(
-                        self._await_or_env_died(env_id, ac.await_result(goal_handle)),
-                        timeout=timeout_s,
-                    )
-                except TimeoutError:
+                    result_obj = await self._await_episode_result(ac, goal_handle, env_id)
+                except _SimStalled:
                     episodes_failed += 1
-                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {timeout_s}s; cancelling and advancing")
+                    stalled = True
+                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} SIM STALLED for {_SIM_STALL_S:.0f}s; cancelling and advancing")
                     try:
                         await self.await_ros(goal_handle.cancel_goal_async())
                         await asyncio.wait_for(
-                            self._await_or_env_died(env_id, ac.await_result(goal_handle)),
+                            self._await_alive(ac.await_result(goal_handle), env_id=env_id, what=f"run_episode cancel on env {env_id}"),
                             timeout=_CANCEL_SETTLE_S,
                         )
-                    except _EnvDied:
+                    except (_SimDied, _EnvDied):
                         raise
                     except TimeoutError:
                         _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} cancel did not settle in {_CANCEL_SETTLE_S}s; env is wedged, abandoning env")
@@ -999,13 +1189,19 @@ class BenchmarkRunner(ArenaMixinNode):
                 episodes_run += 1
                 if rec.outcome_state == EpisodeRecord.FAILED:
                     episodes_failed += 1
+                frac = closed_fraction(rec.goal_dist_start, rec.goal_dist_min)
+                if rec.goal_dist_start > 0.0:
+                    worst_progress = frac if worst_progress is None else min(worst_progress, frac)
+                if self._efficacy is not None and rec.outcome_state != EpisodeRecord.SUCCESS and frac < self._efficacy:
+                    episodes_weak += 1
 
                 state_label = {
                     EpisodeRecord.SUCCESS: "SUCCESS",
                     EpisodeRecord.FAILED: "FAILED",
                     EpisodeRecord.SKIPPED: "SKIPPED",
                 }.get(rec.outcome_state, str(rec.outcome_state))
-                _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s")
+                progress_note = f" progress={frac * 100:.0f}% path={rec.path_length:.1f}m" if rec.goal_dist_start > 0.0 else ""
+                _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s{progress_note}")
 
                 if rec.outcome_state in (
                     EpisodeRecord.SUCCESS,
@@ -1057,11 +1253,11 @@ class BenchmarkRunner(ArenaMixinNode):
                     reference_type=step.reference_type,
                     lockstep=ep_lockstep,
                 )
+        except (_SimDied, asyncio.CancelledError):
+            raise
         except _EnvDied as exc:
             _log.warning(f"{step.key} env={env_id} env died mid-step after run={episodes_run}, failed={episodes_failed}: {exc}")
             return _result("failed", StepErrorKind.ENV_SETUP, repr(exc))
-        except asyncio.CancelledError:
-            raise
         except Exception as exc:
             _log.exception(f"{step.key} env={env_id} unexpected error mid-step after run={episodes_run}, failed={episodes_failed}")
             return _result("failed", StepErrorKind.INTERNAL, repr(exc))
@@ -1075,34 +1271,72 @@ class BenchmarkRunner(ArenaMixinNode):
         else:
             status = "failed"
 
+        if stalled and status != "ok":
+            return _result(status, StepErrorKind.EPISODE_TIMEOUT, f"sim stalled {_SIM_STALL_S:.0f}s")
         return _result(status)
+
+    async def _await_episode_result(self, ac: ActionClientWrapper, goal_handle: object, env_id: int) -> object:
+        """Await an episode result with no wall ceiling, raising _SimStalled if the sim clock freezes outside a reset."""
+        result_task = asyncio.ensure_future(self._await_alive(ac.await_result(goal_handle), env_id=env_id, what=f"run_episode result on env {env_id}"))
+        last_sim = self.sim_time.to_seconds()
+        last_move = time.monotonic()
+        try:
+            while True:
+                done, _ = await asyncio.wait({result_task}, timeout=1.0)
+                if result_task in done:
+                    return result_task.result()
+                now_sim = self.sim_time.to_seconds()
+                if now_sim > last_sim or self._env_resetting.get(env_id, False):
+                    last_sim = now_sim
+                    last_move = time.monotonic()
+                    continue
+                if time.monotonic() - last_move >= _SIM_STALL_S:
+                    raise _SimStalled(f"sim clock frozen for {_SIM_STALL_S:.0f}s on env {env_id}")
+        finally:
+            if not result_task.done():
+                result_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.gather(result_task, return_exceptions=True)
 
     async def _spawn_and_setup_env(self, launch_step: Step, *, inactivity_timeout: float = 120.0) -> tuple[int, str] | None:
         """Spawn one env booting launch_step's world and set up its clients.
         Tracks active progress (log growth) and only times out if completely stalled."""
+        registered: list[int] = []
+        known = set(self._env_records)
         try:
             return await self._await_activity(
-                self._spawn_and_setup_env_impl(launch_step),
+                self._spawn_and_setup_env_impl(launch_step, registered),
                 f"spawn_env for {launch_step.key}",
                 inactivity_timeout=inactivity_timeout,
+                max_total_timeout=self._spawn_budget,
             )
         except (TimeoutError, asyncio.TimeoutError):
-            _log.error(f"spawn_env stalled for {launch_step.key} (no progress/output for {inactivity_timeout:.0f}s); sim may be dead (e.g. Gazebo crash or deadlock)")
+            orphans = _orphaned_env_ids(known, self._env_records, registered)
+            _log.error(f"spawn_env stalled for {launch_step.key} (no progress/output for {inactivity_timeout:.0f}s); despawning orphaned env(s) {orphans}")
+            for env_id in orphans:
+                await self._despawn_env(env_id)
+            if self._sim_dead.is_set():
+                raise _SimDied(self._sim_dead_reason) from None
             return None
 
-    async def _spawn_and_setup_env_impl(self, launch_step: Step) -> tuple[int, str] | None:
-        """Inner impl without timeout — called by _spawn_and_setup_env."""
+    async def _spawn_and_setup_env_impl(self, launch_step: Step, registered: list[int]) -> tuple[int, str] | None:
+        """Inner impl without timeout, called by _spawn_and_setup_env. Appends the spawned env_id to registered."""
         req = SpawnEnv.Request()
         req.ns = ""
         req.headless = self._headless
         req.launch_args = self._build_launch_args(launch_step)
-        resp = await self.await_ros(self._spawn.client.call_async(req))
+        what = f"spawn_env for {launch_step.key}"
+        resp = await self._await_alive(self.await_ros(self._spawn.client.call_async(req)), what=what)
         if resp is None or not resp.success:
             msg = resp.error_msg if resp is not None else "no response"
+            if msg.startswith("sim dead:"):
+                self._mark_sim_dead(msg)
+                raise _SimDied(msg)
             _log.error(f"spawn_env failed for {launch_step.key}: {msg}")
             return None
         env_id = resp.env_id
-        await self._await_env_visible(env_id)
+        registered.append(env_id)
+        await self._await_alive(self._await_env_visible(env_id), what=f"env {env_id} to appear on /arena/state/envs")
         env_ns_root = self._env_records[env_id].fqn
         await self._setup_env_clients(env_id, env_ns_root, launch_step.stage.robot)
         return env_id, env_ns_root
@@ -1110,54 +1344,111 @@ class BenchmarkRunner(ArenaMixinNode):
     async def _despawn_env(self, env_id: int) -> None:
         """Tear down clients and despawn an env, waiting for it to disappear from the registry."""
         self._teardown_env_clients(env_id)
+        if self._sim_dead.is_set():
+            return
         if env_id in self._env_records:
-            with contextlib.suppress(Exception):
-                dreq = DespawnEnv.Request()
-                dreq.env_id = env_id
-                await asyncio.wait_for(self._despawn.call_forever(dreq), timeout=30.0)
-            with contextlib.suppress(asyncio.TimeoutError, Exception):
-                await asyncio.wait_for(self._wait_env_gone(env_id, timeout=15.0), timeout=15.0)
+            dreq = DespawnEnv.Request()
+            dreq.env_id = env_id
+            try:
+                await self._await_alive(asyncio.wait_for(self._despawn.call_forever(dreq), timeout=30.0), what=f"despawn_env {env_id}")
+                gone = await self._await_alive(self._wait_env_gone(env_id, timeout=15.0), what=f"env {env_id} to leave /arena/state/envs")
+                if not gone:
+                    self._mark_sim_dead("despawn timed out")
+                    return
+            except _SimDied:
+                return
+            except TimeoutError:
+                self._mark_sim_dead("despawn timed out")
+                return
+            except Exception as exc:
+                _log.warning(f"despawn of env {env_id} failed: {exc}")
         await asyncio.sleep(2.0)
+
+    async def _run_step(self, step: Step, env_id: int, slot_index: int) -> StepResult:
+        """Push the stage config, then drive the step's episodes."""
+        started = time.time()
+        try:
+            await self._push_stage_config(env_id, step)
+        except (_SimDied, asyncio.CancelledError):
+            raise
+        except _EnvDied as exc:
+            return StepResult(step.key, "failed", env_id, started, time.time(), StepErrorKind.ENV_SETUP, repr(exc), episodes_total=step.episodes)
+        except Exception as exc:
+            _log.error(f"[env {env_id}] stage config failed for {step.key}: {exc}")
+            return StepResult(step.key, "failed", env_id, started, time.time(), StepErrorKind.ENV_SETUP, f"stage config failed: {exc}", episodes_total=step.episodes)
+        return await self._run_episodes(step, env_id, slot_index)
+
+    def _fail_remaining(self, q: asyncio.Queue[Step], env_id: int | None, detail: str, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
+        """Fail every step still queued. Returns True when the run must abort."""
+        abort = False
+        while not q.empty():
+            try:
+                step = q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            res = StepResult(
+                step.key,
+                "failed",
+                env_id,
+                time.time(),
+                time.time(),
+                StepErrorKind.ENV_SETUP,
+                detail,
+                episodes_total=step.episodes,
+            )
+            if flush_cb(res):
+                abort = True
+        return abort
+
+    async def _spend_sim_death(self, reason: str, step_key: str | None) -> tuple[bool, bool]:
+        """Charge one sim death to the retry budget and recover the runtime. Returns (may_retry, run_must_abort)."""
+        generation = self._sim_generation
+        may_retry, run_abort = self._retry_budget.record(step_key, sim_death_generation=generation)
+        if run_abort:
+            _log.error(f"benchmark: {self._retry_budget.sim_deaths} sim deaths in this run (last: {reason}), aborting")
+            return False, True
+        await self._recover_sim(reason, generation)
+        return may_retry, False
+
+    async def _recover_sim(self, reason: str, generation: int) -> None:
+        """Restart arena_runtime once per sim death; workers that lose the race wait for the new generation."""
+        async with self._sim_recover_lock:
+            if self._sim_generation != generation:
+                return
+            _log.error(f"sim died ({reason}), restarting arena_runtime")
+            await self._restart_arena()
+            self._sim_generation += 1
 
     async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
         env_id: int | None = None
-        systemic_streak = 0
+        env_ns_root = ""
+        spawned_once = False
         try:
-            if self._progress is not None:
-                self._progress.update_slot(
-                    slot_index=slot_index,
-                    env_id=None,
-                    contestant=rep_step.contestant.name,
-                    stage=rep_step.stage.name,
-                    step_key=rep_step.key,
-                    ep_idx=0,
-                    ep_total=rep_step.episodes,
-                    state="SPAWNING",
-                )
-            spawned = await self._spawn_and_setup_env(rep_step)
-            if spawned is None:
-                abort = False
-                while not q.empty():
-                    try:
-                        step = q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    res = StepResult(
-                        step.key,
-                        "failed",
-                        None,
-                        time.time(),
-                        time.time(),
-                        StepErrorKind.ENV_SETUP,
-                        "spawn_env failed",
-                        episodes_total=step.episodes,
-                    )
-                    if flush_cb(res):
-                        abort = True
-                return abort
-            env_id, env_ns_root = spawned
-
             while not q.empty():
+                if env_id is None:
+                    if self._progress is not None:
+                        self._progress.update_slot(
+                            slot_index=slot_index,
+                            env_id=None,
+                            contestant=rep_step.contestant.name,
+                            stage=rep_step.stage.name,
+                            step_key=rep_step.key,
+                            ep_idx=0,
+                            ep_total=rep_step.episodes,
+                            state="SPAWNING",
+                        )
+                    try:
+                        spawned = await self._spawn_and_setup_env(rep_step)
+                    except _SimDied as exc:
+                        _, run_abort = await self._spend_sim_death(str(exc), None)
+                        if run_abort:
+                            return True
+                        continue
+                    if spawned is None:
+                        return self._fail_remaining(q, None, "env respawn failed after a wedged env" if spawned_once else "spawn_env failed", flush_cb)
+                    env_id, env_ns_root = spawned
+                    spawned_once = True
+
                 try:
                     step = q.get_nowait()
                 except asyncio.QueueEmpty:
@@ -1237,10 +1528,9 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                 _log.info(f"Starting step {step.key} (env={env_id}, {step.episodes} episodes)")
 
-                await self._push_stage_config(env_id, step)
-
+                sim_death_reason: str | None = None
                 try:
-                    step_result = await self._run_episodes(step, env_id, slot_index)
+                    step_result = await self._run_step(step, env_id, slot_index)
                 except asyncio.CancelledError:
                     while not q.empty():
                         try:
@@ -1248,6 +1538,18 @@ class BenchmarkRunner(ArenaMixinNode):
                         except asyncio.QueueEmpty:
                             break
                     raise
+                except _SimDied as exc:
+                    sim_death_reason = str(exc) or self._sim_dead_reason
+                    step_result = StepResult(
+                        step.key,
+                        "failed",
+                        env_id,
+                        time.time(),
+                        time.time(),
+                        StepErrorKind.SIM_DEAD,
+                        sim_death_reason,
+                        episodes_total=step.episodes,
+                    )
                 except _EnvDied as exc:
                     step_result = StepResult(
                         step.key,
@@ -1279,53 +1581,36 @@ class BenchmarkRunner(ArenaMixinNode):
                             with contextlib.suppress(Exception):
                                 os.killpg(os.getpgid(recorder_proc.pid), signal.SIGKILL)
 
-                abort = flush_cb(step_result)
-                if abort:
+                if step_result.status != "failed" or step_result.error_kind not in _SYSTEMIC:
+                    if flush_cb(step_result):
+                        return True
+                    continue
+
+                if sim_death_reason is not None:
+                    self._teardown_env_clients(env_id)
+                    env_id = None
+                    may_retry, run_abort = await self._spend_sim_death(sim_death_reason, step.key)
+                    if run_abort:
+                        return True
+                else:
+                    may_retry, _ = self._retry_budget.record(step.key, sim_death_generation=None)
+
+                if may_retry:
+                    _log.warning(f"retrying {step.key} (attempt {self._retry_budget.attempts[step.key]}/{self._retry_budget.limit}, {step_result.error_kind}: {step_result.error_detail})")
+                    _requeue_front(q, step)
+                elif flush_cb(step_result):
                     return True
 
-                if step_result.status == "failed" and step_result.error_kind in _SYSTEMIC:
-                    systemic_streak += 1
-                    if q.empty():
-                        continue
-                    if systemic_streak >= _MAX_CONSECUTIVE_SYSTEMIC:
-                        _log.error(f"env {env_id} hit {systemic_streak} consecutive systemic failures, failing {q.qsize()} remaining step(s) without respawn")
-                        respawn_msg = "aborted after repeated systemic failures"
-                    else:
-                        _log.warning(f"env {env_id} unusable after {step.key} ({step_result.error_kind}), respawning a fresh env for {q.qsize()} remaining step(s)")
-                        await self._despawn_env(env_id)
-                        env_id = None
-                        spawned = await self._spawn_and_setup_env(rep_step)
-                        if spawned is not None:
-                            env_id, env_ns_root = spawned
-                            continue
-                        respawn_msg = "env respawn failed after a wedged env"
-                    while not q.empty():
-                        try:
-                            rem_step = q.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
-                        if flush_cb(
-                            StepResult(
-                                rem_step.key,
-                                "failed",
-                                env_id,
-                                time.time(),
-                                time.time(),
-                                StepErrorKind.ENV_SETUP,
-                                respawn_msg,
-                                episodes_total=rem_step.episodes,
-                            )
-                        ):
-                            return True
-                else:
-                    systemic_streak = 0
+                if env_id is not None:
+                    await self._despawn_env(env_id)
+                    env_id = None
 
         finally:
             self._completed_groups += 1
             keep_alive = self._noexit and self._completed_groups == self._total_groups and env_id is not None
             if env_id is not None:
                 self._teardown_env_clients(env_id)
-                if env_id in self._env_records and not keep_alive:
+                if env_id in self._env_records and not keep_alive and not self._sim_dead.is_set():
                     with contextlib.suppress(Exception):
                         dreq = DespawnEnv.Request()
                         dreq.env_id = env_id
@@ -1374,7 +1659,18 @@ class BenchmarkRunner(ArenaMixinNode):
     async def teardown(self) -> None:
         await self._shutdown_arena()
 
+    async def _watch_arena_proc(self, proc: subprocess.Popen) -> None:
+        """Mark the sim dead the moment the arena launch process exits."""
+        rc = await asyncio.get_running_loop().run_in_executor(None, proc.wait)
+        self._mark_sim_dead(f"arena_runtime exited rc={rc}")
+
     async def _shutdown_arena(self) -> None:
+        watch = self._arena_watch
+        self._arena_watch = None
+        if watch is not None:
+            watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await watch
         if self._noexit:
             _log.info("--noexit: leaving arena_runtime.launch.py running; Ctrl+C its terminal to stop")
             return
@@ -1461,6 +1757,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 outer = proc_env.get("ARENA_WORLD_PATH")
                 proc_env["ARENA_WORLD_PATH"] = f"{outer}:{worlds_dir}" if outer else str(worlds_dir)
 
+        self._runtime_started_at = time.time()
         self._arena_proc = subprocess.Popen(
             cmd,
             stdout=self._arena_log_file,
@@ -1468,9 +1765,10 @@ class BenchmarkRunner(ArenaMixinNode):
             start_new_session=True,
             env=proc_env,
         )
+        self._arena_watch = asyncio.create_task(self._watch_arena_proc(self._arena_proc), name="arena_proc_watch")
 
-        await self._spawn.ensure(timeout_sec=300.0)
-        await self._despawn.ensure(timeout_sec=300.0)
+        await self._await_alive(self._spawn.ensure(timeout_sec=300.0), what="spawn_env service")
+        await self._await_alive(self._despawn.ensure(timeout_sec=300.0), what="despawn_env service")
 
     async def _restart_arena(self) -> None:
         """Restart arena_runtime for a fresh simulator session between world switches."""
@@ -1480,6 +1778,8 @@ class BenchmarkRunner(ArenaMixinNode):
         self._env_visible_events.clear()
         self._env_gone_events.clear()
         await asyncio.sleep(1.0)
+        self._sim_dead_reason = ""
+        self._sim_dead.clear()
         await self._start_arena()
 
     async def _run_steps(self) -> int:
@@ -1641,9 +1941,28 @@ class BenchmarkRunner(ArenaMixinNode):
         if rows:
             print(f"\nbenchmark: lockstep report\n{format_report(rows)}", flush=True)
             lockstep_failed = any(summary.verdict == "fail" for _, _, summary in rows)
+        strict_failed = sorted(k for k, r in results.items() if r.error_kind is not None or r.episodes_run < r.episodes_total)
+        if self._strict and strict_failed:
+            print(f"\nbenchmark: strict verdict: {len(strict_failed)} cell(s) did not complete cleanly: {', '.join(strict_failed)}", flush=True)
+
+        efficacy_failed = False
+        if self._efficacy is not None:
+            header = ("contestant", "stage", "verdict", "episodes", "weak", "worst_progress")
+            table = []
+            for k, r in sorted(results.items()):
+                st = step_map.get(k)
+                c_name = st.contestant.name if st else k
+                s_name = st.stage.name if st else ""
+                worst = f"{r.episodes_worst_progress * 100:.0f}%" if r.episodes_worst_progress is not None else "-"
+                table.append((c_name, s_name, cell_verdict(r), f"{r.episodes_run}/{r.episodes_total}", str(r.episodes_weak), worst))
+            print(f"\nbenchmark: preflight verdict\n{format_table(header, table)}", flush=True)
+            efficacy_failed = any(cell_verdict(r) in ("wedged", "weak") for r in results.values())
+
         if aborted_systemic:
             return 1
-        return 3 if self._lockstep_verdict and lockstep_failed else 0
+        if (self._lockstep_verdict and lockstep_failed) or (self._strict and strict_failed) or efficacy_failed:
+            return 3
+        return 0
 
 
 def _all_steps(contest: Contest, suite: Suite, scale_episodes: float) -> list[Step]:
@@ -1763,7 +2082,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     root_logger.handlers = [console_handler]
     _log.setLevel(logging.INFO)
     _log.propagate = True
-    p = argparse.ArgumentParser(prog="benchmark")
+    p = argparse.ArgumentParser(prog="benchmark", epilog="exit codes: 0 ok, 1 systemic abort, 2 config error or crash, 3 lockstep, strict or efficacy verdict, 4 runner hung (deadman), 130 interrupted")
     p.add_argument("--suite", default="basic")
     p.add_argument("--contest", default="basic")
     p.add_argument("--scale-episodes", type=float, default=1.0)
@@ -1778,6 +2097,18 @@ def cli_main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--retry-failed", action="store_true")
     p.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        help="Retries per cell after a systemic failure (sim death, env or robot setup), each on a fresh env. -1 retries forever, 0 never retries. Retried attempts are not recorded.",
+    )
+    p.add_argument(
+        "--max-sim-deaths",
+        type=int,
+        default=_MAX_SIM_DEATHS,
+        help="Abort the run (exit 1) once this many sim deaths happen, whatever --retries allows.",
+    )
+    p.add_argument(
         "--profile",
         action="store_true",
         help="Enable system resource profiling. Writes simulation_profile.yaml with peak/mean CPU, GPU, RAM, and disk I/O stats.",
@@ -1786,6 +2117,24 @@ def cli_main(argv: list[str] | None = None) -> int:
         "--lockstep-verdict",
         action="store_true",
         help="Exit 3 when a step's lockstep report fails (a stall of 5 s or more, or no planner beat registered).",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 3 when any cell ended with an error kind or ran fewer episodes than requested, whatever the episode outcomes were.",
+    )
+    p.add_argument(
+        "--spawn-budget",
+        type=float,
+        default=600.0,
+        help="Maximum wall time in seconds to wait for a single env spawn, on top of the inactivity heuristic, before giving up and despawning it.",
+    )
+    p.add_argument(
+        "--efficacy",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help="Flag a non-SUCCESS episode as weak when it closes less than FRACTION of its starting goal distance. Prints a preflight verdict table and exits 3 on any wedged or weak cell.",
     )
     p.add_argument(
         "--noexit",
@@ -1946,6 +2295,11 @@ def cli_main(argv: list[str] | None = None) -> int:
             noexit=args.noexit,
             suite_bundle_dir=suite_bundle_dir,
             lockstep_verdict=args.lockstep_verdict,
+            strict=args.strict,
+            retries=args.retries,
+            max_sim_deaths=args.max_sim_deaths,
+            spawn_budget=args.spawn_budget,
+            efficacy=args.efficacy,
         )
     except KeyboardInterrupt:
         return 130

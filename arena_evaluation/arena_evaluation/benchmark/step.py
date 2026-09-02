@@ -33,6 +33,7 @@ class StepErrorKind(enum.StrEnum):
     ENV_SETUP = "env_setup"
     ROBOT_SETUP = "robot_setup"
     EPISODE_TIMEOUT = "episode_timeout"
+    SIM_DEAD = "sim_dead"
     CANCELLED = "cancelled"
     INTERNAL = "internal"
 
@@ -48,5 +49,7 @@ class StepResult:
     error_detail: str | None
     episodes_run: int = 0
     episodes_failed: int = 0
+    episodes_weak: int = 0
+    episodes_worst_progress: float | None = None
     episodes_total: int = 0
     lockstep: LockstepSummary | None = None

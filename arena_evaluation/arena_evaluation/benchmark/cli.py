@@ -393,7 +393,7 @@ def _cmd_kill(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="evaluation_cli")
+    parser = argparse.ArgumentParser(prog="evaluation_cli", epilog="benchmark exit codes: 0 ok, 1 systemic abort, 2 config error or crash, 3 lockstep, strict or efficacy verdict, 4 runner hung (deadman), 130 interrupted")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_list = sub.add_parser("list", help="list benchmark runs")
