@@ -70,6 +70,7 @@ class RobotParams:
     laser_max_range: float = 30.0
     base_mass: float = 0.0
     component_masses: dict[str, float] = field(default_factory=dict)
+    max_linear_velocity: float = 0.0
 
     @property
     def mass(self) -> float:
@@ -89,7 +90,7 @@ class RobotParams:
         component_masses: dict[str, float] = {}
 
         try:
-            robot_dir = os.path.join(get_package_share_directory("arena_robots"), "robots", model)
+            robot_dir = os.path.join(get_package_share_directory("arena_robots"), "robots", model.partition("[")[0])
         except Exception:
             return cls(model=model)
 
@@ -102,6 +103,11 @@ class RobotParams:
 
         radius = float(_read(os.path.join(robot_dir, "caps", "mobile.yaml")).get("radius", radius))
         base_mass = float(_read(os.path.join(robot_dir, "model_params.yaml")).get("mass", {}).get("base_kg", base_mass))
+        max_linear_velocity = 0.0
+        for block in _read(os.path.join(robot_dir, "control.yaml")).values():
+            params = block.get("ros__parameters", {}) if isinstance(block, dict) else {}
+            if "linear.x.max_velocity" in params:
+                max_linear_velocity = float(params["linear.x.max_velocity"])
 
         components_root = os.path.join(os.path.dirname(os.path.dirname(robot_dir)), "components")
         for kind, entries in _read(os.path.join(robot_dir, "assembly.yaml")).get("defaults", {}).items():
@@ -120,6 +126,7 @@ class RobotParams:
             laser_max_range=defaults.laser_max_range,
             base_mass=base_mass,
             component_masses=component_masses,
+            max_linear_velocity=max_linear_velocity,
         )
 
 
