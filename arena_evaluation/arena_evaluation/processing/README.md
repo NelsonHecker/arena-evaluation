@@ -40,6 +40,7 @@ bundle = MCAPReader(path).read()
 | Topic | Polars Columns |
 |---|---|
 | odom | `time_ns`, `stamp_ns`, `pos_x`, `pos_y`, `yaw`, `vel_linear`, `vel_angular` |
+| odom_controller | same as odom, from the controller's `<*_controller>/odom`; preferred over odom when present |
 | scan | `time_ns`, `scan_ranges`, `scan_min` |
 | cmd_vel | `time_ns`, `linear_x`, `linear_y`, `linear_z`, `angular_x`, `angular_y`, `angular_z` |
 | joint_states | `time_ns`, `name`, `position`, `velocity`, `effort` |

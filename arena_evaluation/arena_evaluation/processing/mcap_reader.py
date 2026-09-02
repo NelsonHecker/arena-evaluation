@@ -142,6 +142,7 @@ class MCAPReader:
         def new_robot_data():
             return {
                 "odom": defaultdict(list),
+                "odom_controller": defaultdict(list),
                 "scan": defaultdict(list),
                 "cmd_vel": defaultdict(list),
                 "joint_states": defaultdict(list),
@@ -271,17 +272,17 @@ class MCAPReader:
                             base = parts[-2]
                             if base == env_key:
                                 return env_key
-                            if base.endswith("_velocity_controller"):
-                                base = parts[-3] if len(parts) >= 3 else base.replace("_velocity_controller", "")
+                            if base.endswith("_controller"):
+                                base = parts[-3] if len(parts) >= 3 else base
                             elif base == "power_publisher":
                                 base = parts[-3] if len(parts) >= 3 else base
                             return f"{env_key}_{base}"
 
                         # Odom
-                        if topic.endswith("/odom") and "velocity_controller" not in topic:
+                        if topic.endswith("/odom"):
                             robot_name = get_robot_name(parts, env_key)
 
-                            target = robot_data[robot_name]["odom"]
+                            target = robot_data[robot_name]["odom_controller" if parts[-2].endswith("_controller") else "odom"]
                             target["time_ns"].append(ts_ns)
                             target["stamp_ns"].append(self._stamp_ns(ros_msg.header))
                             target["pos_x"].append(ros_msg.pose.pose.position.x)
@@ -703,9 +704,9 @@ class MCAPReader:
             robot_name = robot_dir.name
 
             # Skip pure environment directories (e.g. env_0) if odom.parquet is absent and other robot directories exist
-            if not (robot_dir / "odom.parquet").exists():
-                if any((d / "odom.parquet").exists() for d in robot_dirs if d != robot_dir):
-                    continue
+            has_odom = (robot_dir / "odom.parquet").exists() or (robot_dir / "odom_controller.parquet").exists()
+            if not has_odom and any((d / "odom.parquet").exists() or (d / "odom_controller.parquet").exists() for d in robot_dirs if d != robot_dir):
+                continue
 
             rb = TopicBundle()
 
@@ -808,6 +809,11 @@ class MCAPReader:
                         except Exception:
                             pass
                 setattr(rb, t_name, lf)
+
+            # TEMP: until fixed in isaac, the bare odom topic is shared with Isaac's zero-twist publisher
+            controller_odom = load_parquet(robot_dir / "odom_controller.parquet")
+            if controller_odom is not None:
+                rb.odom = controller_odom
 
             bundles[robot_name] = rb
 
