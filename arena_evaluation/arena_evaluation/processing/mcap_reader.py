@@ -145,6 +145,7 @@ class MCAPReader:
                 "odom_controller": defaultdict(list),
                 "scan": defaultdict(list),
                 "cmd_vel": defaultdict(list),
+                "cmd_vel_controller": defaultdict(list),
                 "joint_states": defaultdict(list),
                 "collision_events": defaultdict(list),
                 "collision_monitor_state": defaultdict(list),
@@ -307,14 +308,15 @@ class MCAPReader:
                         # Cmd_vel
                         elif topic.endswith("/cmd_vel"):
                             robot_name = get_robot_name(parts, env_key)
-                            target = robot_data[robot_name]["cmd_vel"]
+                            target = robot_data[robot_name]["cmd_vel_controller" if parts[-2].endswith("_controller") else "cmd_vel"]
+                            twist = ros_msg.twist if schema.name == "geometry_msgs/msg/TwistStamped" else ros_msg
                             target["time_ns"].append(ts_ns)
-                            target["linear_x"].append(ros_msg.linear.x)
-                            target["linear_y"].append(ros_msg.linear.y)
-                            target["linear_z"].append(ros_msg.linear.z)
-                            target["angular_x"].append(ros_msg.angular.x)
-                            target["angular_y"].append(ros_msg.angular.y)
-                            target["angular_z"].append(ros_msg.angular.z)
+                            target["linear_x"].append(twist.linear.x)
+                            target["linear_y"].append(twist.linear.y)
+                            target["linear_z"].append(twist.linear.z)
+                            target["angular_x"].append(twist.angular.x)
+                            target["angular_y"].append(twist.angular.y)
+                            target["angular_z"].append(twist.angular.z)
                             appended = True
                         # Joint states
                         elif topic.endswith("/joint_states"):
@@ -814,6 +816,9 @@ class MCAPReader:
             controller_odom = load_parquet(robot_dir / "odom_controller.parquet")
             if controller_odom is not None:
                 rb.odom = controller_odom
+
+            if rb.cmd_vel is None:
+                rb.cmd_vel = load_parquet(robot_dir / "cmd_vel_controller.parquet")
 
             bundles[robot_name] = rb
 

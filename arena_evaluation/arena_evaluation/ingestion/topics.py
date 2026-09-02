@@ -17,7 +17,7 @@ class TopicDefinition:
 def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDefinition]:
     """Return the dictionary of topics to subscribe to."""
     from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
-    from sensor_msgs.msg import JointState
+    from sensor_msgs.msg import JointState, LaserScan
     from nav_msgs.msg import Path
     from std_msgs.msg import String
     from tf2_msgs.msg import TFMessage
@@ -38,9 +38,11 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
 
     topics = {
         "cmd_vel": TopicDefinition(f"{ns}/cmd_vel", Twist, throttled=True),
+        "scan": TopicDefinition(f"{ns}/scan", LaserScan, throttled=True),
+        "lidar": TopicDefinition(f"{ns}/lidar", LaserScan, throttled=True),
         "joint_states": TopicDefinition(f"{ns}/joint_states", JointState, throttled=True),
         "plan": TopicDefinition(f"{ns}/plan", Path, throttled=False),
-        "goal_pose": TopicDefinition(f"{p_ns}/goal_pose", PoseStamped, throttled=False),
+        "goal_pose": TopicDefinition(f"{ns}/goal_pose", PoseStamped, throttled=False),
         "initialpose": TopicDefinition(f"{p_ns}/initialpose", PoseWithCovarianceStamped, throttled=False),
         "tf": TopicDefinition("/tf", TFMessage, throttled=True),
         "tf_static": TopicDefinition("/tf_static", TFMessage, throttled=False, qos_transient_local=True),

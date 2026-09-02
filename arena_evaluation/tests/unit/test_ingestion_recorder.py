@@ -687,17 +687,17 @@ def test_robots_fleet_callback_writes_and_discovers_robots(tmp_path, monkeypatch
     assert node.robot_model == "jackal"
     assert node.current_metadata.robot_model == ["jackal"]
     write_spy.assert_called_once()
-    # 15 of the 19 per-robot topics (state/peds topics skipped) + 1 odom topic
-    assert node.create_subscription.call_count == 16
+    # 17 of the 21 per-robot topics (state/peds topics skipped) + the model's controller odom and cmd_vel
+    assert node.create_subscription.call_count == 19
     assert (tmp_path / "episode_000.yaml").exists()
 
     # second sighting of the same robot: no re-subscription
     node.robots_fleet_callback(_fleet_message([("robot_0", "jackal")]))
-    assert node.create_subscription.call_count == 16
+    assert node.create_subscription.call_count == 19
 
-    # a new robot triggers a new subscription wave
+    # a new robot triggers a new subscription wave, no controller topics for a model without model_params
     node.robots_fleet_callback(_fleet_message([("robot_1", "turtlebot3")]))
-    assert node.create_subscription.call_count == 32
+    assert node.create_subscription.call_count == 36
     assert "robot_1" in node.known_robots
     assert node.current_metadata.robot_model == ["jackal", "turtlebot3"]
 
