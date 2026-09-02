@@ -204,6 +204,10 @@ _EXPECTED_HEADERS = [
     "outcome_state", "outcome_info", "started_at", "ended_at", "runtime_s",
     "robots_params_json", "obstacles_params_json",
     "error_kind", "error_detail",
+    "lockstep_stalls",
+    "lockstep_max_stall_s",
+    "lockstep_rtf",
+    "lockstep_beats",
 ]
 
 
@@ -222,7 +226,7 @@ def test_progress_log_header_column_count(tmp_path: pathlib.Path):
     with (tmp_path / "progress.csv").open(newline="") as fh:
         reader = csv.reader(fh)
         headers = next(reader)
-    assert len(headers) == 25
+    assert len(headers) == 29
 
 
 def test_progress_log_append(tmp_path: pathlib.Path):

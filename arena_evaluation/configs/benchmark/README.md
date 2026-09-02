@@ -166,6 +166,24 @@ arena evaluation benchmark --suite characterization --contest characterization
 arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 ```
 
+### Lockstep soak
+
+`arena planners test <planner...>` runs one short crowded stage per
+contestant with `lockstep: true` (`lockstep.paused: false`, headless). The
+runner always watches `/arena/state/lockstep` and records, per episode and per
+step, the stall count, the longest stall, the mean measured rtf and the hard
+channels registered (`lockstep_*` columns in `progress.csv`, `lockstep` in
+`.benchmark_state.json`). When any step ran under lockstep the run ends with a
+report table, and `--lockstep-verdict` turns a `fail` row into exit code 3. A
+row fails when a stall reaches 5 s or no `nav/`/`planner/` beat ever
+registered for the contestant, i.e. the planner never engaged the gate.
+
+Suite and contest are both built inline by the `arena` CLI
+(`arena_cli/features/planners.py`), so nothing here defines them: bridge planners become
+`{mobile: {driver: drl, planner: <name>}}` contestants, anything else a nav2
+`local_planner`, and the benchmark runs with `--lockstep-verdict`. Extra
+`key:=value` tokens pass through (`sim:=isaac`, `lockstep.rtf:=5`).
+
 ## Contest files
 
 A contest defines the set of planner configurations (contestants) to evaluate.
