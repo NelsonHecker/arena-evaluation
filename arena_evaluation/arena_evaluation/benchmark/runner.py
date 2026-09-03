@@ -41,11 +41,15 @@ STATE_TOPIC = "/arena/benchmark/state"
 
 _CANCEL_SETTLE_S = 30.0
 _HEARTBEAT_S = 30.0
+_ARENA_SIGINT_GRACE_S = 15.0
+_ARENA_SIGTERM_GRACE_S = 5.0
+_ARENA_ORPHAN_GRACE_S = 1.0
 
 # EpisodeRecord.outcome_state labels (task_generator_msgs/msg/EpisodeRecord.msg)
 _EPISODE_OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
 
-from arena_evaluation.storage.planner_names import split_planner_name
+
+from ..storage.planner_names import split_planner_name
 from .config import Contest, Suite
 from .state import (
     Manifest,
@@ -58,6 +62,43 @@ from .lockstep import LockstepMonitor, LockstepSummary, format_report
 from .step import Step, StepErrorKind, StepResult
 from .progress_display import BenchmarkProgressDisplay
 from .tree import ContestIdentifier, SuiteIdentifier
+
+
+def _proc_starttime(pid: int) -> int | None:
+    """Start tick of a pid, None once it is gone."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            stat = fh.read()
+    except OSError:
+        return None
+    fields = stat.rpartition(")")[2].split()
+    return int(fields[19])
+
+
+def _proc_tree(root: int) -> dict[int, int]:
+    """Descendants of root as pid -> start tick."""
+    children: dict[int, list[int]] = collections.defaultdict(list)
+    starts: dict[int, int] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open(f"/proc/{pid}/stat") as fh:
+                stat = fh.read()
+        except OSError:
+            continue
+        fields = stat.rpartition(")")[2].split()
+        children[int(fields[1])].append(pid)
+        starts[pid] = int(fields[19])
+    tree: dict[int, int] = {}
+    stack = [root]
+    while stack:
+        for child in children.get(stack.pop(), ()):
+            if child not in tree:
+                tree[child] = starts[child]
+                stack.append(child)
+    return tree
 
 
 class _WithSteps(typing.Protocol):
@@ -1374,7 +1415,9 @@ class BenchmarkRunner(ArenaMixinNode):
                 self._arena_log_file = None
             return
 
-        for sig, grace in ((signal.SIGINT, 3.0), (signal.SIGTERM, 2.0)):
+        descendants = _proc_tree(p.pid)
+
+        for sig, grace in ((signal.SIGINT, _ARENA_SIGINT_GRACE_S), (signal.SIGTERM, _ARENA_SIGTERM_GRACE_S)):
             try:
                 os.killpg(pgid, sig)
             except (ProcessLookupError, OSError):
@@ -1411,6 +1454,17 @@ class BenchmarkRunner(ArenaMixinNode):
                     with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                         os.killpg(os.getpgid(self._viz_proc.pid), signal.SIGKILL)
             self._viz_proc = None
+        deadline = time.time() + _ARENA_ORPHAN_GRACE_S
+        while time.time() < deadline:
+            if not any(_proc_starttime(pid) == start for pid, start in descendants.items()):
+                break
+            await asyncio.sleep(0.1)
+        survivors = [pid for pid, start in descendants.items() if _proc_starttime(pid) == start]
+        if survivors:
+            _log.warning(f"{len(survivors)} arena process(es) outlived the launch, sending SIGKILL: {survivors}")
+            for pid in survivors:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.kill(pid, signal.SIGKILL)
 
         if self._arena_log_file is not None:
             with contextlib.suppress(Exception):

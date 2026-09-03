@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import pathlib
 import polars as pl
 import plotly.express as px
@@ -52,15 +53,7 @@ class BarRenderer(BasePlotRenderer):
         else:
             if self.spec.data_key not in df_filtered.columns:
                 return None
-            grouped = (
-                df_filtered
-                .group_by(diff_col)
-                .agg([
-                    pl.col(self.spec.data_key).mean().alias("mean"),
-                    pl.col(self.spec.data_key).std().alias("std"),
-                ])
-                .to_pandas()
-            )
+            grouped = self._grouped_with_error(df_filtered, diff_col).to_pandas()
 
             if grouped.empty:
                 return None
@@ -70,7 +63,8 @@ class BarRenderer(BasePlotRenderer):
                 x=diff_col,
                 y="mean",
                 color=diff_col,
-                error_y="std",
+                error_y="err_plus",
+                error_y_minus="err_minus",
                 template="plotly_white",
                 labels={
                     "mean": self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key),
@@ -80,6 +74,38 @@ class BarRenderer(BasePlotRenderer):
             fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
 
             return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
+
+    @staticmethod
+    def _wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+        """95% Wilson score interval of a proportion."""
+        if n == 0:
+            return 0.0, 0.0
+        p = k / n
+        denom = 1.0 + z * z / n
+        center = (p + z * z / (2 * n)) / denom
+        half = z * math.sqrt(p * (1.0 - p) / n + z * z / (4 * n * n)) / denom
+        return center - half, center + half
+
+    def _grouped_with_error(self, df_filtered: pl.DataFrame, diff_col: str) -> pl.DataFrame:
+        """Per-group mean with asymmetric error columns: Wilson for boolean data, one std otherwise."""
+        key = self.spec.data_key
+        if df_filtered.schema[key] == pl.Boolean:
+            grouped = df_filtered.group_by(diff_col).agg([
+                pl.col(key).cast(pl.Float64).mean().alias("mean"),
+                pl.col(key).cast(pl.Int64).sum().alias("k"),
+                pl.col(key).count().alias("n"),
+            ])
+            bounds = [self._wilson(int(k), int(n)) for k, n in zip(grouped["k"].to_list(), grouped["n"].to_list())]
+            means = grouped["mean"].to_list()
+            return grouped.with_columns([
+                pl.Series("err_plus", [hi - m for (_, hi), m in zip(bounds, means)]),
+                pl.Series("err_minus", [m - lo for (lo, _), m in zip(bounds, means)]),
+            ]).drop(["k", "n"])
+        grouped = df_filtered.group_by(diff_col).agg([
+            pl.col(key).mean().alias("mean"),
+            pl.col(key).std().fill_null(0.0).alias("std"),
+        ])
+        return grouped.with_columns([pl.col("std").alias("err_plus"), pl.col("std").alias("err_minus")]).drop("std")
 
     def _explode_needed(self, df_filtered: pl.DataFrame, diff_col: str) -> pl.DataFrame:
         """Explode per-sample list columns (timeseries metrics) before
@@ -110,14 +136,19 @@ class BarRenderer(BasePlotRenderer):
         import seaborn as sns
 
         plt.figure(figsize=(10, 6))
-        sns.barplot(
-            data=pdf,
-            x=diff_col,
-            y=self.spec.data_key,
-            hue=diff_col,
-            errorbar="sd",
-            legend=False,
-        )
+        if df_filtered.schema[self.spec.data_key] == pl.Boolean:
+            grouped = self._grouped_with_error(df_filtered, diff_col).to_pandas()
+            sns.barplot(data=grouped, x=diff_col, y="mean", hue=diff_col, errorbar=None, legend=False)
+            plt.errorbar(range(len(grouped)), grouped["mean"], yerr=[grouped["err_minus"], grouped["err_plus"]], fmt="none", ecolor="black", capsize=4)
+        else:
+            sns.barplot(
+                data=pdf,
+                x=diff_col,
+                y=self.spec.data_key,
+                hue=diff_col,
+                errorbar="sd",
+                legend=False,
+            )
         plt.title(self.spec.title)
         plt.ylabel(self.format_label(self.spec.data_key.replace("_", " ").title(), self.spec.data_key))
         plt.tight_layout()

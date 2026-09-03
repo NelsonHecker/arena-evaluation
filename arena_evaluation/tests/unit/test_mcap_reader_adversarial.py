@@ -27,6 +27,8 @@ def test_mcap_reader_duplicate_timestamps_and_out_of_order(tmp_path):
             msg.log_time = ts_ns
             msg.data = b""
             ros_msg = MagicMock()
+            ros_msg.header.stamp.sec = 0
+            ros_msg.header.stamp.nanosec = ts_ns
             ros_msg.pose.pose.position.x = x
             ros_msg.pose.pose.position.y = 0
             ros_msg.pose.pose.orientation.w = 1.0

@@ -55,9 +55,11 @@ class MotionMetricsCalculator(BaseMetricCalculator):
         time_ns = episode.data["time_ns"].to_numpy() if (episode.data is not None and "time_ns" in episode.data.columns) else np.arange(len(pos_x)) * 100_000_000
 
         if episode.data is not None and "vel_linear" in episode.data.columns:
-            episode.data = episode.data.filter(
-                pl.col("vel_linear").is_not_null() & ~pl.col("vel_linear").is_nan()
-            )
+            valid = pl.col("vel_linear").is_not_null() & ~pl.col("vel_linear").is_nan()
+            v_max = self.robot_params.max_linear_velocity if self.robot_params else 0.0
+            if v_max > 0.0:
+                valid = valid & (pl.col("vel_linear").abs() <= v_max)
+            episode.data = episode.data.filter(valid)
             vel_abs = np.abs(episode.data["vel_linear"].to_numpy())
             time_ns = episode.data["time_ns"].to_numpy()
         elif len(pos_x) > 1:

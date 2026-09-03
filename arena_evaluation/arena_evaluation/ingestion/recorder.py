@@ -23,7 +23,7 @@ from rclpy.serialization import serialize_message
 import rosbag2_py
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan, JointState
-from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import Twist, TwistStamped, PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry, Path
 from tf2_msgs.msg import TFMessage
 
@@ -588,9 +588,11 @@ class DataRecorderNode(Node):
         self._update_metadata_from_episode(msg)
 
         env_namespace = self.get_namespace().strip('/')
-        now = self.current_time or self.get_clock().now().nanoseconds
         topic = f"/{env_namespace}/state/episode" if env_namespace else "/state/episode"
-        self._write_to_bag_at(topic, msg, now)
+        if self.current_time is None:
+            self._pre_clock_buffer.append((topic, msg))
+            return
+        self._write_to_bag_at(topic, msg, self.current_time)
 
     def semantic_snapshot_callback(self, msg: SemanticSnapshot):
         env_namespace = self.get_namespace().strip('/')
@@ -641,13 +643,13 @@ class DataRecorderNode(Node):
                     self.subs.append(sub)
                     self.get_logger().info(f"Subscribed to robot topic: {topic_name}")
 
-                robot_name = robot_ns.split('/')[-1] if robot_ns else ""
                 ns_prefix = f"/{robot_ns}" if robot_ns else ""
-                if robot_name:
-                    odom_topic = f"{ns_prefix}/{robot_name}_velocity_controller/odom"
-                    self._register_topic(odom_topic, Odometry)
-                    sub = self.create_subscription(Odometry, odom_topic, self._create_throttled_callback(odom_topic), self.qos)
-                    self.subs.append(sub)
+                cmd_vel_topic, odom_topic = self._control_topics(robot.model)
+                for rel, msg_type in ((odom_topic, Odometry), (cmd_vel_topic, TwistStamped)):
+                    if rel and "/" in rel:
+                        topic = f"{ns_prefix}/{rel}"
+                        self._register_topic(topic, msg_type)
+                        self.subs.append(self.create_subscription(msg_type, topic, self._create_throttled_callback(topic), self.qos))
 
                 if self.robot_model == "unknown":
                     self.robot_model = robot.model
@@ -663,6 +665,17 @@ class DataRecorderNode(Node):
                         MetadataWriter.write(self.current_metadata, self.current_metadata_path)
                     except Exception as e:
                         self.get_logger().warn(f"Failed to write episode metadata: {e}")
+
+    @staticmethod
+    def _control_topics(model: str) -> tuple[str, str]:
+        """The model's controller-side (cmd_vel_topic, odom_topic), relative to the robot namespace."""
+        try:
+            path = os.path.join(get_package_share_directory("arena_robots"), "robots", model.partition("[")[0], "model_params.yaml")
+            with open(path) as f:
+                control = (yaml.safe_load(f) or {}).get("control", {})
+        except Exception:
+            return "", ""
+        return str(control.get("cmd_vel_topic", "")), str(control.get("odom_topic", ""))
 
     def _resolve_throttle_ms(self, topic_name: str) -> float:
         topic_lower = topic_name.lower()

@@ -1,10 +1,48 @@
+import logging
 import os
 import yaml
 import pathlib
 import subprocess
 from PIL import Image
 
+_log = logging.getLogger(__name__)
+
+
 class MapRegistry:
+    @staticmethod
+    def _render_world_map(map_name: str, cache_dir: pathlib.Path) -> dict | None:
+        """Resolve the world the way the runtime does and rasterize its compacted levels into the cache."""
+        try:
+            from arena_simulation_setup.tree.World import WorldIdentifier
+        except ImportError:
+            return None
+        bare, level_filter = WorldIdentifier.parse(map_name)
+        try:
+            view = WorldIdentifier(bare).resolve_sync()
+            loaded = view.load(level_filter=level_filter)
+            origins = view.level_origins()
+            compacted = loaded.compact_world(origins=origins if origins is not None else {fid: (0.0, 0.0) for fid in loaded.level_ids})
+        except Exception as e:
+            _log.warning(f"world {map_name!r} did not resolve: {e!r}")
+            return None
+        if compacted is None:
+            return None
+        png_bytes, map_yaml_text = compacted.render_map_files(level_origins=origins)
+        png_path = cache_dir / f"{map_name}.png"
+        png_path.write_bytes(png_bytes)
+        map_meta = yaml.safe_load(map_yaml_text)
+        img = Image.open(png_path)
+        cache_meta = {
+            "png_path": str(png_path),
+            "resolution": float(map_meta["resolution"]),
+            "origin": [float(x) for x in map_meta["origin"]],
+            "width": img.width,
+            "height": img.height,
+        }
+        with open(cache_dir / f"{map_name}.yaml", "w") as f:
+            yaml.dump(cache_meta, f)
+        return cache_meta
+
     @staticmethod
     def _find_ros_map_dir(map_name: str, run_dir: pathlib.Path | None = None) -> pathlib.Path | None:
         candidates = [map_name]
@@ -83,7 +121,7 @@ class MapRegistry:
         else:
             ros_map_dir = MapRegistry._find_ros_map_dir(map_name)
         if not ros_map_dir:
-            return None
+            return MapRegistry._render_world_map(map_name, cache_dir)
             
         yaml_path = None
         for cand in ["map/map.yaml", "0/map.yaml", "map.yaml"]:
@@ -92,7 +130,7 @@ class MapRegistry:
                 break
                 
         if not yaml_path:
-            return None
+            return MapRegistry._render_world_map(map_name, cache_dir)
             
         with open(yaml_path, "r") as f:
             map_meta = yaml.safe_load(f)

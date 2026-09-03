@@ -1,6 +1,7 @@
 from __future__ import annotations
 import typing
 import numpy as np
+import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 
@@ -62,21 +63,30 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
                 count += 1
         return count
 
+    @staticmethod
+    def _collision_frame(episode: AlignedEpisodeBundle) -> pl.DataFrame | None:
+        """The native collision_events stream when present, else the aligned data."""
+        if episode.topics is not None and "collision_events" in episode.topics:
+            return episode.topics["collision_events"].sort("time_ns")
+        return episode.data
+
     @classmethod
     def _column_rising_edges(cls, episode: AlignedEpisodeBundle, column: str) -> int | None:
-        if episode.data is None or column not in episode.data.columns:
+        frame = cls._collision_frame(episode)
+        if frame is None or column not in frame.columns:
             return None
-        counts = episode.data[column].to_numpy().astype(float)
+        counts = frame[column].to_numpy().astype(float)
         if np.isnan(counts).all():
             return None
         return cls._count_rising_edges(np.nan_to_num(counts, nan=0.0) > 0)
 
-    @staticmethod
-    def _hit_obstacles(episode: AlignedEpisodeBundle) -> list[str]:
-        if episode.data is None or "collision_obstacle_ids" not in episode.data.columns:
+    @classmethod
+    def _hit_obstacles(cls, episode: AlignedEpisodeBundle) -> list[str]:
+        frame = cls._collision_frame(episode)
+        if frame is None or "collision_obstacle_ids" not in frame.columns:
             return []
         hit: set[str] = set()
-        for ids in episode.data["collision_obstacle_ids"].to_list():
+        for ids in frame["collision_obstacle_ids"].to_list():
             if ids is not None:
                 hit.update(i for i in ids if i)
         return sorted(hit)

@@ -30,6 +30,8 @@ from arena_evaluation.ingestion.topics import TopicDefinition, get_topics
 # (key, default name with empty namespaces, msg type name, throttled, transient_local)
 _TOPIC_EXPECTATIONS = [
     ("cmd_vel", "/cmd_vel", "Twist", True, False),
+    ("scan", "/scan", "LaserScan", True, False),
+    ("lidar", "/lidar", "LaserScan", True, False),
     ("joint_states", "/joint_states", "JointState", True, False),
     ("plan", "/plan", "Path", False, False),
     ("goal_pose", "/goal_pose", "PoseStamped", False, False),
@@ -81,7 +83,7 @@ def test_get_topics_namespace_and_parent_namespace():
     assert topics["cmd_vel"].name_template == "/env_0/cmd_vel"
     assert topics["joint_states"].name_template == "/env_0/joint_states"
     assert topics["plan"].name_template == "/env_0/plan"
-    assert topics["goal_pose"].name_template == "/arena_0/task_generator_node/goal_pose"
+    assert topics["goal_pose"].name_template == "/env_0/goal_pose"
     assert topics["initialpose"].name_template == "/arena_0/task_generator_node/initialpose"
     assert topics["peds"].name_template == "/arena_0/arena_peds"
     assert topics["agent_states"].name_template == "/arena_0/task_generator_node/agent_states"
@@ -105,13 +107,14 @@ def test_get_topics_slash_namespaces_treated_as_empty():
     # "//" for namespace="/", so those guards never fire and names gain a
     # doubled slash. We assert the actual behavior so a future fix is noticed.
     assert get_topics("/")["cmd_vel"].name_template == "///cmd_vel"
-    assert get_topics("", "/")["goal_pose"].name_template == "///goal_pose"
+    assert get_topics("", "/")["initialpose"].name_template == "///initialpose"
 
 
 def test_get_topics_parent_only_namespace():
     topics = get_topics("", "arena_0")
     assert topics["cmd_vel"].name_template == "/cmd_vel"
-    assert topics["goal_pose"].name_template == "/arena_0/goal_pose"
+    assert topics["goal_pose"].name_template == "/goal_pose"
+    assert topics["initialpose"].name_template == "/arena_0/initialpose"
 
 
 def test_get_topics_msg_type_identity():

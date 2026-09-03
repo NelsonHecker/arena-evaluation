@@ -78,6 +78,11 @@ class MCAPReader:
         return math.atan2(siny_cosp, cosy_cosp)
 
     @staticmethod
+    def _stamp_ns(header) -> int:
+        """Header stamp (sim time) in ns."""
+        return int(header.stamp.sec) * 1_000_000_000 + int(header.stamp.nanosec)
+
+    @staticmethod
     def _param_value_to_py(val) -> typing.Any:
         p_type = val.type
         if p_type == 1:
@@ -137,8 +142,10 @@ class MCAPReader:
         def new_robot_data():
             return {
                 "odom": defaultdict(list),
+                "odom_controller": defaultdict(list),
                 "scan": defaultdict(list),
                 "cmd_vel": defaultdict(list),
+                "cmd_vel_controller": defaultdict(list),
                 "joint_states": defaultdict(list),
                 "collision_events": defaultdict(list),
                 "collision_monitor_state": defaultdict(list),
@@ -266,18 +273,19 @@ class MCAPReader:
                             base = parts[-2]
                             if base == env_key:
                                 return env_key
-                            if base.endswith("_velocity_controller"):
-                                base = parts[-3] if len(parts) >= 3 else base.replace("_velocity_controller", "")
+                            if base.endswith("_controller"):
+                                base = parts[-3] if len(parts) >= 3 else base
                             elif base == "power_publisher":
                                 base = parts[-3] if len(parts) >= 3 else base
                             return f"{env_key}_{base}"
 
                         # Odom
-                        if topic.endswith("/odom") and "velocity_controller" not in topic:
+                        if topic.endswith("/odom"):
                             robot_name = get_robot_name(parts, env_key)
 
-                            target = robot_data[robot_name]["odom"]
+                            target = robot_data[robot_name]["odom_controller" if parts[-2].endswith("_controller") else "odom"]
                             target["time_ns"].append(ts_ns)
+                            target["stamp_ns"].append(self._stamp_ns(ros_msg.header))
                             target["pos_x"].append(ros_msg.pose.pose.position.x)
                             target["pos_y"].append(ros_msg.pose.pose.position.y)
 
@@ -300,14 +308,15 @@ class MCAPReader:
                         # Cmd_vel
                         elif topic.endswith("/cmd_vel"):
                             robot_name = get_robot_name(parts, env_key)
-                            target = robot_data[robot_name]["cmd_vel"]
+                            target = robot_data[robot_name]["cmd_vel_controller" if parts[-2].endswith("_controller") else "cmd_vel"]
+                            twist = ros_msg.twist if schema.name == "geometry_msgs/msg/TwistStamped" else ros_msg
                             target["time_ns"].append(ts_ns)
-                            target["linear_x"].append(ros_msg.linear.x)
-                            target["linear_y"].append(ros_msg.linear.y)
-                            target["linear_z"].append(ros_msg.linear.z)
-                            target["angular_x"].append(ros_msg.angular.x)
-                            target["angular_y"].append(ros_msg.angular.y)
-                            target["angular_z"].append(ros_msg.angular.z)
+                            target["linear_x"].append(twist.linear.x)
+                            target["linear_y"].append(twist.linear.y)
+                            target["linear_z"].append(twist.linear.z)
+                            target["angular_x"].append(twist.angular.x)
+                            target["angular_y"].append(twist.angular.y)
+                            target["angular_z"].append(twist.angular.z)
                             appended = True
                         # Joint states
                         elif topic.endswith("/joint_states"):
@@ -550,6 +559,7 @@ class MCAPReader:
                                     yaw_val = self._quaternion_to_yaw(t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w)
                                     target = robot_data[robot_name]["tf_gt"]
                                     target["time_ns"].append(ts_ns)
+                                    target["stamp_ns_gt"].append(self._stamp_ns(t.header))
                                     target["pos_x_gt"].append(t.transform.translation.x)
                                     target["pos_y_gt"].append(t.transform.translation.y)
                                     target["yaw_gt"].append(yaw_val)
@@ -696,9 +706,9 @@ class MCAPReader:
             robot_name = robot_dir.name
 
             # Skip pure environment directories (e.g. env_0) if odom.parquet is absent and other robot directories exist
-            if not (robot_dir / "odom.parquet").exists():
-                if any((d / "odom.parquet").exists() for d in robot_dirs if d != robot_dir):
-                    continue
+            has_odom = (robot_dir / "odom.parquet").exists() or (robot_dir / "odom_controller.parquet").exists()
+            if not has_odom and any((d / "odom.parquet").exists() or (d / "odom_controller.parquet").exists() for d in robot_dirs if d != robot_dir):
+                continue
 
             rb = TopicBundle()
 
@@ -801,6 +811,14 @@ class MCAPReader:
                         except Exception:
                             pass
                 setattr(rb, t_name, lf)
+
+            # TEMP: until fixed in isaac, the bare odom topic is shared with Isaac's zero-twist publisher
+            controller_odom = load_parquet(robot_dir / "odom_controller.parquet")
+            if controller_odom is not None:
+                rb.odom = controller_odom
+
+            if rb.cmd_vel is None:
+                rb.cmd_vel = load_parquet(robot_dir / "cmd_vel_controller.parquet")
 
             bundles[robot_name] = rb
 

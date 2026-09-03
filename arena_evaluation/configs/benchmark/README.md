@@ -168,7 +168,7 @@ arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 
 ### Lockstep soak
 
-`arena planners test <planner...>` runs one short crowded stage per
+`arena planners test <planner...|--all>` runs one short crowded stage per
 contestant with `lockstep: true` (`lockstep.paused: false`, headless). The
 runner always watches `/arena/state/lockstep` and records, per episode and per
 step, the stall count, the longest stall, the mean measured rtf and the hard

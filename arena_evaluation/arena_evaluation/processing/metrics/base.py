@@ -3,12 +3,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import ast
 import typing
-import numpy as np
 
 import numpy as np
 import polars as pl
 
-from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from ..pose_segments import teleport_jumps
+
+if typing.TYPE_CHECKING:
+    from ...storage.schemas import AlignedEpisodeBundle, RobotParams
 
 
 class BaseMetricCalculator(ABC):
@@ -53,8 +55,8 @@ class BaseMetricCalculator(ABC):
             raw_odom_y0 = odom_y[0] if len(odom_y) > 0 else 0.0
             raw_odom_yaw0 = odom_yaw[0] if len(odom_yaw) > 0 else 0.0
             if len(odom_x) > 1:
-                dists = np.sqrt(np.diff(odom_x) ** 2 + np.diff(odom_y) ** 2)
-                jumps = np.where(dists > 0.5)[0]
+                stamp_col = "stamp_ns_gt" if "pos_x_gt" in episode.data.columns else "stamp_ns"
+                jumps = teleport_jumps(odom_x, odom_y, episode.data[stamp_col].to_numpy() if stamp_col in episode.data.columns else None)
 
                 if len(jumps) > 0:
                     split_indices = jumps + 1

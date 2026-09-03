@@ -39,9 +39,11 @@ bundle = MCAPReader(path).read()
 
 | Topic | Polars Columns |
 |---|---|
-| odom | `time_ns`, `pos_x`, `pos_y`, `yaw`, `vel_linear`, `vel_angular` |
+| odom | `time_ns`, `stamp_ns`, `pos_x`, `pos_y`, `yaw`, `vel_linear`, `vel_angular` |
+| odom_controller | same as odom, from the controller's `<*_controller>/odom`; preferred over odom when present |
 | scan | `time_ns`, `scan_ranges`, `scan_min` |
 | cmd_vel | `time_ns`, `linear_x`, `linear_y`, `linear_z`, `angular_x`, `angular_y`, `angular_z` |
+| cmd_vel_controller | same as cmd_vel, from the controller's stamped `<*_controller>/cmd_vel`; used when the bare cmd_vel is absent |
 | joint_states | `time_ns`, `name`, `position`, `velocity`, `effort` |
 | power | `time_ns`, `total_power_w`, `static_power_w`, `total_mechanical_power_w`, `total_thermal_power_w`, `joint_*_power_w` |
 | energy | `time_ns`, `total_energy_consumed_wh`, `battery_soc_percent` |
@@ -52,7 +54,7 @@ bundle = MCAPReader(path).read()
 | collision_events | `time_ns`, `collision_event` |
 | collision_monitor_state | `time_ns`, `action_type`, `polygon_name` |
 | tf / tf_static | `time_ns`, frame/child/trans/rot columns |
-| tf_gt | `time_ns`, `pos_x_gt`, `pos_y_gt`, `yaw_gt`, `frame_id` |
+| tf_gt | `time_ns`, `stamp_ns_gt`, `pos_x_gt`, `pos_y_gt`, `yaw_gt`, `frame_id` |
 
 ---
 

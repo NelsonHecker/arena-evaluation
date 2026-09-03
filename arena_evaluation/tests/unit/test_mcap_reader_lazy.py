@@ -56,8 +56,19 @@ class MockTwistWithCovariance:
     def __init__(self, lx=0.0, az=0.0):
         self.twist = MockTwist(lx, az)
 
+class MockStamp:
+    def __init__(self, sec=0, nanosec=0):
+        self.sec = sec
+        self.nanosec = nanosec
+
+class MockHeader:
+    def __init__(self, frame_id="", sec=0, nanosec=0):
+        self.frame_id = frame_id
+        self.stamp = MockStamp(sec, nanosec)
+
 class MockOdomMsg:
-    def __init__(self, px=0.0, py=0.0, lx=0.0, az=0.0):
+    def __init__(self, px=0.0, py=0.0, lx=0.0, az=0.0, sec=0, nanosec=0):
+        self.header = MockHeader("odom", sec, nanosec)
         self.pose = MockPoseWithCovariance(px, py)
         self.twist = MockTwistWithCovariance(lx, az)
 
@@ -99,10 +110,6 @@ def test_mcap_reader_lazy_chunking():
             assert odom_df["time_ns"][10004] == 10004000
 
 
-class MockTransformHeader:
-    def __init__(self, frame_id):
-        self.frame_id = frame_id
-
 class MockTranslation:
     def __init__(self, x, y, z=0.0):
         self.x = x
@@ -116,7 +123,7 @@ class MockTransform:
 
 class MockStampedTransform:
     def __init__(self, frame_id, child_frame_id, tx, ty, qx=0.0, qy=0.0, qz=0.0, qw=1.0):
-        self.header = MockTransformHeader(frame_id)
+        self.header = MockHeader(frame_id)
         self.child_frame_id = child_frame_id
         self.transform = MockTransform(tx, ty, qx, qy, qz, qw)
 
