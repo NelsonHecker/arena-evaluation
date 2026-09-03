@@ -26,6 +26,9 @@ class RunMetadata(BaseModel):
     inter_planner: str = ""
     agent_name: str = ""
     task_generator_episode_id: int | None = None
+    # Deterministic episode seed (stage.seed + episode_index). Written live from
+    # EpisodeRecord so an episode dir can be attributed back to its (step, ep_idx).
+    seed: int | None = None
     # Terminal outcome written by the runner's stop_episode service call
     # (QUEUED=0, RUNNING=1, SUCCESS=2, FAILED=3, SKIPPED=4, FATAL=5).
     outcome_state: int | None = None

@@ -174,6 +174,36 @@ def _params_to_json(params: list) -> str:
     return json.dumps(rows)
 
 
+def read_progress_rows(path: pathlib.Path) -> list[dict]:
+    """Read progress.csv back into a list of row dicts.
+
+    Comment lines (write_comment) are skipped. Numeric cells that fail to parse
+    (or are empty) come back as None so downstream code can distinguish
+    "missing" from a real value. Values stay as close to their written type as
+    the CSV round-trip allows.
+    """
+    if not path.exists():
+        return []
+    with path.open(newline="") as fh:
+        reader = csv.DictReader(line for line in fh if not line.startswith("#"))
+        rows = []
+        for raw in reader:
+            row: dict = {}
+            for key, value in raw.items():
+                if value == "":
+                    row[key] = None
+                else:
+                    for cast in (int, float):
+                        try:
+                            value = cast(value)
+                            break
+                        except (TypeError, ValueError):
+                            pass
+                    row[key] = value
+            rows.append(row)
+    return rows
+
+
 class ProgressLog:
     _HEADER = (
         "ts_iso,run_id,step_key,contestant,stage,env_id,episode_id,parent_episode_id,"
