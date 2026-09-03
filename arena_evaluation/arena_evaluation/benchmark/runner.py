@@ -1617,7 +1617,12 @@ class BenchmarkRunner(ArenaMixinNode):
         pending = [d.step for d in decisions if d.run_indices]
         self._cleanup_stale_episodes(decisions)
         results: dict[str, StepResult] = dict(self._run_dir.state.steps)
+        # Published BenchmarkState total covers the whole run (already-recorded
+        # steps + this session's), but the progress bar shows ONLY the work
+        # remaining in this session, so a resume no longer reads like it is
+        # re-running everything.
         steps_total = len(results) + len(pending)
+        progress_total = len(pending)
         aborted_systemic = False
 
         self._publish_state(results, steps_total)
@@ -1642,7 +1647,7 @@ class BenchmarkRunner(ArenaMixinNode):
 
         self._progress = BenchmarkProgressDisplay(
             title=f"Arena Benchmark: {self._suite.name} • {self._contest.name}",
-            total_steps=steps_total,
+            total_steps=progress_total,
             env_n=self._env_n,
             run_id=self._run_id,
         )
