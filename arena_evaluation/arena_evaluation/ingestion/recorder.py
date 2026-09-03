@@ -99,6 +99,7 @@ class DataRecorderNode(Node):
             ("is_reference", False),
             ("reference_type", ""),
             ("episode_id_offset", 0),
+            ("video_grade_hz", 0.0),
         ]:
             if not self.has_parameter(name):
                 try:
@@ -234,7 +235,23 @@ class DataRecorderNode(Node):
         self._open_log_file()
 
         self.config = self.read_config()
-        self.freqs = self.config.get("record_frequencies", {"default": 20.0})
+        self.freqs = dict(self.config.get("record_frequencies", {"default": 20.0}))
+
+        # Optional video-grade override (recorder.video_grade_hz:=30 on the
+        # benchmark CLI): every throttled topic whose configured interval is
+        # slower than 1000/video_grade_hz ms is raised to that interval.
+        # Config entries that are already faster are kept, and 0.0 entries
+        # (event/latched topics) stay unthrottled. Metric runs leave it 0.
+        video_grade_hz = float(self.get_parameter("video_grade_hz").value or 0.0)
+        if video_grade_hz > 0:
+            floor_ms = 1000.0 / video_grade_hz
+            for key, interval_ms in list(self.freqs.items()):
+                if interval_ms and interval_ms > floor_ms:
+                    self.freqs[key] = floor_ms
+            self._log_info(
+                f"video-grade recording: throttled topics raised to >= {video_grade_hz:g} Hz "
+                f"(interval <= {floor_ms:.1f} ms)"
+            )
 
         self._log_info(f"Recorder ready. Episodes root: {self.episodes_root}")
         self._log_info(f"planner={self.planner!r} stage={self.stage!r} map={self.map_name!r} benchmark_id={self.benchmark_id!r}")

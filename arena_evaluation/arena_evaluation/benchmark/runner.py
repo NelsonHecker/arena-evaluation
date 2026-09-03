@@ -187,6 +187,8 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
         for k, v in passthrough.items():
             if k in ("headless", "env_n", "env.n"):
                 continue
+            if k.startswith("recorder."):
+                continue  # recorder.* params go to the recorder process, not the sim launch
             if k not in own_keys:
                 args.append(f"{k}:={v}")
     return args
@@ -1227,6 +1229,12 @@ class BenchmarkRunner(ArenaMixinNode):
                     if step.reference_type:
                         recorder_args.extend(["-p", f"reference_type:={step.reference_type}"])
 
+                    # recorder.<param>:=value CLI passthroughs become recorder node params
+                    # (e.g. recorder.video_grade_hz:=30 for video-grade throttling).
+                    for rec_k, rec_v in self._arena_passthrough.items():
+                        if rec_k.startswith("recorder."):
+                            recorder_args.extend(["-p", f"{rec_k[len('recorder.'):]}:={rec_v}"])
+
                     recorder_args.extend(
                         [
                             "-p",
@@ -1260,10 +1268,8 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                 _log.info(f"Starting step {step.key} (env={env_id}, {step.episodes} episodes)")
 
-                await self._push_stage_config(env_id, step)
-
                 try:
-                    step_result = await self._run_episodes(step, env_id, slot_index)
+                    await self._push_stage_config(env_id, step)
                 except asyncio.CancelledError:
                     while not q.empty():
                         try:
@@ -1271,7 +1277,10 @@ class BenchmarkRunner(ArenaMixinNode):
                         except asyncio.QueueEmpty:
                             break
                     raise
-                except _EnvDied as exc:
+                except Exception as exc:
+                    # A wedged env (e.g. queue_episode service unresponsive after
+                    # an episode) must fail just this step and fall into the
+                    # env-respawn recovery below, not abort the whole benchmark.
                     step_result = StepResult(
                         step.key,
                         "failed",
@@ -1279,20 +1288,41 @@ class BenchmarkRunner(ArenaMixinNode):
                         time.time(),
                         time.time(),
                         StepErrorKind.ENV_SETUP,
-                        repr(exc),
+                        f"push stage config failed: {exc!r}",
                         episodes_total=step.episodes,
                     )
-                except Exception as exc:
-                    step_result = StepResult(
-                        step.key,
-                        "failed",
-                        env_id,
-                        time.time(),
-                        time.time(),
-                        StepErrorKind.INTERNAL,
-                        repr(exc),
-                        episodes_total=step.episodes,
-                    )
+                else:
+                    try:
+                        step_result = await self._run_episodes(step, env_id, slot_index)
+                    except asyncio.CancelledError:
+                        while not q.empty():
+                            try:
+                                q.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                        raise
+                    except _EnvDied as exc:
+                        step_result = StepResult(
+                            step.key,
+                            "failed",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.ENV_SETUP,
+                            repr(exc),
+                            episodes_total=step.episodes,
+                        )
+                    except Exception as exc:
+                        step_result = StepResult(
+                            step.key,
+                            "failed",
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            StepErrorKind.INTERNAL,
+                            repr(exc),
+                            episodes_total=step.episodes,
+                        )
                 finally:
                     if recorder_proc is not None:
                         try:
@@ -1474,7 +1504,9 @@ class BenchmarkRunner(ArenaMixinNode):
         print("benchmark: arena runtime shutdown complete.", flush=True)
 
     async def _start_arena(self) -> None:
-        passthrough = dict(self._arena_passthrough)
+        passthrough = {
+            k: v for k, v in self._arena_passthrough.items() if not k.startswith("recorder.")
+        }
         cmd = [
             "ros2",
             "launch",

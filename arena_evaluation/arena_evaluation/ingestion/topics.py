@@ -42,6 +42,7 @@ def get_topics(namespace: str, parent_namespace: str = "") -> dict[str, TopicDef
         "lidar": TopicDefinition(f"{ns}/lidar", LaserScan, throttled=True),
         "joint_states": TopicDefinition(f"{ns}/joint_states", JointState, throttled=True),
         "plan": TopicDefinition(f"{ns}/plan", Path, throttled=False),
+        "local_plan": TopicDefinition(f"{ns}/local_plan", Path, throttled=True),
         "goal_pose": TopicDefinition(f"{ns}/goal_pose", PoseStamped, throttled=False),
         "initialpose": TopicDefinition(f"{p_ns}/initialpose", PoseWithCovarianceStamped, throttled=False),
         "tf": TopicDefinition("/tf", TFMessage, throttled=True),
