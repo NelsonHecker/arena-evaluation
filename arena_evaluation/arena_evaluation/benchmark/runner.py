@@ -1077,6 +1077,7 @@ class BenchmarkRunner(ArenaMixinNode):
         episodes_failed = 0
         episodes_weak = 0
         worst_progress: float | None = None
+        sim_s = 0.0
         stalled = False
         lockstep: LockstepSummary | None = None
         window: list[object] = []
@@ -1105,6 +1106,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 episodes_weak=episodes_weak,
                 episodes_worst_progress=worst_progress,
                 episodes_total=step.episodes,
+                sim_s=sim_s,
                 lockstep=lockstep,
             )
 
@@ -1120,6 +1122,7 @@ class BenchmarkRunner(ArenaMixinNode):
                         ep_idx=ep_idx,
                         ep_total=step.episodes,
                         state="RUNNING",
+                        sim_start=self.sim_time.to_seconds(),
                     )
                 goal = RunEpisode.Goal()
                 goal.world = step.stage.map
@@ -1169,6 +1172,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     _fold_window()
                     continue
                 ep_ended_sim = self.sim_time.to_seconds()
+                sim_s += ep_ended_sim - ep_started_sim
                 ep_ended_wall = time.time()
 
                 result: RunEpisode.Result = result_obj.result
@@ -1813,6 +1817,7 @@ class BenchmarkRunner(ArenaMixinNode):
             total_steps=steps_total,
             env_n=self._env_n,
             run_id=self._run_id,
+            sim_now=lambda: self.sim_time.to_seconds(),
         )
 
         def _mark_step_in_progress(step: Step) -> None:
@@ -1851,6 +1856,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     episodes_failed=res.episodes_failed,
                     elapsed_sec=elapsed,
                     error_detail=res.error_detail,
+                    sim_sec=res.sim_s,
                 )
 
             total_episodes_run = sum(r.episodes_run for r in results.values())

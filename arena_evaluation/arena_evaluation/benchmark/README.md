@@ -94,6 +94,10 @@ clock once a second and gives up after 60 wall seconds of a frozen clock outside
 (`<env_ns>/state/resetting`), cancelling the goal exactly like the old wall-clock timeout and
 recording `episode_timeout` / `sim stalled 60s`.
 
+The live display shows both clocks: the env table's `Sim / Wall` column counts the current
+episode in sim seconds against wall seconds, so the ratio is the live rtf, and each completed
+cell reports its wall time and the sim time its episodes consumed.
+
 A watchdog beats the runner's own event loop. After 120 s of no beat it writes one line to
 `runner.log`, SIGTERMs the arena launch process group and exits 4.
 
