@@ -1,0 +1,30 @@
+﻿name: planner_smoke
+description: "Smoke test suite for validating planner stack viability on map_empty with random task mode and zero obstacles (2 episodes per contestant)."
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+  optim.obstacles: bbox
+stages:
+  - name: empty_random_2ep
+    map: map_empty
+    robot: jackal
+    episodes: 2
+    timeout: 60.0
+    seed: 42
+    tm_robots: random
+    tm_obstacles: random
+    config:
+      random:
+        dynamic:
+          min: 0
+          max: 0
+          models: []
+        interactive:
+          min: 0
+          max: 0
+          models: []
+        static:
+          min: 0
+          max: 0
+          models: []

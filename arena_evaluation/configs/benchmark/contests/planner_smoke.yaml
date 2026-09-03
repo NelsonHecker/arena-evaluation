@@ -1,0 +1,167 @@
+﻿name: planner_smoke
+description: "Comprehensive smoke test contest evaluating all available local planners and key inter-planners"
+contestants:
+  # ==========================================
+  # Nav2 Local Planners (standard inter-planner)
+  # ==========================================
+  - name: dwb
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: regulated_pure_pursuit
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: graceful
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: mppi
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: rotation_shim
+    mobile:
+      driver: nav2
+      local_planner: rotation_shim
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: hateb
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: crowdnav-nav2
+    mobile:
+      driver: nav2
+      local_planner: crowdnav
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: crowdnav_attngraph-nav2
+    mobile:
+      driver: nav2
+      local_planner: crowdnav_attngraph
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: drlvo-nav2
+    mobile:
+      driver: nav2
+      local_planner: drlvo
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: sicnav-nav2
+    mobile:
+      driver: nav2
+      local_planner: sicnav
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+  - name: rosnav_rl-nav2
+    mobile:
+      driver: nav2
+      local_planner: rosnav_rl
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+
+  # ==========================================
+  # Inter-Planner Variations (with DWB)
+  # ==========================================
+  - name: dwb-inter-default
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: default
+  - name: dwb-inter-replan-time
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_w_replanning_time
+  - name: dwb-inter-replan-distance
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_w_replanning_distance
+  - name: dwb-inter-replan-on-invalid
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_w_recovery_and_replanning_only_if_path_becomes_invalid
+  - name: dwb-inter-consistent-replan
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: nav_to_pose_with_consistent_replanning_and_if_path_becomes_invalid
+  - name: dwb-inter-goal-patience
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_goal_patience_and_recovery
+
+  # ==========================================
+  # DRL Bridge Planners (arena_planners)
+  # ==========================================
+  - name: attngraph-drl
+    mobile:
+      driver: drl
+      planner: attngraph
+  - name: cadrl-drl
+    mobile:
+      driver: drl
+      planner: cadrl
+  - name: cd_sarl-drl
+    mobile:
+      driver: drl
+      planner: cd-sarl
+  - name: crowdnav-drl
+    mobile:
+      driver: drl
+      planner: crowdnav
+  - name: crowdsurfer-drl
+    mobile:
+      driver: drl
+      planner: crowdsurfer
+  - name: drlvo-drl
+    mobile:
+      driver: drl
+      planner: drlvo
+  - name: dsrnn-drl
+    mobile:
+      driver: drl
+      planner: dsrnn
+  - name: gensafenav-drl
+    mobile:
+      driver: drl
+      planner: gensafenav
+  - name: height-drl
+    mobile:
+      driver: drl
+      planner: height
+  - name: her_drl-drl
+    mobile:
+      driver: drl
+      planner: her-drl
+  - name: kdma-drl
+    mobile:
+      driver: drl
+      planner: kdma
+  - name: navistar-drl
+    mobile:
+      driver: drl
+      planner: navistar
+  - name: navrep-drl
+    mobile:
+      driver: drl
+      planner: navrep
+  - name: rlrvo-drl
+    mobile:
+      driver: drl
+      planner: rlrvo
+  - name: scope-drl
+    mobile:
+      driver: drl
+      planner: scope
+  - name: sicnav-drl
+    mobile:
+      driver: drl
+      planner: sicnav
+  - name: sonic-drl
+    mobile:
+      driver: drl
+      planner: sonic
