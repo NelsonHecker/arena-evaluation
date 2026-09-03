@@ -1,0 +1,50 @@
+name: icra_master_planners
+description: "Master Multi-Planner Contest: Nav2 Geometric, Stochastic, and Social Elastic Band Controllers"
+contestants:
+  - name: dwb-standard
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 1.50
+    linear_decel: -1.50
+    max_angular_vel: 1.20
+    angular_acc: 2.00
+
+  - name: rpp-standard
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    max_angular_vel: 1.20
+
+  - name: graceful-standard
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    max_angular_vel: 1.20
+
+  - name: mppi-standard
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 1.50
+    linear_decel: -1.50
+    max_angular_vel: 1.20
+    angular_acc: 2.00
+
+  - name: hateb-standard
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 0.80
+    max_angular_vel: 1.20
+    angular_acc: 1.00

@@ -1,0 +1,30 @@
+name: figure7_library_quiet_desk
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_direct_shortcut
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig7_reading_desk_direct
+
+- name: stage_perimeter_detour
+  map: library_acoustic_partition
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig7_reading_desk_perimeter

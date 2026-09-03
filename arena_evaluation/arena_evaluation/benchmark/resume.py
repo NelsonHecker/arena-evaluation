@@ -262,7 +262,7 @@ def decide_step(
         recorded_without_row: OnDiskEpisode | None = None
         if cur_row is None:
             for d in yaml_seed_dirs:
-                if d.outcome_state is not None:
+                if d.outcome_state is not None or (step.is_reference and step.reference_type == "unhindered_peds" and d.has_mcap):
                     recorded_without_row = d
                     break
 
@@ -274,6 +274,11 @@ def decide_step(
             outcome = recorded_without_row.outcome_state
         else:
             outcome = None
+
+        if step.is_reference and step.reference_type == "unhindered_peds":
+            candidate = cur_dir or recorded_without_row
+            if candidate is not None and candidate.has_mcap:
+                outcome = _OUTCOME_SUCCESS
 
         if outcome == _OUTCOME_SUCCESS:
             # GOOD: an intact successful recording exists. Evidence can be the

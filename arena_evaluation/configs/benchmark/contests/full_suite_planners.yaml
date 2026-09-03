@@ -1,0 +1,260 @@
+name: full_suite_planners
+description: "Master Evaluation Contest: All Nav2 Controllers, Express (1.4m/s), Reduced (0.35m/s), and All SOTA DRL Planners"
+contestants:
+  # =========================================================================
+  # 1. Standard Nav2 Planners (0.80 m/s, Balanced Acceleration)
+  # =========================================================================
+  - name: dwb-standard
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 1.50
+    linear_decel: -1.50
+    max_angular_vel: 1.20
+    angular_acc: 2.00
+
+  - name: rpp-standard
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    max_angular_vel: 1.20
+
+  - name: graceful-standard
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    max_angular_vel: 1.20
+
+  - name: mppi-standard
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 1.50
+    linear_decel: -1.50
+    max_angular_vel: 1.20
+    angular_acc: 2.00
+
+  - name: hateb-standard
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 0.80
+    max_angular_vel: 1.20
+    angular_acc: 1.00
+
+  # =========================================================================
+  # 2. Express Nav2 Planners (1.40 m/s, High Acceleration)
+  # =========================================================================
+  - name: dwb-express
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.40
+    linear_acc: 2.50
+    linear_decel: -2.50
+    max_angular_vel: 1.60
+    angular_acc: 3.00
+
+  - name: rpp-express
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.40
+    max_angular_vel: 1.60
+
+  - name: graceful-express
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.40
+    max_angular_vel: 1.60
+
+  - name: mppi-express
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.40
+    linear_acc: 2.50
+    linear_decel: -2.50
+    max_angular_vel: 1.60
+    angular_acc: 3.00
+
+  # =========================================================================
+  # 3. Reduced / Acoustic-Tamed Nav2 Planners (0.35 m/s, Low Acceleration)
+  # =========================================================================
+  - name: dwb-reduced
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    linear_acc: 0.60
+    linear_decel: -0.60
+    max_angular_vel: 0.80
+    angular_acc: 1.00
+
+  - name: rpp-reduced
+    mobile:
+      driver: nav2
+      local_planner: regulated_pure_pursuit
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    max_angular_vel: 0.80
+
+  - name: graceful-reduced
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    max_angular_vel: 0.80
+
+  - name: mppi-reduced
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    linear_acc: 0.60
+    linear_decel: -0.60
+    max_angular_vel: 0.80
+    angular_acc: 1.00
+
+  - name: hateb-reduced
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    linear_acc: 0.50
+    max_angular_vel: 0.80
+    angular_acc: 0.80
+
+  # =========================================================================
+  # 4. Deep Reinforcement Learning (DRL) Planners & Regimes
+  # =========================================================================
+  - name: crowdnav-standard
+    mobile:
+      driver: drl
+      planner: crowdnav
+    max_linear_vel: 0.80
+
+  - name: crowdnav-express
+    mobile:
+      driver: drl
+      planner: crowdnav
+    max_linear_vel: 1.40
+    linear_acc: 2.50
+
+  - name: crowdnav-reduced
+    mobile:
+      driver: drl
+      planner: crowdnav
+    max_linear_vel: 0.35
+    linear_acc: 0.60
+
+  - name: drlvo-standard
+    mobile:
+      driver: drl
+      planner: drlvo
+    max_linear_vel: 0.80
+
+  - name: drlvo-express
+    mobile:
+      driver: drl
+      planner: drlvo
+    max_linear_vel: 1.40
+    linear_acc: 2.50
+
+  - name: drlvo-reduced
+    mobile:
+      driver: drl
+      planner: drlvo
+    max_linear_vel: 0.35
+    linear_acc: 0.60
+
+  - name: kdma-standard
+    mobile:
+      driver: drl
+      planner: kdma
+    max_linear_vel: 0.80
+
+  - name: rlrvo-standard
+    mobile:
+      driver: drl
+      planner: rlrvo
+    max_linear_vel: 0.80
+
+  - name: attngraph-standard
+    mobile:
+      driver: drl
+      planner: attngraph
+    max_linear_vel: 0.80
+
+  - name: sicnav-standard
+    mobile:
+      driver: drl
+      planner: sicnav
+    max_linear_vel: 0.80
+
+  - name: cadrl-standard
+    mobile:
+      driver: drl
+      planner: cadrl
+    max_linear_vel: 0.80
+
+  - name: cd_sarl-standard
+    mobile:
+      driver: drl
+      planner: cd-sarl
+    max_linear_vel: 0.80
+
+  - name: crowdsurfer-standard
+    mobile:
+      driver: drl
+      planner: crowdsurfer
+    max_linear_vel: 0.80
+
+  - name: dsrnn-standard
+    mobile:
+      driver: drl
+      planner: dsrnn
+    max_linear_vel: 0.80
+
+  - name: gensafenav-standard
+    mobile:
+      driver: drl
+      planner: gensafenav
+    max_linear_vel: 0.80
+
+  - name: navrep-standard
+    mobile:
+      driver: drl
+      planner: navrep
+    max_linear_vel: 0.80
+
+  - name: scope-standard
+    mobile:
+      driver: drl
+      planner: scope
+    max_linear_vel: 0.80
+
+  - name: sonic-standard
+    mobile:
+      driver: drl
+      planner: sonic
+    max_linear_vel: 0.80

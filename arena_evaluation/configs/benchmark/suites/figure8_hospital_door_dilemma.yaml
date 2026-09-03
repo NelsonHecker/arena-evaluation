@@ -1,11 +1,11 @@
-name: figure2_cost_of_crowding
+name: figure8_hospital_door_dilemma
 references: false
 launch:
   sim: gazebo
   headless: true
   env.n: 1
 stages:
-- name: stage_0_unhindered
+- name: stage_top_door_direct
   map: hospital_1
   robot: jackal
   episodes: 3
@@ -15,9 +15,9 @@ stages:
   tm_obstacles: scenario
   config:
     scenario:
-      file: fig2_ward_tour_0peds
+      file: fig8_hospital_door_dilemma_direct
 
-- name: stage_1_social
+- name: stage_south_door_centerline
   map: hospital_1
   robot: jackal
   episodes: 3
@@ -27,16 +27,4 @@ stages:
   tm_obstacles: scenario
   config:
     scenario:
-      file: fig2_ward_tour_2peds
-
-- name: stage_2_crowded
-  map: hospital_1
-  robot: jackal
-  episodes: 3
-  timeout: 300.0
-  seed: 101
-  tm_robots: scenario
-  tm_obstacles: scenario
-  config:
-    scenario:
-      file: fig2_ward_tour_4peds
+      file: fig8_hospital_door_dilemma

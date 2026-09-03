@@ -1,0 +1,19 @@
+name: suite_hospital_end_to_end
+description: "Grand Hospital End-to-End Stress Test: South Lobby to North Doctors Retreat across 6 Dynamic Encounters"
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_hospital_crucible
+  map: hospital_1
+  robot: jackal
+  episodes: 3
+  timeout: 350.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: hospital_end_to_end

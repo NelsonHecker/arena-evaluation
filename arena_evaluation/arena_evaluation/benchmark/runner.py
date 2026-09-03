@@ -1018,6 +1018,74 @@ class BenchmarkRunner(ArenaMixinNode):
                         timeout=timeout_s,
                     )
                 except TimeoutError:
+                    if step.is_reference and step.reference_type == "unhindered_peds":
+                        _log.info(
+                            f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
+                            f"unhindered_peds reached duration {timeout_s}s; completing episode"
+                        )
+                        with contextlib.suppress(Exception):
+                            await self.await_ros(goal_handle.cancel_goal_async())
+                            await asyncio.wait_for(
+                                self._await_or_env_died(env_id, ac.await_result(goal_handle)),
+                                timeout=_CANCEL_SETTLE_S,
+                            )
+                        ep_ended_sim = self.sim_time.to_seconds()
+                        ep_ended_wall = time.time()
+
+                        recs = self._episode_records.get(env_id, {})
+                        episode_id = max(recs.keys()) if recs else (ep_idx + 1)
+                        rec = recs.get(episode_id)
+                        if rec is None:
+                            rec = EpisodeRecord()
+                            rec.episode_id = episode_id
+                        rec.outcome_state = EpisodeRecord.SUCCESS
+                        rec.outcome_info = "unhindered_peds_complete"
+
+                        episodes_run += 1
+                        state_label = "SUCCESS"
+                        _log.info(
+                            f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} "
+                            f"{state_label} info={rec.outcome_info!r} "
+                            f"sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s"
+                        )
+
+                        rc = self._recorder_clients.get(env_id)
+                        if rc is not None:
+                            req = RecordEpisode.Request()
+                            req.command = RecordEpisode.Request.COMMAND_STOP
+                            req.episode_id = episode_id
+                            req.outcome_state = EpisodeRecord.SUCCESS
+                            req.outcome_info = rec.outcome_info
+                            try:
+                                resp = await rc.call_timeout(req, timeout_sec=5.0)
+                                if resp is None:
+                                    _log.warning(f"[env {env_id}] recorder stop_episode({episode_id}) timed out")
+                                else:
+                                    _log.info(f"[env {env_id}] recorder stopped episode {episode_id} ({state_label})")
+                            except Exception as exc:
+                                _log.warning(f"[env {env_id}] recorder stop_episode({episode_id}) failed: {exc}")
+
+                        parent_ep_id = self._parent_episode_map.get(("__stage__", step.stage.name, ep_idx))
+                        ep_lockstep = _fold_window()
+                        ts_iso = datetime.datetime.now(tz=datetime.UTC).isoformat()
+                        self._run_dir.progress.append(
+                            ts_iso=ts_iso,
+                            run_id=self._run_id,
+                            step_key=step.key,
+                            contestant=step.contestant.name,
+                            stage=step.stage.name,
+                            env_id=env_id,
+                            episode_id=episode_id,
+                            episode_record=rec,
+                            started_at=ep_started_sim,
+                            ended_at=ep_ended_sim,
+                            parent_episode_id=parent_ep_id,
+                            is_reference=step.is_reference,
+                            reference_type=step.reference_type,
+                            lockstep=ep_lockstep,
+                        )
+                        continue
+
                     episodes_failed += 1
                     _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} TIMEOUT after {timeout_s}s; cancelling and advancing")
                     try:
@@ -1048,10 +1116,21 @@ class BenchmarkRunner(ArenaMixinNode):
                 recs = self._episode_records.get(env_id, {})
                 rec = recs.get(episode_id)
                 if rec is None:
-                    episodes_failed += 1
-                    _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} no EpisodeRecord for episode_id={episode_id}; counted as failed")
-                    _fold_window()
-                    continue
+                    if step.is_reference and step.reference_type == "unhindered_peds":
+                        rec = EpisodeRecord()
+                        rec.episode_id = episode_id
+                        rec.outcome_state = EpisodeRecord.SUCCESS
+                        rec.outcome_info = "unhindered_peds_complete"
+                    else:
+                        episodes_failed += 1
+                        _log.warning(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} no EpisodeRecord for episode_id={episode_id}; counted as failed")
+                        _fold_window()
+                        continue
+
+                if step.is_reference and step.reference_type == "unhindered_peds":
+                    rec.outcome_state = EpisodeRecord.SUCCESS
+                    if not rec.outcome_info:
+                        rec.outcome_info = "unhindered_peds_complete"
 
                 episodes_run += 1
                 if rec.outcome_state == EpisodeRecord.FAILED:

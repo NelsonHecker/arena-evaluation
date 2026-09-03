@@ -1,0 +1,19 @@
+name: suite_office_end_to_end
+description: "Grand Office End-to-End Stress Test: West Reception to East Conference Room across 60m Workplace Artery"
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_office_crucible
+  map: office_1
+  robot: jackal
+  episodes: 3
+  timeout: 350.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: office_end_to_end

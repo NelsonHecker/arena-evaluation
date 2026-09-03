@@ -900,6 +900,30 @@ def test_plan_reference_steps_evidence_based(tmp_path):
     assert by_key["unhindered_peds/s1"].run_indices == [0, 1, 2, 3, 4]
 
 
+def test_plan_unhindered_peds_kept_with_surviving_mcap(tmp_path):
+    # unhindered_peds with surviving mcap is kept as SUCCESS even if sidecar outcome was None
+    suite = _make_suite("s1")._replace(references=True)
+    contest = _make_contest("pa")
+    for i in range(5):
+        _mk_episode(
+            tmp_path,
+            number=i,
+            planner="unhindered_peds",
+            stage="s1",
+            sim_id=100 + i,
+            seed=i,
+            outcome=None,
+            is_reference=True,
+            reference_type="unhindered_peds",
+            mcap=True,
+        )
+    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
+    by_key = {d.step.key: d for d in decisions}
+    assert by_key["unhindered_peds/s1"].run_indices == []
+    assert by_key["unhindered_peds/s1"].delete_dirs == []
+    assert len(by_key["unhindered_peds/s1"].kept_sim_ids) == 5
+
+
 def test_plan_scale_episodes(tmp_path):
     suite = _no_refs(_make_suite("s1"))
     contest = _make_contest("pa")
