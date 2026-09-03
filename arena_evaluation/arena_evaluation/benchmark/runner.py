@@ -200,10 +200,11 @@ def _all_steps_grid(
 
     for contestant in contest.contestants:
         for stage in suite.stages:
+            ep_count = max(1, int(round(stage.episodes * scale_episodes))) if scale_episodes > 0 and stage.episodes > 0 else 0
             main_step = Step(
                 contestant=contestant,
                 stage=stage,
-                episodes=int(round(stage.episodes * scale_episodes)),
+                episodes=ep_count,
                 record_dir=episodes_dir,
             )
             if not suite.references:
@@ -215,7 +216,7 @@ def _all_steps_grid(
             ref_robot_step = Step(
                 contestant=contestant,
                 stage=stage,
-                episodes=int(round(stage.episodes * scale_episodes)),
+                episodes=ep_count,
                 record_dir=episodes_dir,
                 is_reference=True,
                 reference_type="unobstructed_robot",
@@ -231,10 +232,11 @@ def _all_steps_grid(
 
     dummy_peds_contestant = Contest.Contestant(name="unhindered_peds", args={})
     for stage in suite.stages:
+        ep_count = max(1, int(round(stage.episodes * scale_episodes))) if scale_episodes > 0 and stage.episodes > 0 else 0
         ref_peds_step = Step(
             contestant=dummy_peds_contestant,
             stage=stage,
-            episodes=int(round(stage.episodes * scale_episodes)),
+            episodes=ep_count,
             record_dir=episodes_dir,
             is_reference=True,
             reference_type="unhindered_peds",
