@@ -178,3 +178,23 @@ def test_outcome_info_collision_overrides_result():
 
     assert results["result"] == "COLLISION"
     assert results["success"] is False
+
+
+def _episode_with_outcome(outcome_state: int | None) -> AlignedEpisodeBundle:
+    df = pl.DataFrame({"collision_event": [0, 0, 0]})
+    return AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[], outcome_state=outcome_state)
+
+
+def test_unresolved_record_overrides_trace_verdict() -> None:
+    calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
+    for state in (0, 1):
+        results = calc.calculate(_episode_with_outcome(state), {"time_to_goal": 200.0})
+        assert results["result"] == "UNRESOLVED"
+        assert results["success"] is False
+
+
+def test_missing_record_keeps_trace_verdict() -> None:
+    calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
+    results = calc.calculate(_episode_with_outcome(None), {"time_to_goal": 200.0})
+    assert results["result"] == "TIMEOUT"
+    assert results["success"] is False

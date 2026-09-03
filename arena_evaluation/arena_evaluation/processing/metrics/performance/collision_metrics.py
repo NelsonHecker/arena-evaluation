@@ -12,6 +12,8 @@ if typing.TYPE_CHECKING:
 # task_generator_msgs/msg/EpisodeRecord outcome_state values.
 _OUTCOME_SUCCESS = 2
 _OUTCOME_RESULTS = {3: "FAILED", 4: "CANCELLED", 5: "FATAL"}
+# QUEUED / RUNNING: never resolved by the runtime.
+_OUTCOME_UNRESOLVED = (0, 1)
 
 
 class CollisionMetricsCalculator(BaseMetricCalculator):
@@ -119,6 +121,9 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         # The runtime's verdict wins over anything derived from the trace.
         if episode.outcome_info == "collision":
             result = "COLLISION"
+            success = False
+        elif episode.outcome_state in _OUTCOME_UNRESOLVED:
+            result = "UNRESOLVED"
             success = False
         elif episode.outcome_state is not None and episode.outcome_state != _OUTCOME_SUCCESS:
             success = False

@@ -54,7 +54,7 @@ class ParquetStore:
         metadata: RunMetadata | None = None,
     ) -> None:
         """Build a frame from metric rows and write it, dropping empty dicts on the way."""
-        df = pl.DataFrame(_writable_rows(rows), schema_overrides=schema_overrides)
+        df = pl.DataFrame(_writable_rows(rows), schema_overrides=schema_overrides, infer_schema_length=None)
         ParquetStore.write(df, dest, metadata)
 
     @staticmethod
