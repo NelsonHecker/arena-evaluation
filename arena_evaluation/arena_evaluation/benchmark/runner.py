@@ -9,6 +9,7 @@ import logging
 import os
 import pathlib
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -57,8 +58,10 @@ from .state import (
     capture_git_sha,
     compute_config_hash,
     find_most_recent_resumable,
+    read_progress_rows,
 )
 from .lockstep import LockstepMonitor, LockstepSummary, format_report
+from .resume import StepResumeDecision, load_episode_dirs, plan_resume, retire_episode_dir
 from .step import Step, StepErrorKind, StepResult
 from .progress_display import BenchmarkProgressDisplay
 from .tree import ContestIdentifier, SuiteIdentifier
@@ -99,17 +102,6 @@ def _proc_tree(root: int) -> dict[int, int]:
                 tree[child] = starts[child]
                 stack.append(child)
     return tree
-
-
-class _WithSteps(typing.Protocol):
-    steps: dict[str, StepResult]
-
-
-class _HasStateSteps(typing.Protocol):
-    """Structural interface required by build_pending: any object with .state.steps."""
-
-    @property
-    def state(self) -> _WithSteps: ...
 
 
 _log = logging.getLogger(__name__)
@@ -255,28 +247,40 @@ def _all_steps_grid(
     return steps
 
 
-def build_pending(
+def plan_pending_steps(
     suite: Suite,
     contest: Contest,
     scale_episodes: float,
-    run_dir: _HasStateSteps,
+    run_dir_path: pathlib.Path,
     retry_failed: bool,
-    record_root: pathlib.Path,
-) -> list[Step]:
-    """Return the list of steps that still need to be run."""
-    state_steps = run_dir.state.steps
-    pending: list[Step] = []
-    for step in _all_steps_grid(suite, contest, scale_episodes, record_root):
-        existing = state_steps.get(step.key)
-        if existing is None:
-            pending.append(step)
-            continue
-        if existing.status == "ok":
-            continue
-        if existing.status == "failed" and not retry_failed:
-            continue
-        pending.append(step)
-    return pending
+) -> list[StepResumeDecision]:
+    """Per-episode resume planning for a run dir (see benchmark/resume.py).
+
+    Every grid step is classified from its evidence (progress.csv rows +
+    episode dirs + sidecar YAMLs) rather than from the coarse step status in
+    .benchmark_state.json, so an interrupted run whose state was never flushed
+    (e.g. the runner crashed mid-step) still resumes correctly: episodes with
+    an intact SUCCESS recording are skipped, episodes with a recorded terminal
+    failure are preserved unless `retry_failed`, and everything else (crashed /
+    wedged / never-started) is re-run. Stale dirs of re-run episodes are either
+    deleted (garbage: no terminal outcome) or moved to episodes/.superseded/
+    (recorded evidence superseded by a forced re-run).
+    """
+    grid = _all_steps_grid(suite, contest, scale_episodes, record_root=run_dir_path)
+    rows_by_key: dict[str, list[dict]] = {}
+    for row in read_progress_rows(run_dir_path / "progress.csv"):
+        key = row.get("step_key")
+        if key is not None:
+            rows_by_key.setdefault(str(key), []).append(row)
+    episodes_root = run_dir_path / "episodes"
+    live_dirs, retired_dirs = load_episode_dirs(episodes_root)
+    return plan_resume(
+        grid,
+        rows_by_key,
+        live_dirs,
+        retired_dirs,
+        retry_failed=retry_failed,
+    )
 
 
 def resolve_planner_identity(contestant: Contest.Contestant) -> tuple[str, str]:
@@ -614,15 +618,56 @@ class BenchmarkRunner(ArenaMixinNode):
         self._parent_episode_map: dict[tuple[str, str, int], int] = {}
         self._progress: BenchmarkProgressDisplay | None = None
 
-    def _build_pending(self) -> list[Step]:
-        return build_pending(
+    def _build_pending(self) -> tuple[list[StepResumeDecision], dict[str, tuple[int, ...]]]:
+        """Per-episode resume plan: (decisions with run_indices, ep subsets by key).
+
+        Also reseeds the in-memory parent-episode map from recordings that are
+        kept (skipped) this session, so reference steps (unobstructed_robot /
+        unhindered_peds) that re-run still link to their parent robot episode.
+        """
+        decisions = plan_pending_steps(
             suite=self._suite,
             contest=self._contest,
             scale_episodes=self._scale_episodes,
-            run_dir=self._run_dir,
+            run_dir_path=self._run_dir.path,
             retry_failed=self._retry_failed,
-            record_root=self._run_dir.path,
         )
+        subsets: dict[str, tuple[int, ...]] = {}
+        self._parent_episode_map.clear()
+        for decision in decisions:
+            if decision.run_indices:
+                subsets[decision.step.key] = tuple(decision.run_indices)
+            for ep_idx, sim_id in decision.kept_sim_ids.items():
+                self._parent_episode_map[(decision.step.contestant.name, decision.step.stage.name, ep_idx)] = sim_id
+                self._parent_episode_map[("__stage__", decision.step.stage.name, ep_idx)] = sim_id
+        return decisions, subsets
+
+    def _cleanup_stale_episodes(self, decisions: list[StepResumeDecision]) -> None:
+        """Apply the planner's cleanup: delete garbage dirs, retire recorded dirs.
+
+        Runs before the episode-id offset scan so re-recorded episodes get
+        fresh numbers and downstream discovery sees exactly one live copy per
+        (step, ep_idx) once the re-run finishes.
+        """
+        deleted = retired = 0
+        for decision in decisions:
+            for path in decision.delete_dirs:
+                try:
+                    if path.exists():
+                        shutil.rmtree(path)
+                        deleted += 1
+                except Exception as exc:
+                    _log.warning(f"resume: failed to delete stale episode dir {path}: {exc}")
+            for path in decision.retire_dirs:
+                try:
+                    if path.exists() and path.parent.name != ".superseded":
+                        dest = retire_episode_dir(path, self._run_dir.path / "episodes" / ".superseded")
+                        _log.info(f"resume: retired {path.name} -> .superseded/{dest.name}")
+                        retired += 1
+                except Exception as exc:
+                    _log.warning(f"resume: failed to retire episode dir {path}: {exc}")
+        if deleted or retired:
+            _log.info(f"resume: episode cleanup deleted {deleted} stale dir(s), retired {retired} recorded dir(s)")
 
     def _on_envs(self, msg: EnvRegistry) -> None:
         new_ids = {e.env_id for e in msg.envs}
@@ -884,14 +929,22 @@ class BenchmarkRunner(ArenaMixinNode):
         step: Step,
         env_id: int,
         slot_index: int = 0,
+        episode_subset: typing.Iterable[int] | None = None,
     ) -> StepResult:
-        """Drive all episodes for one step. Env is already up and clients are set up."""
+        """Drive episodes for one step. Env is already up and clients are set up.
+
+        `episode_subset` selects which planned episode indices to run this
+        session (resume re-runs only episodes whose recordings are missing or
+        failed); None means the whole step. Seeds stay deterministic per
+        episode index either way.
+        """
         started = time.time()
         episodes_run = 0
         episodes_failed = 0
         lockstep: LockstepSummary | None = None
         window: list[object] = []
         ac = self._episode_action_clients[env_id]
+        ep_indices = tuple(episode_subset) if episode_subset is not None else tuple(range(step.episodes))
 
         def _fold_window() -> LockstepSummary | None:
             nonlocal lockstep
@@ -918,7 +971,7 @@ class BenchmarkRunner(ArenaMixinNode):
             )
 
         try:
-            for ep_idx in range(step.episodes):
+            for ep_idx in ep_indices:
                 if self._progress is not None:
                     self._progress.update_slot(
                         slot_index=slot_index,
@@ -1144,7 +1197,14 @@ class BenchmarkRunner(ArenaMixinNode):
                 await asyncio.wait_for(self._wait_env_gone(env_id, timeout=15.0), timeout=15.0)
         await asyncio.sleep(2.0)
 
-    async def _run_group_queue(self, rep_step: Step, q: asyncio.Queue[Step], slot_index: int, flush_cb: typing.Callable[[StepResult], bool]) -> bool:
+    async def _run_group_queue(
+        self,
+        rep_step: Step,
+        q: asyncio.Queue[Step],
+        slot_index: int,
+        flush_cb: typing.Callable[[StepResult], bool],
+        episode_subsets: dict[str, tuple[int, ...]],
+    ) -> bool:
         env_id: int | None = None
         systemic_streak = 0
         try:
@@ -1293,7 +1353,12 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                 else:
                     try:
-                        step_result = await self._run_episodes(step, env_id, slot_index)
+                        step_result = await self._run_episodes(
+                            step,
+                            env_id,
+                            slot_index,
+                            episode_subset=episode_subsets.get(step.key),
+                        )
                     except asyncio.CancelledError:
                         while not q.empty():
                             try:
@@ -1548,7 +1613,9 @@ class BenchmarkRunner(ArenaMixinNode):
         await self._start_arena()
 
     async def _run_steps(self) -> int:
-        pending = self._build_pending()
+        decisions, episode_subsets = self._build_pending()
+        pending = [d.step for d in decisions if d.run_indices]
+        self._cleanup_stale_episodes(decisions)
         results: dict[str, StepResult] = dict(self._run_dir.state.steps)
         steps_total = len(results) + len(pending)
         aborted_systemic = False
@@ -1662,7 +1729,13 @@ class BenchmarkRunner(ArenaMixinNode):
                                 if target_q is None:
                                     break
 
-                                abort = await self._run_group_queue(rep_step, target_q, slot_index, _flush_step_result)
+                                abort = await self._run_group_queue(
+                                    rep_step,
+                                    target_q,
+                                    slot_index,
+                                    _flush_step_result,
+                                    episode_subsets,
+                                )
                                 if abort:
                                     return True
                             return False
@@ -1839,9 +1912,24 @@ def cli_main(argv: list[str] | None = None) -> int:
         nargs="?",
         const="__auto__",
         default=None,
-        help="Resume a prior run. Bare --resume picks the most recent resumable; --resume <run_id> opens that run explicitly.",
+        help=(
+            "Resume a prior run. Bare --resume picks the most recent resumable; "
+            "--resume <run_id> opens that run explicitly. Re-runs exactly the "
+            "episodes whose recording is missing or dead (crashed envs, spawn "
+            "failures); intact recordings are skipped, and stale episode dirs of "
+            "re-run episodes are cleaned up automatically."
+        ),
     )
-    p.add_argument("--retry-failed", action="store_true")
+    p.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help=(
+            "With --resume: also re-run episodes that recorded a terminal failure "
+            "(e.g. the planner genuinely collided or timed out). Such episodes are "
+            "preserved by default; this moves their old recording to "
+            "episodes/.superseded/ and runs a fresh attempt."
+        ),
+    )
     p.add_argument(
         "--profile",
         action="store_true",
