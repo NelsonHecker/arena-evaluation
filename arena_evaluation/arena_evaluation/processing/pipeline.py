@@ -6,6 +6,7 @@ import contextlib
 import typing
 import polars as pl
 import os
+import re
 import sys
 import time
 import shutil
@@ -15,7 +16,7 @@ import traceback
 import multiprocessing
 import concurrent.futures
 
-from ..storage.schemas import RobotParams, EpisodeDescriptor, TopicBundle, AlignedEpisodeBundle
+from ..storage.schemas import RobotParams, EpisodeDescriptor, TopicBundle, AlignedEpisodeBundle, RunMetadata
 from ..storage.folder_manager import FolderManager
 
 _log = logging.getLogger(__name__)
@@ -87,7 +88,11 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
-    result = pipeline.process_episode(ep, force_extract=force_extract, status_dict=status_dict)
+    try:
+        result = pipeline.process_episode(ep, force_extract=force_extract, status_dict=status_dict)
+    except Exception as e:
+        _log.exception(f"episode_{ep.episode_id:03d}: metrics failed")
+        result = [_status_row(ep, None, "", "error", repr(e))]
     if status_dict is not None:
         try:
             status_dict.pop(ep.episode_id, None)
@@ -157,6 +162,23 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     return start, int(df["time_ns"][-1])
 
 
+_ALIGN_TOLERANCE_NS = 100_000_000
+
+
+def _peds_count(peds: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> int:
+    """Peak pedestrian count over the episode window."""
+    if peds is None:
+        return 0
+    df = peds.collect() if isinstance(peds, pl.LazyFrame) else peds
+    start_ns, end_ns = window
+    if start_ns is not None:
+        df = df.filter(pl.col("time_ns") >= start_ns - _ALIGN_TOLERANCE_NS)
+    if end_ns is not None:
+        df = df.filter(pl.col("time_ns") <= end_ns)
+    counts = df["num_pedestrians"].drop_nulls()
+    return int(counts.max()) if len(counts) > 0 else 0
+
+
 def _episode_endpoints(aligned_df: pl.DataFrame, plan: pl.DataFrame | pl.LazyFrame | None) -> tuple[list[float], list[float]]:
     """Map-frame (x, y, yaw) of the first sample and of the goal, the last planned pose when a plan exists."""
     first_row = aligned_df.row(0, named=True)
@@ -200,6 +222,7 @@ from ..benchmark.profiler import PipelineProfiler
 from .mcap_reader import MCAPReader
 from .topic_aligner import TopicAligner
 from .parquet_store import ParquetStore, TopicParquetStore
+from .pose_anchor import resolve_pose_source
 
 # Columns whose values are all-None (no kind in the recording) or all-empty
 # (no collisions) would otherwise infer as Null / List(Null) and clash with
@@ -209,10 +232,102 @@ _METRIC_DTYPES = {
     "collision_amount_static": pl.Int64,
     "collision_amount_pedestrian": pl.Int64,
     "collision_obstacles": pl.List(pl.String),
+    "pose_source": pl.String,
+    "pose_samples": pl.Int64,
+    "pose_anchor_residual_m": pl.Float64,
+    "status": pl.String,
+    "status_reason": pl.String,
+    "result": pl.String,
+    "outcome_info": pl.String,
+    "success": pl.Boolean,
+    "start": pl.List(pl.Float64),
+    "goal": pl.List(pl.Float64),
 }
 from .metrics.registry import MetricRegistry
 
 import arena_evaluation
+
+
+# EpisodeRecord.outcome_state -> (result, success)
+_OUTCOME_VERDICTS = {2: ("GOAL_REACHED", True), 3: ("FAILED", False), 4: ("CANCELLED", False), 5: ("FATAL", False)}
+_STATUS_EVALUATED = "evaluated"
+
+
+def _outcome_verdict(outcome_state: int | None, outcome_info: str | None) -> tuple[str, bool]:
+    if outcome_info == "collision":
+        return "COLLISION", False
+    return _OUTCOME_VERDICTS.get(outcome_state, ("UNRESOLVED", False))
+
+
+def _record_outcome(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMetadata | None) -> tuple[int | None, str | None]:
+    """Last recorded (outcome_state, outcome_info), from the yaml when no record was captured."""
+    df = record.collect() if isinstance(record, pl.LazyFrame) else record
+    if df is not None and len(df) > 0 and "outcome_state" in df.columns and "time_ns" in df.columns:
+        last = df.sort("time_ns").row(-1, named=True)
+        return int(last["outcome_state"]), last.get("outcome_info")
+    if metadata is not None:
+        return metadata.outcome_state, metadata.outcome_info
+    return None, None
+
+
+def _planner_split(ep: EpisodeDescriptor, metadata: RunMetadata | None) -> tuple[str, str]:
+    if metadata is not None and metadata.local_planner:
+        return metadata.local_planner, metadata.inter_planner or ""
+    from ..presentation.dimension_detector import split_planner_name
+
+    return split_planner_name(ep.planner)
+
+
+def _status_row(
+    ep: EpisodeDescriptor,
+    metadata: RunMetadata | None,
+    robot: str,
+    status: str,
+    reason: str,
+    record: pl.DataFrame | pl.LazyFrame | None = None,
+) -> dict:
+    """Identity and runtime verdict of an episode without metrics."""
+    local_planner, inter_planner = _planner_split(ep, metadata)
+    outcome_state, outcome_info = _record_outcome(record, metadata)
+    result, success = _outcome_verdict(outcome_state, outcome_info)
+    return {
+        "episode": ep.episode_id,
+        "planner": ep.planner,
+        "local_planner": local_planner,
+        "inter_planner": inter_planner,
+        "robot": robot,
+        "map": ep.map,
+        "stage": ep.stage,
+        "benchmark_id": ep.benchmark_id,
+        "start": [],
+        "goal": [],
+        "is_reference": ep.is_reference,
+        "reference_type": ep.reference_type,
+        "status": status,
+        "status_reason": reason,
+        "pose_source": None,
+        "outcome_info": outcome_info,
+        "result": result,
+        "success": success,
+    }
+
+
+def _print_status_summary(rows: list[dict]) -> None:
+    """One line per status, then every row the pipeline could not fully evaluate."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row.get("status") or "unknown"] = counts.get(row.get("status") or "unknown", 0) + 1
+    print("Episode status: " + ", ".join(f"{n} {status}" for status, n in sorted(counts.items())), flush=True)
+    flagged = [r for r in rows if r.get("status") != _STATUS_EVALUATED]
+    for r in sorted(flagged, key=lambda r: (str(r.get("stage")), r.get("episode", 0))):
+        print(f"  episode {r.get('episode')} {r.get('planner')}/{r.get('stage')} [{r.get('robot')}] {r.get('status')}: {r.get('status_reason')}", flush=True)
+
+
+def _metadata_robot(metadata: RunMetadata | None, bundles: dict[str, TopicBundle] | None = None) -> str:
+    """Bundle-style robot key (env_0_jackal) for a row without a robot bundle."""
+    model = metadata.robot_model[0].partition("[")[0] if metadata is not None and metadata.robot_model else ""
+    env = next((re.match(r"env_\d+", name).group(0) for name in (bundles or {}) if re.match(r"env_\d+", name)), None)
+    return f"{env}_{model}" if env and model else model
 
 
 class ProcessingPipeline:
@@ -258,8 +373,8 @@ class ProcessingPipeline:
         ep: EpisodeDescriptor,
         force_extract: bool = False,
         status_dict: typing.Any = None,
-    ) -> dict | None:
-        """Process a single episode: extract MCAP, compute metrics."""
+    ) -> list[dict]:
+        """Extract and evaluate one episode: one row per robot, a status row where metrics are impossible."""
         episode_dir = pathlib.Path(ep.episode_dir)
 
         # Load episode metadata
@@ -272,11 +387,18 @@ class ProcessingPipeline:
             try:
                 metadata = MetadataWriter.read(yaml_path)
             except Exception as e:
-                print(f"  [warn] Could not read metadata for episode_{ep.episode_id:03d}: {e}")
+                _log.warning(f"episode_{ep.episode_id:03d}: could not read metadata: {e}")
+
+        def finish(rows: list[dict]) -> list[dict]:
+            try:
+                ParquetStore.write_rows(rows, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES)
+            except Exception as e:
+                _log.warning(f"episode_{ep.episode_id:03d}: metrics.parquet not written, the combined frame is the only copy: {e!r}")
+            return rows
 
         bundles = self.extract_episode(ep, force_extract=force_extract)
         if bundles is None or len(bundles) == 0:
-            return None
+            return finish([_status_row(ep, metadata, _metadata_robot(metadata), "no_recording", "no MCAP or empty extraction")])
 
         _ctx = self.profiler.phase("process") if self.profiler else contextlib.nullcontext()
         with _ctx:
@@ -289,29 +411,44 @@ class ProcessingPipeline:
             robot_params = RobotParams.load(robot_model)
             registry = MetricRegistry(robot_params)
 
-            all_results = []
-            for robot_name, bundle in bundles.items():
+            all_results: list[dict] = []
+            robots = {name: bundle for name, bundle in bundles.items() if bundle.odom is not None}
+            if not robots:
+                any_record = next((b.episode_record for b in bundles.values() if b.episode_record is not None), None)
+                return finish([_status_row(ep, metadata, _metadata_robot(metadata, bundles), "no_trajectory", "no odom rows", any_record)])
+            for robot_name, bundle in robots.items():
+                window = _episode_window(bundle.episode_record)
+                tf_gt, pose_source = resolve_pose_source(bundle, window)
+                bundle.tf_gt = tf_gt
+
+                peds_count = 0
+                if pose_source.kind == "odom":
+                    peds_count = _peds_count(bundle.peds, window)
+                    bundle.peds = None
+
                 if bundle.peds is not None:
                     pedsim_avail = True
+                robot_pedsim = pedsim_avail and pose_source.kind != "odom"
 
                 available_topics = bundle.available()
 
-                if bundle.odom is None:
-                    continue
-
                 aligner = TopicAligner()
-                aligned_df = aligner.align(bundle, *_episode_window(bundle.episode_record))
+                aligned_df = aligner.align(bundle, *window)
                 if isinstance(aligned_df, pl.LazyFrame):
                     aligned_df = aligned_df.collect()
 
                 if aligned_df is None or len(aligned_df) < 5:
-                    print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid data found in MCAP after alignment")
+                    reason = f"{0 if aligned_df is None else len(aligned_df)} odom rows inside the episode window"
+                    _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
+                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
                     continue
 
                 # Resolve the pose frame once so all calculators share it
                 aligned_df = _resolve_odom_frame(aligned_df)
                 if aligned_df is None or len(aligned_df) < 5:
-                    print(f"  [episode_{ep.episode_id:03d}] [{robot_name}] No valid pose data after resolution")
+                    reason = f"{0 if aligned_df is None else len(aligned_df)} pose rows after resolution"
+                    _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
+                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
                     continue
 
                 topics = _collect_native_topics(bundle)
@@ -323,7 +460,7 @@ class ProcessingPipeline:
 
                 start_pos, goal_pos = _episode_endpoints(aligned_df, bundle.plan)
 
-                num_pedestrians = 0
+                num_pedestrians = peds_count if pose_source.kind == "odom" else 0
                 if "num_pedestrians" in aligned_df.columns:
                     peds = aligned_df["num_pedestrians"].drop_nulls()
                     if len(peds) > 0:
@@ -390,7 +527,7 @@ class ProcessingPipeline:
                 for aligned_ep in episodes:
                     ep_metrics = registry.run(
                         aligned_ep,
-                        pedsim_available=pedsim_avail,
+                        pedsim_available=robot_pedsim,
                         available_topics=available_topics,
                         progress_callback=on_calc_progress,
                     )
@@ -413,15 +550,20 @@ class ProcessingPipeline:
                     ep_metrics["goal"] = aligned_ep.goal_pos
                     ep_metrics["is_reference"] = ep.is_reference
                     ep_metrics["reference_type"] = ep.reference_type
+                    if pose_source.kind == "odom":
+                        ep_metrics["num_pedestrians"] = aligned_ep.num_pedestrians
+                    ep_metrics["pose_source"] = pose_source.kind
+                    ep_metrics["pose_samples"] = pose_source.samples
+                    ep_metrics["pose_anchor_residual_m"] = pose_source.residual_m
+                    if pose_source.kind == "odom":
+                        ep_metrics["status"] = "path_only"
+                        ep_metrics["status_reason"] = "no map-frame pose sample, robot track in odom frame"
+                    else:
+                        ep_metrics["status"] = _STATUS_EVALUATED
+                        ep_metrics["status_reason"] = None
                     all_results.append(ep_metrics)
 
-            if all_results:
-                try:
-                    ParquetStore.write_rows(all_results, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES)
-                except Exception as e:
-                    _log.warning(f"episode_{ep.episode_id:03d}: metrics.parquet not written, the combined frame is the only copy: {e!r}")
-
-            return all_results[0] if len(all_results) == 1 else (all_results if all_results else None)
+            return finish(all_results)
 
     def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """Extract all episodes in a benchmark."""
@@ -430,7 +572,6 @@ class ProcessingPipeline:
             print(f"No episodes found for benchmark '{benchmark_id}'")
             return
 
-        import multiprocessing
         from .progress_display import PipelineProgressDisplay
 
         manager = multiprocessing.Manager()
@@ -475,7 +616,6 @@ class ProcessingPipeline:
         all_metrics: list[dict] = []
         data_root_str = str(self.folder_manager.data_root)
 
-        import multiprocessing
         from .progress_display import PipelineProgressDisplay
 
         manager = multiprocessing.Manager()
@@ -498,15 +638,11 @@ class ProcessingPipeline:
                         try:
                             ep_id, result = future.result()
                             elapsed = time.perf_counter() - t_start
-                            if result is not None:
-                                if isinstance(result, list):
-                                    all_metrics.extend(result)
-                                else:
-                                    all_metrics.append(result)
-
+                            all_metrics.extend(result)
                             display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
                         except Exception as e:
                             display.log_error(ep.episode_id, str(e))
+                            all_metrics.append(_status_row(ep, None, "", "error", repr(e)))
                 except KeyboardInterrupt:
                     print("\n[KeyboardInterrupt] Metrics calculation interrupted by user. Terminating workers...", flush=True)
                     _shutdown_executor_cleanly(executor)
@@ -514,6 +650,7 @@ class ProcessingPipeline:
                 finally:
                     _shutdown_executor_cleanly(executor)
 
+        _print_status_summary(all_metrics)
         if not all_metrics:
             print("No valid results were generated.")
             return
@@ -550,8 +687,8 @@ class ProcessingPipeline:
             ref_robots = ref_robot_by_stage.get(stage, [])
             ref_peds = ref_ped_by_stage.get(stage, [])
 
-            ref_robot_row = ref_robots[0] if ref_robots else None
-            ref_ped_row = ref_peds[0] if ref_peds else None
+            ref_robot_row = next((r for r in ref_robots if r.get("status") == _STATUS_EVALUATED), None)
+            ref_ped_row = next((r for r in ref_peds if r.get("status") == _STATUS_EVALUATED), None)
 
             reconciled = MutualAccommodationCalculator.reconcile_stage_references(
                 dynamic_row=row,

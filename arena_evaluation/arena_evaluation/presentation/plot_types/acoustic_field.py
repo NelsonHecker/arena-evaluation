@@ -474,19 +474,21 @@ class AcousticFieldRenderer(BasePlotRenderer):
             return None
         robot_dir = robot_dirs[0]
 
+        from ...processing.parquet_store import TopicParquetStore
+        from ...processing.pipeline import _episode_window
+        from ...processing.pose_anchor import resolve_pose_source
+
         frames = []
-        # Robot ground-truth position (prefer tf_gt, fall back to odom)
-        tf_gt_path = robot_dir / "tf_gt.parquet"
-        odom_path = robot_dir / "odom.parquet"
-        if tf_gt_path.exists():
-            frames.append(pl.scan_parquet(tf_gt_path).select(["time_ns", "pos_x_gt", "pos_y_gt"]))
-        elif odom_path.exists():
+        # the pose stream the metrics used, odom as the last resort
+        bundle = TopicParquetStore.read(topics_root)[robot_dir.name]
+        tf_gt, _ = resolve_pose_source(bundle, _episode_window(bundle.episode_record))
+        if tf_gt is not None:
+            frames.append(tf_gt.lazy().select(["time_ns", "pos_x_gt", "pos_y_gt"]))
+        else:
             frames.append(
-                pl.scan_parquet(odom_path)
+                pl.scan_parquet(robot_dir / "odom.parquet")
                 .select(["time_ns", pl.col("pos_x").alias("pos_x_gt"), pl.col("pos_y").alias("pos_y_gt")])
             )
-        else:
-            return None
 
         # Source level from acoustics topic
         acoustics_path = robot_dir / "acoustics.parquet"
