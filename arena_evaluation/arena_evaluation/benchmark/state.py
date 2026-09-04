@@ -277,9 +277,9 @@ class ProgressLog:
             round(lockstep.max_stall_s, 3) if lockstep is not None else "",
             round(lockstep.rtf, 3) if lockstep is not None else "",
             ",".join(ch for ch in lockstep.channels if ch.startswith(BEAT_PREFIXES)) if lockstep is not None else "",
-            rec.goal_dist_start,
-            rec.goal_dist_min,
-            rec.path_length,
+            float(getattr(rec, "goal_dist_start", 0.0) or 0.0),
+            float(getattr(rec, "goal_dist_min", 0.0) or 0.0),
+            float(getattr(rec, "path_length", 0.0) or 0.0),
         ])
         self._fh.flush()
 

@@ -1279,8 +1279,11 @@ class BenchmarkRunner(ArenaMixinNode):
                 episodes_run += 1
                 if rec.outcome_state == EpisodeRecord.FAILED:
                     episodes_failed += 1
-                frac = closed_fraction(rec.goal_dist_start, rec.goal_dist_min)
-                if rec.goal_dist_start > 0.0:
+                goal_dist_start = float(getattr(rec, "goal_dist_start", 0.0) or 0.0)
+                goal_dist_min = float(getattr(rec, "goal_dist_min", 0.0) or 0.0)
+                path_length = float(getattr(rec, "path_length", 0.0) or 0.0)
+                frac = closed_fraction(goal_dist_start, goal_dist_min)
+                if goal_dist_start > 0.0:
                     worst_progress = frac if worst_progress is None else min(worst_progress, frac)
                 if self._efficacy is not None and rec.outcome_state != EpisodeRecord.SUCCESS and frac < self._efficacy:
                     episodes_weak += 1
@@ -1290,7 +1293,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     EpisodeRecord.FAILED: "FAILED",
                     EpisodeRecord.SKIPPED: "SKIPPED",
                 }.get(rec.outcome_state, str(rec.outcome_state))
-                progress_note = f" progress={frac * 100:.0f}% path={rec.path_length:.1f}m" if rec.goal_dist_start > 0.0 else ""
+                progress_note = f" progress={frac * 100:.0f}% path={path_length:.1f}m" if goal_dist_start > 0.0 else ""
                 _log.info(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} {state_label} info={rec.outcome_info!r} sim={ep_ended_sim - ep_started_sim:.1f}s wall={ep_ended_wall - ep_started_wall:.1f}s{progress_note}")
 
                 if rec.outcome_state in (
