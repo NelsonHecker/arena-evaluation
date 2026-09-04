@@ -85,9 +85,12 @@ For each episode:
 1. Reads `episode_XXX.yaml` metadata.
 2. Loads `RobotParams`.
 3. Loads cached topics or extracts them via `MCAPReader`.
-4. Aligns topics with `TopicAligner`.
-5. Computes metrics with `MetricRegistry`.
-6. Attaches run identifiers and writes `metrics.parquet`.
+4. Resolves the pose stream (`pose_anchor.py`): dense `tf_gt` as is, sparse `tf_gt` anchors the odom track onto the map frame with one rigid fit, none leaves the track in the odom frame without pedestrian-relative metrics.
+5. Aligns topics with `TopicAligner`.
+6. Computes metrics with `MetricRegistry`.
+7. Attaches run identifiers and writes `metrics.parquet`.
+
+Every recorded episode yields a row. `status` is `evaluated`, `path_only` (no map-frame pose), `no_trajectory`, `no_recording` or `error`, with `status_reason`; rows without a trajectory carry the runtime verdict in `result` and `success` and null metrics. `pose_source` (`tf`, `anchored`, `tf_sparse`, `odom`), `pose_samples` and `pose_anchor_residual_m` say how the robot pose was obtained. The report lists every non-`evaluated` row above the summary.
 
 ---
 

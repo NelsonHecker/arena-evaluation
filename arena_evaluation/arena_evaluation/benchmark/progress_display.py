@@ -24,8 +24,10 @@ class BenchmarkProgressDisplay:
         total_steps: int,
         env_n: int,
         run_id: str,
+        sim_now: typing.Callable[[], float] | None = None,
     ):
         self.title = title
+        self.sim_now = sim_now
         self.total_steps = total_steps
         self.env_n = env_n
         self.run_id = run_id
@@ -114,6 +116,7 @@ class BenchmarkProgressDisplay:
         ep_idx: int,
         ep_total: int,
         state: str = "RUNNING",
+        sim_start: float | None = None,
     ):
         with self._lock:
             self.active_slots[slot_index] = {
@@ -125,6 +128,7 @@ class BenchmarkProgressDisplay:
                 "ep_total": ep_total,
                 "state": state,
                 "start_time": time.perf_counter(),
+                "sim_start": sim_start,
             }
 
     def update_slot_state(self, slot_index: int, state: str, ep_idx: int | None = None):
@@ -150,6 +154,7 @@ class BenchmarkProgressDisplay:
         episodes_failed: int,
         elapsed_sec: float,
         error_detail: str | None = None,
+        sim_sec: float | None = None,
     ):
         with self._lock:
             self.completed_steps += 1
@@ -170,10 +175,11 @@ class BenchmarkProgressDisplay:
                 icon = "[bold red]✘[/bold red]"
                 status_colored = f"[red]failed ({episodes_failed}/{episodes_total} eps failed)[/red]"
 
+            timing = f"in {elapsed_sec:.1f}s wall" + (f", {sim_sec:.1f}s sim" if sim_sec is not None else "")
             line = (
                 f"{icon} [{self.completed_steps:2d}/{self.total_steps:2d}] "
                 f"[bold]{contestant}[/bold] • [cyan]{stage}[/cyan] "
-                f"[{status_colored}] in {elapsed_sec:.1f}s"
+                f"[{status_colored}] {timing}"
             )
             if error_detail and status == "failed":
                 line += f" • [dim red]{error_detail}[/dim red]"
@@ -184,7 +190,7 @@ class BenchmarkProgressDisplay:
             self.live.refresh()
         else:
             print(
-                f"[{self.completed_steps}/{self.total_steps}] {step_key} ({status}) in {elapsed_sec:.1f}s",
+                f"[{self.completed_steps}/{self.total_steps}] {step_key} ({status}) {timing}",
                 flush=True,
             )
 
@@ -224,20 +230,23 @@ class BenchmarkProgressDisplay:
             worker_table.add_column("Contestant / Stage", style="white", no_wrap=True, overflow="ellipsis", max_width=60)
             worker_table.add_column("State", style="yellow", no_wrap=True)
             worker_table.add_column("Episode", justify="right", style="magenta", no_wrap=True)
-            worker_table.add_column("Time", justify="right", style="green", no_wrap=True)
+            worker_table.add_column("Sim / Wall", justify="right", style="green", no_wrap=True)
 
             now = time.perf_counter()
+            sim_now = self.sim_now() if self.sim_now is not None else None
             for slot_idx in sorted(slots_snapshot.keys()):
                 info = slots_snapshot[slot_idx]
                 env_label = f"env_{info['env_id']}" if info.get("env_id") is not None else "-"
                 ep_str = f"({info['ep_idx'] + 1}/{info['ep_total']})" if info.get("ep_total") else "-"
                 w_elapsed = max(now - info.get("start_time", now), 0.0)
+                sim_start = info.get("sim_start")
+                sim_str = f"{max(sim_now - sim_start, 0.0):.1f}s" if sim_now is not None and sim_start is not None else "-"
                 worker_table.add_row(
                     env_label,
                     f"{info.get('contestant', '')} / {info.get('stage', '')}",
                     str(info.get("state", "RUNNING")),
                     ep_str,
-                    f"{w_elapsed:.1f}s",
+                    f"{sim_str} / {w_elapsed:.1f}s",
                 )
             table.add_row(worker_table)
         else:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import datetime
 import json
@@ -12,9 +13,16 @@ import types
 import pytest
 from arena_evaluation.benchmark.config import Contest, Suite, _parse_duration
 from arena_evaluation.benchmark.runner import (
+    _MAX_SIM_DEATHS,
+    _RetryBudget,
+    _SYSTEMIC,
     _default_run_id,
+    _orphaned_env_ids,
+    _requeue_front,
     _resolve_resume_config,
     build_launch_args,
+    cell_verdict,
+    closed_fraction,
     plan_pending_steps,
 )
 from arena_evaluation.benchmark.state import (
@@ -64,6 +72,9 @@ def _make_episode_record(
     outcome_info: str = "",
     robots_params: list | None = None,
     obstacles_params: list | None = None,
+    goal_dist_start: float = 0.0,
+    goal_dist_min: float = 0.0,
+    path_length: float = 0.0,
 ) -> types.SimpleNamespace:
     return types.SimpleNamespace(
         episode_id=episode_id,
@@ -77,7 +88,14 @@ def _make_episode_record(
         outcome_info=outcome_info,
         robots_params=robots_params or [],
         obstacles_params=obstacles_params or [],
+        goal_dist_start=goal_dist_start,
+        goal_dist_min=goal_dist_min,
+        path_length=path_length,
     )
+
+
+def _make_env_record(env_id: int, ready: bool) -> types.SimpleNamespace:
+    return types.SimpleNamespace(env_id=env_id, ready=ready)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +226,9 @@ _EXPECTED_HEADERS = [
     "lockstep_max_stall_s",
     "lockstep_rtf",
     "lockstep_beats",
+    "goal_dist_start",
+    "goal_dist_min",
+    "path_length",
 ]
 
 
@@ -226,7 +247,7 @@ def test_progress_log_header_column_count(tmp_path: pathlib.Path):
     with (tmp_path / "progress.csv").open(newline="") as fh:
         reader = csv.reader(fh)
         headers = next(reader)
-    assert len(headers) == 29
+    assert len(headers) == 32
 
 
 def test_progress_log_append(tmp_path: pathlib.Path):
@@ -945,6 +966,13 @@ def test_plan_duplicate_key_raises(tmp_path):
         plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
 
 
+def test_plan_scale_episodes_minimum_one(tmp_path: pathlib.Path):
+    suite = _no_refs(_make_suite("s1"))  # stage has episodes=5
+    contest = _make_contest("pa")
+    decisions = plan_pending_steps(suite, contest, 0.05, tmp_path, retry_failed=False)
+    assert decisions[0].step.episodes == 1
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # ProgressLog.dedupe_in_place
@@ -1359,3 +1387,190 @@ def test_world_batch_ordering():
     assert len(blocks) == 2
 
 
+
+
+# ---------------------------------------------------------------------------
+# retry bookkeeping
+# ---------------------------------------------------------------------------
+
+def test_sim_dead_is_systemic():
+    assert StepErrorKind.SIM_DEAD in _SYSTEMIC
+    assert StepErrorKind.EPISODE_TIMEOUT not in _SYSTEMIC
+
+
+def test_retry_budget_allows_one_retry_per_key_by_default():
+    budget = _RetryBudget()
+    assert budget.record("teb/s1", sim_death_generation=None) == (True, False)
+    assert budget.record("teb/s1", sim_death_generation=None) == (False, False)
+
+
+def test_retry_budget_keys_are_independent():
+    budget = _RetryBudget()
+    assert budget.record("teb/s1", sim_death_generation=None) == (True, False)
+    assert budget.record("dwb/s1", sim_death_generation=None) == (True, False)
+
+
+def test_retry_budget_zero_never_retries():
+    budget = _RetryBudget(retries=0)
+    assert budget.record("teb/s1", sim_death_generation=None) == (False, False)
+    assert budget.limit == "0"
+
+
+def test_retry_budget_unbounded_always_retries():
+    budget = _RetryBudget(retries=-1)
+    for _ in range(5):
+        assert budget.record("teb/s1", sim_death_generation=None) == (True, False)
+    assert budget.limit == "inf"
+
+
+def test_retry_budget_counts_one_sim_death_per_generation():
+    budget = _RetryBudget()
+    budget.record("teb/s1", sim_death_generation=0)
+    budget.record("dwb/s1", sim_death_generation=0)
+    assert budget.sim_deaths == 1
+
+
+def test_retry_budget_max_sim_deaths_aborts_the_run():
+    budget = _RetryBudget()
+    for generation in range(_MAX_SIM_DEATHS - 1):
+        may_retry, run_abort = budget.record(f"p{generation}/s1", sim_death_generation=generation)
+        assert (may_retry, run_abort) == (True, False)
+    assert budget.record("last/s1", sim_death_generation=_MAX_SIM_DEATHS - 1) == (False, True)
+    assert budget.sim_deaths == _MAX_SIM_DEATHS
+
+
+def test_retry_budget_abort_wins_over_retry():
+    budget = _RetryBudget(retries=-1, max_sim_deaths=1)
+    assert budget.record("fresh/s1", sim_death_generation=0) == (False, True)
+
+
+def test_retry_budget_spawn_phase_death_counts_the_generation_only():
+    budget = _RetryBudget()
+    assert budget.record(None, sim_death_generation=0) == (False, False)
+    assert budget.sim_deaths == 1
+    assert not budget.attempts
+    assert budget.record("teb/s1", sim_death_generation=1) == (True, False)
+
+
+def test_requeue_front_puts_the_step_back_at_the_head():
+    q: asyncio.Queue = asyncio.Queue()
+    first = _make_step_for("p1", "s1")
+    second = _make_step_for("p1", "s2")
+    third = _make_step_for("p1", "s3")
+    for step in (second, third):
+        q.put_nowait(step)
+
+    _requeue_front(q, first)
+
+    assert [q.get_nowait().key for _ in range(3)] == [first.key, second.key, third.key]
+
+
+# ---------------------------------------------------------------------------
+# orphan despawn on spawn timeout
+# ---------------------------------------------------------------------------
+
+def test_orphaned_env_ids_picks_new_not_ready_envs():
+    known = {1}
+    records = {
+        1: _make_env_record(1, ready=True),
+        2: _make_env_record(2, ready=False),
+        3: _make_env_record(3, ready=True),
+    }
+    assert _orphaned_env_ids(known, records, []) == [2]
+
+
+def test_orphaned_env_ids_ignores_new_ready_envs():
+    known = {1}
+    records = {1: _make_env_record(1, ready=True), 2: _make_env_record(2, ready=True)}
+    assert _orphaned_env_ids(known, records, []) == []
+
+
+def test_orphaned_env_ids_dedupes_with_registered():
+    known = set()
+    records = {2: _make_env_record(2, ready=False)}
+    assert _orphaned_env_ids(known, records, [2]) == [2]
+
+
+def test_orphaned_env_ids_keeps_registered_first():
+    known = set()
+    records = {2: _make_env_record(2, ready=False), 5: _make_env_record(5, ready=False)}
+    assert _orphaned_env_ids(known, records, [5]) == [5, 2]
+
+
+def test_orphaned_env_ids_empty_when_nothing_new():
+    known = {1, 2}
+    records = {1: _make_env_record(1, ready=True), 2: _make_env_record(2, ready=False)}
+    assert _orphaned_env_ids(known, records, []) == []
+
+
+# ---------------------------------------------------------------------------
+# closed_fraction
+# ---------------------------------------------------------------------------
+
+def test_closed_fraction_zero_start_is_zero():
+    assert closed_fraction(0.0, 0.0) == 0.0
+    assert closed_fraction(0.0, 5.0) == 0.0
+
+
+def test_closed_fraction_full_close():
+    assert closed_fraction(10.0, 0.0) == 1.0
+
+
+def test_closed_fraction_no_progress():
+    assert closed_fraction(10.0, 10.0) == 0.0
+
+
+def test_closed_fraction_partial():
+    assert closed_fraction(10.0, 4.0) == pytest.approx(0.6)
+
+
+def test_closed_fraction_clamps_above_start():
+    assert closed_fraction(10.0, 15.0) == 0.0
+
+
+def test_closed_fraction_clamps_below_zero_min():
+    assert closed_fraction(10.0, -5.0) == 1.0
+
+
+# ---------------------------------------------------------------------------
+# cell_verdict
+# ---------------------------------------------------------------------------
+
+def test_cell_verdict_wedged_on_error_kind():
+    r = StepResult(
+        "p/s", "failed", 0, 0.0, 1.0, StepErrorKind.ENV_SETUP, "boom",
+        episodes_run=0, episodes_total=5,
+    )
+    assert cell_verdict(r) == "wedged"
+
+
+def test_cell_verdict_wedged_on_incomplete_episodes():
+    r = StepResult(
+        "p/s", "partial", 0, 0.0, 1.0, None, None,
+        episodes_run=3, episodes_total=5,
+    )
+    assert cell_verdict(r) == "wedged"
+
+
+def test_cell_verdict_weak_when_episodes_weak():
+    r = StepResult(
+        "p/s", "ok", 0, 0.0, 1.0, None, None,
+        episodes_run=5, episodes_total=5, episodes_weak=2,
+    )
+    assert cell_verdict(r) == "weak"
+
+
+def test_cell_verdict_ok():
+    r = StepResult(
+        "p/s", "ok", 0, 0.0, 1.0, None, None,
+        episodes_run=5, episodes_total=5, episodes_weak=0,
+    )
+    assert cell_verdict(r) == "ok"
+
+
+def test_requeue_front_into_an_empty_queue():
+    q: asyncio.Queue = asyncio.Queue()
+    only = _make_step_for("p1", "s1")
+    _requeue_front(q, only)
+    assert q.qsize() == 1
+    assert q.get_nowait().key == only.key

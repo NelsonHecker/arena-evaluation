@@ -1,3 +1,6 @@
+launch:
+  robot.mobile.deadline: 30
+
 stages:
   - name: quicktest_map_empty
     map: map_empty

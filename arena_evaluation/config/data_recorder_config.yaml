@@ -15,3 +15,8 @@ record_frequencies:
   reset_end: 0.0 # event-driven (recorded unthrottled)
   tf: 20.0       # standard transform topic
   default: 20.0  # cmd_vel, joint_states, etc.
+
+# Per-frame minimum /tf interval in milliseconds, matched against the child frame in order.
+tf_frames:
+  - ["^body_env_\\d+_agent_\\d+$", 0.0]   # pedestrian root, every window
+  - ["_agent_\\d+$", 200.0]               # skeleton bones, 5 Hz

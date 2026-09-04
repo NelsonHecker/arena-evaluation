@@ -141,6 +141,13 @@ class LockstepMonitor:
             )
 
 
+def format_table(header: typing.Sequence[str], table: typing.Sequence[typing.Sequence[str]]) -> str:
+    """Aligned, left-justified column printer shared by the lockstep and efficacy reports."""
+    widths = [max(len(str(r[i])) for r in (header, *table)) for i in range(len(header))]
+    lines = ["  ".join(str(c).ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in (header, *table)]
+    return "\n".join(lines)
+
+
 def format_report(rows: typing.Sequence[tuple[str, str, LockstepSummary]]) -> str:
     """One line per (contestant, stage): verdict, stalls, longest stall, mean rtf, beats, stalled channels."""
     header = ("contestant", "stage", "verdict", "stalls", "max_stall_s", "rtf", "beats", "stalled_on")
@@ -157,6 +164,4 @@ def format_report(rows: typing.Sequence[tuple[str, str, LockstepSummary]]) -> st
         )
         for contestant, stage, s in rows
     ]
-    widths = [max(len(r[i]) for r in (header, *table)) for i in range(len(header))]
-    lines = ["  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in (header, *table)]
-    return "\n".join(lines)
+    return format_table(header, table)

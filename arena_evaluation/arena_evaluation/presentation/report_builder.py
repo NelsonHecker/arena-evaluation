@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_escape
 import pathlib
 import datetime
 import typing
@@ -47,6 +48,29 @@ def data_file_for(data_source: str | None) -> str | None:
 def _has_values(df: "pl.DataFrame", col: str) -> bool:
     """Check if column exists and contains at least one non-null value."""
     return col in df.columns and bool(df[col].is_not_null().any())
+
+
+_STATUS_COLS = ("stage", "planner", "episode", "robot", "status", "status_reason", "result")
+
+
+def _status_table_html(df: pl.DataFrame) -> str:
+    """Rows the pipeline could not fully evaluate, empty when every row is evaluated."""
+    if "status" not in df.columns:
+        return ""
+    rows = df.filter(pl.col("status").fill_null("evaluated") != "evaluated")
+    if len(rows) == 0:
+        return ""
+    cols = [c for c in _STATUS_COLS if c in rows.columns]
+    rows = rows.select(cols).sort([c for c in ("stage", "episode") if c in cols])
+    head = "".join(f"<th>{html_escape.escape(c.replace('_', ' '))}</th>" for c in cols)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html_escape.escape('' if v is None else str(v))}</td>" for v in row) + "</tr>"
+        for row in rows.iter_rows()
+    )
+    return (
+        f"<h3>Episodes not fully evaluated ({len(rows)} of {len(df)})</h3>"
+        f"<table class=\"dataframe\"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+    )
 
 
 def _default_summary_group_cols(df: "pl.DataFrame") -> list[str]:
@@ -341,6 +365,7 @@ class ReportBuilder:
             summary_html = self._generate_summary_table_manifest(df, manifest)
         else:
             summary_html = self._generate_summary_table(df_contestants)
+        summary_html = _status_table_html(df_contestants) + summary_html
 
         report_title = manifest.title or self.output_dir.name
 

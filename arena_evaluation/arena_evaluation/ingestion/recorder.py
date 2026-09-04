@@ -1,6 +1,7 @@
 import argparse
 from typing import Any
 import os
+import re
 import shutil
 import threading
 import traceback
@@ -236,6 +237,7 @@ class DataRecorderNode(Node):
 
         self.config = self.read_config()
         self.freqs = dict(self.config.get("record_frequencies", {"default": 20.0}))
+        self.tf_frames = [(re.compile(pattern), float(ms)) for pattern, ms in self.config.get("tf_frames", [])]
 
         # Optional video-grade override (recorder.video_grade_hz:=30 on the
         # benchmark CLI): every throttled topic whose configured interval is
@@ -261,6 +263,11 @@ class DataRecorderNode(Node):
         self._clock_received_count = 0
         self.last_recorded_times: dict[str, int] = {}
         self.writer_lock = threading.Lock()
+        # guards the tf merge state against the start_episode service callback group
+        self._tf_lock = threading.Lock()
+        self._tf_pending: dict[tuple[str, str], Any] = {}
+        self._tf_last_written: dict[tuple[str, str], int] = {}
+        self._tf_last_flush = 0
         self.writer: rosbag2_py.SequentialWriter | None = None
         self.topics_metadata: dict[str, rosbag2_py.TopicMetadata] = {}
         self._topic_registry: dict[str, rosbag2_py.TopicMetadata] = {}
@@ -284,6 +291,11 @@ class DataRecorderNode(Node):
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             depth=10,
+        )
+        self.tf_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=100,
         )
 
         self.is_shutting_down = False
@@ -340,6 +352,11 @@ class DataRecorderNode(Node):
         self._write_success_count = 0
         self._write_drop_count = 0
         self.recorded_topics = set()
+
+        with self._tf_lock:
+            self._tf_pending = {}
+            self._tf_last_written = {}
+            self._tf_last_flush = 0
 
         ep_name = f"episode_{global_episode_id:03d}"
         ep_dir = self.episodes_root / ep_name
@@ -454,7 +471,7 @@ class DataRecorderNode(Node):
         topics_dict = get_topics(namespace="", parent_namespace=env_namespace)
 
         for key, t_def in topics_dict.items():
-            if key not in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot"):
+            if key not in ("episode_record", "robots_fleet", "peds", "agent_states", "semantic_snapshot", "tf", "tf_static"):
                 continue
 
             topic_name = t_def.name_template
@@ -480,6 +497,9 @@ class DataRecorderNode(Node):
                 callback = self.robots_fleet_callback
             elif key == "semantic_snapshot":
                 callback = self.semantic_snapshot_callback
+            elif key == "tf":
+                qos_profile = self.tf_qos
+                callback = self._tf_callback
             elif t_def.throttled:
                 callback = self._create_throttled_callback(topic_name)
             else:
@@ -536,16 +556,24 @@ class DataRecorderNode(Node):
 
         if self.current_time is not None and new_time < self.current_time:
             self._log_warn(f"Backward time jump detected: {self.current_time} -> {new_time}")
+            self._flush_tf(self.current_time, force=True)
             self.last_recorded_times.clear()
+            with self._tf_lock:
+                self._tf_last_written.clear()
 
         self.current_time = new_time
 
-        if hasattr(self, "_pre_clock_buffer"):
+        if self._pre_clock_buffer is not None:
             if self._pre_clock_buffer:
                 self._log_info(f"Flushing {len(self._pre_clock_buffer)} pre-clock buffered messages")
                 for topic, buffered_msg in self._pre_clock_buffer:
-                    self._write_to_bag_at(topic, buffered_msg, self.current_time)
-            del self._pre_clock_buffer
+                    if topic == "/tf":
+                        self._tf_callback(buffered_msg)
+                    else:
+                        self._write_to_bag_at(topic, buffered_msg, self.current_time)
+            self._pre_clock_buffer = None
+
+        self._flush_tf(self.current_time)
 
     def _begin_episode(self, episode_id: int, source: str = "episode_record") -> bool:
         """Open a writer for a new episode unless one was already started for it."""
@@ -569,6 +597,11 @@ class DataRecorderNode(Node):
                 MetadataWriter.write(self.current_metadata, self.current_metadata_path)
             except Exception as e:
                 self._log_error(f"Failed to write outcome metadata: {e}")
+        if self.current_time is None:
+            with self._tf_lock:
+                self._tf_pending.clear()
+        else:
+            self._flush_tf(self.current_time, force=True)
         self._close_current_writer()
         self._pre_episode_buffer.clear()
 
@@ -636,7 +669,7 @@ class DataRecorderNode(Node):
                 topics_dict = get_topics(namespace=robot_ns, parent_namespace=env_namespace)
 
                 for key, t_def in topics_dict.items():
-                    if key in ("episode_record", "robots_fleet", "peds", "agent_states"):
+                    if key in ("episode_record", "robots_fleet", "peds", "agent_states", "tf", "tf_static"):
                         continue
 
                     topic_name = t_def.name_template
@@ -708,7 +741,7 @@ class DataRecorderNode(Node):
 
         def callback(msg):
             if self.current_time is None:
-                if hasattr(self, "_pre_clock_buffer"):
+                if self._pre_clock_buffer is not None:
                     self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
@@ -721,12 +754,46 @@ class DataRecorderNode(Node):
     def _create_unthrottled_callback(self, topic_name: str):
         def callback(msg):
             if self.current_time is None:
-                if hasattr(self, "_pre_clock_buffer"):
+                if self._pre_clock_buffer is not None:
                     self._pre_clock_buffer.append((topic_name, msg))
                 return
             now = self.current_time
             self._write_to_bag_at(topic_name, msg, now)
         return callback
+
+    def _tf_callback(self, msg: TFMessage):
+        """Merge the per-window transforms of /tf, newest wins per (frame, child) pair."""
+        if self.current_time is None:
+            if self._pre_clock_buffer is not None:
+                self._pre_clock_buffer.append(("/tf", msg))
+            return
+        now = self.current_time
+        with self._tf_lock:
+            for transform in msg.transforms:
+                child = transform.child_frame_id
+                interval_ms = 0.0
+                for pattern, ms in self.tf_frames:
+                    if pattern.search(child):
+                        interval_ms = ms
+                        break
+                key = (transform.header.frame_id, child)
+                if (now - self._tf_last_written.get(key, 0)) / 1e6 >= interval_ms:
+                    self._tf_pending[key] = transform
+
+    def _flush_tf(self, now: int, force: bool = False):
+        """Write the merged transforms as one TFMessage. Never called under writer_lock."""
+        window_ms = self._resolve_throttle_ms("/tf")
+        with self._tf_lock:
+            if not self._tf_pending:
+                return
+            if not force and (now - self._tf_last_flush) / 1e6 < window_ms:
+                return
+            taken = self._tf_pending
+            self._tf_pending = {}
+            for key in taken:
+                self._tf_last_written[key] = now
+            self._tf_last_flush = now
+        self._write_to_bag_at("/tf", TFMessage(transforms=list(taken.values())), now)
 
     def _log_info(self, msg: str):
         full_msg = f"[DataRecorder] [INFO] {msg}"
@@ -924,7 +991,7 @@ class DataRecorderNode(Node):
             with open(config_path, "r") as f:
                 return yaml.safe_load(f)
         except Exception:
-            return {"record_frequencies": {"default": 20.0}}
+            return {"record_frequencies": {"default": 20.0}, "tf_frames": []}
 
     def finalize(self):
         """Close the current episode writer and write final metadata."""

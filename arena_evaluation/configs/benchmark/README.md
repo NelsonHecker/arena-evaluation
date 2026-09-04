@@ -68,8 +68,8 @@ extension has the extension stripped before it is sent (`4.json` and `4` are equ
 | `episodes` | int | Episode count (scaled by the `--scale-episodes` CLI flag, default 1.0) |
 | `config` | dict | Per-mode params; top-level keys must match `tm_robots`/`tm_obstacles` (e.g. `scenario`, `random`). Inner leaves map to `task.<mode>.<leaf>` via QueueEpisode (see [task_generator/tasks/obstacles/README.md](../../../../task_generator/task_generator/tasks/obstacles/README.md)) |
 | `seed` | int | Auto-derived from a SHA-1 hash of the stage fields (excluding `config`); can be set explicitly |
-| `timeout` | string | Per-episode timeout, e.g. `300s`/`5m`. Defaults to 60s if absent |
-| `timeout_peds` | string | Timeout override used only for the `unhindered_peds` reference step of this stage (see `references` below). Defaults to `timeout` if absent |
+| `timeout` | string | Per-episode budget in **sim** seconds, e.g. `300s`/`5m`. The runner pushes it to the env's task generator as its `timeout` parameter before every step, so the episode ends FAILED with `outcome_info='timeout'`. Defaults to 60s if absent |
+| `timeout_peds` | string | Same budget for the `unhindered_peds` reference step of this stage (see `references` below). Defaults to `timeout` if absent |
 | `optim` | dict | Extra `optim.<key>:=<value>` launch args for this stage's env |
 
 ### Directory bundles
@@ -314,6 +314,11 @@ For each group the runner:
      `file`, `dynamic.min`). MERGE semantics: empty fields leave the prior
      queued value untouched. Called for every step including the first; the
      env owns no stage-specific config until the runner pushes it.
+   - Sets the env's `timeout` parameter to the stage's `timeout` (or
+     `timeout_peds` for the `unhindered_peds` reference step) via
+     `<env_ns>/set_parameters`, so the episode budget is spent in sim time.
+     The runner keeps no wall-clock episode ceiling, only a 60 s sim-stall
+     guard (see [benchmark/README.md](../../arena_evaluation/benchmark/README.md#liveness)).
    - Drives `step.episodes` goals via the `RunEpisode` action at
      `<env_ns>/lifecycle/run_episode`, with `goal.world = stage.map` and
      `goal.seed = stage.seed` overriding the queued world/seed if needed.

@@ -1,8 +1,12 @@
+import numpy as np
 import pytest
 
 pl = pytest.importorskip("polars")
 
 from arena_evaluation.processing.pipeline import _episode_endpoints, _episode_window
+from arena_evaluation.processing.pose_anchor import resolve_pose_source
+from arena_evaluation.processing.topic_aligner import TopicAligner
+from arena_evaluation.storage.schemas import TopicBundle
 
 
 def _aligned(with_gt: bool) -> pl.DataFrame:
@@ -57,3 +61,19 @@ def test_episode_window_spans_running_to_terminal_record():
     assert _episode_window(record.lazy()) == (100, 900)
     assert _episode_window(None) == (None, None)
     assert _episode_window(pl.DataFrame({"time_ns": []})) == (None, None)
+
+
+def test_start_is_the_anchored_pose_not_the_odom_origin():
+    t = (np.arange(100) * 33_333_333).astype(np.int64)
+    x = np.linspace(0.0, 10.0, 100)
+    odom = pl.DataFrame({"time_ns": t, "stamp_ns": t, "pos_x": x, "pos_y": np.zeros(100), "yaw": np.zeros(100)})
+    # One ground-truth sample near the end of the run, the map frame is 3 m / -2 m away and rotated.
+    c, s = np.cos(0.7), np.sin(0.7)
+    gt = pl.DataFrame({"time_ns": t[[90]], "stamp_ns_gt": t[[90]], "pos_x_gt": [3.0 + c * x[90]], "pos_y_gt": [-2.0 + s * x[90]], "yaw_gt": [0.7], "frame_id": ["env_0/jackal/odom"]})
+
+    bundle = TopicBundle(odom=odom, tf_gt=gt)
+    bundle.tf_gt, source = resolve_pose_source(bundle, (None, None))
+    assert source.kind == "anchored"
+
+    start, _ = _episode_endpoints(TopicAligner().align(bundle), None)
+    assert start == pytest.approx([3.0, -2.0, 0.7])
