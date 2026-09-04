@@ -8,6 +8,7 @@ tmp_path. The rosbag2 writer is mocked at every call site.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import threading
 from types import SimpleNamespace
@@ -26,7 +27,8 @@ from rclpy.parameter import Parameter
 from rosgraph_msgs.msg import Clock
 from std_msgs.msg import String
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet, RobotState
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped, Twist
+from tf2_msgs.msg import TFMessage
 
 from arena_evaluation.ingestion import recorder
 from arena_evaluation.ingestion.recorder import DataRecorderNode
@@ -48,6 +50,26 @@ class _FakeLogger:
 
     def error(self, msg):
         self.errors.append(msg)
+
+
+_TF_FRAMES = [
+    (re.compile(r"^body_env_\d+_agent_\d+$"), 0.0),
+    (re.compile(r"_agent_\d+$"), 200.0),
+]
+
+
+def _transform(frame_id: str, child_frame_id: str, x: float = 0.0) -> TransformStamped:
+    tf = TransformStamped()
+    tf.header.frame_id = frame_id
+    tf.child_frame_id = child_frame_id
+    tf.transform.translation.x = x
+    return tf
+
+
+def _tf_message(*pairs) -> TFMessage:
+    msg = TFMessage()
+    msg.transforms = [_transform(*pair) for pair in pairs]
+    return msg
 
 
 def _make_run_metadata(**overrides) -> RunMetadata:
@@ -86,12 +108,18 @@ def _bare_node(**overrides) -> DataRecorderNode:
     node._write_drop_count = 0
     node.writer = None
     node.writer_lock = threading.Lock()
+    node._tf_lock = threading.Lock()
+    node._tf_pending = {}
+    node._tf_last_written = {}
+    node._tf_last_flush = 0
+    node.tf_frames = list(_TF_FRAMES)
     node._topic_registry = {}
     node.topics_metadata = {}
     node._pre_episode_buffer = []
     node._pre_clock_buffer = []
     node.freqs = {"default": 20.0}
     node.qos = object()
+    node.tf_qos = object()
     node.latched_qos = object()
     node.reliable_volatile_qos = object()
     node._seen_episodes = set()
@@ -216,10 +244,9 @@ def test_constructor_data_root_creates_runs_uuid(tmp_path, fake_share, monkeypat
 
 def test_constructor_registers_subscriptions_and_service(tmp_path, full_node):
     assert full_node._start_service is not None
-    assert len(full_node.subs) == 5
-    # only the state/peds topics are latched during __init__; tf_static is
-    # latched later when robot topics are discovered via RobotFleet
-    assert full_node.latched_topic_names == {"state/episode", "state/robots", "state/semantics"}
+    assert len(full_node.subs) == 7
+    # /tf and /tf_static are subscribed once, at construction
+    assert full_node.latched_topic_names == {"state/episode", "state/robots", "state/semantics", "tf_static"}
     assert full_node.freqs == {"default": 20.0}
 
 
@@ -229,7 +256,7 @@ def test_constructor_registers_subscriptions_and_service(tmp_path, full_node):
 
 def test_read_config_falls_back_when_file_missing(tmp_path):
     node = _bare_node(base_dir=str(tmp_path / "missing"))
-    assert node.read_config() == {"record_frequencies": {"default": 20.0}}
+    assert node.read_config() == {"record_frequencies": {"default": 20.0}, "tf_frames": []}
 
 
 def test_read_config_parses_file(tmp_path):
@@ -247,7 +274,7 @@ def test_read_config_falls_back_on_corrupt_yaml(tmp_path):
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "data_recorder_config.yaml").write_text("{{{{ not yaml")
     node = _bare_node(base_dir=str(tmp_path / "share"))
-    assert node.read_config() == {"record_frequencies": {"default": 20.0}}
+    assert node.read_config() == {"record_frequencies": {"default": 20.0}, "tf_frames": []}
 
 
 # ---------------------------------------------------------------------------
@@ -304,15 +331,15 @@ def test_throttled_callback_buffers_before_first_clock():
 
 
 def test_throttled_callback_drops_message_when_clock_buffer_already_flushed():
-    # after the first clock tick flushes a non-empty buffer, the attribute is
-    # deleted; a pre-clock message arriving afterwards is simply discarded
+    # after the first clock tick flushes a non-empty buffer, the buffer is set
+    # to None; a pre-clock message arriving afterwards is simply discarded
     node = _bare_node()
     node._write_to_bag_at = MagicMock()
     node._pre_clock_buffer = [("/a", "m0")]
-    node.clock_callback(Clock())  # flush path deletes _pre_clock_buffer
+    node.clock_callback(Clock())  # flush path drops _pre_clock_buffer
     node._write_to_bag_at.assert_called_once_with("/a", "m0", 0)
     node._write_to_bag_at.reset_mock()
-    assert not hasattr(node, "_pre_clock_buffer")
+    assert node._pre_clock_buffer is None
     node.current_time = None
     cb = node._create_throttled_callback("/cmd_vel")
     cb("m1")
@@ -381,11 +408,137 @@ def test_clock_callback_flushes_pre_clock_buffer_once():
     msg.clock.sec = 1
     node.clock_callback(msg)
     assert node.current_time == 10**9
-    assert not hasattr(node, "_pre_clock_buffer")
+    assert node._pre_clock_buffer is None
     node._write_to_bag_at.assert_has_calls([call("/a", "m1", 10**9), call("/b", "m2", 10**9)])
     node._write_to_bag_at.reset_mock()
     node.clock_callback(msg)
     node._write_to_bag_at.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# /tf merging: _tf_callback / _flush_tf
+# ---------------------------------------------------------------------------
+
+def _tf_writes(node):
+    """(timestamp, {child_frame: x}) for every /tf write on the mocked writer."""
+    out = []
+    for call_args in node._write_to_bag_at.call_args_list:
+        topic, msg, ts = call_args.args
+        assert topic == "/tf"
+        out.append((ts, {t.child_frame_id: t.transform.translation.x for t in msg.transforms}))
+    return out
+
+
+def test_tf_callback_merges_pairs_of_one_window_into_a_single_message():
+    node = _bare_node(current_time=0)
+    node._write_to_bag_at = MagicMock()
+    node._tf_callback(_tf_message(("map", "odom", 1.0)))
+    node.current_time = 10_000_000
+    node._tf_callback(_tf_message(("odom", "base_link", 2.0)))
+
+    node._flush_tf(10_000_000)  # inside the 20 ms window
+    node._write_to_bag_at.assert_not_called()
+
+    node._flush_tf(20_000_000)
+    assert _tf_writes(node) == [(20_000_000, {"odom": 1.0, "base_link": 2.0})]
+    assert node._tf_pending == {}
+    assert node._tf_last_flush == 20_000_000
+
+
+def test_tf_callback_keeps_the_newest_transform_per_pair():
+    node = _bare_node(current_time=0)
+    node._write_to_bag_at = MagicMock()
+    node._tf_callback(_tf_message(("odom", "base_link", 1.0)))
+    node.current_time = 5_000_000
+    node._tf_callback(_tf_message(("odom", "base_link", 2.0)))
+
+    node._flush_tf(20_000_000)
+    assert _tf_writes(node) == [(20_000_000, {"base_link": 2.0})]
+
+
+def test_tf_bone_frames_are_capped_while_root_frames_flush_every_window():
+    node = _bare_node(current_time=0)
+    node._write_to_bag_at = MagicMock()
+    root = ("map", "body_env_0_agent_2", 0.0)
+    bone = ("body_env_0_agent_2", "l_p_collar_env_0_agent_2", 0.0)
+
+    for step in range(0, 400_000_001, 20_000_000):
+        node.current_time = step
+        node._tf_callback(_tf_message(root, bone))
+        node._flush_tf(step)
+
+    writes = _tf_writes(node)
+    assert [ts for ts, _ in writes] == list(range(20_000_000, 400_000_001, 20_000_000))
+    assert all("body_env_0_agent_2" in frames for _, frames in writes)
+    bone_stamps = [ts for ts, frames in writes if "l_p_collar_env_0_agent_2" in frames]
+    assert bone_stamps == [200_000_000, 400_000_000]
+
+
+def test_tf_callback_buffers_before_first_clock_and_merges_on_first_tick():
+    node = _bare_node()
+    node._write_to_bag_at = MagicMock()
+    node._tf_callback(_tf_message(("map", "odom", 1.0)))
+    node._tf_callback(_tf_message(("map", "odom", 2.0), ("odom", "base_link", 3.0)))
+    assert [topic for topic, _ in node._pre_clock_buffer] == ["/tf", "/tf"]
+    node._write_to_bag_at.assert_not_called()
+
+    msg = Clock()
+    msg.clock.sec = 1
+    node.clock_callback(msg)
+
+    assert _tf_writes(node) == [(10**9, {"odom": 2.0, "base_link": 3.0})]
+    assert node._pre_clock_buffer is None
+
+
+def test_stop_episode_flushes_pending_tf_before_closing():
+    node = _bare_node(current_sim_episode_id=3, current_time=50_000_000)
+    node._close_current_writer = MagicMock()
+    node._write_to_bag_at = MagicMock()
+    node._tf_pending = {("map", "odom"): _transform("map", "odom", 1.0)}
+    node._tf_last_flush = 45_000_000  # inside the window: the forced flush writes anyway
+
+    node._stop_episode(3, outcome_state=2)
+
+    assert _tf_writes(node) == [(50_000_000, {"odom": 1.0})]
+    assert node._tf_pending == {}
+    node._close_current_writer.assert_called_once()
+
+
+def test_stop_episode_drops_pending_tf_when_no_clock_was_received():
+    node = _bare_node(current_sim_episode_id=3)
+    node._close_current_writer = MagicMock()
+    node._write_to_bag_at = MagicMock()
+    node._tf_pending = {("map", "odom"): _transform("map", "odom", 1.0)}
+
+    node._stop_episode(3, outcome_state=2)
+
+    node._write_to_bag_at.assert_not_called()
+    assert node._tf_pending == {}
+
+
+def test_clock_backward_jump_writes_pending_tf_at_the_pre_jump_time():
+    node = _bare_node(current_time=10_000_000_000, last_recorded_times={"/t": 5})
+    node._write_to_bag_at = MagicMock()
+    node._tf_pending = {("map", "odom"): _transform("map", "odom", 1.0)}
+    node._tf_last_written = {("map", "odom"): 9_000_000_000}
+    node._tf_last_flush = 10_000_000_000
+    msg = Clock()
+    msg.clock.sec = 5
+
+    node.clock_callback(msg)
+
+    assert _tf_writes(node) == [(10_000_000_000, {"odom": 1.0})]
+    assert node._tf_pending == {}
+    assert node._tf_last_written == {}
+
+
+def test_flush_tf_writes_nothing_when_nothing_is_pending():
+    node = _bare_node(current_time=100_000_000)
+    node._write_to_bag_at = MagicMock()
+    node._flush_tf(100_000_000)
+    node._flush_tf(100_000_000, force=True)
+    node._write_to_bag_at.assert_not_called()
+    assert node._tf_last_flush == 0
 
 
 # ---------------------------------------------------------------------------
@@ -697,17 +850,17 @@ def test_robots_fleet_callback_writes_and_discovers_robots(tmp_path, monkeypatch
     assert node.robot_model == "jackal"
     assert node.current_metadata.robot_model == ["jackal"]
     write_spy.assert_called_once()
-    # 17 of the 21 per-robot topics (state/peds topics skipped) + the model's controller odom and cmd_vel
-    assert node.create_subscription.call_count == 19
+    # 15 of the 21 per-robot topics (state/peds/tf topics skipped) + the model's controller odom and cmd_vel
+    assert node.create_subscription.call_count == 17
     assert (tmp_path / "episode_000.yaml").exists()
 
     # second sighting of the same robot: no re-subscription
     node.robots_fleet_callback(_fleet_message([("robot_0", "jackal")]))
-    assert node.create_subscription.call_count == 19
+    assert node.create_subscription.call_count == 17
 
     # a new robot triggers a new subscription wave, no controller topics for a model without model_params
     node.robots_fleet_callback(_fleet_message([("robot_1", "turtlebot3")]))
-    assert node.create_subscription.call_count == 36
+    assert node.create_subscription.call_count == 32
     assert "robot_1" in node.known_robots
     assert node.current_metadata.robot_model == ["jackal", "turtlebot3"]
 

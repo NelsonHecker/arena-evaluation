@@ -457,3 +457,15 @@ def test_topic_write_empty_bundle_dict(tmp_path):
     TopicParquetStore.write({}, dest)
     assert dest.is_dir()
     assert TopicParquetStore.read(dest) is None
+
+
+def test_write_rows_status_rows_first_keep_metric_columns(tmp_path: pathlib.Path) -> None:
+    # status rows finish first under as_completed
+    status = {"episode": 0, "status": "no_trajectory", "success": False}
+    metric = {"episode": 1, "status": "evaluated", "success": True, "time": [1, 2, 3], "path_length": 4.2}
+    dest = tmp_path / "combined.parquet"
+    ParquetStore.write_rows([dict(status, episode=i) for i in range(150)] + [metric], dest, schema_overrides={"success": pl.Boolean})
+    df, _ = ParquetStore.read(dest)
+    assert df.columns[-2:] == ["time", "path_length"]
+    assert df["time"].null_count() == 150
+    assert df["path_length"].drop_nulls().to_list() == [4.2]

@@ -70,6 +70,9 @@ def _make_episode_record(*, episode_id: int = 1) -> types.SimpleNamespace:
         outcome_info="",
         robots_params=[],
         obstacles_params=[],
+        goal_dist_start=0.0,
+        goal_dist_min=0.0,
+        path_length=0.0,
     )
 
 
@@ -417,6 +420,9 @@ _HEADERS = [
     "lockstep_max_stall_s",
     "lockstep_rtf",
     "lockstep_beats",
+    "goal_dist_start",
+    "goal_dist_min",
+    "path_length",
 ]
 
 
@@ -510,6 +516,7 @@ def test_progress_log_append_with_parameter_msg_params(tmp_path: pathlib.Path):
         tm_modules=["m"], robots=["bot"], outcome_state=1, outcome_info="",
         robots_params=[_msg_param("speed", ParameterType.PARAMETER_INTEGER, 3)],
         obstacles_params=[],
+        goal_dist_start=0.0, goal_dist_min=0.0, path_length=0.0,
     )
     log.append(
         ts_iso="t", run_id="r", step_key="k", contestant="c", stage="s",

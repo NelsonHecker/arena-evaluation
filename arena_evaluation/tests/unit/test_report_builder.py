@@ -281,3 +281,28 @@ def test_per_plot_note_rendered_below_plot():
         assert content.count("class='plot-note'") == 2
         assert "Inline <strong>note</strong>" in content
         assert "<strong>Key</strong> finding" in content
+
+
+def test_status_table_lists_only_unevaluated_rows() -> None:
+    from arena_evaluation.presentation.report_builder import _status_table_html
+
+    df = pl.DataFrame({
+        "stage": ["s1", "s1", "s2"],
+        "planner": ["p", "p", "p"],
+        "episode": [0, 1, 2],
+        "status": ["evaluated", "no_trajectory", "path_only"],
+        "status_reason": [None, "no odom rows", "no map-frame pose sample"],
+        "result": ["GOAL_REACHED", "COLLISION", "GOAL_REACHED"],
+    })
+    out = _status_table_html(df)
+    assert "2 of 3" in out
+    assert "no odom rows" in out
+    assert "no map-frame pose sample" in out
+    assert "<td>0</td>" not in out
+
+
+def test_status_table_empty_when_all_evaluated_or_column_missing() -> None:
+    from arena_evaluation.presentation.report_builder import _status_table_html
+
+    assert _status_table_html(pl.DataFrame({"episode": [0], "status": ["evaluated"]})) == ""
+    assert _status_table_html(pl.DataFrame({"episode": [0]})) == ""

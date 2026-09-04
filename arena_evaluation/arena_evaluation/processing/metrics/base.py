@@ -30,7 +30,7 @@ class BaseMetricCalculator(ABC):
         self.robot_params = robot_params
 
     def resolve_robot_pose(self, episode: "AlignedEpisodeBundle") -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Extract and resolve the robot's pose (pos_x, pos_y, yaw) in the map frame."""
+        """Map-frame robot pose (pos_x, pos_y, yaw); the start-pose re-anchor is the odom-only fallback."""
         if episode.data is not None and len(episode.data) > 0:
             if "pos_x_gt" in episode.data.columns:
                 episode.data = episode.data.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())

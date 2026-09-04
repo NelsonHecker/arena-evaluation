@@ -83,9 +83,11 @@ All topics use simulation time from `/clock`. Messages prior to the first `/cloc
 | `/{parent_ns}/arena_peds` | `arena_people_msgs/Pedestrians` | 20 ms |
 | `/{parent_ns}/state/episode` | `task_generator_msgs/EpisodeRecord` | unthrottled |
 | `/{parent_ns}/state/robots` | `task_generator_msgs/RobotFleet` | latched |
-| `/tf` | `tf2_msgs/TFMessage` | 20 ms |
+| `/tf` | `tf2_msgs/TFMessage` | 20 ms, merged |
 | `/tf_static` | `tf2_msgs/TFMessage` | latched |
 | `/clock` | `rosgraph_msgs/Clock` | time tracking |
+
+`/tf` is merged rather than throttled: the newest transform per `(frame_id, child_frame_id)` is kept and written as one `TFMessage` per 20 ms window, so no publisher can starve the others. `tf_frames` in `config/data_recorder_config.yaml` is an ordered `[regex, ms]` list matched against the child frame that caps frame families; by default skeleton bones go out at 5 Hz.
 
 ### Shutdown
 
