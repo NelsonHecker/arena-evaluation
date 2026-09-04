@@ -29,7 +29,8 @@ class HeatmapRenderer(BasePlotRenderer):
                 "total_time_looking_at_pedestrians", "total_time_looked_at_by_pedestrians",
                 "total_time_in_personal_space", "avg_velocity_in_personal_space"
             ]
-            valid_cols = [col for col in candidates if col in df_filtered.columns and not df_filtered[col].is_null().all()]
+            cand_list = (self.spec.options.get("metrics") if self.spec.options else None) or candidates
+            valid_cols = [col for col in cand_list if col in df_filtered.columns and not df_filtered[col].is_null().all()]
             if len(valid_cols) < 2:
                 return None
             
@@ -123,7 +124,8 @@ class HeatmapRenderer(BasePlotRenderer):
                 "total_time_looking_at_pedestrians", "total_time_looked_at_by_pedestrians",
                 "total_time_in_personal_space", "avg_velocity_in_personal_space"
             ]
-            valid_cols = [col for col in candidates if col in df_filtered.columns and not df_filtered[col].is_null().all()]
+            cand_list = (self.spec.options.get("metrics") if self.spec.options else None) or candidates
+            valid_cols = [col for col in cand_list if col in df_filtered.columns and not df_filtered[col].is_null().all()]
             if len(valid_cols) < 2:
                 plt.close()
                 return

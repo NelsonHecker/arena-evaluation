@@ -1,0 +1,273 @@
+# ==============================================================================
+# FIGURE 6: LIBRARY RETRIEVAL & ROUTING ARCHETYPES MANIFEST
+# ==============================================================================
+# Long-Shift Battery Autonomy Scaling vs. Reading Lounge Acoustic Exposure
+# Across 10 Pick Missions for 5 Planners, 3 Kinematic Regimes, and 4 Routing Policies.
+# ==============================================================================
+
+manifest_version: "1.0"
+name: fig6_library_acoustic_retrieval
+title: "Figure 6: Library Continuous Retrieval and Acoustic/Autonomy Trade-offs"
+description: "Long-Shift Battery Autonomy Scaling vs. Reading Lounge Acoustic Exposure Across 10 Pick Missions for 5 Planners, 3 Kinematic Regimes, and 4 Macro-Routing Policies."
+data_source: metrics
+
+groups:
+  - {id: executive_overview, title: "1. Executive Performance Scorecard and Macro Radar Profile"}
+  - {id: spatial_archetypes, title: "2. Spatial Fleet Trajectories and Macro Routing Archetypes"}
+  - {id: environmental_acoustics, title: "3. Spatial Acoustic Propagation and Reading Lounge Exposure"}
+  - {id: energy_and_standstill, title: "4. Subsystem Power Decomposition and Standstill Compute Penalty"}
+  - {id: time_series_telemetry, title: "5. Shift-Long Telemetry and Battery Autonomy Scaling"}
+  - {id: trade_off_frontiers, title: "6. Multi-Objective Trade-Off Frontiers (Speed vs Decibels vs Joules)"}
+
+units:
+  success: "%"
+  spl: ""
+  time_to_goal: s
+  path_length: m
+  path_efficiency: ""
+  idling_time: s
+  velocity_mean: m/s
+  velocity_max: m/s
+  energy_total_wh: Wh
+  energy_static_wh: Wh
+  energy_mechanical_wh: Wh
+  energy_thermal_wh: Wh
+  specific_cost_of_transport: ""
+  e_cot: ""
+  kcsc_wh: Wh
+  battery_soc_drop_pct: "%"
+  aeps_linear_s: s
+  ped_max_exposure_dba: dBA
+  ped_leq_exposure_dba: dBA
+  ped_max_startle_factor: dBA/s
+  total_sound_energy_joules: J
+  personal_space_intrusion_integral: "m·s"
+  total_time_in_personal_space: s
+  timeseries_power_total_w: W
+  timeseries_power_static_w: W
+  timeseries_power_mechanical_w: W
+  timeseries_power_thermal_w: W
+  timeseries_battery_soc: "%"
+  timeseries_time_s: s
+  timeseries_velocity_linear: m/s
+
+plots:
+  # ============================================================================
+  # 1. Executive Performance Scorecard and Macro Radar Profile
+  # ============================================================================
+  - id: fleet_summary_table
+    type: table
+    title: "Library Retrieval Executive Performance Scorecard"
+    data_key: "*"
+    layout_group: executive_overview
+    options:
+      group_by: [local_planner]
+      columns:
+        - {metric: success, label: "Success Rate (%)", format: "{:.1f}%"}
+        - {metric: time_to_goal, label: "Mission Time (s)", format: "{:.1f}"}
+        - {metric: velocity_mean, label: "Mean Speed (m/s)", format: "{:.2f}"}
+        - {metric: path_length, label: "Haulage Distance (m)", format: "{:.1f}"}
+        - {metric: energy_total_wh, label: "Total Energy (Wh)", format: "{:.2f}"}
+        - {metric: energy_static_wh, label: "Static Drain (Wh)", format: "{:.2f}"}
+        - {metric: idling_time, label: "Standstill Time (s)", format: "{:.1f}"}
+        - {metric: specific_cost_of_transport, label: "S-CoT", format: "{:.2f}"}
+        - {metric: kcsc_wh, label: "KCSC (Wh)", format: "{:.2f}"}
+        - {metric: ped_leq_exposure_dba, label: "Lounge Leq (dBA)", format: "{:.1f}"}
+        - {metric: aeps_linear_s, label: "Lounge AEPS (s)", format: "{:.2f}"}
+
+  - id: radar_fleet_profile
+    type: radar
+    title: "Multi-Domain Fleet Radar Profile (Efficiency vs Acoustics vs Energy)"
+    data_key: "*"
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: executive_overview
+    options:
+      metrics: [path_efficiency, velocity_mean, specific_cost_of_transport, kcsc_wh, ped_leq_exposure_dba, aeps_linear_s]
+
+  - id: violin_time_to_goal
+    type: violin
+    title: "Mission Retrieval Duration (Distribution Across 10 Pick Legs in s)"
+    data_key: time_to_goal
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: executive_overview
+
+  # ============================================================================
+  # 2. Spatial Fleet Trajectories and Macro Routing Archetypes
+  # ============================================================================
+  - id: amr_spatial_trajectories
+    type: trajectory
+    title: "Spatial AMR Fleet Navigation Trajectories Over Library Floorplan"
+    data_key: path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: spatial_archetypes
+    filter: {is_reference: false}
+
+  - id: pedestrian_interaction_paths
+    type: trajectory
+    title: "Pedestrian Cross-Aisle and Reading Room Interaction Trajectories"
+    data_key: pedestrian_path
+    differentiate: local_planner
+    auto_differentiate: false
+    group_by: [stage]
+    layout_group: spatial_archetypes
+    options: {overlay_markers: false}
+
+  - id: violin_path_length
+    type: violin
+    title: "Haulage Path Length Distribution (Odometry Over 10 Pick Legs in m)"
+    data_key: path_length
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: spatial_archetypes
+
+  - id: violin_mean_velocity
+    type: violin
+    title: "Cruising Speed Distribution (Mean Linear Velocity Across Legs in m/s)"
+    data_key: velocity_mean
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: spatial_archetypes
+
+  # ============================================================================
+  # 3. Spatial Acoustic Propagation and Reading Lounge Exposure
+  # ============================================================================
+  - id: acoustic_field_spatial_snapshot
+    type: acoustic_field
+    title: "Spatial Acoustic Propagation Field (Worst Emission Frame Over Stacks and Lounge)"
+    data_key: ped_max_exposure_dba
+    differentiate: local_planner
+    layout_group: environmental_acoustics
+    options:
+      downsample: 2
+      overlay_trajectories: true
+      colormap: "Turbo"
+      vmin: 20.0
+      vmax: 65.0
+
+  - id: violin_acoustic_leq_distribution
+    type: violin
+    title: "Equivalent Continuous Sound Level (L_Aeq in dBA at Lounge Entrance)"
+    data_key: ped_leq_exposure_dba
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: environmental_acoustics
+
+  - id: violin_aeps_study_receptors
+    type: violin
+    title: "Acoustic Exposure in Personal Space (AEPS at Seated Study Carrels)"
+    data_key: aeps_linear_s
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: environmental_acoustics
+
+  - id: violin_startle_factor_comparison
+    type: violin
+    title: "Max Acoustic Startle Factor (dBA/s at Lounge Boundary)"
+    data_key: ped_max_startle_factor
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: environmental_acoustics
+
+  # ============================================================================
+  # 4. Subsystem Power Decomposition and Standstill Compute Penalty
+  # ============================================================================
+  - id: bar_energy_subsystem_breakdown
+    type: bar
+    title: "Subsystem Energy Budget Breakdown (Traction vs Compute vs Thermal Dissipation)"
+    data_key: energy_total_wh
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: energy_and_standstill
+    options:
+      group_by: [local_planner]
+      subsystems: [energy_mechanical_wh, energy_static_wh, energy_thermal_wh]
+
+  - id: violin_standstill_duration
+    type: violin
+    title: "Controller Standstill Duration (Idling Compute Waste per Leg in s)"
+    data_key: idling_time
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: energy_and_standstill
+
+  - id: violin_scot_distribution
+    type: violin
+    title: "Specific Cost of Transport (S-CoT Dimensionless Transport Cost)"
+    data_key: specific_cost_of_transport
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: energy_and_standstill
+
+  - id: violin_kcsc_distribution
+    type: violin
+    title: "Kinematic Cost of Social Compliance (KCSC in Wh per Mission)"
+    data_key: kcsc_wh
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: energy_and_standstill
+
+  # ============================================================================
+  # 5. Shift-Long Telemetry and Battery Autonomy Scaling
+  # ============================================================================
+  - id: timeseries_power_and_battery
+    type: timeseries
+    title: "Instantaneous Power Draw and Battery SOC Depletion Curve Across Picks"
+    data_key: timeseries_power_total_w
+    differentiate: local_planner
+    layout_group: time_series_telemetry
+    group_by: [stage]
+    options:
+      x: timeseries_time_s
+      metrics: [timeseries_power_total_w, timeseries_power_static_w, timeseries_power_mechanical_w, timeseries_power_thermal_w, timeseries_battery_soc]
+
+  - id: timeseries_velocity_profile
+    type: timeseries
+    title: "AMR Linear Speed Profile During Aisle Navigation and Docking Maneuvers"
+    data_key: timeseries_velocity_linear
+    differentiate: local_planner
+    layout_group: time_series_telemetry
+    group_by: [stage]
+    options: {x: timeseries_time_s}
+
+  # ============================================================================
+  # 6. Multi-Objective Trade-Off Frontiers (Speed vs Decibels vs Joules)
+  # ============================================================================
+  - id: scatter_speed_vs_acoustics
+    type: scatter
+    title: "Throughput-Acoustic Frontier (Mean Velocity vs. Study Lounge AEPS)"
+    data_key: velocity_mean
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: trade_off_frontiers
+    options: {y: aeps_linear_s}
+
+  - id: scatter_compliance_vs_autonomy
+    type: scatter
+    title: "Social Deceleration vs. Energy Overhead (PSII vs. KCSC in Wh)"
+    data_key: personal_space_intrusion_integral
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: trade_off_frontiers
+    options: {y: kcsc_wh}
+
+  - id: scatter_energy_vs_sound
+    type: scatter
+    title: "Joules vs. Decibels Frontier (Total Energy in Wh vs. Peak Leq Noise)"
+    data_key: energy_total_wh
+    differentiate: local_planner
+    auto_differentiate: false
+    layout_group: trade_off_frontiers
+    options: {y: ped_leq_exposure_dba}
+
+  - id: heatmap_metric_correlations
+    type: heatmap
+    title: "Cross-Metric Correlation Matrix (Efficiency vs Acoustics vs Energy)"
+    data_key: "*"
+    layout_group: trade_off_frontiers
+    options:
+      metrics: [time_to_goal, path_length, velocity_mean, idling_time, energy_total_wh, specific_cost_of_transport, kcsc_wh, ped_leq_exposure_dba, aeps_linear_s, ped_max_startle_factor]
+

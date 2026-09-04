@@ -93,6 +93,16 @@ contestants:
     max_angular_vel: 1.60
     angular_acc: 3.00
 
+  - name: hateb-express
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.40
+    linear_acc: 1.50
+    max_angular_vel: 1.50
+    angular_acc: 2.00
+
   # =========================================================================
   # 3. Reduced / Acoustic-Tamed Nav2 Planners (0.35 m/s, Low Acceleration)
   # =========================================================================
@@ -145,116 +155,89 @@ contestants:
     angular_acc: 0.80
 
   # =========================================================================
-  # 4. Deep Reinforcement Learning (DRL) Planners & Regimes
+  # 4. Deep Reinforcement Learning (DRL) Planners (Native Policy Kinematics)
   # =========================================================================
   - name: crowdnav-standard
     mobile:
       driver: drl
       planner: crowdnav
-    max_linear_vel: 0.80
-
-  - name: crowdnav-express
-    mobile:
-      driver: drl
-      planner: crowdnav
-    max_linear_vel: 1.40
-    linear_acc: 2.50
-
-  - name: crowdnav-reduced
-    mobile:
-      driver: drl
-      planner: crowdnav
-    max_linear_vel: 0.35
-    linear_acc: 0.60
 
   - name: drlvo-standard
     mobile:
       driver: drl
       planner: drlvo
-    max_linear_vel: 0.80
-
-  - name: drlvo-express
-    mobile:
-      driver: drl
-      planner: drlvo
-    max_linear_vel: 1.40
-    linear_acc: 2.50
-
-  - name: drlvo-reduced
-    mobile:
-      driver: drl
-      planner: drlvo
-    max_linear_vel: 0.35
-    linear_acc: 0.60
 
   - name: kdma-standard
     mobile:
       driver: drl
       planner: kdma
-    max_linear_vel: 0.80
 
   - name: rlrvo-standard
     mobile:
       driver: drl
       planner: rlrvo
-    max_linear_vel: 0.80
 
   - name: attngraph-standard
     mobile:
       driver: drl
       planner: attngraph
-    max_linear_vel: 0.80
 
   - name: sicnav-standard
     mobile:
       driver: drl
       planner: sicnav
-    max_linear_vel: 0.80
 
   - name: cadrl-standard
     mobile:
       driver: drl
       planner: cadrl
-    max_linear_vel: 0.80
 
   - name: cd_sarl-standard
     mobile:
       driver: drl
       planner: cd-sarl
-    max_linear_vel: 0.80
 
   - name: crowdsurfer-standard
     mobile:
       driver: drl
       planner: crowdsurfer
-    max_linear_vel: 0.80
 
   - name: dsrnn-standard
     mobile:
       driver: drl
       planner: dsrnn
-    max_linear_vel: 0.80
 
   - name: gensafenav-standard
     mobile:
       driver: drl
       planner: gensafenav
-    max_linear_vel: 0.80
+
+  - name: height-standard
+    mobile:
+      driver: drl
+      planner: height
+
+  - name: her_drl-standard
+    mobile:
+      driver: drl
+      planner: her-drl
+
+  - name: navistar-standard
+    mobile:
+      driver: drl
+      planner: navistar
 
   - name: navrep-standard
     mobile:
       driver: drl
       planner: navrep
-    max_linear_vel: 0.80
 
   - name: scope-standard
     mobile:
       driver: drl
       planner: scope
-    max_linear_vel: 0.80
 
   - name: sonic-standard
     mobile:
       driver: drl
       planner: sonic
-    max_linear_vel: 0.80
