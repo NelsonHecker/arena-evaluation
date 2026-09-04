@@ -859,7 +859,7 @@ class BenchmarkRunner(ArenaMixinNode):
         awaitable: typing.Awaitable[_T],
         what: str,
         *,
-        inactivity_timeout: float = 120.0,
+        inactivity_timeout: float = 300.0,
         max_total_timeout: float = 600.0,
         check_interval: float = 15.0,
     ) -> _T:
@@ -1225,8 +1225,10 @@ class BenchmarkRunner(ArenaMixinNode):
                     _log.error(f"[{ep_idx + 1}/{step.episodes}] {step.key} env={env_id} goal rejected ({exc}); env action server is wedged, abandoning env")
                     return _result("failed", StepErrorKind.ENV_SETUP, f"run_episode goal rejected: {exc}")
 
+                budget = self._episode_budget(step)
+                max_sim = (budget * 1.5 + 30.0) if (budget is not None and budget > 0) else None
                 try:
-                    result_obj = await self._await_episode_result(ac, goal_handle, env_id)
+                    result_obj = await self._await_episode_result(ac, goal_handle, env_id, max_sim_duration=max_sim)
                 except _SimStalled:
                     episodes_failed += 1
                     stalled = True
@@ -1368,10 +1370,18 @@ class BenchmarkRunner(ArenaMixinNode):
             return _result(status, StepErrorKind.EPISODE_TIMEOUT, f"sim stalled {_SIM_STALL_S:.0f}s")
         return _result(status)
 
-    async def _await_episode_result(self, ac: ActionClientWrapper, goal_handle: object, env_id: int) -> object:
-        """Await an episode result with no wall ceiling, raising _SimStalled if the sim clock freezes outside a reset."""
+    async def _await_episode_result(
+        self,
+        ac: ActionClientWrapper,
+        goal_handle: object,
+        env_id: int,
+        *,
+        max_sim_duration: float | None = None,
+    ) -> object:
+        """Await an episode result with no wall ceiling, raising _SimStalled if the sim clock freezes outside a reset or exceeds max_sim_duration."""
         result_task = asyncio.ensure_future(self._await_alive(ac.await_result(goal_handle), env_id=env_id, what=f"run_episode result on env {env_id}"))
-        last_sim = self.sim_time.to_seconds()
+        start_sim = self.sim_time.to_seconds()
+        last_sim = start_sim
         last_move = time.monotonic()
         try:
             while True:
@@ -1379,6 +1389,8 @@ class BenchmarkRunner(ArenaMixinNode):
                 if result_task in done:
                     return result_task.result()
                 now_sim = self.sim_time.to_seconds()
+                if max_sim_duration is not None and (now_sim - start_sim) >= max_sim_duration:
+                    raise _SimStalled(f"episode sim duration {now_sim - start_sim:.1f}s exceeded max limit of {max_sim_duration:.1f}s on env {env_id}")
                 if now_sim > last_sim or self._env_resetting.get(env_id, False):
                     last_sim = now_sim
                     last_move = time.monotonic()
@@ -1391,7 +1403,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 with contextlib.suppress(asyncio.CancelledError):
                     await asyncio.gather(result_task, return_exceptions=True)
 
-    async def _spawn_and_setup_env(self, launch_step: Step, *, inactivity_timeout: float = 120.0) -> tuple[int, str] | None:
+    async def _spawn_and_setup_env(self, launch_step: Step, *, inactivity_timeout: float = 300.0) -> tuple[int, str] | None:
         """Spawn one env booting launch_step's world and set up its clients.
         Tracks active progress (log growth) and only times out if completely stalled."""
         registered: list[int] = []

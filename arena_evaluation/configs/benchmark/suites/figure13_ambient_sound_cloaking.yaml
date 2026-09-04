@@ -1,0 +1,42 @@
+name: figure13_ambient_sound_cloaking
+description: 'Figure 13: Ambient Sound Cloaking: High-Ambient Atrium Masking vs. Quiet
+  Bullpen Throttling'
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_uniform_express
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig13_uniform_express
+- name: stage_uniform_crawl
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig13_uniform_crawl
+- name: stage_ambient_cloaking
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig13_ambient_cloaking

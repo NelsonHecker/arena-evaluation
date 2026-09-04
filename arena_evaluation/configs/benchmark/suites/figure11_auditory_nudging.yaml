@@ -1,0 +1,31 @@
+name: figure11_auditory_nudging
+description: 'Figure 11: Auditory Nudging vs. Startle Shock: Blind 90-Degree Corner
+  Encounter & Acoustic Diffraction'
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_unmitigated_corner
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig11_startle_blind_corner
+- name: stage_auditory_nudged
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig11_auditory_nudging

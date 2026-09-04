@@ -1,0 +1,31 @@
+name: figure10_hesitation_energy_trap
+description: 'Figure 10: Hesitation Energy Trap & Detour Routing: Doorway Bottleneck
+  Freeze vs. Perimeter Detour Loop'
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_doorway_freeze
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig10_hesitation_direct
+- name: stage_perimeter_detour
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig10_hesitation_detour

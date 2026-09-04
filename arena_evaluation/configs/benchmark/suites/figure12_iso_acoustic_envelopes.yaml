@@ -1,0 +1,31 @@
+name: figure12_iso_acoustic_envelopes
+description: 'Figure 12: Dynamic Iso-Acoustic Safe Envelopes: Flat Crawling vs. Distance-Stepped
+  Velocity in Quiet Bullpen'
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_flat_crawl
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig12_flat_crawling
+- name: stage_stepped_envelope
+  map: office_campus_master
+  robot: jackal
+  episodes: 3
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig12_stepped_envelope
