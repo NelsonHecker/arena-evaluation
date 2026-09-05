@@ -49,6 +49,7 @@ _ARENA_SIGINT_GRACE_S = 15.0
 _ARENA_SIGTERM_GRACE_S = 5.0
 _ARENA_ORPHAN_GRACE_S = 1.0
 _SIM_STALL_S = 60.0
+_RESET_STALL_S = 120.0
 _MAX_SIM_DEATHS = 3
 _LOOP_DEADLINE_S = 120.0
 _HUNG_EXIT_CODE = 4
@@ -1373,16 +1374,16 @@ class BenchmarkRunner(ArenaMixinNode):
     async def _await_episode_result(
         self,
         ac: ActionClientWrapper,
-        goal_handle: object,
+        goal_handle: rclpy.action.client.ClientGoalHandle,
         env_id: int,
-        *,
         max_sim_duration: float | None = None,
     ) -> object:
-        """Await an episode result with no wall ceiling, raising _SimStalled if the sim clock freezes outside a reset or exceeds max_sim_duration."""
+        """Await an episode result with no wall ceiling, raising _SimStalled if the sim clock freezes outside a reset, exceeds max_sim_duration, or if a reset stalls."""
         result_task = asyncio.ensure_future(self._await_alive(ac.await_result(goal_handle), env_id=env_id, what=f"run_episode result on env {env_id}"))
         start_sim = self.sim_time.to_seconds()
         last_sim = start_sim
         last_move = time.monotonic()
+        reset_start: float | None = None
         try:
             while True:
                 done, _ = await asyncio.wait({result_task}, timeout=1.0)
@@ -1391,7 +1392,19 @@ class BenchmarkRunner(ArenaMixinNode):
                 now_sim = self.sim_time.to_seconds()
                 if max_sim_duration is not None and (now_sim - start_sim) >= max_sim_duration:
                     raise _SimStalled(f"episode sim duration {now_sim - start_sim:.1f}s exceeded max limit of {max_sim_duration:.1f}s on env {env_id}")
-                if now_sim > last_sim or self._env_resetting.get(env_id, False):
+
+                if self._env_resetting.get(env_id, False):
+                    now_mono = time.monotonic()
+                    if reset_start is None:
+                        reset_start = now_mono
+                    elif now_mono - reset_start >= _RESET_STALL_S:
+                        raise _SimStalled(f"env {env_id} reset stalled for {_RESET_STALL_S:.0f}s")
+                    last_move = now_mono
+                    continue
+                else:
+                    reset_start = None
+
+                if now_sim > last_sim:
                     last_sim = now_sim
                     last_move = time.monotonic()
                     continue
