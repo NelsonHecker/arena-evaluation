@@ -8,10 +8,10 @@ launch:
   env.n: 1
 stages:
 - name: stage_doorway_freeze
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
-  timeout: 300.0
+  episodes: 1
+  timeout: 120.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -19,10 +19,10 @@ stages:
     scenario:
       file: fig10_hesitation_direct
 - name: stage_perimeter_detour
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
-  timeout: 300.0
+  episodes: 1
+  timeout: 120.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario

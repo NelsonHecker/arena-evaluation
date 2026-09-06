@@ -1,0 +1,19 @@
+name: figure9_office_disturbance
+description: "Figure 9: Multi-Zone Office Transit & Tiered Congestion in office_1"
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: office_desk_tour
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig4_office_desk_service

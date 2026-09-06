@@ -1,0 +1,108 @@
+name: figure10_to_13_master
+description: 'ICRA 2027 Master Suite: Figures 10, 11, 12, and 13 Socio-Acoustic &
+  Energetic Benchmark on office_1'
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: fig10_stage1_doorway_freeze
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig10_hesitation_direct
+- name: fig10_stage2_perimeter_detour
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig10_hesitation_detour
+- name: fig11_stage1_unmitigated_corner
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig11_startle_blind_corner
+- name: fig11_stage2_auditory_nudged
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig11_auditory_nudging
+- name: fig12_stage1_flat_crawl
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig12_flat_crawling
+- name: fig12_stage2_stepped_envelope
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig12_stepped_envelope
+- name: fig13_stage1_uniform_express
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig13_uniform_express
+- name: fig13_stage2_uniform_crawl
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig13_uniform_crawl
+- name: fig13_stage3_ambient_cloaking
+  map: office_1
+  robot: jackal
+  episodes: 1
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: fig13_ambient_cloaking

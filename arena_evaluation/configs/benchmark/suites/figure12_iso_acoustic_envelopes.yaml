@@ -8,9 +8,9 @@ launch:
   env.n: 1
 stages:
 - name: stage_flat_crawl
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario
@@ -19,9 +19,9 @@ stages:
     scenario:
       file: fig12_flat_crawling
 - name: stage_stepped_envelope
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario

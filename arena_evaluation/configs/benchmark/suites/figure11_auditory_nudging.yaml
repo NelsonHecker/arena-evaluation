@@ -8,9 +8,9 @@ launch:
   env.n: 1
 stages:
 - name: stage_unmitigated_corner
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario
@@ -19,9 +19,9 @@ stages:
     scenario:
       file: fig11_startle_blind_corner
 - name: stage_auditory_nudged
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario

@@ -104,20 +104,20 @@ contestants:
     angular_acc: 2.00
 
   # =========================================================================
-  # 3. Reduced / Acoustic-Tamed Nav2 Planners (0.35 m/s, Low Acceleration)
+  # 3. Acoustic-Tamed Nav2 Planners (0.35 m/s, Low Acceleration)
   # =========================================================================
-  - name: dwb-reduced
+  - name: dwb-acoustic-tamed
     mobile:
       driver: nav2
       local_planner: dwb
       inter_planner: navigate_to_pose_w_replanning_and_recovery
     max_linear_vel: 0.35
-    linear_acc: 0.60
-    linear_decel: -0.60
+    linear_acc: 0.75
+    linear_decel: -0.75
     max_angular_vel: 0.80
     angular_acc: 1.00
 
-  - name: rpp-reduced
+  - name: rpp-acoustic-tamed
     mobile:
       driver: nav2
       local_planner: regulated_pure_pursuit
@@ -125,7 +125,7 @@ contestants:
     max_linear_vel: 0.35
     max_angular_vel: 0.80
 
-  - name: graceful-reduced
+  - name: graceful-acoustic-tamed
     mobile:
       driver: nav2
       local_planner: graceful
@@ -133,26 +133,26 @@ contestants:
     max_linear_vel: 0.35
     max_angular_vel: 0.80
 
-  - name: mppi-reduced
+  - name: mppi-acoustic-tamed
     mobile:
       driver: nav2
       local_planner: mppi
       inter_planner: navigate_to_pose_w_replanning_and_recovery
     max_linear_vel: 0.35
-    linear_acc: 0.60
-    linear_decel: -0.60
+    linear_acc: 0.75
+    linear_decel: -0.75
     max_angular_vel: 0.80
     angular_acc: 1.00
 
-  - name: hateb-reduced
+  - name: hateb-acoustic-tamed
     mobile:
       driver: nav2
       local_planner: hateb
       inter_planner: navigate_to_pose_w_replanning_and_recovery
     max_linear_vel: 0.35
-    linear_acc: 0.50
+    linear_acc: 0.35
     max_angular_vel: 0.80
-    angular_acc: 0.80
+    angular_acc: 0.50
 
   # =========================================================================
   # 4. Deep Reinforcement Learning (DRL) Planners (Native Policy Kinematics)

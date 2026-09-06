@@ -8,9 +8,9 @@ launch:
   env.n: 1
 stages:
 - name: stage_uniform_express
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario
@@ -19,9 +19,9 @@ stages:
     scenario:
       file: fig13_uniform_express
 - name: stage_uniform_crawl
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario
@@ -30,9 +30,9 @@ stages:
     scenario:
       file: fig13_uniform_crawl
 - name: stage_ambient_cloaking
-  map: office_campus_master
+  map: office_1
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario

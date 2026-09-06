@@ -1,0 +1,133 @@
+name: socio_acoustic_nav2_planners
+description: 'ICRA 2027 Socio-Acoustic Nav2 Benchmark: 5 Controllers x 3 Kinematic
+  Regimes (Express 1.4m/s, Standard 0.8m/s, Acoustic-Tamed 0.35m/s)'
+contestants:
+- name: dwb-standard
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.8
+  linear_acc: 1.5
+  linear_decel: -1.5
+  max_angular_vel: 1.2
+  angular_acc: 2.0
+- name: rpp-standard
+  mobile:
+    driver: nav2
+    local_planner: regulated_pure_pursuit
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.8
+  max_angular_vel: 1.2
+- name: graceful-standard
+  mobile:
+    driver: nav2
+    local_planner: graceful
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.8
+  max_angular_vel: 1.2
+- name: mppi-standard
+  mobile:
+    driver: nav2
+    local_planner: mppi
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.8
+  linear_acc: 1.5
+  linear_decel: -1.5
+  max_angular_vel: 1.2
+  angular_acc: 2.0
+- name: hateb-standard
+  mobile:
+    driver: nav2
+    local_planner: hateb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.8
+  linear_acc: 0.8
+  max_angular_vel: 1.2
+  angular_acc: 1.0
+- name: dwb-express
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 1.4
+  linear_acc: 2.5
+  linear_decel: -2.5
+  max_angular_vel: 1.6
+  angular_acc: 3.0
+- name: rpp-express
+  mobile:
+    driver: nav2
+    local_planner: regulated_pure_pursuit
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 1.4
+  max_angular_vel: 1.6
+- name: graceful-express
+  mobile:
+    driver: nav2
+    local_planner: graceful
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 1.4
+  max_angular_vel: 1.6
+- name: mppi-express
+  mobile:
+    driver: nav2
+    local_planner: mppi
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 1.4
+  linear_acc: 2.5
+  linear_decel: -2.5
+  max_angular_vel: 1.6
+  angular_acc: 3.0
+- name: hateb-express
+  mobile:
+    driver: nav2
+    local_planner: hateb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 1.4
+  linear_acc: 1.5
+  max_angular_vel: 1.5
+  angular_acc: 2.0
+- name: dwb-acoustic-tamed
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.35
+  linear_acc: 0.75
+  linear_decel: -0.75
+  max_angular_vel: 0.8
+  angular_acc: 1.0
+- name: rpp-acoustic-tamed
+  mobile:
+    driver: nav2
+    local_planner: regulated_pure_pursuit
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.35
+  max_angular_vel: 0.8
+- name: graceful-acoustic-tamed
+  mobile:
+    driver: nav2
+    local_planner: graceful
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.35
+  max_angular_vel: 0.8
+- name: mppi-acoustic-tamed
+  mobile:
+    driver: nav2
+    local_planner: mppi
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.35
+  linear_acc: 0.75
+  linear_decel: -0.75
+  max_angular_vel: 0.8
+  angular_acc: 1.0
+- name: hateb-acoustic-tamed
+  mobile:
+    driver: nav2
+    local_planner: hateb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+  max_linear_vel: 0.35
+  linear_acc: 0.35
+  max_angular_vel: 0.8
+  angular_acc: 0.5
