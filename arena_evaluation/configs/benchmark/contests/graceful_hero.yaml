@@ -1,0 +1,26 @@
+name: graceful_hero
+description: used for hero images for smooth trajectory
+contestants:
+  - name: graceful-standard
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.00
+    max_angular_vel: 1.20
+
+  - name: graceful-express
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.80
+    max_angular_vel: 1.60
+
+  - name: graceful-acoustic-tamed
+    mobile:
+      driver: nav2
+      local_planner: graceful
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    max_angular_vel: 0.80

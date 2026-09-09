@@ -20,8 +20,10 @@ class SeabornRenderer:
             HistogramRenderer,
             HeatmapRenderer,
             LineRenderer,
+            TimeseriesRenderer,
             AcousticFieldRenderer,
             AcousticFieldAnimationRenderer,
+            AcousticFieldTextureRenderer,
         )
 
         self.renderers = {
@@ -34,8 +36,10 @@ class SeabornRenderer:
             "histogram": HistogramRenderer,
             "heatmap": HeatmapRenderer,
             "line": LineRenderer,
+            "timeseries": TimeseriesRenderer,
             "acoustic_field": AcousticFieldRenderer,
             "acoustic_field_animation": AcousticFieldAnimationRenderer,
+            "acoustic_field_texture": AcousticFieldTextureRenderer,
         }
 
         from .color_utils import set_global_color_palette

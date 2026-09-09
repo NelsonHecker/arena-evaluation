@@ -34,6 +34,8 @@ def _handle_acoustic(args: argparse.Namespace) -> None:
         _acoustic_animate(df, args)
     elif args.acoustic_command == "snapshot":
         _acoustic_snapshot(df, args)
+    elif args.acoustic_command == "texture":
+        _acoustic_texture(df, args)
 
 
 def _acoustic_list(df: "pl.DataFrame") -> None:
@@ -359,6 +361,83 @@ def _acoustic_snapshot(df: "pl.DataFrame", args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _acoustic_texture(df: "pl.DataFrame", args: argparse.Namespace) -> None:
+    """Render a borderless raw acoustic MP4 texture for Blender floor mapping."""
+    episode_id = _resolve_episode(df, args.episode)
+    if episode_id is None:
+        sys.exit(1)
+
+    from arena_evaluation.presentation.plot_types.acoustic_field import AcousticFieldRenderer
+    from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
+    import polars as pl
+
+    renderer = AcousticFieldRenderer(None)
+    renderer.run_dir = args.benchmark_dir
+
+    map_name = None
+    metrics_path = args.benchmark_dir / "combined_metrics.parquet"
+    if not metrics_path.exists():
+        metrics_path = args.benchmark_dir / "metrics.parquet"
+    if metrics_path.exists():
+        from arena_evaluation.processing.parquet_store import ParquetStore
+        metrics_df, _ = ParquetStore.read(metrics_path)
+        if "map" in metrics_df.columns and len(metrics_df) > 0:
+            map_name = metrics_df["map"][0]
+
+    if not map_name:
+        print("Error: could not determine map name from metrics.")
+        sys.exit(1)
+
+    result = renderer._load_grid_and_meta(map_name, run_dir=args.benchmark_dir)
+    if result is None:
+        print(f"Error: could not load map '{map_name}'.")
+        sys.exit(1)
+
+    grid, meta = result
+    resolution = meta["resolution"]
+    ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
+
+    episode_df = AcousticFieldRenderer._load_episode_data(args.benchmark_dir, episode_id)
+    if episode_df is None:
+        print(f"Error: no topic data for {episode_id}. Run 'evaluation extract' first.")
+        sys.exit(1)
+
+    from arena_evaluation.processing.acoustics.door_map import door_segments
+    doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=args.benchmark_dir)
+
+    state_timeline = None
+    semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
+    if semantic_path.exists():
+        semantic_df = pl.read_parquet(semantic_path)
+        state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
+
+    out_path = args.output or (args.benchmark_dir / "plots" / f"{episode_id}_acoustic_raw.mp4")
+
+    print(f"Rendering raw texture video for {episode_id} ({len(episode_df)} data frames)...")
+    print(f"  fps={args.fps}, vmin={args.vmin}, vmax={args.vmax}, downsample={args.downsample}")
+    print(f"  doors: {len(doors)} found" + (f", timeline: {'present' if state_timeline else 'ABSENT'}" if doors else ""))
+
+    result_path = renderer.render_raw_texture_video(
+        episode_df, grid, resolution, ox, oy, doors,
+        state_timeline=state_timeline,
+        out_path=out_path,
+        downsample=args.downsample,
+        fps=args.fps,
+        vmin=args.vmin,
+        vmax=args.vmax,
+        max_frames=args.max_frames,
+        map_name=map_name,
+        episode_id=episode_id,
+        manifest_out=args.manifest_out,
+    )
+
+    if result_path:
+        print(f"Texture video saved to: {result_path}")
+    else:
+        print("Texture video generation failed.")
+        sys.exit(1)
+
+
 def setup_acoustic_subparsers(subparsers):
     """Add acoustic subcommands to the main parser."""
     acoustic_parser = subparsers.add_parser(
@@ -408,3 +487,26 @@ def setup_acoustic_subparsers(subparsers):
                                help="Disable trajectory overlay.")
     acoustic_snap.add_argument("--output", type=pathlib.Path, default=None, metavar="PATH",
                                help="Override output path (default: plots/{episode}_acoustic_snapshot.png).")
+
+    # acoustic texture
+    acoustic_tex = acoustic_sub.add_parser(
+        "texture",
+        help="Render borderless raw acoustic MP4 texture for Blender floor mapping.",
+    )
+    acoustic_tex.add_argument("--benchmark-dir", type=pathlib.Path, required=True,
+                              metavar="DIR", help="Path to benchmark directory.")
+    acoustic_tex.add_argument("--episode", type=str, default="worst", metavar="EP",
+                              help="Episode ID, 'worst', 'loudest-source', or 'max-total' (default: worst).")
+    acoustic_tex.add_argument("--fps", type=float, default=30.0, help="Output frame rate (default: 30).")
+    acoustic_tex.add_argument("--vmin", type=float, default=20.0,
+                              help="Pinned color-scale floor in dBA (default: 20).")
+    acoustic_tex.add_argument("--vmax", type=float, default=60.0,
+                              help="Pinned color-scale ceiling in dBA (default: 60).")
+    acoustic_tex.add_argument("--downsample", type=int, default=2,
+                              help="Solver grid downsample (default: 2).")
+    acoustic_tex.add_argument("--max-frames", type=int, default=0,
+                              help="Cap rendered frames; 0 = full duration (default: 0).")
+    acoustic_tex.add_argument("--output", type=pathlib.Path, default=None, metavar="PATH",
+                              help="Override output path (default: plots/{episode}_acoustic_raw.mp4).")
+    acoustic_tex.add_argument("--manifest-out", type=pathlib.Path, default=None, metavar="PATH",
+                              help="Override texture manifest path.")

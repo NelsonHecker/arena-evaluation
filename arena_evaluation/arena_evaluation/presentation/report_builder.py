@@ -45,6 +45,65 @@ def data_file_for(data_source: str | None) -> str | None:
     return None
 
 
+def _default_hero_episode(benchmark_dir: pathlib.Path) -> str:
+    """First episode directory that has extracted topics, else a clear error."""
+    episodes = benchmark_dir / "episodes"
+    if episodes.is_dir():
+        for d in sorted(episodes.glob("episode_*")):
+            if (d / "topics").is_dir():
+                return d.name
+    raise FileNotFoundError(
+        f"No episode with extracted topics under {episodes}; run "
+        f"'evaluation process --benchmark-dir {benchmark_dir.name}' first."
+    )
+
+
+def _build_hero_timeseries(benchmark_dir: pathlib.Path, **opts) -> pathlib.Path:
+    """data_source_builder: hero_timeseries -> hero_timeseries.parquet."""
+    from arena_evaluation.paper.hero_timeseries import build_hero_timeseries
+
+    episode = opts.get("episode") or _default_hero_episode(benchmark_dir)
+    return build_hero_timeseries(
+        benchmark_dir,
+        episode,
+        benchmark_dir / "hero_timeseries.parquet",
+        map_name=opts.get("map"),
+    )
+
+
+_DATA_BUILDERS = {
+    "hero_timeseries": _build_hero_timeseries,
+}
+
+
+def _materialize_data_source(
+    benchmark_dir: pathlib.Path,
+    manifest: "VizManifest",
+    data_file: str | None,
+) -> None:
+    """Build the manifest's data file on demand when it is missing."""
+    if not data_file or not manifest.data_source_builder:
+        return
+    target = benchmark_dir / data_file
+    if target.exists():
+        return
+    if not benchmark_dir.is_dir():
+        return
+    builder = _DATA_BUILDERS.get(manifest.data_source_builder)
+    if builder is None:
+        print(
+            f"  [warn] Unknown data_source_builder '{manifest.data_source_builder}' "
+            f"in manifest {manifest.name!r}."
+        )
+        return
+    print(f"  Building {data_file} via builder '{manifest.data_source_builder}' ...")
+    try:
+        out = builder(benchmark_dir, **dict(manifest.builder_options))
+        print(f"  Wrote {out}")
+    except Exception as e:  # surface, don't abort the whole report
+        print(f"  [warn] data_source_builder '{manifest.data_source_builder}' failed: {e}")
+
+
 def _has_values(df: "pl.DataFrame", col: str) -> bool:
     """Check if column exists and contains at least one non-null value."""
     return col in df.columns and bool(df[col].is_not_null().any())
@@ -187,6 +246,9 @@ class ReportBuilder:
         data_file = None
         if instance._manifest_obj is not None:
             data_file = data_file_for(instance._manifest_obj.data_source)
+            if data_file and instance._manifest_obj.data_source_builder:
+                for src in source_dirs:
+                    _materialize_data_source(pathlib.Path(src), instance._manifest_obj, data_file)
         instance._merged_df = cls._load_and_merge(source_dirs, data_file=data_file)
         return instance
 
@@ -234,6 +296,8 @@ class ReportBuilder:
     def _load_primary_frame(self, manifest: VizManifest) -> pl.DataFrame | None:
         """Load the manifest's primary data frame (from benchmark_dir)."""
         data_file = data_file_for(manifest.data_source)
+        if data_file and manifest.data_source_builder:
+            _materialize_data_source(self.benchmark_dir, manifest, data_file)
         if data_file:
             target_path = self.benchmark_dir / data_file
             if not target_path.exists():

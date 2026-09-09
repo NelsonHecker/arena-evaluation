@@ -1,0 +1,19 @@
+name: hero_grand_tour
+description: "Master Socio-Acoustic Hero Tour in office_1"
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_hero_grand_tour
+  map: office_1
+  robot: jackal
+  episodes: 2
+  timeout: 300.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: hero_grand_tour3

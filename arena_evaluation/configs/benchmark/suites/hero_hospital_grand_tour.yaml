@@ -1,0 +1,19 @@
+name: hero_hospital_grand_tour
+description: "Master Socio-Acoustic Hero Tour in hospital_1"
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+- name: stage_hero_hospital_grand_tour
+  map: hospital_1
+  robot: jackal
+  episodes: 1
+  timeout: 600.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: scenario
+  config:
+    scenario:
+      file: hero_hospital_grand_tour

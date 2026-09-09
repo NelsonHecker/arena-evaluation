@@ -6,9 +6,9 @@ launch:
   env.n: 1
 stages:
 - name: stage_top_door_direct
-  map: hospital_1
+  map: hospital_1a
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario
@@ -18,9 +18,9 @@ stages:
       file: fig8_hospital_door_dilemma_direct
 
 - name: stage_south_door_centerline
-  map: hospital_1
+  map: hospital_1a
   robot: jackal
-  episodes: 3
+  episodes: 1
   timeout: 300.0
   seed: 101
   tm_robots: scenario

@@ -16,4 +16,4 @@ stages:
   tm_obstacles: scenario
   config:
     scenario:
-      file: fig4_office_desk_service
+      file: fig9_office_desk_service

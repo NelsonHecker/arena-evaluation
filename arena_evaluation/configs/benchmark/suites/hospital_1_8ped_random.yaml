@@ -1,0 +1,18 @@
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+stages:
+  - name: hospital_1_8ped_random_jackal
+    map: hospital_1
+    robot: jackal
+    episodes: 15
+    seed: 25346
+    tm_robots: random
+    tm_obstacles: random
+    timeout: 180s
+    config:
+      random:
+        dynamic:
+          min: 8
+          max: 8

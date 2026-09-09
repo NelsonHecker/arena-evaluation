@@ -28,6 +28,57 @@ _CELL_DPI = 150
 _FIELD_VMIN_DBA = 20.0
 
 
+def _write_texture_manifest(
+    manifest_path,
+    *,
+    vmin: float,
+    vmax: float,
+    fps: float,
+    n_frames: int,
+    duration_s: float,
+    map_name: str | None,
+    ox: float,
+    oy: float,
+    eff_res: float,
+    downsample: int,
+    width: int,
+    height: int,
+    episode_id: str | None,
+    mp4_name: str,
+) -> pathlib.Path:
+    """Write the pinned colormap/frame metadata for a raw texture MP4.
+
+    Top-level `texture:` key on purpose: the HUD generator's legacy
+    benchmark-dir yaml scan looks for a `plots:` list, so a texture manifest
+    is ignored there and read only by explicit texture-manifest consumers.
+    """
+    import yaml
+
+    payload = {
+        "texture": {
+            "vmin": float(vmin),
+            "vmax": float(vmax),
+            "cmap": "inferno",
+            "fps": float(fps),
+            "n_frames": int(n_frames),
+            "duration_s": float(duration_s),
+            "map": map_name,
+            "origin": [float(ox), float(oy)],
+            "resolution": float(eff_res),
+            "downsample": int(downsample),
+            "width": int(width),
+            "height": int(height),
+            "episode": episode_id,
+            "mp4": mp4_name,
+        }
+    }
+    manifest_path = pathlib.Path(manifest_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "w") as fh:
+        yaml.safe_dump(payload, fh, sort_keys=False)
+    return manifest_path
+
+
 class AcousticFieldRenderer(BasePlotRenderer):
     PLOT_TYPE = "acoustic_field"
 
@@ -166,6 +217,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(out_path, dpi=_CELL_DPI, bbox_inches="tight")
+
+        # Export raw borderless acoustic heatmap texture for 3D Blender floor mapping
+        try:
+            raw_path = out_path.with_name(f"{out_path.stem}_raw.png")
+            raw_data = np.nan_to_num(render_grid, nan=vmin)
+            plt.imsave(str(raw_path), raw_data, cmap="inferno", origin="upper", vmin=vmin, vmax=vmax)
+        except Exception as _raw_e:
+            logger.debug(f"Failed to save raw texture: {_raw_e}")
+
         plt.close()
         return True
 
@@ -1285,6 +1345,248 @@ class AcousticFieldRenderer(BasePlotRenderer):
         logger.info("Animation saved to %s (%d frames, %d fps)", out_path, len(valid), fps)
         return out_path
 
+    def render_raw_texture_video(
+        self,
+        episode_df: pl.DataFrame,
+        grid: np.ndarray,
+        resolution: float,
+        ox: float,
+        oy: float,
+        doors: dict,
+        state_timeline=None,
+        out_path: pathlib.Path | None = None,
+        downsample: int = 2,
+        fps: float = 30.0,
+        vmin: float = _FIELD_VMIN_DBA,
+        vmax: float = 60.0,
+        movement_eps: float = 0.04,
+        max_frames: int = 0,
+        map_name: str | None = None,
+        episode_id: str | None = None,
+        manifest_out: pathlib.Path | None = None,
+    ) -> pathlib.Path | None:
+        """Render a borderless, full-duration raw MP4 of the acoustic field for
+        Blender floor-texture mapping (MOVIE texture; GEMINI.md section 12
+        invariants: constant vmin/vmax across frames, cv2 writer with RGB->BGR
+        LUT flip, source='MOVIE' compatible frame stream).
+
+        Solver calls are cached over the episode: the attenuation grid is
+        recomputed only when the robot moves more than `movement_eps` or the
+        open-door set changes. Output frames interpolate between cached samples
+        in time, with door-state changes stepped at the interval midpoint.
+        """
+        if compute_attenuations is None:
+            logger.warning("render_raw_texture_video: C++ solver not available.")
+            return None
+
+        rows = episode_df.rows(named=True)
+        n_samples = len(rows)
+        if n_samples == 0:
+            logger.warning("render_raw_texture_video: empty episode frame set.")
+            return None
+
+        time_ns_arr = episode_df["time_ns"].to_numpy()
+        t0_ns = int(time_ns_arr[0])
+        total_duration = float((time_ns_arr[-1] - t0_ns) / 1e9)
+
+        # 1. Downsampled solver grid + door masks
+        if downsample > 1:
+            grid_ds = downsample_occupancy(grid, downsample)
+        else:
+            grid_ds = grid
+        eff_res = resolution * downsample
+        h, w = grid_ds.shape
+
+        doors_ds: dict = {}
+        if doors:
+            for name, (mask, tl_db) in doors.items():
+                m_ds = mask[::downsample, ::downsample] if downsample > 1 else mask
+                doors_ds[name] = (m_ds[:h, :w], tl_db)
+
+        yy, xx = np.mgrid[0:h, 0:w]
+        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
+        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
+
+        # 2. Cached solver samples along the telemetry timeline
+        sample_records: list[dict] = []
+        last_atten = None
+        last_x = last_y = None
+        last_doors: frozenset | None = None
+        c_computed = 0
+
+        for r in rows:
+            t_ns = int(r["time_ns"])
+            t_s = (t_ns - t0_ns) / 1e9
+            rx_m = float(r["pos_x_gt"])
+            ry_m = float(r["pos_y_gt"])
+            source_dba = float(r.get("source_dba") or 40.0)
+            open_set = (
+                state_timeline.open_doors_at(t_ns)
+                if state_timeline is not None
+                else frozenset()
+            )
+
+            if (
+                last_atten is None
+                or open_set != last_doors
+                or np.hypot(rx_m - last_x, ry_m - last_y) > movement_eps
+            ):
+                rx_px = (rx_m - ox) / eff_res
+                ry_px = (ry_m - oy) / eff_res
+                pixel_tl = build_pixel_tl(grid_ds, doors_ds, open_doors=set(open_set))
+                atten = compute_attenuations(
+                    occupancy_grid=grid_ds,
+                    resolution=eff_res,
+                    start_x_px=rx_px,
+                    start_y_px=ry_px,
+                    target_xs_px=tx,
+                    target_ys_px=ty,
+                    wall_tl=47.0,
+                    mic_distance=1.0,
+                    pixel_tl=pixel_tl,
+                )
+                last_atten = atten.reshape((h, w))
+                last_x, last_y, last_doors = rx_m, ry_m, open_set
+                c_computed += 1
+
+            sample_records.append({
+                "t": t_s,
+                "atten": last_atten,
+                "source_dba": source_dba,
+                "open_doors": open_set,
+            })
+
+        logger.info(
+            "render_raw_texture_video: %d solver calls over %d samples (%dx%d grid).",
+            c_computed, n_samples, w, h,
+        )
+
+        # 3. Frame timeline (full duration at fps; max_frames>0 caps for previews)
+        total_frames = int(round(total_duration * fps)) + 1
+        if max_frames and max_frames > 0:
+            total_frames = min(total_frames, max_frames)
+
+        if out_path is None:
+            plots_dir = pathlib.Path(self.run_dir or ".") / "plots"
+            ep_stem = episode_id or "episode_000"
+            out_path = plots_dir / f"{ep_stem}_acoustic_raw.mp4"
+        out_path = pathlib.Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 4. Inferno LUT in BGR order for the cv2 writer
+        import cv2
+        import matplotlib.pyplot as plt
+
+        lut_vals = np.linspace(0.0, 1.0, 256)
+        lut_rgb = (plt.cm.inferno(lut_vals)[:, :3] * 255.0).astype(np.uint8)
+        lut_bgr = np.ascontiguousarray(lut_rgb[:, ::-1])  # RGB -> BGR
+
+        mask_cache: dict[frozenset, np.ndarray] = {}
+
+        def wall_closed_mask(open_set):
+            key = frozenset(open_set)
+            if key in mask_cache:
+                return mask_cache[key]
+            open_dm = np.zeros((h, w), dtype=bool)
+            if doors_ds:
+                for name, (m_ds, _) in doors_ds.items():
+                    if any(_entity_matches_door(name, e) for e in open_set):
+                        open_dm |= m_ds
+            wall_or_closed = (grid_ds == 1) & ~open_dm
+            mask_cache[key] = wall_or_closed
+            return wall_or_closed
+
+        # 5. Encode frames
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+        if not writer.isOpened():
+            logger.error("render_raw_texture_video: could not open cv2 VideoWriter for %s", out_path)
+            return None
+
+        cur_idx = 0
+        for f in range(total_frames):
+            t_target = f / fps
+
+            while cur_idx < n_samples - 2 and sample_records[cur_idx + 1]["t"] < t_target:
+                cur_idx += 1
+
+            s0 = sample_records[cur_idx]
+            s1 = sample_records[min(cur_idx + 1, n_samples - 1)]
+
+            dt = s1["t"] - s0["t"]
+            if dt > 1e-6:
+                alpha = float(np.clip((t_target - s0["t"]) / dt, 0.0, 1.0))
+            else:
+                alpha = 0.0
+
+            if s0["open_doors"] == s1["open_doors"]:
+                atten_i = (1.0 - alpha) * s0["atten"] + alpha * s1["atten"]
+                src_i = (1.0 - alpha) * s0["source_dba"] + alpha * s1["source_dba"]
+                open_set = s0["open_doors"]
+            else:
+                # Step door state at midpoint
+                pick = s0 if alpha < 0.5 else s1
+                atten_i = pick["atten"]
+                src_i = pick["source_dba"]
+                open_set = pick["open_doors"]
+
+            field_dba = np.clip(src_i - atten_i, 0.0, None)
+            rg = np.where(wall_closed_mask(open_set) | np.isinf(field_dba), np.nan, field_dba)
+            raw_data = np.nan_to_num(np.flipud(rg), nan=vmin)
+
+            norm = np.clip((raw_data - vmin) / (vmax - vmin), 0.0, 1.0)
+            idx_grid = (norm * 255.0).astype(np.uint8)
+            writer.write(lut_bgr[idx_grid])
+
+        writer.release()
+
+        # 6. Texture manifest (pinned limits, single source of truth for colorbars)
+        if manifest_out is None:
+            stem = out_path.name
+            if stem.endswith("_acoustic_raw.mp4"):
+                manifest_out = out_path.with_name(
+                    stem[: -len("_acoustic_raw.mp4")] + "_acoustic_texture.yaml"
+                )
+            else:
+                manifest_out = out_path.with_suffix(".yaml")
+        _write_texture_manifest(
+            manifest_out,
+            vmin=vmin, vmax=vmax, fps=fps, n_frames=total_frames,
+            duration_s=total_duration, map_name=map_name, ox=float(ox), oy=float(oy),
+            eff_res=float(eff_res), downsample=downsample, width=w, height=h,
+            episode_id=episode_id, mp4_name=out_path.name,
+        )
+
+        logger.info(
+            "render_raw_texture_video: wrote %s (%d frames @ %.1f fps, vmin=%.0f vmax=%.0f).",
+            out_path, total_frames, fps, vmin, vmax,
+        )
+        return out_path
+
+    def _select_episode(self, work_df: pl.DataFrame, benchmark_dir: pathlib.Path) -> int | None:
+        """Pick the episode for per-episode outputs: explicit spec option, else
+        the worst episode by pedestrian exposure, else the first episode that
+        has topic data on disk, else the first row's episode."""
+        explicit = self.spec.options.get("episode")
+        if explicit is not None:
+            return int(explicit)
+
+        if "episode" not in work_df.columns or len(work_df) == 0:
+            return None
+
+        if "ped_max_exposure_dba" in work_df.columns and work_df["ped_max_exposure_dba"].null_count() < len(work_df):
+            max_idx = work_df["ped_max_exposure_dba"].arg_max()
+            if max_idx is not None:
+                return int(work_df.row(max_idx, named=True).get("episode", 0))
+
+        for ep in work_df["episode"].to_list():
+            ep_name = f"episode_{int(ep):03d}"
+            if (benchmark_dir / "episodes" / ep_name).is_dir() or any(
+                (p / "episodes" / ep_name).is_dir() for p in benchmark_dir.parents
+            ):
+                return int(ep)
+        return int(work_df["episode"][0])
+
 
 class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
     """Manifest-driven acoustic field animation (GIF during report)."""
@@ -1456,6 +1758,112 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
             f'<img src="{gif_rel}" style="max-width:100%;border-radius:4px;" '
             f'alt="{self.spec.title}">'
             f'<br><span style="font-size:0.78em;color:#475569;">'
+            f'{self.spec.title}'
+            f'</span></div>'
+        )
+
+
+class AcousticFieldTextureRenderer(AcousticFieldRenderer):
+    """Manifest-driven borderless raw MP4 texture of the acoustic field,
+    named `<episode>_acoustic_raw.mp4` so `arena_blender_viz` bundle_builder
+    auto-resolves it as the Blender floor MOVIE texture."""
+
+    PLOT_TYPE = "acoustic_field_texture"
+
+    def _resolve_texture_targets(self, work_df: pl.DataFrame, benchmark_dir: pathlib.Path):
+        """Resolve (episode_dir_name, bdir, episode_id) or None."""
+        episode_id = self._select_episode(work_df, benchmark_dir)
+        if episode_id is None:
+            logger.warning("AcousticFieldTextureRenderer: cannot determine episode ID.")
+            return None
+
+        episode_dir_name = f"episode_{int(episode_id):03d}"
+        bdir = benchmark_dir
+        if not (bdir / "episodes" / episode_dir_name).is_dir():
+            for parent in bdir.parents:
+                if (parent / "episodes" / episode_dir_name).is_dir():
+                    bdir = parent
+                    break
+        return episode_dir_name, bdir, episode_id
+
+    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+        """Generate the borderless acoustic MP4 texture + pinned manifest."""
+        if compute_attenuations is None:
+            logger.warning("AcousticFieldTextureRenderer: C++ solver not available.")
+            return
+
+        work_df = self._prepared_df(df)
+        if len(work_df) == 0:
+            return
+
+        map_name = work_df["map"][0] if "map" in work_df.columns else None
+        if not map_name:
+            return
+
+        result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
+        if result is None:
+            return
+        grid, meta = result
+        resolution = meta["resolution"]
+        ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
+
+        downsample = int(self.spec.options.get("downsample", 2))
+        fps = float(self.spec.options.get("fps", 30))
+        vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
+        vmax = float(self.spec.options.get("vmax", 60.0))
+        max_frames = int(self.spec.options.get("max_frames", 0))
+
+        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+        benchmark_dir = self.run_dir if self.run_dir else pathlib.Path(".")
+
+        targets = self._resolve_texture_targets(work_df, benchmark_dir)
+        if targets is None:
+            return
+        episode_dir_name, bdir, episode_id = targets
+
+        episode_df = self._load_episode_data(bdir, episode_dir_name)
+        if episode_df is None:
+            logger.warning("AcousticFieldTextureRenderer: no episode data for %s", episode_dir_name)
+            return
+
+        semantic_path = bdir / "episodes" / episode_dir_name / "topics" / "semantic_snapshot.parquet"
+        state_timeline = None
+        if semantic_path.exists():
+            state_timeline = DoorStateTimeline.from_semantic_frame(pl.read_parquet(semantic_path))
+
+        mp4_path = out_path.parent / f"{episode_dir_name}_acoustic_raw.mp4"
+        manifest_path = out_path.parent / f"{episode_dir_name}_acoustic_texture.yaml"
+
+        self.render_raw_texture_video(
+            episode_df, grid, resolution, ox, oy, doors,
+            state_timeline=state_timeline,
+            out_path=mp4_path,
+            downsample=downsample, fps=fps,
+            vmin=vmin, vmax=vmax,
+            max_frames=max_frames,
+            map_name=map_name,
+            episode_id=episode_dir_name,
+            manifest_out=manifest_path,
+        )
+
+    def render_plotly(self, df: pl.DataFrame) -> str:
+        """Embed the generated texture MP4 in the report."""
+        work_df = self._prepared_df(df)
+        if len(work_df) == 0 or compute_attenuations is None:
+            return ""
+
+        benchmark_dir = self.run_dir if self.run_dir else pathlib.Path(".")
+        targets = self._resolve_texture_targets(work_df, benchmark_dir)
+        if targets is None:
+            return ""
+        episode_dir_name, _, _ = targets
+        mp4_rel = f"plots/{episode_dir_name}_acoustic_raw.mp4"
+        return (
+            f'<div style="text-align:center;">'
+            f'<video src="{mp4_rel}" controls muted loop '
+            f'style="max-width:100%;border-radius:4px;" '
+            f'alt="{self.spec.title}">'
+            f'</video><br><span style="font-size:0.78em;color:#475569;">'
             f'{self.spec.title}'
             f'</span></div>'
         )

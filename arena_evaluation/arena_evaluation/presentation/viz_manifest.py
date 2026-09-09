@@ -29,6 +29,11 @@ class VizManifest(BaseModel):
     description: str | None = None
     # metrics | characterization_samples | characterization_summary | <parquet filename>
     data_source: str = "metrics"
+    # Optional builder that materializes data_source on demand when the parquet
+    # is missing (e.g. hero_timeseries from the episode topic parquets), so a
+    # single `evaluation run/report --report-manifest` call is self-contained.
+    data_source_builder: str | None = None
+    builder_options: dict = Field(default_factory=dict)
     groups: list[ManifestGroup] = Field(default_factory=list)
     summary: list[SummarySpec] = Field(default_factory=list)
     summary_group_by: list[str] | str | None = None

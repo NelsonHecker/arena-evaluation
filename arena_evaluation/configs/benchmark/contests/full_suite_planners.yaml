@@ -60,7 +60,7 @@ contestants:
       driver: nav2
       local_planner: dwb
       inter_planner: navigate_to_pose_w_replanning_and_recovery
-    max_linear_vel: 1.40
+    max_linear_vel: 1.80
     linear_acc: 2.50
     linear_decel: -2.50
     max_angular_vel: 1.60
@@ -71,7 +71,7 @@ contestants:
       driver: nav2
       local_planner: regulated_pure_pursuit
       inter_planner: navigate_to_pose_w_replanning_and_recovery
-    max_linear_vel: 1.40
+    max_linear_vel: 1.80
     max_angular_vel: 1.60
 
   - name: graceful-express
@@ -79,7 +79,7 @@ contestants:
       driver: nav2
       local_planner: graceful
       inter_planner: navigate_to_pose_w_replanning_and_recovery
-    max_linear_vel: 1.40
+    max_linear_vel: 1.80
     max_angular_vel: 1.60
 
   - name: mppi-express
@@ -87,7 +87,7 @@ contestants:
       driver: nav2
       local_planner: mppi
       inter_planner: navigate_to_pose_w_replanning_and_recovery
-    max_linear_vel: 1.40
+    max_linear_vel: 1.80
     linear_acc: 2.50
     linear_decel: -2.50
     max_angular_vel: 1.60
@@ -98,7 +98,7 @@ contestants:
       driver: nav2
       local_planner: hateb
       inter_planner: navigate_to_pose_w_replanning_and_recovery
-    max_linear_vel: 1.40
+    max_linear_vel: 1.80
     linear_acc: 1.50
     max_angular_vel: 1.50
     angular_acc: 2.00

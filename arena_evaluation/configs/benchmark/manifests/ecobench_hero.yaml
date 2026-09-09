@@ -1,0 +1,74 @@
+# EcoBench hero-figure panels, generated through a single
+# `arena evaluation run/report --benchmark-dir <run> --report-manifest ecobench_hero`.
+#
+# Data source: hero_timeseries.parquet (one row per sample). When the parquet
+# is missing, the pipeline materializes it via data_source_builder:
+# `arena_evaluation.paper.hero_timeseries` (power layers + emitted dBA from the
+# topic parquets, received pedestrian exposure via the wall-TL solver).
+manifest_version: "1.0"
+name: ecobench_hero
+title: EcoBench Hero Episode
+description: Hero-figure time-series panels - stacked decomposed power draw (Panel B) and twin-axis acoustic emission vs pedestrian exposure (Panel C).
+data_source: hero_timeseries.parquet
+data_source_builder: hero_timeseries
+builder_options:
+  episode: episode_001
+units:
+  p_mech_w: W
+  p_static_w: W
+  p_heat_w: W
+  p_total_w: W
+  emitted_dba: dBA
+  exposure_dba: dBA
+plots:
+  # Panel B: synchronized time-series power trace, stacked decomposed bands.
+  # Blue mechanical / grey static electronics (42.2 W) / red heat loss, with
+  # the shaded evasion window annotated by its marginal cost.
+  - id: hero_power_stacked
+    type: timeseries
+    title: Decomposed Power Draw
+    data_key: p_total_w
+    options:
+      x: t_s
+      metrics: [p_static_w, p_mech_w, p_heat_w]
+      stacked: true
+      colors:
+        p_static_w: "#aab3bd"
+        p_mech_w: "#2a6f97"
+        p_heat_w: "#c05a4e"
+      shade_window:
+        start: 24.5
+        end: 36.5
+        label: "Marginal Cost: 0.028 Wh"
+        color: "#ffd166"
+        alpha: 0.22
+      ylabel: "Power (W)"
+      figsize: [7.2, 2.8]
+      dpi: 300
+  # Panel C: pedestrian acoustic exposure - emitted drive-noise level (left)
+  # and received exposure at the pedestrian ear (right, wall TL accounted),
+  # with the 100 dBA contact-impulse cutoff. X-axis locked 1:1 with Panel B
+  # (same t_s column).
+  - id: hero_acoustic_exposure
+    type: timeseries
+    title: Acoustic Emission & Pedestrian Exposure
+    data_key: emitted_dba
+    options:
+      x: t_s
+      metrics: [emitted_dba]
+      twin: [exposure_dba]
+      twin_fill: true
+      hline:
+        value: 100.0
+        label: "Contact impulse cutoff (100 dBA)"
+        color: "#b3403a"
+        style: "--"
+        axis: left
+      ylabel: "Emitted L_AF (dBA)"
+      twin_ylabel: "Received exposure (dBA)"
+      twin_same_scale: true
+      colors:
+        emitted_dba: "#357f6e"
+        exposure_dba: "#d9a05b"
+      figsize: [7.2, 2.8]
+      dpi: 300

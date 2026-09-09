@@ -415,11 +415,16 @@ class ProcessingPipeline:
             robots = {name: bundle for name, bundle in bundles.items() if bundle.odom is not None}
             if not robots:
                 any_record = next((b.episode_record for b in bundles.values() if b.episode_record is not None), None)
+                _log.warning(f"episode_{ep.episode_id:03d}: Skipped metrics calculation - no robot bundles found with 'odom' topic. Available topics: {list(bundles.keys())}")
                 return finish([_status_row(ep, metadata, _metadata_robot(metadata, bundles), "no_trajectory", "no odom rows", any_record)])
+
             for robot_name, bundle in robots.items():
                 window = _episode_window(bundle.episode_record)
+                _log.info(f"episode_{ep.episode_id:03d} [{robot_name}]: Determined episode window timestamps -> start_ns={window[0]}, end_ns={window[1]}")
+                
                 tf_gt, pose_source = resolve_pose_source(bundle, window)
                 bundle.tf_gt = tf_gt
+                _log.info(f"episode_{ep.episode_id:03d} [{robot_name}]: Resolved pose source to '{pose_source.kind}' with {pose_source.samples} samples (residual: {pose_source.residual_m}m)")
 
                 peds_count = 0
                 if pose_source.kind == "odom":
@@ -431,6 +436,7 @@ class ProcessingPipeline:
                 robot_pedsim = pedsim_avail and pose_source.kind != "odom"
 
                 available_topics = bundle.available()
+                _log.info(f"episode_{ep.episode_id:03d} [{robot_name}]: Available topic bundle keys: {sorted(list(available_topics))}")
 
                 aligner = TopicAligner()
                 aligned_df = aligner.align(bundle, *window)
@@ -438,8 +444,18 @@ class ProcessingPipeline:
                     aligned_df = aligned_df.collect()
 
                 if aligned_df is None or len(aligned_df) < 5:
-                    reason = f"{0 if aligned_df is None else len(aligned_df)} odom rows inside the episode window"
-                    _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
+                    row_count = 0 if aligned_df is None else len(aligned_df)
+                    reason = f"{row_count} odom rows inside the episode window [{window[0]} to {window[1]}]"
+                    _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: Metrics aborted -> {reason}. Check if simulation time sync or topic name (`env_0/jackal/odom`) matches recording windows.")
+                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
+                    continue
+
+                # Resolve the pose frame once so all calculators share it
+                aligned_df = _resolve_odom_frame(aligned_df)
+                if aligned_df is None or len(aligned_df) < 5:
+                    row_count = 0 if aligned_df is None else len(aligned_df)
+                    reason = f"{row_count} pose rows after telemetry teleport resolution"
+                    _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: Metrics aborted -> {reason}.")
                     all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
                     continue
 

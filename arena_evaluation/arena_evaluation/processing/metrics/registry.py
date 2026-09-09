@@ -140,18 +140,27 @@ class MetricRegistry:
                 
                 # Check topic dependencies
                 skip_due_to_topics = False
+                missing_reqs = []
                 for req in calc.REQUIRED_TOPICS:
                     if isinstance(req, str):
                         if req not in available_topics:
                             skip_due_to_topics = True
+                            missing_reqs.append(req)
                             break
                     elif isinstance(req, (list, tuple, set)):
                         if not any(t in available_topics for t in req):
                             skip_due_to_topics = True
+                            missing_reqs.append(list(req))
                             break
 
                 if skip_due_to_topics:
-                    # Fill with None for schema consistency
+                    _log.info(f"Calculator '{calc_name}' skipped for episode {episode.episode_id}: required topics {missing_reqs} not found in available topics {sorted(list(available_topics))}.")
+                    for key in calc.output_keys():
+                        results[key] = None
+                    continue
+
+                if calc.REQUIRES_PEDSIM and not pedsim_available:
+                    _log.info(f"Calculator '{calc_name}' skipped for episode {episode.episode_id}: requires pedsim data but pedsim_available=False.")
                     for key in calc.output_keys():
                         results[key] = None
                     continue
