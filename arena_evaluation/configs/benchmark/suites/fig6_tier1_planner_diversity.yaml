@@ -1,7 +1,7 @@
 name: fig6_tier1_planner_diversity
 description: 'Tier 1: Multi-Planner Benchmark on the Direct 20-Book Retrieval Mission,
   split into 20 chained single-book episodes (a stuck leg fails only its own book).'
-references: false
+references: true
 launch:
   sim: gazebo
   headless: true
