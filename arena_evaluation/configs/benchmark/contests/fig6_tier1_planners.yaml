@@ -90,3 +90,72 @@ contestants:
       inter_planner: navigate_to_pose_w_replanning_and_recovery
     max_linear_vel: 0.35
     max_angular_vel: 0.80
+
+  # =========================================================================
+  # 4. MPPI (Model Predictive Path Integral - Stochastic Trajectory Optimization)
+  # =========================================================================
+  - name: mppi-express
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.50
+    linear_acc: 2.50
+    linear_decel: -2.50
+    max_angular_vel: 1.80
+    angular_acc: 3.20
+
+  - name: mppi-standard
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 1.50
+    linear_decel: -1.50
+    max_angular_vel: 1.20
+    angular_acc: 2.00
+
+  - name: mppi-acoustic-tamed
+    mobile:
+      driver: nav2
+      local_planner: mppi
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    linear_acc: 0.75
+    linear_decel: -0.75
+    max_angular_vel: 0.80
+    angular_acc: 1.00
+
+  # =========================================================================
+  # 5. HATeb (Human-Aware Timed Elastic Band - Elastic Deformation & Social Safety)
+  # =========================================================================
+  - name: hateb-express
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 1.50
+    linear_acc: 1.50
+    max_angular_vel: 1.50
+    angular_acc: 2.00
+
+  - name: hateb-standard
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.80
+    linear_acc: 0.80
+    max_angular_vel: 1.20
+    angular_acc: 1.00
+
+  - name: hateb-acoustic-tamed
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.35
+    linear_acc: 0.35
+    max_angular_vel: 0.80
+    angular_acc: 0.50
