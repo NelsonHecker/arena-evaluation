@@ -158,11 +158,27 @@ class _HasStateSteps(typing.Protocol):
 _log = logging.getLogger(__name__)
 
 _CAP_KEYS = ("mobile", "arm", "planner")
+_MOBILE_KINEMATICS_KEYS = {
+    "max_linear_vel",
+    "min_linear_vel",
+    "linear_acc",
+    "linear_decel",
+    "max_angular_vel",
+    "min_angular_vel",
+    "angular_acc",
+    "angular_decel",
+    "max_lateral_vel",
+    "min_lateral_vel",
+    "lateral_acc",
+    "lateral_decel",
+}
 
 
 def _launch_key(k: str) -> str:
     """Contest cap keys stay bare (`mobile`, `arm.<x>`, `planner`), launch args live under `robot.`."""
     head = k.split(".", 1)[0]
+    if head in _MOBILE_KINEMATICS_KEYS:
+        return f"robot.mobile.{k}"
     return f"robot.{k}" if head in _CAP_KEYS else k
 
 

@@ -1,18 +1,19 @@
-name: suite_empty_crucible
+name: office_1_render
+description: hospital_1_render
 references: false
 launch:
   sim: gazebo
   headless: true
   env.n: 1
 stages:
-- name: stage_crucible
-  map: map_empty
+- name: office_1_render
+  map: office_1
   robot: jackal
-  episodes: 5
-  timeout: 120.0
+  episodes: 1
+  timeout: 10
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
   config:
     scenario:
-      file: empty_crucible
+      file: fig2_ward_tour_4peds

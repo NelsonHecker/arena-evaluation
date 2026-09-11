@@ -34,15 +34,16 @@ RED = "#c0392b"
 INK = "#2b2f36"
 MUTED = "#8a919b"
 
-SQUARE_FIGSIZE = (5.6, 5.0)
+# 170 x 60 mm banner (full text width x compact strip)
+BANNER_FIGSIZE = (170.0 / 25.4, 60.0 / 25.4)
 
 
 def _stat_line(ax, x, value: str, label: str, accent: str) -> None:
     """Plain, unboxed stat: big bold value with a small caps label beneath."""
-    ax.text(x, 0.62, value, transform=ax.transAxes, ha="center", va="center",
-            fontsize=18, fontweight="bold", color=accent)
-    ax.text(x, 0.20, label.upper(), transform=ax.transAxes, ha="center", va="center",
-            fontsize=7.5, color=MUTED)
+    ax.text(x, 0.60, value, transform=ax.transAxes, ha="center", va="center",
+            fontsize=14, fontweight="bold", color=accent)
+    ax.text(x, 0.16, label.upper(), transform=ax.transAxes, ha="center", va="center",
+            fontsize=6.5, color=MUTED)
 
 
 def _base_style(ax, ylabel: str, xmax: float) -> None:
@@ -63,33 +64,6 @@ def _legend(ax) -> None:
     if handles:
         ax.legend(handles, labels, loc="upper right", frameon=False, fontsize=8,
                   ncol=min(len(handles), 3), handlelength=1.6, borderaxespad=0.6)
-
-
-def _door_events(bench: pathlib.Path, episode_id: str, t_ns: np.ndarray, t_s: np.ndarray):
-    """Red vline events where the open-door set changes, as (t_s, kind)."""
-    import polars as pl
-    from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
-
-    sem = bench / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
-    if not sem.is_file():
-        return []
-    tl = DoorStateTimeline.from_semantic_frame(pl.read_parquet(sem))
-    events = []
-    prev = None
-    for tn, ts in zip(t_ns, t_s):
-        cur = tl.open_doors_at(int(tn))
-        if prev is not None and cur != prev:
-            kind = "door opens" if len(cur) > len(prev) else "door closes"
-            events.append((float(ts), kind))
-        prev = cur
-    # merge adjacent duplicates (same transition reported over several samples)
-    merged = []
-    for ts, kind in events:
-        if merged and merged[-1][1] == kind and ts - merged[-1][0] < 1.5:
-            merged[-1] = (ts, kind)
-        else:
-            merged.append((ts, kind))
-    return merged
 
 
 def _encounter_windows(bench: pathlib.Path, episode_id: str, t_ns: np.ndarray, t_s: np.ndarray,
@@ -153,8 +127,8 @@ def render_power_figure(
 
     total_wh = float(np.trapezoid(p_total, t) / 3600.0)
 
-    fig = plt.figure(figsize=SQUARE_FIGSIZE)
-    gs = fig.add_gridspec(2, 1, height_ratios=[0.8, 3.0], hspace=0.30)
+    fig = plt.figure(figsize=BANNER_FIGSIZE)
+    gs = fig.add_gridspec(2, 1, height_ratios=[0.8, 3.0], hspace=0.06)
 
     cards = fig.add_subplot(gs[0])
     cards.set_xlim(0, 1)
@@ -167,24 +141,20 @@ def render_power_figure(
     ax = fig.add_subplot(gs[1])
     ax.stackplot(
         t, p_mech, p_static, p_heat,
-        labels=["Mechanical Power (P_mech)", "Static Electronics (42.2 W)", "Heat Loss Spikes (P_heat)"],
         colors=[BLUE, GREY, TERRA], alpha=0.9, linewidth=0,
     )
 
     # Pedestrian-encounter markers: light bands where the robot is within the
     # personal band of a pedestrian.
     if encounters:
-        first = True
         for lo, hi in encounters:
-            ax.axvspan(lo, hi, color=RED, alpha=0.08, linewidth=0,
-                       label="Pedestrian encounter" if first else None)
-            first = False
+            ax.axvspan(lo, hi, color=RED, alpha=0.08, linewidth=0)
 
     _base_style(ax, "Power (W)", xmax)
-    _legend(ax)
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=dpi, bbox_inches="tight", facecolor="white")
+    fig.subplots_adjust(left=0.055, right=0.995, top=0.965, bottom=0.16)
+    fig.savefig(out_png, dpi=dpi, facecolor="white")
     plt.close(fig)
     return out_png
 
@@ -196,7 +166,6 @@ def render_acoustic_figure(
     out_png: pathlib.Path,
     *,
     xmax: float = 40.0,
-    door_events: list | None = None,
     dpi: int = 300,
 ) -> pathlib.Path:
     import matplotlib
@@ -207,8 +176,8 @@ def render_acoustic_figure(
     leq = float(10.0 * np.log10(np.mean(10.0 ** (valid / 10.0)))) if len(valid) else float("nan")
     max_recv = float(np.nanmax(exposure)) if len(exposure) else float("nan")
 
-    fig = plt.figure(figsize=SQUARE_FIGSIZE)
-    gs = fig.add_gridspec(2, 1, height_ratios=[0.8, 3.0], hspace=0.30)
+    fig = plt.figure(figsize=BANNER_FIGSIZE)
+    gs = fig.add_gridspec(2, 1, height_ratios=[0.8, 3.0], hspace=0.06)
 
     cards = fig.add_subplot(gs[0])
     cards.set_xlim(0, 1)
@@ -218,26 +187,17 @@ def render_acoustic_figure(
     _stat_line(cards, 0.75, f"{max_recv:.1f} dBA", "Max Received", AMBER)
 
     ax = fig.add_subplot(gs[1])
-    ax.plot(t, emitted, label="Emitted drive noise (L_drive)", color=TEAL, linewidth=2.0)
-    ax.plot(t, exposure, label="Pedestrian received exposure", color=AMBER, linewidth=2.0)
+    ax.plot(t, emitted, color=TEAL, linewidth=2.0)
+    ax.plot(t, exposure, color=AMBER, linewidth=2.0)
 
-    # Door open/close events: red vertical markers annotating the sharp
-    # declines and increases in the traces.
-    if door_events:
-        seen = set()
-        ymax = ax.get_ylim()[1]
-        for ts, kind in door_events:
-            ax.axvline(ts, color=RED, linestyle=":", linewidth=0.9, alpha=0.75)
-            if kind not in seen:
-                ax.text(ts, ymax * 0.99, f" {kind}", rotation=90, ha="left", va="top",
-                        fontsize=6.5, color=RED)
-                seen.add(kind)
+    ax.set_ylim(0.0, 70.0)
+    ax.set_yticks([0, 10, 20, 30, 40, 50, 60, 70])
 
     _base_style(ax, "Level (dBA)", xmax)
-    _legend(ax)
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=dpi, bbox_inches="tight", facecolor="white")
+    fig.subplots_adjust(left=0.055, right=0.995, top=0.965, bottom=0.16)
+    fig.savefig(out_png, dpi=dpi, facecolor="white")
     plt.close(fig)
     return out_png
 
@@ -288,11 +248,10 @@ def main() -> None:
             if pl_val is not None and total > 0.0:
                 energy_per_meter = total / float(pl_val)
 
-    # Door events + pedestrian encounters from the episode topics
+    # Pedestrian encounters from the episode topics
     ep_df = AcousticFieldRenderer._load_episode_data(bench, ep_id)
     t_ns = ep_df["time_ns"].to_numpy() if ep_df is not None else np.array([], dtype=np.int64)
     t_ns = t_ns[mask][: len(t_c)]
-    door_events = _door_events(bench, ep_id, t_ns, t_c)
     encounters = _encounter_windows(bench, ep_id, t_ns, t_c)
 
     out_dir = args.out_dir or (bench / "plots")
@@ -300,9 +259,9 @@ def main() -> None:
                              xmax=args.xmax, energy_per_meter=energy_per_meter,
                              encounters=encounters, dpi=args.dpi)
     p2 = render_acoustic_figure(t_c, emitted, exposure, out_dir / "hero_acoustic.png",
-                                xmax=args.xmax, door_events=door_events, dpi=args.dpi)
+                                xmax=args.xmax, dpi=args.dpi)
     print(f"[OK] {p1}  (encounters: {len(encounters)})")
-    print(f"[OK] {p2}  (door events: {len(door_events)})")
+    print(f"[OK] {p2}")
 
 
 if __name__ == "__main__":

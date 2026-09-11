@@ -1,6 +1,6 @@
 name: hero_grand_tour
-description: "Master Socio-Acoustic Hero Tour in office_1"
-references: true
+description: "Crowded end-to-end traverse in office_1: robot drives one long diagonal through walking pedestrians"
+references: false
 launch:
   sim: gazebo
   headless: true
@@ -10,7 +10,7 @@ stages:
   map: office_1
   robot: jackal
   episodes: 2
-  timeout: 300.0
+  timeout: 360.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario

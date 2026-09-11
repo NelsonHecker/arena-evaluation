@@ -1574,3 +1574,36 @@ def test_requeue_front_into_an_empty_queue():
     _requeue_front(q, only)
     assert q.qsize() == 1
     assert q.get_nowait().key == only.key
+
+
+def test_launch_key_kinematics_namespacing():
+    from arena_evaluation.benchmark.runner import _launch_key
+
+    assert _launch_key("max_linear_vel") == "robot.mobile.max_linear_vel"
+    assert _launch_key("linear_acc") == "robot.mobile.linear_acc"
+    assert _launch_key("linear_decel") == "robot.mobile.linear_decel"
+    assert _launch_key("max_angular_vel") == "robot.mobile.max_angular_vel"
+    assert _launch_key("angular_acc") == "robot.mobile.angular_acc"
+    assert _launch_key("mobile.local_planner") == "robot.mobile.local_planner"
+    assert _launch_key("arm.planner") == "robot.arm.planner"
+    assert _launch_key("custom_flag") == "custom_flag"
+
+
+def test_build_launch_args_kinematics_forwarding():
+    stage = _make_stage("s1")
+    contestant = _make_contestant(
+        "dwb-express",
+        args={
+            "mobile": {"driver": "nav2", "local_planner": "dwb"},
+            "max_linear_vel": 1.50,
+            "linear_acc": 2.50,
+        },
+    )
+    step = Step(contestant=contestant, stage=stage, episodes=1)
+    args = build_launch_args(step, simulator="gazebo")
+
+    assert "robot.mobile:=nav2" in args
+    assert "robot.mobile.local_planner:=dwb" in args
+    assert "robot.mobile.max_linear_vel:=1.5" in args or "robot.mobile.max_linear_vel:=1.50" in args
+    assert "robot.mobile.linear_acc:=2.5" in args or "robot.mobile.linear_acc:=2.50" in args
+
