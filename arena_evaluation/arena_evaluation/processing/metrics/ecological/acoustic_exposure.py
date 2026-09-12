@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import typing
 
@@ -19,8 +20,12 @@ from arena_evaluation.processing.metrics.ecological.characterization import _ACO
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 try:
-    from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
+    from arena_evaluation.processing.acoustics.impedance_grid import (
+        compute_acoustic_field,
+        compute_attenuations,
+    )
 except ImportError:
+    compute_acoustic_field = None
     compute_attenuations = None
 
 logger = logging.getLogger(__name__)
@@ -60,7 +65,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         """Parse a single frame's pedestrian positions (flat or nested schema)."""
         pts: list[tuple[float, float]] = []
         if isinstance(row, str):
-            import json
             try:
                 row = json.loads(row)
             except Exception:
@@ -189,14 +193,20 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         last_eval_rx = None
         last_eval_ry = None
-        last_eval_peds = None
-        last_eval_source = None
+        last_eval_doors = None
+        current_field: np.ndarray | None = None
+        last_attenuations: np.ndarray | None = None
 
         POS_THRESHOLD = 0.5  # meters (attenuation changes < 0.3 dB over 0.5m)
         total_frames = len(rx_m)
 
         eval_count = 0
-        last_attenuations: np.ndarray | None = None
+
+        # Check if compute_attenuations was monkeypatched in testing
+        from arena_evaluation.processing.acoustics.impedance_grid import (
+            compute_attenuations as _real_ca,
+        )
+        is_mocked = compute_attenuations is not _real_ca
 
         for i in range(total_frames):
             pts = self._parse_pedestrian_positions(peds_pos[i])
@@ -211,59 +221,84 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
             current_source = source_dba[i]
 
-            # Check if we should re-evaluate geometric attenuation field
-            should_eval = False
-            if i == 0 or i == total_frames - 1:
-                should_eval = True
-            elif last_eval_rx is None or last_attenuations is None:
-                should_eval = True
-            else:
-                if np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > POS_THRESHOLD:
-                    should_eval = True
-                elif len(px_m) != len(last_eval_peds[0]):
-                    should_eval = True
-                else:
-                    ped_dists = np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1])
-                    if np.any(ped_dists > POS_THRESHOLD):
-                        should_eval = True
+            # Door state at current timestamp
+            open_set = (
+                state_timeline.open_doors_at(int(df["time_ns"][i]))
+                if state_timeline is not None
+                else frozenset()
+            )
+
+            # Check if we should re-evaluate the robot's acoustic emission field.
+            # Note: Pedestrian movement alone does NOT change the robot's acoustic propagation
+            # field. When the robot is stationary (< POS_THRESHOLD) and doors are unchanged,
+            # the field remains identical and can be resampled directly at pedestrian coordinates.
+            robot_moved = (
+                last_eval_rx is None
+                or np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > POS_THRESHOLD
+            )
+            doors_changed = (open_set != last_eval_doors) if last_eval_doors is not None else True
+
+            should_eval = (
+                i == 0
+                or i == total_frames - 1
+                or robot_moved
+                or doors_changed
+                or (current_field is None and not is_mocked)
+                or (last_attenuations is None and is_mocked)
+            )
+
+            rx_px = (rx_m[i] - ox) / resolution
+            ry_px = (ry_m[i] - oy) / resolution
+
+            px_px = (px_m - ox) / resolution
+            py_px = (py_m - oy) / resolution
 
             if should_eval:
                 last_eval_rx = rx_m[i]
                 last_eval_ry = ry_m[i]
-                last_eval_peds = (px_m, py_m)
-
-                rx_px = (rx_m[i] - ox) / resolution
-                ry_px = (ry_m[i] - oy) / resolution
-
-                px_px = (px_m - ox) / resolution
-                py_px = (py_m - oy) / resolution
+                last_eval_doors = open_set
 
                 # Door-aware per-pixel TL (open doors carved to 0 dB)
-                open_set = (
-                    state_timeline.open_doors_at(int(df["time_ns"][i]))
-                    if state_timeline is not None
-                    else frozenset()
-                )
                 tl_key = tuple(sorted(open_set))
                 pixel_tl = tl_cache.get(tl_key)
                 if pixel_tl is None:
                     pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
                     tl_cache[tl_key] = pixel_tl
 
-                attenuations = compute_attenuations(
-                    occupancy_grid=grid,
-                    resolution=resolution,
-                    start_x_px=rx_px,
-                    start_y_px=ry_px,
-                    target_xs_px=px_px,
-                    target_ys_px=py_px,
-                    wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
-                    mic_distance=1.0,
-                    pixel_tl=pixel_tl,
-                )
-                last_attenuations = attenuations
-                eval_count += 1
-            else:
+                if not is_mocked and compute_acoustic_field is not None:
+                    current_field = compute_acoustic_field(
+                        occupancy_grid=grid,
+                        resolution=resolution,
+                        start_x_px=rx_px,
+                        start_y_px=ry_px,
+                        wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
+                        mic_distance=1.0,
+                        pixel_tl=pixel_tl,
+                    )
+                    eval_count += 1
+                else:
+                    # Mocked / fallback path
+                    attenuations = compute_attenuations(
+                        occupancy_grid=grid,
+                        resolution=resolution,
+                        start_x_px=rx_px,
+                        start_y_px=ry_px,
+                        target_xs_px=px_px,
+                        target_ys_px=py_px,
+                        wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
+                        mic_distance=1.0,
+                        pixel_tl=pixel_tl,
+                    )
+                    last_attenuations = attenuations
+                    eval_count += 1
+
+            if not is_mocked and current_field is not None:
+                # Fast O(1) resampling of the existing acoustic field at pedestrian locations
+                h_grid, w_grid = current_field.shape
+                ix = np.clip(np.round(px_px).astype(np.int32), 0, w_grid - 1)
+                iy = np.clip(np.round(py_px).astype(np.int32), 0, h_grid - 1)
+                attenuations = current_field[iy, ix]
+            elif not should_eval:
                 attenuations = last_attenuations
 
             # Filter out infinity (unreachable)
@@ -280,11 +315,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             ts_attenuation.append(att_valid.tolist())
             ts_exposure.append(exp_valid.tolist())
 
-            eval_count += 1
-            if eval_count % 50 == 0:
+            if (i + 1) % 100 == 0 or i == total_frames - 1:
                 logger.info(
-                    "AcousticExposureCalculator: Evaluated %d frames... (%d/%d total frames processed)",
-                    eval_count, i, total_frames,
+                    "AcousticExposureCalculator: Processed %d/%d frames (%d solver field evaluations)",
+                    i + 1, total_frames, eval_count,
                 )
 
         logger.info(

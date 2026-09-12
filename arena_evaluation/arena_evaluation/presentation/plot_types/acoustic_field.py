@@ -16,8 +16,12 @@ from arena_evaluation.processing.acoustics.impedance_grid import downsample_occu
 from arena_evaluation.processing.map_registry import MapRegistry
 
 try:
-    from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
+    from arena_evaluation.processing.acoustics.impedance_grid import (
+        compute_acoustic_field,
+        compute_attenuations,
+    )
 except ImportError:
+    compute_acoustic_field = None
     compute_attenuations = None
 
 logger = logging.getLogger(__name__)
@@ -110,17 +114,23 @@ class AcousticFieldRenderer(BasePlotRenderer):
         rx_px = (rx_m - ox) / resolution
         ry_px = (ry_m - oy) / resolution
 
-        yy, xx = np.mgrid[0:h, 0:w]
-        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
-        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
+        if compute_acoustic_field is not None:
+            att_grid = compute_acoustic_field(
+                grid, resolution, rx_px, ry_px,
+                wall_tl=47.0, mic_distance=1.0,
+                pixel_tl=pixel_tl,
+            )
+        else:
+            yy, xx = np.mgrid[0:h, 0:w]
+            tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
+            ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
 
-        attenuations = compute_attenuations(
-            grid, resolution, rx_px, ry_px, tx, ty,
-            wall_tl=47.0, mic_distance=1.0,
-            pixel_tl=pixel_tl,
-        )
-
-        att_grid = attenuations.reshape((h, w))
+            attenuations = compute_attenuations(
+                grid, resolution, rx_px, ry_px, tx, ty,
+                wall_tl=47.0, mic_distance=1.0,
+                pixel_tl=pixel_tl,
+            )
+            att_grid = attenuations.reshape((h, w))
         field_dba = source_dba - att_grid
         field_dba = np.clip(field_dba, 0, None)
         logger.info("AcousticFieldRenderer: full-field done.")
