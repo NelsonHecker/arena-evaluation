@@ -12,7 +12,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 100.0
+  timeout: 200.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -23,7 +23,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 110.0
+  timeout: 220.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -34,7 +34,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 230.0
+  timeout: 460.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -45,7 +45,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 250.0
+  timeout: 500.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -56,7 +56,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 180.0
+  timeout: 360.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -67,7 +67,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 250.0
+  timeout: 500.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -78,7 +78,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 300.0
+  timeout: 600.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -89,7 +89,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 150.0
+  timeout: 300.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -100,7 +100,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 230.0
+  timeout: 460.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -111,7 +111,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 120.0
+  timeout: 240.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -122,7 +122,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 100.0
+  timeout: 200.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -133,7 +133,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 110.0
+  timeout: 220.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -144,7 +144,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 170.0
+  timeout: 340.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -155,7 +155,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 160.0
+  timeout: 320.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -166,7 +166,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 250.0
+  timeout: 500.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -177,7 +177,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 230.0
+  timeout: 460.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -188,7 +188,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 290.0
+  timeout: 580.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -199,7 +199,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 280.0
+  timeout: 560.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -210,7 +210,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 300.0
+  timeout: 600.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario
@@ -221,7 +221,7 @@ stages:
   map: library_acoustic_partition
   robot: jackal
   episodes: 1
-  timeout: 180.0
+  timeout: 360.0
   seed: 101
   tm_robots: scenario
   tm_obstacles: scenario

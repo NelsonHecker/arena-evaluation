@@ -53,15 +53,16 @@ def _shutdown_executor_cleanly(executor: concurrent.futures.ProcessPoolExecutor)
         pass
 
 
-def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> int:
+def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> tuple[int, float]:
     from arena_evaluation.processing.pipeline import ProcessingPipeline
     from arena_evaluation.storage.folder_manager import FolderManager
     import pathlib
     import time
 
+    t_start = time.perf_counter()
     if status_dict is not None:
         try:
-            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Extracting MCAP / Topics", 1, 1, time.perf_counter())
+            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Extracting MCAP / Topics", 1, 1, t_start)
         except Exception:
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
@@ -72,18 +73,20 @@ def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
             status_dict.pop(ep.episode_id, None)
         except Exception:
             pass
-    return ep.episode_id
+    elapsed = time.perf_counter() - t_start
+    return ep.episode_id, elapsed
 
 
-def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> typing.Tuple[int, typing.Any]:
+def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> typing.Tuple[int, typing.Any, float]:
     from arena_evaluation.processing.pipeline import ProcessingPipeline
     from arena_evaluation.storage.folder_manager import FolderManager
     import pathlib
     import time
 
+    t_start = time.perf_counter()
     if status_dict is not None:
         try:
-            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Loading Topics", 0, 18, time.perf_counter())
+            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Loading Topics", 0, 18, t_start)
         except Exception:
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
@@ -98,7 +101,8 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
             status_dict.pop(ep.episode_id, None)
         except Exception:
             pass
-    return ep.episode_id, result
+    elapsed = time.perf_counter() - t_start
+    return ep.episode_id, result, elapsed
 
 
 def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
@@ -602,12 +606,11 @@ class ProcessingPipeline:
         ) as display:
             executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
             try:
-                futures = {executor.submit(_extract_worker, data_root_str, ep, force_extract, status_dict): (ep, time.perf_counter()) for ep in episodes}
+                futures = {executor.submit(_extract_worker, data_root_str, ep, force_extract, status_dict): ep for ep in episodes}
                 for future in concurrent.futures.as_completed(futures):
-                    ep, t_start = futures[future]
+                    ep = futures[future]
                     try:
-                        ep_id = future.result()
-                        elapsed = time.perf_counter() - t_start
+                        ep_id, elapsed = future.result()
                         display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
                     except Exception as e:
                         display.log_error(ep.episode_id, str(e))
@@ -647,13 +650,12 @@ class ProcessingPipeline:
             ) as display:
                 executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
                 try:
-                    futures = {executor.submit(_process_worker, data_root_str, ep, False, status_dict): (ep, time.perf_counter()) for ep in episodes}
+                    futures = {executor.submit(_process_worker, data_root_str, ep, False, status_dict): ep for ep in episodes}
 
                     for future in concurrent.futures.as_completed(futures):
-                        ep, t_start = futures[future]
+                        ep = futures[future]
                         try:
-                            ep_id, result = future.result()
-                            elapsed = time.perf_counter() - t_start
+                            ep_id, result, elapsed = future.result()
                             all_metrics.extend(result)
                             display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
                         except Exception as e:
