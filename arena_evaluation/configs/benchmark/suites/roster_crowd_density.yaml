@@ -1,0 +1,77 @@
+name: roster_crowd_density
+description: "Roster completion survey on Jackal across 0, 6, and 12 pedestrian densities on map_empty"
+references: false
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 1
+  optim.obstacles: bbox
+stages:
+- name: stage_0_unhindered
+  map: map_empty
+  robot: jackal
+  episodes: 10
+  timeout: 180.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: crowd_density_0peds
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models: [arenian]
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+
+- name: stage_1_moderate_crowd
+  map: map_empty
+  robot: jackal
+  episodes: 10
+  timeout: 180.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: crowd_density_0peds
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models: [arenian]
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+
+- name: stage_2_dense_crowd
+  map: map_empty
+  robot: jackal
+  episodes: 10
+  timeout: 180.0
+  seed: 101
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: crowd_density_0peds
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models: [arenian]
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
