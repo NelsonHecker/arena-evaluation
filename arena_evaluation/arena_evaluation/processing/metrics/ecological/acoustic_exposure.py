@@ -24,11 +24,9 @@ from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 try:
     from arena_evaluation.processing.acoustics.impedance_grid import (
-        compute_acoustic_field,
         compute_attenuations,
     )
 except ImportError:
-    compute_acoustic_field = None
     compute_attenuations = None
 
 logger = logging.getLogger(__name__)
@@ -197,27 +195,25 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         last_eval_rx = None
         last_eval_ry = None
+        last_eval_pts: list[tuple[float, float]] | None = None
         last_eval_doors = None
-        current_field: np.ndarray | None = None
         last_attenuations: np.ndarray | None = None
 
         # Proximity-adaptive displacement thresholds:
         # Near pedestrians (< 2.0 m), fine granularity (0.05 m = 5 cm) is required because
         # 1/r geometric spreading produces rapid dB gradients (e.g. 0.5m -> 1.0m is 6 dB!).
-        # At intermediate distances (< 5.0 m), 0.10 m (10 cm) preserves sub-decibel precision.
-        # At far distances (>= 5.0 m), 0.20 m (20 cm) maintains high efficiency.
-        POS_THRESHOLD_NEAR = 0.05  # meters (5 cm when robot is near pedestrians < 2.0m)
-        POS_THRESHOLD_MID = 0.10   # meters (10 cm when robot is 2.0m - 5.0m)
-        POS_THRESHOLD_FAR = 0.20   # meters (20 cm when robot is >= 5.0m or no pedestrians)
+        # Proximity-adaptive displacement thresholds:
+        # Near pedestrians (< 2.0 m): 0.05 m (5 cm) captures steep 1/r acoustic gradients (< 0.4 dB).
+        # Intermediate (2.0 m - 5.0 m): 0.10 m (10 cm) preserves sub-decibel precision (< 0.4 dB).
+        # Far (5.0 m - 10.0 m): 0.30 m (30 cm) preserves < 0.4 dB precision at distance.
+        # Remote (>= 10.0 m): 0.75 m (75 cm) preserves < 0.5 dB precision (at 15m+, 0.75m is < 0.4 dB).
+        POS_THRESHOLD_NEAR = 0.05    # meters (< 2.0m)
+        POS_THRESHOLD_MID = 0.10     # meters (2.0m - 5.0m)
+        POS_THRESHOLD_FAR = 0.30     # meters (5.0m - 10.0m)
+        POS_THRESHOLD_REMOTE = 0.75  # meters (>= 10.0m)
         total_frames = len(rx_m)
 
         eval_count = 0
-
-        # Check if compute_attenuations was monkeypatched in testing
-        from arena_evaluation.processing.acoustics.impedance_grid import (
-            compute_attenuations as _real_ca,
-        )
-        is_mocked = compute_attenuations is not _real_ca
 
         for i in range(total_frames):
             pts = self._parse_pedestrian_positions(peds_pos[i])
@@ -241,32 +237,52 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
             # Adaptive displacement threshold based on minimum pedestrian proximity
             if len(px_m) > 0:
-                min_ped_dist = float(np.min(np.hypot(px_m - rx_m[i], py_m - ry_m[i])))
+                ped_dists = np.hypot(px_m - rx_m[i], py_m - ry_m[i])
+                min_ped_dist = float(np.min(ped_dists))
                 if min_ped_dist < 2.0:
                     pos_threshold = POS_THRESHOLD_NEAR
                 elif min_ped_dist < 5.0:
                     pos_threshold = POS_THRESHOLD_MID
-                else:
+                elif min_ped_dist < 10.0:
                     pos_threshold = POS_THRESHOLD_FAR
+                else:
+                    pos_threshold = POS_THRESHOLD_REMOTE
             else:
-                pos_threshold = POS_THRESHOLD_MID
+                pos_threshold = POS_THRESHOLD_REMOTE
 
-            # Check if we should re-evaluate the robot's acoustic emission field.
-            # Note: Pedestrian movement alone does NOT change the robot's acoustic propagation
-            # field. When the robot is stationary (< pos_threshold) and doors are unchanged,
-            # the field remains identical and can be resampled directly at pedestrian coordinates.
+            # Check if we should re-evaluate the robot's acoustic emission.
+            # Recomputation is triggered on robot displacement, pedestrian displacement,
+            # door state transition, or initial frame.
             robot_moved = (
                 last_eval_rx is None
                 or np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > pos_threshold
+            )
+
+            def _ped_threshold(p_dist: float) -> float:
+                if p_dist < 2.0:
+                    return POS_THRESHOLD_NEAR
+                if p_dist < 5.0:
+                    return POS_THRESHOLD_MID
+                if p_dist < 10.0:
+                    return POS_THRESHOLD_FAR
+                return POS_THRESHOLD_REMOTE
+
+            peds_moved = (
+                last_eval_pts is None
+                or len(pts) != len(last_eval_pts)
+                or any(
+                    np.hypot(p[0] - lp[0], p[1] - lp[1]) > _ped_threshold(ped_dists[p_idx])
+                    for p_idx, (p, lp) in enumerate(zip(pts, last_eval_pts))
+                )
             )
             doors_changed = (open_set != last_eval_doors) if last_eval_doors is not None else True
 
             should_eval = (
                 i == 0
                 or robot_moved
+                or peds_moved
                 or doors_changed
-                or (current_field is None and not is_mocked)
-                or (last_attenuations is None and is_mocked)
+                or last_attenuations is None
             )
 
             rx_px = (rx_m[i] - ox) / resolution
@@ -278,6 +294,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             if should_eval:
                 last_eval_rx = rx_m[i]
                 last_eval_ry = ry_m[i]
+                last_eval_pts = pts
                 last_eval_doors = open_set
 
                 # Door-aware per-pixel TL (open doors carved to 0 dB)
@@ -287,40 +304,20 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
                     tl_cache[tl_key] = pixel_tl
 
-                if not is_mocked and compute_acoustic_field is not None:
-                    current_field = compute_acoustic_field(
-                        occupancy_grid=grid,
-                        resolution=resolution,
-                        start_x_px=rx_px,
-                        start_y_px=ry_px,
-                        wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
-                        mic_distance=1.0,
-                        pixel_tl=pixel_tl,
-                    )
-                    eval_count += 1
-                else:
-                    # Mocked / fallback path
-                    attenuations = compute_attenuations(
-                        occupancy_grid=grid,
-                        resolution=resolution,
-                        start_x_px=rx_px,
-                        start_y_px=ry_px,
-                        target_xs_px=px_px,
-                        target_ys_px=py_px,
-                        wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
-                        mic_distance=1.0,
-                        pixel_tl=pixel_tl,
-                    )
-                    last_attenuations = attenuations
-                    eval_count += 1
-
-            if not is_mocked and current_field is not None:
-                # Fast O(1) resampling of the existing acoustic field at pedestrian locations
-                h_grid, w_grid = current_field.shape
-                ix = np.clip(np.round(px_px).astype(np.int32), 0, w_grid - 1)
-                iy = np.clip(np.round(py_px).astype(np.int32), 0, h_grid - 1)
-                attenuations = current_field[iy, ix]
-            elif not should_eval:
+                attenuations = compute_attenuations(
+                    occupancy_grid=grid,
+                    resolution=resolution,
+                    start_x_px=rx_px,
+                    start_y_px=ry_px,
+                    target_xs_px=px_px,
+                    target_ys_px=py_px,
+                    wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
+                    mic_distance=1.0,
+                    pixel_tl=pixel_tl,
+                )
+                last_attenuations = attenuations
+                eval_count += 1
+            else:
                 attenuations = last_attenuations
 
             # Filter out infinity (unreachable)

@@ -8,7 +8,7 @@ Covers:
      multiple, duplicates, source coincident, out-of-bounds, unreachable).
   3. Workspace reusability and sanitization across consecutive runs and grid resizes.
   4. Proximity-adaptive displacement thresholding in AcousticExposureCalculator
-     (5 cm near, 10 cm mid, 20 cm far) and passive pedestrian resampling.
+     (5 cm near, 10 cm mid, 20 cm far) and sub-threshold displacement caching.
   5. Granular acoustic door state transitions (15% progress seal breach).
 """
 from __future__ import annotations
@@ -304,34 +304,39 @@ class TestProximityAdaptiveThresholding:
         calc.world = map_name
         return calc
 
-    def test_pedestrian_movement_alone_does_not_recompute(self, setup_calculator_env, monkeypatch):
-        """When the robot is stationary, moving pedestrians only resample the cached field."""
+    def test_pedestrian_sub_threshold_movement_does_not_recompute(self, setup_calculator_env, monkeypatch):
+        """When pedestrian movement is below the proximity threshold, solver is not recomputed."""
         calc = setup_calculator_env
         solver_calls = 0
 
-        # Spy on compute_acoustic_field
+        # Spy on compute_attenuations
         import arena_evaluation.processing.acoustics.impedance_grid as ig
-        orig_field_fn = ig.compute_acoustic_field
+        orig_fn = ig.compute_attenuations
 
-        def spy_compute_field(*args, **kwargs):
+        def spy_attenuations(*args, **kwargs):
             nonlocal solver_calls
             solver_calls += 1
-            return orig_field_fn(*args, **kwargs)
+            return orig_fn(*args, **kwargs)
 
         monkeypatch.setattr(
-            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_acoustic_field",
-            spy_compute_field,
+            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_attenuations",
+            spy_attenuations,
         )
 
-        # 5 frames: Robot stands completely still at (5.0, 5.0)
-        # Pedestrian walks towards the robot from (10.0, 5.0) to (6.0, 5.0)
+        # 3 frames: Robot stands still at (5.0, 5.0)
+        # Pedestrian is at (6.00, 5.0) [1.0m away -> near tier, threshold 0.05m]
+        # Frame 0: (6.00, 5.0) -> solver call 1
+        # Frame 1: moves 0.02m to (6.02, 5.0) <= 0.05m -> no solver call (reuses cached attenuations)
+        # Frame 2: moves 0.08m from last eval to (6.08, 5.0) > 0.05m -> solver call 2
         df = pl.DataFrame({
-            "time_ns": [i * 100_000_000 for i in range(5)],
-            "pos_x_gt": [5.0] * 5,
-            "pos_y_gt": [5.0] * 5,
-            "total_level_af_dba": [70.0] * 5,
+            "time_ns": [0, 100_000_000, 200_000_000],
+            "pos_x_gt": [5.0, 5.0, 5.0],
+            "pos_y_gt": [5.0, 5.0, 5.0],
+            "total_level_af_dba": [70.0, 70.0, 70.0],
             "peds_positions": [
-                [[10.0 - i, 5.0]] for i in range(5)
+                [[6.00, 5.0]],
+                [[6.02, 5.0]],
+                [[6.08, 5.0]],
             ],
         })
 
@@ -345,13 +350,10 @@ class TestProximityAdaptiveThresholding:
 
         res = calc.calculate(bundle, {"map": "test_acoustic_map"})
 
-        # Field should only be computed once for frame 0!
-        assert solver_calls == 1
-        # Timeseries attenuation must reflect decreasing distance
+        # Field computed only on Frame 0 and Frame 2 (sub-threshold on Frame 1 bypassed)
+        assert solver_calls == 2
         atts = [frame[0] for frame in res["timeseries_acoustic_attenuation_db"]]
-        assert len(atts) == 5
-        for i in range(1, 5):
-            assert atts[i] < atts[i - 1], "Attenuation must decrease as pedestrian approaches"
+        assert len(atts) == 3
 
     def test_close_proximity_fine_granularity(self, setup_calculator_env, monkeypatch):
         """When near a pedestrian (< 2.0m), robot displacement > 0.05m triggers recomputation."""
@@ -359,20 +361,20 @@ class TestProximityAdaptiveThresholding:
         solver_calls = 0
 
         import arena_evaluation.processing.acoustics.impedance_grid as ig
-        orig_field_fn = ig.compute_acoustic_field
+        orig_fn = ig.compute_attenuations
 
-        def spy_compute_field(*args, **kwargs):
+        def spy_attenuations(*args, **kwargs):
             nonlocal solver_calls
             solver_calls += 1
-            return orig_field_fn(*args, **kwargs)
+            return orig_fn(*args, **kwargs)
 
         monkeypatch.setattr(
-            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_acoustic_field",
-            spy_compute_field,
+            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_attenuations",
+            spy_attenuations,
         )
 
         # Robot is at 1.0m from pedestrian (near tier, threshold = 0.05m)
-        # Frame 0: (5.0, 5.0) -> Frame 1: moves 0.03m (no recompute) -> Frame 2: moves total 0.07m (recomputes)
+        # Frame 0: (5.00, 5.0) -> Frame 1: moves 0.03m (no recompute) -> Frame 2: moves total 0.07m (recomputes)
         df = pl.DataFrame({
             "time_ns": [0, 100_000_000, 200_000_000],
             "pos_x_gt": [5.00, 5.03, 5.07],
@@ -395,7 +397,7 @@ class TestProximityAdaptiveThresholding:
 
         calc.calculate(bundle, {"map": "test_acoustic_map"})
 
-        # Frame 0: computed. Frame 1 (0.03m): resampled. Frame 2 (0.07m > 0.05m): recomputed.
+        # Frame 0: computed. Frame 1 (0.03m): resampled/reused. Frame 2 (0.07m > 0.05m): recomputed.
         assert solver_calls == 2
 
 
@@ -473,16 +475,16 @@ class TestGranularDoorTransition:
 
         solver_calls = 0
         import arena_evaluation.processing.acoustics.impedance_grid as ig
-        orig_field_fn = ig.compute_acoustic_field
+        orig_fn = ig.compute_attenuations
 
-        def spy_compute_field(*args, **kwargs):
+        def spy_attenuations(*args, **kwargs):
             nonlocal solver_calls
             solver_calls += 1
-            return orig_field_fn(*args, **kwargs)
+            return orig_fn(*args, **kwargs)
 
         monkeypatch.setattr(
-            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_acoustic_field",
-            spy_compute_field,
+            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_attenuations",
+            spy_attenuations,
         )
 
         # Semantic timeline: door is closed at t=0, cracks open (0.20) at t=100ms

@@ -34,6 +34,7 @@ _TOPIC_EXPECTATIONS = [
     ("lidar", "/lidar", "LaserScan", True, False),
     ("joint_states", "/joint_states", "JointState", True, False),
     ("plan", "/plan", "Path", False, False),
+    ("local_plan", "/local_plan", "Path", True, False),
     ("goal_pose", "/goal_pose", "PoseStamped", False, False),
     ("initialpose", "/initialpose", "PoseWithCovarianceStamped", False, False),
     ("tf", "/tf", "TFMessage", True, False),

@@ -1,3 +1,4 @@
+// Fast C++ Acoustic Propagation Solver with Sparse Early-Exit
 #include <vector>
 #include <queue>
 #include <cmath>
@@ -7,7 +8,7 @@
 
 using namespace std;
 
-static bool line_of_sight(
+static inline bool line_of_sight(
     const uint8_t* grid, const float* pixel_tl, int width, int height,
     int x0, int y0, int x1, int y1
 ) {
@@ -17,7 +18,6 @@ static bool line_of_sight(
     int err = ddx - ddy;
     int x = x0, y = y0;
     while (true) {
-        if (x < 0 || x >= width || y < 0 || y >= height) return false;
         int idx = y * width + x;
         if (grid[idx] > 0) return false;                               // solid wall blocks LoS
         if (pixel_tl != nullptr && pixel_tl[idx] > 0.0f) return false; // TL barrier (e.g. closed door) blocks LoS
@@ -50,17 +50,40 @@ struct AcousticSolverWorkspace {
     vector<float> min_dist;        // size: capacity * MAX_WALLS
     vector<float> min_cost;        // size: capacity
     vector<uint8_t> target_status; // size: capacity (0: none, 1: unsettled, 2: settled)
+    vector<int> touched;
 
-    void prepare(int N) {
+    void ensure_capacity(int N) {
         if (capacity < N) {
             capacity = N;
-            min_dist.resize((size_t)N * MAX_WALLS);
-            min_cost.resize(N);
-            target_status.resize(N);
+            min_dist.assign((size_t)N * MAX_WALLS, numeric_limits<float>::infinity());
+            min_cost.assign(N, numeric_limits<float>::infinity());
+            target_status.assign(N, (uint8_t)0);
+            touched.clear();
         }
+    }
+
+    void reset(const vector<int>& target_indices) {
+        for (int idx : touched) {
+            size_t base = (size_t)idx * MAX_WALLS;
+            for (int w = 0; w < MAX_WALLS; ++w) {
+                min_dist[base + w] = numeric_limits<float>::infinity();
+            }
+            min_cost[idx] = numeric_limits<float>::infinity();
+            target_status[idx] = 0;
+        }
+        touched.clear();
+        for (int tidx : target_indices) {
+            if (tidx >= 0 && tidx < capacity) {
+                target_status[tidx] = 0;
+            }
+        }
+    }
+
+    void reset_all(int N) {
         std::fill(min_dist.begin(), min_dist.begin() + ((size_t)N * MAX_WALLS), numeric_limits<float>::infinity());
         std::fill(min_cost.begin(), min_cost.begin() + N, numeric_limits<float>::infinity());
         std::fill(target_status.begin(), target_status.begin() + N, (uint8_t)0);
+        touched.clear();
     }
 };
 
@@ -106,6 +129,7 @@ static inline void run_acoustic_dijkstra(
     size_t start_base = (size_t)start_idx * AcousticSolverWorkspace::MAX_WALLS;
     ws.min_dist[start_base + start_walls] = 0.0f;
     ws.min_cost[start_idx] = init_cost;
+    ws.touched.push_back(start_idx);
 
     priority_queue<Label, vector<Label>, greater<Label>> pq;
     pq.push({0.0f, start_walls, start_idx, start_tl, init_cost,
@@ -145,9 +169,18 @@ static inline void run_acoustic_dijkstra(
             }
 
             int nidx = ny * width + nx;
+            if (ws.min_cost[nidx] <= curr.cost) {
+                continue;
+            }
+
             bool next_is_wall = grid[nidx] > 0;
             int nwalls = curr.walls + ((next_is_wall && !curr_is_wall) ? 1 : 0);
             if (nwalls >= AcousticSolverWorkspace::MAX_WALLS) {
+                continue;
+            }
+
+            size_t n_base = (size_t)nidx * AcousticSolverWorkspace::MAX_WALLS;
+            if (ws.min_dist[n_base + nwalls] <= curr.dist) {
                 continue;
             }
 
@@ -156,7 +189,24 @@ static inline void run_acoustic_dijkstra(
             float new_par_dist;
             float next_tl_contrib;
 
-            if (line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny)) {
+            bool can_los = !next_is_wall && !curr_is_wall && (pixel_tl == nullptr || pixel_tl[nidx] <= 0.0f);
+            bool has_los = false;
+            if (can_los) {
+                if (par_x == cx && par_y == cy) {
+                    if (dir < 4) {
+                        has_los = true;
+                    } else {
+                        int c1 = cy * width + nx;
+                        int c2 = ny * width + cx;
+                        has_los = !((grid[c1] > 0 || (pixel_tl && pixel_tl[c1] > 0.0f)) &&
+                                    (grid[c2] > 0 || (pixel_tl && pixel_tl[c2] > 0.0f)));
+                    }
+                } else {
+                    has_los = line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny);
+                }
+            }
+
+            if (has_los) {
                 float fdx = (float)(nx - par_x) * resolution;
                 float fdy = (float)(ny - par_y) * resolution;
                 ndist         = par_dist + sqrtf(fdx * fdx + fdy * fdy);
@@ -174,22 +224,23 @@ static inline void run_acoustic_dijkstra(
                 next_tl_contrib   = (curr_tl_val <= 0.0f && next_tl_val > 0.0f) ? next_tl_val : 0.0f;
             }
 
-            size_t n_base = (size_t)nidx * AcousticSolverWorkspace::MAX_WALLS;
-            bool dominated = false;
-            for (int w = 0; w <= nwalls; ++w) {
-                if (ws.min_dist[n_base + w] <= ndist) {
-                    dominated = true;
+            if (ws.min_dist[n_base + nwalls] <= ndist) {
+                continue;
+            }
+            for (int w = nwalls; w < AcousticSolverWorkspace::MAX_WALLS; ++w) {
+                if (ws.min_dist[n_base + w] > ndist) {
+                    ws.min_dist[n_base + w] = ndist;
+                } else {
                     break;
                 }
             }
-            if (dominated) {
-                continue;
-            }
-            ws.min_dist[n_base + nwalls] = ndist;
 
             float new_tl = curr.tl + next_tl_contrib;
             float ncost  = 20.0f * log10f(ndist + mic_distance) + new_tl;
             if (ncost < ws.min_cost[nidx]) {
+                if (ws.min_cost[nidx] == numeric_limits<float>::infinity()) {
+                    ws.touched.push_back(nidx);
+                }
                 ws.min_cost[nidx] = ncost;
                 pq.push({ndist, nwalls, nidx, new_tl, ncost,
                          new_par_x, new_par_y, new_par_dist});
@@ -225,7 +276,7 @@ extern "C" {
         }
 
         const int N = width * height;
-        ws.prepare(N);
+        ws.ensure_capacity(N);
 
         int num_unsettled = 0;
         vector<int> target_indices(num_targets);
@@ -258,6 +309,8 @@ extern "C" {
                 out_attenuations[i] = ws.min_cost[tidx];
             }
         }
+
+        ws.reset(target_indices);
     }
 
     void solve_acoustic_grid(
@@ -283,7 +336,7 @@ extern "C" {
             return;
         }
 
-        ws.prepare(N);
+        ws.ensure_capacity(N);
 
         run_acoustic_dijkstra<false>(
             grid, width, height, resolution,
@@ -294,5 +347,7 @@ extern "C" {
         for (int i = 0; i < N; ++i) {
             out_field[i] = ws.min_cost[i];
         }
+
+        ws.reset_all(N);
     }
 }
