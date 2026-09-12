@@ -328,11 +328,15 @@ def _acoustic_snapshot(df: "pl.DataFrame", args: argparse.Namespace) -> None:
 
     print(f"Rendering snapshot: frame {frame_idx}, t={time_ns/1e9:.1f}s, source={source_dba:.0f} dBA, {len(open_set)} doors open")
 
-    traj_data = renderer._extract_trajectory_data(
-        episode_df,
-        run_dir=args.benchmark_dir,
-        episode_id=episode_id,
-    ) if getattr(args, "overlay_trajectories", True) else None
+    traj_data = (
+        renderer._extract_trajectory_data(
+            episode_df,
+            run_dir=args.benchmark_dir,
+            episode_id=episode_id,
+        )
+        if getattr(args, "overlay_trajectories", True) and hasattr(renderer, "_extract_trajectory_data")
+        else None
+    )
 
     open_doors = set(open_set) if doors else None
 
@@ -464,7 +468,7 @@ def setup_acoustic_subparsers(subparsers):
     acoustic_anim.add_argument("--format", type=str, default="gif", choices=["gif", "mp4", "frames"],
                                help="Output format (default: gif).")
     acoustic_anim.add_argument("--dpi", type=int, default=150, help="Output resolution (default: 150).")
-    acoustic_anim.add_argument("--vmin", type=float, default=20.0, help="Color-scale floor in dBA (default: 20).")
+    acoustic_anim.add_argument("--vmin", type=float, default=42.0, help="Color-scale floor in dBA (default: 42).")
     acoustic_anim.add_argument("--vmax", type=float, default=None, help="Color-scale ceiling in dBA (default: auto).")
     acoustic_anim.add_argument("--no-door-overlay", action="store_true", help="Hide door contours.")
     acoustic_anim.add_argument("--no-trajectories", action="store_false", dest="overlay_trajectories",

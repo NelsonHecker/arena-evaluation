@@ -111,6 +111,16 @@ class _FakeRenderer:
     def _render_cell_png(self, *args, **kwargs) -> bool:
         return self.cell_render_ok
 
+    @classmethod
+    def _extract_trajectory_data(cls, episode_df, run_dir=None, episode_id=None):
+        return {
+            "robot_path": ([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]),
+            "robot_start": (1.0, 1.0),
+            "robot_goal": (3.0, 3.0),
+            "ped_trajectories": {},
+            "ped_waypoints": {},
+        }
+
 
 def _install_stubs(monkeypatch, *, doors: list[int] | None = None) -> types.SimpleNamespace:
     """Swap heavy acoustic deps for stubs via sys.modules (imports are lazy)."""

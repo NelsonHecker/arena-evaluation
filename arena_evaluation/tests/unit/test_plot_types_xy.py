@@ -402,10 +402,11 @@ def test_timeseries_plotly_polars_list_columns_render_successfully():
     assert "dwb - Ep 1" in html
 
 
-def test_timeseries_seaborn_is_pass_through(tmp_path):
+def test_timeseries_seaborn_renders_output(tmp_path):
     out = tmp_path / "ts.png"
     assert TimeseriesRenderer(_ts_spec()).render_seaborn(_ts_df(), out) is None
-    assert not out.exists()
+    assert out.exists()
+    assert out.stat().st_size > 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════

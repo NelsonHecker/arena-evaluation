@@ -19,8 +19,6 @@ def _compile_solver():
     cmd = [
         "g++",
         "-O3",
-        "-march=native",
-        "-ffast-math",
         "-fPIC",
         "-shared",
         "-std=c++17",

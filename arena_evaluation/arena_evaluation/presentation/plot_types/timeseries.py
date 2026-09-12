@@ -54,7 +54,22 @@ class TimeseriesRenderer(BasePlotRenderer):
         # Row-per-sample scalar columns (e.g. hero_timeseries.parquet): one
         # trace per metric over the full columns. Wide-format list columns
         # (row-per-episode) fall through to the per-planner path below.
-        if df_filtered.schema[x_col] != pl.List:
+        has_sequences = (
+            df_filtered.schema[x_col] in (pl.List, pl.Array)
+            or any(df_filtered.schema[m] in (pl.List, pl.Array) for m in valid_metrics)
+        )
+        if not has_sequences:
+            for col in [x_col] + valid_metrics:
+                if len(df_filtered) > 0:
+                    for v in df_filtered[col]:
+                        if v is not None:
+                            if isinstance(v, (list, tuple, np.ndarray)):
+                                has_sequences = True
+                            break
+                if has_sequences:
+                    break
+
+        if not has_sequences:
             return self._render_plotly_scalar(df_filtered, x_col, valid_metrics)
 
         fig = go.Figure()

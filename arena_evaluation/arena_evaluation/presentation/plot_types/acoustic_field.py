@@ -30,6 +30,7 @@ _CELL_FIGSIZE = (5, 4)
 _CELL_DPI = 150
 
 _FIELD_VMIN_DBA = 20.0
+_SOURCE_FLOOR_DBA = 30.0
 
 
 def _write_texture_manifest(
@@ -678,29 +679,44 @@ class AcousticFieldRenderer(BasePlotRenderer):
             peds_col = "peds_positions" if "peds_positions" in cols else ("peds" if "peds" in cols else None)
             if peds_col:
                 raw_pos = df[peds_col].to_list()
-                parsed_frames = []
-                for frame_raw in raw_pos:
-                    if frame_raw is not None and len(frame_raw) > 0:
-                        if isinstance(frame_raw[0], (list, tuple, np.ndarray)):
-                            parsed_frames.append([[float(p[0]), float(p[1])] for p in frame_raw if len(p) >= 2])
-                        elif isinstance(frame_raw[0], dict):
-                            parsed_frames.append([[float(p["x"]), float(p["y"])] for p in frame_raw if "x" in p and "y" in p])
+                has_ids = any(
+                    frame_raw and isinstance(frame_raw[0], dict) and "id" in frame_raw[0]
+                    for frame_raw in raw_pos if frame_raw is not None and len(frame_raw) > 0
+                )
+                if has_ids:
+                    for frame_raw in raw_pos:
+                        if not frame_raw:
+                            continue
+                        for p in frame_raw:
+                            if isinstance(p, dict) and "id" in p and "x" in p and "y" in p:
+                                pid = p["id"]
+                                x, y = float(p["x"]), float(p["y"])
+                                if not np.isnan(x) and not np.isnan(y):
+                                    ped_trajs.setdefault(pid, []).append((x, y))
+                else:
+                    parsed_frames = []
+                    for frame_raw in raw_pos:
+                        if frame_raw is not None and len(frame_raw) > 0:
+                            if isinstance(frame_raw[0], (list, tuple, np.ndarray)):
+                                parsed_frames.append([[float(p[0]), float(p[1])] for p in frame_raw if len(p) >= 2])
+                            elif isinstance(frame_raw[0], dict):
+                                parsed_frames.append([[float(p["x"]), float(p["y"])] for p in frame_raw if "x" in p and "y" in p])
+                            else:
+                                pts = []
+                                stride = 3 if len(frame_raw) % 3 == 0 and len(frame_raw) >= 3 else 2
+                                for j in range(0, len(frame_raw), stride):
+                                    if j + 1 < len(frame_raw):
+                                        pts.append([float(frame_raw[j]), float(frame_raw[j+1])])
+                                parsed_frames.append(pts)
                         else:
-                            pts = []
-                            stride = 3 if len(frame_raw) % 3 == 0 and len(frame_raw) >= 3 else 2
-                            for j in range(0, len(frame_raw), stride):
-                                if j + 1 < len(frame_raw):
-                                    pts.append([float(frame_raw[j]), float(frame_raw[j+1])])
-                            parsed_frames.append(pts)
-                    else:
-                        parsed_frames.append([])
+                            parsed_frames.append([])
 
-                if parsed_frames:
-                    max_peds = max((len(f) for f in parsed_frames), default=0)
-                    for p_idx in range(max_peds):
-                        ped_traj = [(float(f[p_idx][0]), float(f[p_idx][1])) for f in parsed_frames if len(f) > p_idx and not np.isnan(f[p_idx][0]) and not np.isnan(f[p_idx][1])]
-                        if len(ped_traj) > 1:
-                            ped_trajs[p_idx] = ped_traj
+                    if parsed_frames:
+                        max_peds = max((len(f) for f in parsed_frames), default=0)
+                        for p_idx in range(max_peds):
+                            ped_traj = [(float(f[p_idx][0]), float(f[p_idx][1])) for f in parsed_frames if len(f) > p_idx and not np.isnan(f[p_idx][0]) and not np.isnan(f[p_idx][1])]
+                            if len(ped_traj) > 1:
+                                ped_trajs[p_idx] = ped_traj
 
         # 2c. Fallback: load directly from episode topics/peds.parquet or metrics.parquet on disk
         if not ped_trajs and run_dir is not None:
@@ -983,7 +999,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
             rx_m = row.get("pos_x_gt")
             ry_m = row.get("pos_y_gt")
-            source_dba = row.get("total_level_af_dba") or row.get("source_dba") or _FIELD_VMIN_DBA
+            source_dba = row.get("total_level_af_dba") or row.get("source_dba") or _SOURCE_FLOOR_DBA
             time_ns = int(row.get("time_ns", 0))
 
             if rx_m is None or ry_m is None or np.isnan(rx_m) or np.isnan(ry_m):
@@ -1004,7 +1020,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 tl_cache[tl_key] = pixel_tl
 
             if source_dba is None or np.isnan(source_dba):
-                source_dba = _FIELD_VMIN_DBA
+                source_dba = _SOURCE_FLOOR_DBA
 
             attenuations = compute_attenuations(
                 occupancy_grid=grid,

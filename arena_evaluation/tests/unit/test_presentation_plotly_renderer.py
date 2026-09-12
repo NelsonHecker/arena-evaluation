@@ -13,7 +13,7 @@ from arena_evaluation.storage.schemas import PlotSpec
 _ALL_PLOT_TYPES = [
     "violin", "box", "bar", "trajectory", "radar", "scatter", "histogram",
     "heatmap", "timeseries", "line", "table", "acoustic_field",
-    "acoustic_field_animation",
+    "acoustic_field_animation", "acoustic_field_texture",
 ]
 
 

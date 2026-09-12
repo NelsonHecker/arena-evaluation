@@ -853,10 +853,11 @@ def _patch_animation(monkeypatch, seen: dict):
                                state_timeline=None, out_path=None, downsample=1,
                                stride=1, max_frames=120, fps=10, dpi=150,
                                vmin=None, vmax=None, robot_trail=0,
-                               show_doors=True, fmt="gif"):
+                               show_doors=True, fmt="gif", **kwargs):
         seen.update({"out_path": out_path, "fmt": fmt, "fps": fps, "vmin": vmin,
                      "downsample": downsample, "stride": stride, "max_frames": max_frames,
                      "state_timeline": state_timeline, "vmax": vmax})
+        seen.update(kwargs)
         return out_path
 
     monkeypatch.setattr(af_mod.AcousticFieldRenderer, "render_animation", _fake_render_animation)
@@ -992,8 +993,8 @@ def test_extract_trajectory_data_robot_and_peds():
         "time_ns": [0, 100000000, 200000000],
         "pos_x_gt": [1.0, 2.0, 3.0],
         "pos_y_gt": [0.5, 0.5, 0.5],
-        "start": [[1.0, 0.5]],
-        "goal": [[3.0, 0.5]],
+        "start": [[1.0, 0.5], [1.0, 0.5], [1.0, 0.5]],
+        "goal": [[3.0, 0.5], [3.0, 0.5], [3.0, 0.5]],
         "peds_positions": [
             [{"id": 10, "x": 5.0, "y": 2.0}, {"id": 20, "x": 8.0, "y": 4.0}],
             [{"id": 10, "x": 5.5, "y": 2.0}, {"id": 20, "x": 7.5, "y": 4.0}],

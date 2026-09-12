@@ -31,8 +31,12 @@ class LineRenderer(BasePlotRenderer):
             if diff_col in df_filtered.columns:
                 group_cols = [diff_col]
 
+        err_cand = opts.get("error_y") or opts.get("error_col")
+        if err_cand and err_cand in df_filtered.columns:
+            error_col = err_cand
+
         filter_keys = [k for k in (self.spec.filter or {}).keys() if k in df_filtered.columns]
-        keep = list(dict.fromkeys([c for c in [x_col, y_col, *group_cols, *filter_keys] if c]))
+        keep = list(dict.fromkeys([c for c in [x_col, y_col, *group_cols, *filter_keys, error_col] if c]))
         list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
         if list_cols:
             df_filtered = df_filtered.select(keep).explode(list_cols)

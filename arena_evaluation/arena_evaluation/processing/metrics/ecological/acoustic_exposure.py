@@ -13,7 +13,10 @@ from arena_evaluation.processing.acoustics.door_map import (
     build_pixel_tl,
     door_segments,
 )
-from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
+from arena_evaluation.processing.acoustics.door_state import (
+    ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+    DoorStateTimeline,
+)
 from arena_evaluation.processing.map_registry import MapRegistry
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.characterization import _ACOUSTIC_DEFAULTS
@@ -145,7 +148,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         doors = door_segments(map_name, grid, resolution, origin, run_dir=run_dir)
         tl_cache: dict[tuple, np.ndarray] = {}
         state_timeline = DoorStateTimeline.from_semantic_frame(
-            episode.semantic_snapshot
+            episode.semantic_snapshot,
+            progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
         )
         if doors:
             logger.info(
@@ -197,7 +201,14 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         current_field: np.ndarray | None = None
         last_attenuations: np.ndarray | None = None
 
-        POS_THRESHOLD = 0.5  # meters (attenuation changes < 0.3 dB over 0.5m)
+        # Proximity-adaptive displacement thresholds:
+        # Near pedestrians (< 2.0 m), fine granularity (0.05 m = 5 cm) is required because
+        # 1/r geometric spreading produces rapid dB gradients (e.g. 0.5m -> 1.0m is 6 dB!).
+        # At intermediate distances (< 5.0 m), 0.10 m (10 cm) preserves sub-decibel precision.
+        # At far distances (>= 5.0 m), 0.20 m (20 cm) maintains high efficiency.
+        POS_THRESHOLD_NEAR = 0.05  # meters (5 cm when robot is near pedestrians < 2.0m)
+        POS_THRESHOLD_MID = 0.10   # meters (10 cm when robot is 2.0m - 5.0m)
+        POS_THRESHOLD_FAR = 0.20   # meters (20 cm when robot is >= 5.0m or no pedestrians)
         total_frames = len(rx_m)
 
         eval_count = 0
@@ -228,19 +239,30 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 else frozenset()
             )
 
+            # Adaptive displacement threshold based on minimum pedestrian proximity
+            if len(px_m) > 0:
+                min_ped_dist = float(np.min(np.hypot(px_m - rx_m[i], py_m - ry_m[i])))
+                if min_ped_dist < 2.0:
+                    pos_threshold = POS_THRESHOLD_NEAR
+                elif min_ped_dist < 5.0:
+                    pos_threshold = POS_THRESHOLD_MID
+                else:
+                    pos_threshold = POS_THRESHOLD_FAR
+            else:
+                pos_threshold = POS_THRESHOLD_MID
+
             # Check if we should re-evaluate the robot's acoustic emission field.
             # Note: Pedestrian movement alone does NOT change the robot's acoustic propagation
-            # field. When the robot is stationary (< POS_THRESHOLD) and doors are unchanged,
+            # field. When the robot is stationary (< pos_threshold) and doors are unchanged,
             # the field remains identical and can be resampled directly at pedestrian coordinates.
             robot_moved = (
                 last_eval_rx is None
-                or np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > POS_THRESHOLD
+                or np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > pos_threshold
             )
             doors_changed = (open_set != last_eval_doors) if last_eval_doors is not None else True
 
             should_eval = (
                 i == 0
-                or i == total_frames - 1
                 or robot_moved
                 or doors_changed
                 or (current_field is None and not is_mocked)

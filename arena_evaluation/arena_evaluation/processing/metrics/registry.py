@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import pkgutil
 import typing
 from collections import defaultdict, deque
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.storage.exceptions import CircularDependencyError
-
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+
+_log = logging.getLogger(__name__)
 
 
 class MetricRegistry:

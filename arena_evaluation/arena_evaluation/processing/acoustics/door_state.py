@@ -7,6 +7,7 @@ import numpy as np
 import polars as pl
 
 OPEN_PROGRESS_THRESHOLD = 0.5
+ACOUSTIC_OPEN_PROGRESS_THRESHOLD = 0.15
 
 
 class DoorStateTimeline:
@@ -17,7 +18,11 @@ class DoorStateTimeline:
         self.open_sets = open_sets
 
     @classmethod
-    def from_semantic_frame(cls, semantic: pl.DataFrame | None) -> "DoorStateTimeline | None":
+    def from_semantic_frame(
+        cls,
+        semantic: pl.DataFrame | None,
+        progress_threshold: float = OPEN_PROGRESS_THRESHOLD,
+    ) -> "DoorStateTimeline | None":
         """Build the timeline from the flattened semantic snapshot table."""
         if semantic is None:
             return None
@@ -51,7 +56,7 @@ class DoorStateTimeline:
                         is_open = True
                     elif field == "progress":
                         v = row.get("value_num")
-                        if v is not None and not np.isnan(float(v)) and float(v) > OPEN_PROGRESS_THRESHOLD:
+                        if v is not None and not np.isnan(float(v)) and float(v) > progress_threshold:
                             is_open = True
                 if is_open:
                     open_doors.add(ent)

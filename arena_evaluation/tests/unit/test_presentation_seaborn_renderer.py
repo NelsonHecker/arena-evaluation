@@ -15,6 +15,7 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _ALL_PLOT_TYPES = [
     "violin", "box", "bar", "trajectory", "radar", "scatter", "histogram",
     "heatmap", "line", "acoustic_field", "acoustic_field_animation",
+    "acoustic_field_texture", "timeseries",
 ]
 
 
