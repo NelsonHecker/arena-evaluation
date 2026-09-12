@@ -8,27 +8,6 @@
 
 using namespace std;
 
-static inline bool line_of_sight(
-    const uint8_t* grid, const float* pixel_tl, int width, int height,
-    int x0, int y0, int x1, int y1
-) {
-    int ddx = abs(x1 - x0), ddy = abs(y1 - y0);
-    int sx  = (x0 < x1) ? 1 : -1;
-    int sy  = (y0 < y1) ? 1 : -1;
-    int err = ddx - ddy;
-    int x = x0, y = y0;
-    while (true) {
-        int idx = y * width + x;
-        if (grid[idx] > 0) return false;                               // solid wall blocks LoS
-        if (pixel_tl != nullptr && pixel_tl[idx] > 0.0f) return false; // TL barrier (e.g. closed door) blocks LoS
-        if (x == x1 && y == y1) break;
-        int e2 = 2 * err;
-        if (e2 > -ddy) { err -= ddy; x += sx; }
-        if (e2 <  ddx) { err += ddx; y += sy; }
-    }
-    return true;
-}
-
 struct Label {
     float dist;        // accumulated Euclidean distance (metres) to THIS node
     int   walls;       // number of air->wall transitions so far
@@ -45,12 +24,17 @@ struct Label {
 };
 
 struct AcousticSolverWorkspace {
-    static const int MAX_WALLS = 20;
+    static const int MAX_WALLS = 4;
     int capacity = 0;
     vector<float> min_dist;        // size: capacity * MAX_WALLS
     vector<float> min_cost;        // size: capacity
     vector<uint8_t> target_status; // size: capacity (0: none, 1: unsettled, 2: settled)
     vector<int> touched;
+
+    // Summed Area Table (Integral Image) for O(1) empty box obstacle checks
+    vector<int> sat;
+    int sat_w = 0;
+    int sat_h = 0;
 
     void ensure_capacity(int N) {
         if (capacity < N) {
@@ -60,6 +44,36 @@ struct AcousticSolverWorkspace {
             target_status.assign(N, (uint8_t)0);
             touched.clear();
         }
+    }
+
+    void ensure_sat(const uint8_t* grid, const float* pixel_tl, int width, int height) {
+        sat_w = width + 1;
+        sat_h = height + 1;
+        sat.assign((size_t)sat_w * sat_h, 0);
+
+        for (int y = 0; y < height; ++y) {
+            int row_sum = 0;
+            for (int x = 0; x < width; ++x) {
+                int idx = y * width + x;
+                int val = (grid[idx] > 0 || (pixel_tl != nullptr && pixel_tl[idx] > 0.0f)) ? 1 : 0;
+                row_sum += val;
+                sat[(y + 1) * sat_w + (x + 1)] = sat[y * sat_w + (x + 1)] + row_sum;
+            }
+        }
+    }
+
+    inline bool has_obstacles_in_box(int x0, int y0, int x1, int y1) const {
+        if (sat.empty()) return true;
+        int min_x = min(x0, x1);
+        int max_x = max(x0, x1);
+        int min_y = min(y0, y1);
+        int max_y = max(y0, y1);
+
+        int count = sat[(max_y + 1) * sat_w + (max_x + 1)]
+                  - sat[min_y * sat_w + (max_x + 1)]
+                  - sat[(max_y + 1) * sat_w + min_x]
+                  + sat[min_y * sat_w + min_x];
+        return count > 0;
     }
 
     void reset(const vector<int>& target_indices) {
@@ -88,6 +102,31 @@ struct AcousticSolverWorkspace {
 };
 
 static thread_local AcousticSolverWorkspace ws;
+
+static inline bool line_of_sight(
+    const uint8_t* grid, const float* pixel_tl, int width, int height,
+    int x0, int y0, int x1, int y1
+) {
+    if (!ws.has_obstacles_in_box(x0, y0, x1, y1)) {
+        return true;
+    }
+
+    int ddx = abs(x1 - x0), ddy = abs(y1 - y0);
+    int sx  = (x0 < x1) ? 1 : -1;
+    int sy  = (y0 < y1) ? 1 : -1;
+    int err = ddx - ddy;
+    int x = x0, y = y0;
+    while (true) {
+        int idx = y * width + x;
+        if (grid[idx] > 0) return false;                               // solid wall blocks LoS
+        if (pixel_tl != nullptr && pixel_tl[idx] > 0.0f) return false; // TL barrier (e.g. closed door) blocks LoS
+        if (x == x1 && y == y1) break;
+        int e2 = 2 * err;
+        if (e2 > -ddy) { err -= ddy; x += sx; }
+        if (e2 <  ddx) { err += ddx; y += sy; }
+    }
+    return true;
+}
 
 static const int ddx_arr[] = {-1, 1, 0, 0, -1, -1, 1, 1};
 static const int ddy_arr[] = { 0, 0, -1, 1, -1,  1, -1, 1};
@@ -227,6 +266,9 @@ static inline void run_acoustic_dijkstra(
             if (ws.min_dist[n_base + nwalls] <= ndist) {
                 continue;
             }
+            if (ws.min_cost[nidx] == numeric_limits<float>::infinity()) {
+                ws.touched.push_back(nidx);
+            }
             for (int w = nwalls; w < AcousticSolverWorkspace::MAX_WALLS; ++w) {
                 if (ws.min_dist[n_base + w] > ndist) {
                     ws.min_dist[n_base + w] = ndist;
@@ -238,9 +280,6 @@ static inline void run_acoustic_dijkstra(
             float new_tl = curr.tl + next_tl_contrib;
             float ncost  = 20.0f * log10f(ndist + mic_distance) + new_tl;
             if (ncost < ws.min_cost[nidx]) {
-                if (ws.min_cost[nidx] == numeric_limits<float>::infinity()) {
-                    ws.touched.push_back(nidx);
-                }
                 ws.min_cost[nidx] = ncost;
                 pq.push({ndist, nwalls, nidx, new_tl, ncost,
                          new_par_x, new_par_y, new_par_dist});
@@ -277,6 +316,7 @@ extern "C" {
 
         const int N = width * height;
         ws.ensure_capacity(N);
+        ws.ensure_sat(grid, pixel_tl, width, height);
 
         int num_unsettled = 0;
         vector<int> target_indices(num_targets);
@@ -284,6 +324,18 @@ extern "C" {
             int tx = (int)round(target_xs[i]);
             int ty = (int)round(target_ys[i]);
             if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
+                // Direct line-of-sight shortcut:
+                // If there is unobstructed line-of-sight between source and target,
+                // no path with detour or wall penetration can have lower cost than the direct Euclidean line.
+                if (line_of_sight(grid, pixel_tl, width, height, start_ix, start_iy, tx, ty)) {
+                    float fdx = (float)(tx - start_ix) * resolution;
+                    float fdy = (float)(ty - start_iy) * resolution;
+                    float dist = sqrtf(fdx * fdx + fdy * fdy);
+                    out_attenuations[i] = 20.0f * log10f(dist + mic_distance);
+                    target_indices[i] = -1;
+                    continue;
+                }
+
                 int tidx = ty * width + tx;
                 target_indices[i] = tidx;
                 if (ws.target_status[tidx] == 0) {
@@ -337,6 +389,7 @@ extern "C" {
         }
 
         ws.ensure_capacity(N);
+        ws.ensure_sat(grid, pixel_tl, width, height);
 
         run_acoustic_dijkstra<false>(
             grid, width, height, resolution,

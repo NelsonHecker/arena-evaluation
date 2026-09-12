@@ -551,5 +551,60 @@ class TestGranularDoorTransition:
 
         res = calc.calculate(bundle_ref, {"map": "test_map"})
         assert not solver_called
-        assert res["total_acoustic_energy_exposure_j"] is None
-        assert res["mean_sound_pressure_level_dba"] is None
+        assert res["ped_max_exposure_dba"] is None
+        assert res["ped_leq_exposure_dba"] is None
+
+    def test_per_pedestrian_displacement_decoupling(self, monkeypatch, tmp_path):
+        """Moving near a close pedestrian should not re-evaluate a distant stationary observer."""
+        map_name = "test_decoupling_map"
+
+        computed_targets_per_call = []
+        def spy_compute(*args, **kwargs):
+            target_xs = kwargs.get("target_xs_px", [])
+            computed_targets_per_call.append(len(target_xs))
+            return [15.0] * len(target_xs)
+
+        monkeypatch.setattr(
+            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_attenuations",
+            spy_compute,
+        )
+
+        calc = AcousticExposureCalculator(RobotParams(0.25, 0.0, 30.0))
+        calc.world = map_name
+        monkeypatch.setattr(
+            calc,
+            "_get_map_occupancy",
+            lambda *args, **kwargs: (np.zeros((100, 100), dtype=np.uint8), 0.05, (0.0, 0.0, 0.0)),
+        )
+
+        # Ped 0 is at (1.0, 1.0) [close to robot at (1.0, 1.0)]
+        # Ped 1 is at (40.0, 40.0) [distant observer ~55m away]
+        # Frame 0: robot at (1.00, 1.00) -> Frame 0 initial: both peds evaluated (2 targets)
+        # Frame 1: robot at (1.06, 1.00) -> Moved 0.06m > 0.05m for close Ped 0 (<2m),
+        #          but 0.06m << 1.0m for distant Ped 1 (>=10m).
+        #          Only Ped 0 should be sent to the solver! (1 target)
+        df = pl.DataFrame({
+            "time_ns": [100, 200],
+            "pos_x_gt": [1.00, 1.06],
+            "pos_y_gt": [1.00, 1.00],
+            "total_level_af_dba": [70.0, 70.0],
+            "peds_positions": [
+                [[1.0, 1.0], [40.0, 40.0]],
+                [[1.0, 1.0], [40.0, 40.0]],
+            ],
+        })
+
+        bundle = AlignedEpisodeBundle(
+            episode_id="test_ep_decoupling",
+            data=df,
+            start_pos=[0.0, 0.0, 0.0],
+            goal_pos=[10.0, 10.0, 0.0],
+            map=map_name,
+        )
+
+        calc.calculate(bundle, {"map": map_name})
+
+        # Frame 0: 2 targets (both). Frame 1: ONLY 1 target (close ped)! Distant ped decoupled!
+        assert len(computed_targets_per_call) == 2
+        assert computed_targets_per_call[0] == 2
+        assert computed_targets_per_call[1] == 1

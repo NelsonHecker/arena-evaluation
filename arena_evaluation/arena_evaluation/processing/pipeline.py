@@ -83,13 +83,36 @@ def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
     return ep.episode_id, elapsed
 
 
-def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> typing.Tuple[int, typing.Any, float]:
-    from arena_evaluation.processing.pipeline import ProcessingPipeline
+def _process_worker(
+    data_root_str: str,
+    ep: EpisodeDescriptor,
+    force_extract: bool,
+    status_dict: typing.Any = None,
+    force_process: bool = False,
+) -> typing.Tuple[int, typing.Any, float, bool]:
+    from arena_evaluation.processing.pipeline import ProcessingPipeline, _STATUS_EVALUATED
     from arena_evaluation.storage.folder_manager import FolderManager
     import pathlib
     import time
 
     t_start = time.perf_counter()
+
+    # Fast-path: check if metrics.parquet already exists with valid data
+    if not force_process:
+        ep_dir = pathlib.Path(ep.episode_dir)
+        m_path = ep_dir / "metrics.parquet"
+        if m_path.is_file() and m_path.stat().st_size > 0:
+            try:
+                from arena_evaluation.processing.parquet_store import ParquetStore
+                df, _ = ParquetStore.read(m_path)
+                if len(df) > 0:
+                    rows = df.to_dicts()
+                    if any(r.get("status") in (_STATUS_EVALUATED, "path_only") for r in rows):
+                        elapsed = time.perf_counter() - t_start
+                        return ep.episode_id, rows, elapsed, True
+            except Exception:
+                pass
+
     if status_dict is not None:
         try:
             status_dict[ep.episode_id] = (_display_planner_label(ep), ep.stage, "Loading Topics", 0, 18, t_start)
@@ -98,7 +121,12 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
     try:
-        result = pipeline.process_episode(ep, force_extract=force_extract, status_dict=status_dict)
+        result = pipeline.process_episode(
+            ep,
+            force_extract=force_extract,
+            force_process=force_process,
+            status_dict=status_dict,
+        )
     except Exception as e:
         _log.exception(f"episode_{ep.episode_id:03d}: metrics failed")
         result = [_status_row(ep, None, "", "error", repr(e))]
@@ -108,7 +136,7 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
         except Exception:
             pass
     elapsed = time.perf_counter() - t_start
-    return ep.episode_id, result, elapsed
+    return ep.episode_id, result, elapsed, False
 
 
 def _resolve_odom_frame(aligned_df) -> "pl.DataFrame | None":
@@ -382,10 +410,24 @@ class ProcessingPipeline:
         self,
         ep: EpisodeDescriptor,
         force_extract: bool = False,
+        force_process: bool = False,
         status_dict: typing.Any = None,
     ) -> list[dict]:
         """Extract and evaluate one episode: one row per robot, a status row where metrics are impossible."""
         episode_dir = pathlib.Path(ep.episode_dir)
+
+        if not force_process:
+            metrics_path = episode_dir / "metrics.parquet"
+            if metrics_path.is_file() and metrics_path.stat().st_size > 0:
+                try:
+                    df, _ = ParquetStore.read(metrics_path)
+                    if len(df) > 0:
+                        rows = df.to_dicts()
+                        if any(r.get("status") in (_STATUS_EVALUATED, "path_only") for r in rows):
+                            _log.info(f"episode_{ep.episode_id:03d}: reusing existing {metrics_path.name}")
+                            return rows
+                except Exception as e:
+                    _log.warning(f"episode_{ep.episode_id:03d}: reading cached metrics.parquet failed ({e}), recalculating")
 
         # Load episode metadata
         yaml_path = episode_dir / f"{episode_dir.name}.yaml"
@@ -593,11 +635,74 @@ class ProcessingPipeline:
 
             return finish(all_results)
 
-    def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
+    def process_run_dir(
+        self,
+        run_dir: pathlib.Path,
+        force_extract: bool = False,
+        force_process: bool = False,
+    ) -> pathlib.Path | None:
+        """Process a single episode or recording directory."""
+        run_dir = pathlib.Path(run_dir).resolve()
+        yaml_path = run_dir / f"{run_dir.name}.yaml"
+        if not yaml_path.exists():
+            yaml_path = run_dir / "metadata.yaml"
+
+        ep_id = 0
+        try:
+            if run_dir.name.startswith("episode_"):
+                ep_id = int(run_dir.name.split("_", 1)[1])
+        except Exception:
+            pass
+
+        meta = None
+        if yaml_path.exists():
+            try:
+                meta = MetadataWriter.read(yaml_path)
+            except Exception:
+                pass
+
+        ep = EpisodeDescriptor(
+            episode_dir=str(run_dir),
+            benchmark_id=run_dir.parent.name if run_dir.parent else "",
+            episode_id=ep_id,
+            planner=meta.planner if meta else "",
+            stage=meta.stage if meta else "",
+            map=meta.map if meta else "",
+            is_reference=meta.is_reference if meta else False,
+            reference_type=meta.reference_type if meta else None,
+        )
+        rows = self.process_episode(ep, force_extract=force_extract, force_process=force_process)
+        out_parquet = run_dir / "metrics.parquet"
+        if out_parquet.exists():
+            return out_parquet
+        return None
+
+    def extract_benchmark(
+        self,
+        benchmark_id: str,
+        force_extract: bool = False,
+        force_process: bool = False,
+    ) -> None:
         """Extract all episodes in a benchmark."""
         episodes = self.folder_manager.discover_episodes(benchmark_id)
         if not episodes:
             print(f"No episodes found for benchmark '{benchmark_id}'")
+            return
+
+        if not force_extract:
+            needed_episodes = []
+            for ep in episodes:
+                ep_dir = pathlib.Path(ep.episode_dir)
+                if not force_process and (ep_dir / "metrics.parquet").is_file() and (ep_dir / "metrics.parquet").stat().st_size > 0:
+                    continue
+                topics_dir = ep_dir / "topics"
+                if topics_dir.is_dir() and any(topics_dir.glob("*.parquet")):
+                    continue
+                needed_episodes.append(ep)
+        else:
+            needed_episodes = episodes
+
+        if not needed_episodes:
             return
 
         from .progress_display import PipelineProgressDisplay
@@ -608,13 +713,13 @@ class ProcessingPipeline:
 
         with PipelineProgressDisplay(
             f"Phase 1: Extracting MCAP topics for {benchmark_id}",
-            len(episodes),
+            len(needed_episodes),
             self.workers,
             status_dict=status_dict,
         ) as display:
             executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
             try:
-                futures = {executor.submit(_extract_worker, data_root_str, ep, force_extract, status_dict): ep for ep in episodes}
+                futures = {executor.submit(_extract_worker, data_root_str, ep, force_extract, status_dict): ep for ep in needed_episodes}
                 for future in concurrent.futures.as_completed(futures):
                     ep = futures[future]
                     try:
@@ -628,7 +733,12 @@ class ProcessingPipeline:
             finally:
                 _shutdown_executor_cleanly(executor)
 
-    def process_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
+    def process_benchmark(
+        self,
+        benchmark_id: str,
+        force_extract: bool = False,
+        force_process: bool = False,
+    ) -> None:
         """Process all episodes and write combined_metrics.parquet using a 2-Phase pipeline."""
         episodes = self.folder_manager.discover_episodes(benchmark_id)
 
@@ -638,7 +748,7 @@ class ProcessingPipeline:
 
         _ctx_extract = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx_extract:
-            self.extract_benchmark(benchmark_id, force_extract=force_extract)
+            self.extract_benchmark(benchmark_id, force_extract=force_extract, force_process=force_process)
 
         all_metrics: list[dict] = []
         data_root_str = str(self.folder_manager.data_root)
@@ -658,14 +768,28 @@ class ProcessingPipeline:
             ) as display:
                 executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
                 try:
-                    futures = {executor.submit(_process_worker, data_root_str, ep, False, status_dict): ep for ep in episodes}
+                    futures = {
+                        executor.submit(_process_worker, data_root_str, ep, False, status_dict, force_process): ep
+                        for ep in episodes
+                    }
 
                     for future in concurrent.futures.as_completed(futures):
                         ep = futures[future]
                         try:
-                            ep_id, result, elapsed = future.result()
+                            res = future.result()
+                            if len(res) == 4:
+                                ep_id, result, elapsed, was_cached = res
+                            else:
+                                ep_id, result, elapsed = res
+                                was_cached = False
                             all_metrics.extend(result)
-                            display.log_completed(ep_id, f"{_display_planner_label(ep)}/{ep.stage}", elapsed)
+                            extra_label = "cached" if was_cached else ""
+                            display.log_completed(
+                                ep_id,
+                                f"{_display_planner_label(ep)}/{ep.stage}",
+                                elapsed,
+                                extra=extra_label,
+                            )
                         except Exception as e:
                             display.log_error(ep.episode_id, str(e))
                             all_metrics.append(_status_row(ep, None, "", "error", repr(e)))

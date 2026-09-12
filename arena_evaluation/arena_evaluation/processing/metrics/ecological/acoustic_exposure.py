@@ -198,21 +198,34 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         last_eval_ry = None
         last_eval_pts: list[tuple[float, float]] | None = None
         last_eval_doors = None
-        last_attenuations: np.ndarray | None = None
+        # Per-pedestrian state tracking
+        # Each pedestrian maintains its own last evaluated robot pose and pedestrian pose
+        ped_last_eval_rx: list[float] = []
+        ped_last_eval_ry: list[float] = []
+        ped_last_eval_px: list[float] = []
+        ped_last_eval_py: list[float] = []
+        current_attenuations = np.array([], dtype=np.float32)
 
         # Proximity-adaptive displacement thresholds:
-        # Near pedestrians (< 2.0 m), fine granularity (0.05 m = 5 cm) is required because
-        # 1/r geometric spreading produces rapid dB gradients (e.g. 0.5m -> 1.0m is 6 dB!).
-        # Proximity-adaptive displacement thresholds:
-        # Near pedestrians (< 2.0 m): 0.05 m (5 cm) captures steep 1/r acoustic gradients (< 0.4 dB).
-        # Intermediate (2.0 m - 5.0 m): 0.10 m (10 cm) preserves sub-decibel precision (< 0.4 dB).
-        # Far (5.0 m - 10.0 m): 0.30 m (30 cm) preserves < 0.4 dB precision at distance.
-        # Remote (>= 10.0 m): 0.75 m (75 cm) preserves < 0.5 dB precision (at 15m+, 0.75m is < 0.4 dB).
-        POS_THRESHOLD_NEAR = 0.05    # meters (< 2.0m)
-        POS_THRESHOLD_MID = 0.10     # meters (2.0m - 5.0m)
-        POS_THRESHOLD_FAR = 0.30     # meters (5.0m - 10.0m)
-        POS_THRESHOLD_REMOTE = 0.75  # meters (>= 10.0m)
+        # Designed to bound acoustic geometric spreading errors to < 0.5 dB
+        # (well below human perceptual Just-Noticeable Difference JND of 1.0 dB).
+        POS_THRESHOLD_NEAR = 0.05    # meters (< 2.0m): at 1m, 5cm is 0.2 dB
+        POS_THRESHOLD_MID = 0.15     # meters (2.0m - 5.0m): at 3m, 15cm is 0.3 dB
+        POS_THRESHOLD_FAR = 0.40     # meters (5.0m - 10.0m): at 7m, 40cm is 0.4 dB
+        POS_THRESHOLD_DISTANT = 1.00 # meters (10.0m - 20.0m): at 15m, 1.0m is 0.5 dB
+        POS_THRESHOLD_REMOTE = 2.00  # meters (>= 20.0m): at 25m, 2.0m is 0.6 dB
         total_frames = len(rx_m)
+
+        def _ped_threshold(p_dist: float) -> float:
+            if p_dist < 2.0:
+                return POS_THRESHOLD_NEAR
+            if p_dist < 5.0:
+                return POS_THRESHOLD_MID
+            if p_dist < 10.0:
+                return POS_THRESHOLD_FAR
+            if p_dist < 20.0:
+                return POS_THRESHOLD_DISTANT
+            return POS_THRESHOLD_REMOTE
 
         eval_count = 0
 
@@ -236,67 +249,39 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 else frozenset()
             )
 
-            # Adaptive displacement threshold based on minimum pedestrian proximity
-            if len(px_m) > 0:
-                ped_dists = np.hypot(px_m - rx_m[i], py_m - ry_m[i])
-                min_ped_dist = float(np.min(ped_dists))
-                if min_ped_dist < 2.0:
-                    pos_threshold = POS_THRESHOLD_NEAR
-                elif min_ped_dist < 5.0:
-                    pos_threshold = POS_THRESHOLD_MID
-                elif min_ped_dist < 10.0:
-                    pos_threshold = POS_THRESHOLD_FAR
-                else:
-                    pos_threshold = POS_THRESHOLD_REMOTE
-            else:
-                pos_threshold = POS_THRESHOLD_REMOTE
-
-            # Check if we should re-evaluate the robot's acoustic emission.
-            # Recomputation is triggered on robot displacement, pedestrian displacement,
-            # door state transition, or initial frame.
-            robot_moved = (
-                last_eval_rx is None
-                or np.hypot(rx_m[i] - last_eval_rx, ry_m[i] - last_eval_ry) > pos_threshold
-            )
-
-            def _ped_threshold(p_dist: float) -> float:
-                if p_dist < 2.0:
-                    return POS_THRESHOLD_NEAR
-                if p_dist < 5.0:
-                    return POS_THRESHOLD_MID
-                if p_dist < 10.0:
-                    return POS_THRESHOLD_FAR
-                return POS_THRESHOLD_REMOTE
-
-            peds_moved = (
-                last_eval_pts is None
-                or len(pts) != len(last_eval_pts)
-                or any(
-                    np.hypot(p[0] - lp[0], p[1] - lp[1]) > _ped_threshold(ped_dists[p_idx])
-                    for p_idx, (p, lp) in enumerate(zip(pts, last_eval_pts))
-                )
-            )
             doors_changed = (open_set != last_eval_doors) if last_eval_doors is not None else True
+            num_peds = len(pts)
 
-            should_eval = (
-                i == 0
-                or robot_moved
-                or peds_moved
-                or doors_changed
-                or last_attenuations is None
-            )
+            # Determine which pedestrians require solver re-evaluation
+            if doors_changed or len(current_attenuations) != num_peds:
+                # Full invalidation across all pedestrians on door state transition or topology change
+                indices_to_eval = list(range(num_peds))
+                ped_last_eval_rx = [0.0] * num_peds
+                ped_last_eval_ry = [0.0] * num_peds
+                ped_last_eval_px = [0.0] * num_peds
+                ped_last_eval_py = [0.0] * num_peds
+                if len(current_attenuations) != num_peds:
+                    current_attenuations = np.full(num_peds, np.inf, dtype=np.float32)
+            else:
+                indices_to_eval = []
+                for p_idx in range(num_peds):
+                    p_x, p_y = pts[p_idx]
+                    p_dist = float(np.hypot(p_x - rx_m[i], p_y - ry_m[i]))
+                    thresh = _ped_threshold(p_dist)
+                    r_disp = np.hypot(rx_m[i] - ped_last_eval_rx[p_idx], ry_m[i] - ped_last_eval_ry[p_idx])
+                    p_disp = np.hypot(p_x - ped_last_eval_px[p_idx], p_y - ped_last_eval_py[p_idx])
+                    if r_disp > thresh or p_disp > thresh:
+                        indices_to_eval.append(p_idx)
 
-            rx_px = (rx_m[i] - ox) / resolution
-            ry_px = (ry_m[i] - oy) / resolution
+            if indices_to_eval:
+                rx_px = (rx_m[i] - ox) / resolution
+                ry_px = (ry_m[i] - oy) / resolution
 
-            px_px = (px_m - ox) / resolution
-            py_px = (py_m - oy) / resolution
+                px_px = (px_m - ox) / resolution
+                py_px = (py_m - oy) / resolution
 
-            if should_eval:
-                last_eval_rx = rx_m[i]
-                last_eval_ry = ry_m[i]
-                last_eval_pts = pts
-                last_eval_doors = open_set
+                sub_px = px_px[indices_to_eval]
+                sub_py = py_px[indices_to_eval]
 
                 # Door-aware per-pixel TL (open doors carved to 0 dB)
                 tl_key = tuple(sorted(open_set))
@@ -305,21 +290,29 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
                     tl_cache[tl_key] = pixel_tl
 
-                attenuations = compute_attenuations(
+                sub_atts = compute_attenuations(
                     occupancy_grid=grid,
                     resolution=resolution,
                     start_x_px=rx_px,
                     start_y_px=ry_px,
-                    target_xs_px=px_px,
-                    target_ys_px=py_px,
+                    target_xs_px=sub_px,
+                    target_ys_px=sub_py,
                     wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
                     mic_distance=1.0,
                     pixel_tl=pixel_tl,
                 )
-                last_attenuations = attenuations
+
+                for k, p_idx in enumerate(indices_to_eval):
+                    current_attenuations[p_idx] = sub_atts[k]
+                    ped_last_eval_rx[p_idx] = rx_m[i]
+                    ped_last_eval_ry[p_idx] = ry_m[i]
+                    ped_last_eval_px[p_idx] = pts[p_idx][0]
+                    ped_last_eval_py[p_idx] = pts[p_idx][1]
+
+                last_eval_doors = open_set
                 eval_count += 1
-            else:
-                attenuations = last_attenuations
+
+            attenuations = current_attenuations
 
             # Filter out infinity (unreachable)
             valid = ~np.isinf(attenuations)

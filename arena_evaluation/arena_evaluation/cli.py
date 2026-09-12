@@ -144,7 +144,7 @@ Examples:
         action="store_true",
         help="List the available named report manifests and exit.",
     )
-    run_parent.set_defaults(force_extract=False)
+    run_parent.set_defaults(force_extract=False, force_process=False)
 
     subparsers.add_parser(
         "extract",
@@ -159,12 +159,20 @@ Examples:
     process_parser = subparsers.add_parser(
         "process",
         parents=[run_parent],
-        help="Layer 3: Compute metrics and write metrics.parquet (uses cached extraction by default).",
+        help="Layer 3: Compute metrics and write metrics.parquet (uses cached extraction and cached metrics by default).",
     )
     process_parser.add_argument(
         "--force-extract",
         action="store_true",
         help="Force re-extraction of MCAP files, overwriting the topic cache.",
+    )
+    process_parser.add_argument(
+        "--force-process",
+        "--force-metrics",
+        "--force",
+        action="store_true",
+        dest="force_process",
+        help="Force re-calculation of metrics even if metrics.parquet already exists.",
     )
     subparsers.add_parser(
         "report",
@@ -224,8 +232,10 @@ Examples:
 
     if args.command in ("extract", "run", "process"):
         force_extract = args.force_extract
+        force_process = getattr(args, "force_process", False)
         if args.command == "run":
             force_extract = True 
+            force_process = True
 
         if args.run_dir:
             for run_dir in args.run_dir:
@@ -237,7 +247,7 @@ Examples:
                     pipeline.extract_run_dir(run_dir)
                 else:
                     print(f"Processing single run: {run_dir}")
-                    out = pipeline.process_run_dir(run_dir, force_extract=force_extract)
+                    out = pipeline.process_run_dir(run_dir, force_extract=force_extract, force_process=force_process)
                     if out:
                         print(f"Metrics written to: {out}")
                     else:
@@ -250,10 +260,10 @@ Examples:
                 
                 if args.command == "extract":
                     print(f"Extracting benchmark: {benchmark_dir.name}")
-                    pipeline.extract_benchmark(benchmark_dir.name)
+                    pipeline.extract_benchmark(benchmark_dir.name, force_extract=force_extract, force_process=force_process)
                 else:
                     print(f"Processing benchmark: {benchmark_dir.name}")
-                    pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract)
+                    pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract, force_process=force_process)
 
     if args.command in ("run", "report", "plot"):
         output_dir = args.output_dir

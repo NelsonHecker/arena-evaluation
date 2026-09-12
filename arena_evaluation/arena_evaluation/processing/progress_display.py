@@ -102,8 +102,9 @@ class PipelineProgressDisplay:
                 self.console.print(line)
                 self.live.update(self._render())
             else:
+                extra_str = f" • {extra}" if extra else ""
                 print(
-                    f"[{self.completed_items}/{self.total_items}] episode_{ep_id:03d} ({label}) in {elapsed_sec:.2f}s",
+                    f"[{self.completed_items}/{self.total_items}] episode_{ep_id:03d} ({label}) in {elapsed_sec:.2f}s{extra_str}",
                     flush=True,
                 )
 
