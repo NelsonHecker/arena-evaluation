@@ -105,7 +105,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         nulls = {k: None for k in self.output_keys()}
 
         # Skip heavy calculation for reference runs
-        if episode.run is not None and episode.run.is_reference:
+        is_ref = getattr(episode, "is_reference", False) or (episode.run is not None and getattr(episode.run, "is_reference", False))
+        if is_ref:
             logger.info("Skipping acoustic calculation for reference episode %s", episode.episode_id)
             return nulls
 

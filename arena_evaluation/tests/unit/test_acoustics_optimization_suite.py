@@ -524,3 +524,32 @@ class TestGranularDoorTransition:
 
         # Must recompute: Frame 0 (initial) + Frame 1 (door state transitioned to open)
         assert solver_calls == 2
+
+    def test_acoustic_exposure_skips_reference_episodes(self, monkeypatch):
+        solver_called = False
+        def fake_compute(*args, **kwargs):
+            nonlocal solver_called
+            solver_called = True
+            return [10.0]
+
+        monkeypatch.setattr(
+            "arena_evaluation.processing.metrics.ecological.acoustic_exposure.compute_attenuations",
+            fake_compute,
+        )
+
+        calc = AcousticExposureCalculator(RobotParams(0.25, 0.0, 30.0))
+        calc.world = "test_map"
+
+        bundle_ref = AlignedEpisodeBundle(
+            episode_id=99,
+            data=pl.DataFrame({"pos_x": [1.0], "pos_y": [1.0]}),
+            start_pos=[0.0, 0.0],
+            goal_pos=[1.0, 1.0],
+            is_reference=True,
+            reference_type="unobstructed_robot",
+        )
+
+        res = calc.calculate(bundle_ref, {"map": "test_map"})
+        assert not solver_called
+        assert res["total_acoustic_energy_exposure_j"] is None
+        assert res["mean_sound_pressure_level_dba"] is None

@@ -206,6 +206,8 @@ class AlignedEpisodeBundle:
     peds: pl.DataFrame | None = None
     map: str | None = None
     topics: dict[str, pl.DataFrame] | None = None
+    is_reference: bool = False
+    reference_type: str | None = None
 
 
 class PlotSpec(BaseModel):

@@ -53,6 +53,12 @@ def _shutdown_executor_cleanly(executor: concurrent.futures.ProcessPoolExecutor)
         pass
 
 
+def _display_planner_label(ep: EpisodeDescriptor) -> str:
+    if ep.is_reference:
+        return f"{ep.planner} [{ep.reference_type or 'ref'}]"
+    return ep.planner
+
+
 def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bool, status_dict: typing.Any = None) -> tuple[int, float]:
     from arena_evaluation.processing.pipeline import ProcessingPipeline
     from arena_evaluation.storage.folder_manager import FolderManager
@@ -62,7 +68,7 @@ def _extract_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
     t_start = time.perf_counter()
     if status_dict is not None:
         try:
-            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Extracting MCAP / Topics", 1, 1, t_start)
+            status_dict[ep.episode_id] = (_display_planner_label(ep), ep.stage, "Extracting MCAP / Topics", 1, 1, t_start)
         except Exception:
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
@@ -86,7 +92,7 @@ def _process_worker(data_root_str: str, ep: EpisodeDescriptor, force_extract: bo
     t_start = time.perf_counter()
     if status_dict is not None:
         try:
-            status_dict[ep.episode_id] = (ep.planner, ep.stage, "Loading Topics", 0, 18, t_start)
+            status_dict[ep.episode_id] = (_display_planner_label(ep), ep.stage, "Loading Topics", 0, 18, t_start)
         except Exception:
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
@@ -525,6 +531,8 @@ class ProcessingPipeline:
                     outcome_info=outcome_info,
                     map=ep.map,
                     topics=topics,
+                    is_reference=ep.is_reference,
+                    reference_type=ep.reference_type,
                 )
                 episodes = [aligned_ep]
 
@@ -534,7 +542,7 @@ class ProcessingPipeline:
                             import time
 
                             status_dict[ep.episode_id] = (
-                                ep.planner,
+                                _display_planner_label(ep),
                                 ep.stage,
                                 calc_name,
                                 calc_idx,
@@ -657,7 +665,7 @@ class ProcessingPipeline:
                         try:
                             ep_id, result, elapsed = future.result()
                             all_metrics.extend(result)
-                            display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
+                            display.log_completed(ep_id, f"{_display_planner_label(ep)}/{ep.stage}", elapsed)
                         except Exception as e:
                             display.log_error(ep.episode_id, str(e))
                             all_metrics.append(_status_row(ep, None, "", "error", repr(e)))
