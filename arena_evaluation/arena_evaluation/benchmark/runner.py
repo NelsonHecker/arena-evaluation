@@ -1587,8 +1587,6 @@ class BenchmarkRunner(ArenaMixinNode):
         slot_index: int,
         flush_cb: typing.Callable[[StepResult], bool],
         episode_subsets: dict[str, tuple[int, ...]] | None = None,
-        startup_barrier: asyncio.Barrier | None = None,
-        initial_boot: bool = False,
     ) -> bool:
         env_id: int | None = None
         env_ns_root = ""
@@ -1610,26 +1608,14 @@ class BenchmarkRunner(ArenaMixinNode):
                     try:
                         spawned = await self._spawn_and_setup_env(rep_step)
                     except _SimDied as exc:
-                        if startup_barrier is not None:
-                            with contextlib.suppress(Exception):
-                                startup_barrier.abort()
                         _, run_abort = await self._spend_sim_death(str(exc), None)
                         if run_abort:
                             return True
                         continue
                     if spawned is None:
-                        if startup_barrier is not None:
-                            with contextlib.suppress(Exception):
-                                startup_barrier.abort()
                         return self._fail_remaining(q, None, "env respawn failed after a wedged env" if spawned_once else "spawn_env failed", flush_cb)
                     env_id, env_ns_root = spawned
                     spawned_once = True
-
-                    if startup_barrier is not None:
-                        try:
-                            await startup_barrier.wait()
-                        except asyncio.BrokenBarrierError:
-                            return True
 
                 try:
                     step = q.get_nowait()
@@ -2095,13 +2081,11 @@ class BenchmarkRunner(ArenaMixinNode):
                     cap = max(1, min(self._env_n, len(block_queues)))
                     self._completed_groups = 0
                     self._total_groups = len(block_queues)
-                    startup_barrier = asyncio.Barrier(cap)
                     block_iter = iter(block_queues)
                     blocks_lock = asyncio.Lock()
                     worker_tasks: list[asyncio.Task[bool]] = []
 
                     async def _worker(slot_index: int) -> bool:
-                        initial_boot = True
                         try:
                             while True:
                                 async with blocks_lock:
@@ -2110,22 +2094,14 @@ class BenchmarkRunner(ArenaMixinNode):
                                     except StopIteration:
                                         break
 
-                                b = startup_barrier if initial_boot else None
-                                is_initial = initial_boot
-                                initial_boot = False
-
                                 abort = await self._run_group_queue(
                                     rep_step,
                                     q,
                                     slot_index,
                                     _flush_step_result,
                                     episode_subsets,
-                                    startup_barrier=b,
-                                    initial_boot=is_initial,
                                 )
                                 if abort:
-                                    with contextlib.suppress(Exception):
-                                        startup_barrier.abort()
                                     return True
                             return False
                         finally:
@@ -2150,8 +2126,6 @@ class BenchmarkRunner(ArenaMixinNode):
 
                             if abort:
                                 aborted_systemic = True
-                                with contextlib.suppress(Exception):
-                                    startup_barrier.abort()
                                 _log.error("benchmark: worker hit a systemic setup failure; aborting run")
                                 for t2 in worker_tasks:
                                     t2.cancel()
