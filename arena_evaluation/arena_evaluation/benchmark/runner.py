@@ -1587,6 +1587,7 @@ class BenchmarkRunner(ArenaMixinNode):
         slot_index: int,
         flush_cb: typing.Callable[[StepResult], bool],
         episode_subsets: dict[str, tuple[int, ...]] | None = None,
+        startup_barrier: asyncio.Barrier | None = None,
     ) -> bool:
         env_id: int | None = None
         env_ns_root = ""
@@ -1594,6 +1595,9 @@ class BenchmarkRunner(ArenaMixinNode):
         try:
             while not q.empty():
                 if env_id is None:
+                    if not spawned_once and slot_index > 0:
+                        await asyncio.sleep(slot_index * 1.5)
+
                     if self._progress is not None:
                         self._progress.update_slot(
                             slot_index=slot_index,
@@ -1608,14 +1612,24 @@ class BenchmarkRunner(ArenaMixinNode):
                     try:
                         spawned = await self._spawn_and_setup_env(rep_step)
                     except _SimDied as exc:
+                        if startup_barrier is not None:
+                            startup_barrier.abort()
                         _, run_abort = await self._spend_sim_death(str(exc), None)
                         if run_abort:
                             return True
                         continue
                     if spawned is None:
+                        if startup_barrier is not None:
+                            startup_barrier.abort()
                         return self._fail_remaining(q, None, "env respawn failed after a wedged env" if spawned_once else "spawn_env failed", flush_cb)
                     env_id, env_ns_root = spawned
                     spawned_once = True
+
+                    if startup_barrier is not None:
+                        try:
+                            await startup_barrier.wait()
+                        except asyncio.BrokenBarrierError:
+                            return True
 
                 try:
                     step = q.get_nowait()
@@ -1788,14 +1802,10 @@ class BenchmarkRunner(ArenaMixinNode):
             self._completed_groups += 1
             keep_alive = self._noexit and self._completed_groups == self._total_groups and env_id is not None
             if env_id is not None:
-                self._teardown_env_clients(env_id)
-                if env_id in self._env_records and not keep_alive and not self._sim_dead.is_set():
-                    with contextlib.suppress(Exception):
-                        dreq = DespawnEnv.Request()
-                        dreq.env_id = env_id
-                        await asyncio.wait_for(self._despawn.call_forever(dreq), timeout=2.0)
-                    with contextlib.suppress(Exception):
-                        await asyncio.wait_for(self._wait_env_gone(env_id, timeout=2.0), timeout=2.0)
+                if not keep_alive and not self._sim_dead.is_set():
+                    await self._despawn_env(env_id)
+                else:
+                    self._teardown_env_clients(env_id)
                 if keep_alive:
                     _log.info(f"--noexit: keeping env {env_id} alive after last group {rep_step.key}")
 
@@ -2083,56 +2093,57 @@ class BenchmarkRunner(ArenaMixinNode):
                         block_queues.append((block[0], q))
 
                     cap = max(1, min(self._env_n, len(world_steps) or 1))
+                    self._total_groups = len(block_queues)
+                    waves = [block_queues[i:i + cap] for i in range(0, len(block_queues), cap)]
 
-                    async def _worker(slot_index: int) -> bool:
-                        try:
-                            while True:
-                                target_q = None
-                                rep_step = None
-                                for r_step, q in block_queues:
-                                    if not q.empty():
-                                        target_q = q
-                                        rep_step = r_step
-                                        break
+                    for wave_idx, wave in enumerate(waves):
+                        wave_size = len(wave)
+                        barrier = asyncio.Barrier(wave_size)
+                        wave_tasks: list[asyncio.Task[bool]] = []
 
-                                if target_q is None:
-                                    break
-
-                                abort = await self._run_group_queue(
-                                    rep_step,
-                                    target_q,
-                                    slot_index,
+                        for slot, (r_step, q) in enumerate(wave):
+                            t = asyncio.create_task(
+                                self._run_group_queue(
+                                    r_step,
+                                    q,
+                                    slot,
                                     _flush_step_result,
                                     episode_subsets,
-                                )
+                                    startup_barrier=barrier,
+                                ),
+                                name=f"worker_wave{wave_idx}_slot{slot}",
+                            )
+                            wave_tasks.append(t)
+                            in_flight.add(t)
+
+                        while wave_tasks:
+                            done, _ = await asyncio.wait(wave_tasks, return_when=asyncio.FIRST_COMPLETED)
+                            for t in done:
+                                wave_tasks.remove(t)
+                                in_flight.discard(t)
+                                if self._progress is not None:
+                                    try:
+                                        slot_num = int(t.get_name().split("slot")[-1])
+                                        self._progress.clear_slot(slot_num)
+                                    except Exception:
+                                        pass
+                                abort = t.result()
                                 if abort:
-                                    return True
-                            return False
-                        finally:
-                            if self._progress is not None:
-                                self._progress.clear_slot(slot_index)
-
-                    for slot in range(cap):
-                        in_flight.add(asyncio.create_task(_worker(slot), name=f"worker_{slot}"))
-
-                    while in_flight:
-                        done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
-                        for t in done:
-                            abort = t.result()
-                            if abort:
-                                aborted_systemic = True
-                                _log.error(f"benchmark: worker hit a systemic setup failure; aborting run")
-                                for t2 in in_flight:
-                                    t2.cancel()
-                                with contextlib.suppress(Exception):
-                                    await asyncio.gather(*in_flight, return_exceptions=True)
-                                in_flight.clear()
+                                    aborted_systemic = True
+                                    barrier.abort()
+                                    _log.error("benchmark: worker hit a systemic setup failure; aborting run")
+                                    for t2 in wave_tasks:
+                                        t2.cancel()
+                                    with contextlib.suppress(Exception):
+                                        await asyncio.gather(*wave_tasks, return_exceptions=True)
+                                    wave_tasks.clear()
+                                    in_flight.clear()
+                                    break
+                            if aborted_systemic:
                                 break
+
                         if aborted_systemic:
                             break
-
-                    if aborted_systemic:
-                        break
 
             except asyncio.CancelledError:
                 for t in in_flight:
