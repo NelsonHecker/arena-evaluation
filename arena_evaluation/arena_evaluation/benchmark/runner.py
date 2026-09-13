@@ -1588,7 +1588,6 @@ class BenchmarkRunner(ArenaMixinNode):
         flush_cb: typing.Callable[[StepResult], bool],
         episode_subsets: dict[str, tuple[int, ...]] | None = None,
         startup_barrier: asyncio.Barrier | None = None,
-        lifecycle_lock: asyncio.Lock | None = None,
         initial_boot: bool = False,
     ) -> bool:
         env_id: int | None = None
@@ -1597,9 +1596,6 @@ class BenchmarkRunner(ArenaMixinNode):
         try:
             while not q.empty():
                 if env_id is None:
-                    if initial_boot and not spawned_once and slot_index > 0:
-                        await asyncio.sleep(slot_index * 1.5)
-
                     if self._progress is not None:
                         self._progress.update_slot(
                             slot_index=slot_index,
@@ -1612,8 +1608,7 @@ class BenchmarkRunner(ArenaMixinNode):
                             state="SPAWNING",
                         )
                     try:
-                        async with (lifecycle_lock if lifecycle_lock is not None else contextlib.nullcontext()):
-                            spawned = await self._spawn_and_setup_env(rep_step)
+                        spawned = await self._spawn_and_setup_env(rep_step)
                     except _SimDied as exc:
                         if startup_barrier is not None:
                             with contextlib.suppress(Exception):
@@ -1800,8 +1795,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     return True
 
                 if env_id is not None:
-                    async with (lifecycle_lock if lifecycle_lock is not None else contextlib.nullcontext()):
-                        await self._despawn_env(env_id)
+                    await self._despawn_env(env_id)
                     env_id = None
 
         finally:
@@ -1809,8 +1803,7 @@ class BenchmarkRunner(ArenaMixinNode):
             keep_alive = self._noexit and self._completed_groups == self._total_groups and env_id is not None
             if env_id is not None:
                 if not keep_alive and not self._sim_dead.is_set():
-                    async with (lifecycle_lock if lifecycle_lock is not None else contextlib.nullcontext()):
-                        await self._despawn_env(env_id)
+                    await self._despawn_env(env_id)
                 else:
                     self._teardown_env_clients(env_id)
                 if keep_alive:
@@ -2103,7 +2096,6 @@ class BenchmarkRunner(ArenaMixinNode):
                     self._completed_groups = 0
                     self._total_groups = len(block_queues)
                     startup_barrier = asyncio.Barrier(cap)
-                    lifecycle_lock = asyncio.Lock()
                     block_iter = iter(block_queues)
                     blocks_lock = asyncio.Lock()
                     worker_tasks: list[asyncio.Task[bool]] = []
@@ -2129,7 +2121,6 @@ class BenchmarkRunner(ArenaMixinNode):
                                     _flush_step_result,
                                     episode_subsets,
                                     startup_barrier=b,
-                                    lifecycle_lock=lifecycle_lock,
                                     initial_boot=is_initial,
                                 )
                                 if abort:
