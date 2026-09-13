@@ -1,0 +1,70 @@
+name: roster_survey
+description: "Roster completion survey on Jackal at 0.5 m/s deployment cap"
+contestants:
+  - name: dwb
+    mobile:
+      driver: nav2
+      local_planner: dwb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.50
+    linear_acc: 1.00
+    linear_decel: -1.00
+    max_angular_vel: 1.00
+    angular_acc: 1.50
+  - name: hateb
+    mobile:
+      driver: nav2
+      local_planner: hateb
+      inter_planner: navigate_to_pose_w_replanning_and_recovery
+    max_linear_vel: 0.50
+    linear_acc: 0.60
+    max_angular_vel: 1.00
+    angular_acc: 0.80
+  - name: height
+    mobile:
+      driver: drl
+      planner: height
+  - name: kdma
+    mobile:
+      driver: drl
+      planner: kdma
+  - name: scope
+    mobile:
+      driver: drl
+      planner: scope
+  - name: her-drl
+    mobile:
+      driver: drl
+      planner: her-drl
+  - name: navrep
+    mobile:
+      driver: drl
+      planner: navrep
+  - name: drlvo
+    mobile:
+      driver: drl
+      planner: drlvo
+  - name: cadrl
+    mobile:
+      driver: drl
+      planner: cadrl
+  - name: crowdsurfer
+    mobile:
+      driver: drl
+      planner: crowdsurfer
+  - name: cd-sarl
+    mobile:
+      driver: drl
+      planner: cd-sarl
+  - name: navistar
+    mobile:
+      driver: drl
+      planner: navistar
+  - name: rlrvo
+    mobile:
+      driver: drl
+      planner: rlrvo
+  - name: sicnav
+    mobile:
+      driver: drl
+      planner: sicnav

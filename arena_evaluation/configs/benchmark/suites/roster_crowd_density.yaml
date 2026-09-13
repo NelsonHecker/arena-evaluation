@@ -1,74 +1,697 @@
 name: roster_crowd_density
-description: "Roster completion survey on Jackal across 0, 6, and 12 pedestrian densities on map_empty"
-references: false
+description: Roster completion survey on Jackal across 10 calibrated cross-map perimeter
+  traversals over 0, 6, and 12 pedestrian densities on map_empty
+references: true
 launch:
   sim: gazebo
   headless: true
   env.n: 1
   optim.obstacles: bbox
 stages:
-- name: stage_0_unhindered
+- name: stage_0_ped0_route01
   map: map_empty
   robot: jackal
-  episodes: 10
+  episodes: 1
   timeout: 180.0
-  seed: 101
+  seed: 102
   tm_robots: scenario
   tm_obstacles: random
   config:
     scenario:
-      file: crowd_density_0peds
+      file: cross_route_01
     random:
       dynamic:
         min: 0
         max: 0
-        models: [arenian]
+        models:
+        - arenian
       static:
         min: 0
         max: 0
       interactive:
         min: 0
         max: 0
-
-- name: stage_1_moderate_crowd
+- name: stage_0_ped0_route02
   map: map_empty
   robot: jackal
-  episodes: 10
+  episodes: 1
   timeout: 180.0
-  seed: 101
+  seed: 103
   tm_robots: scenario
   tm_obstacles: random
   config:
     scenario:
-      file: crowd_density_0peds
+      file: cross_route_02
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route03
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 104
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_03
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route04
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 105
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_04
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route05
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 106
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_05
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route06
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 107
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_06
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route07
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 108
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_07
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route08
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 109
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_08
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route09
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 110
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_09
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_0_ped0_route10
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 111
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_10
+    random:
+      dynamic:
+        min: 0
+        max: 0
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route01
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 102
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_01
     random:
       dynamic:
         min: 6
         max: 6
-        models: [arenian]
+        models:
+        - arenian
       static:
         min: 0
         max: 0
       interactive:
         min: 0
         max: 0
-
-- name: stage_2_dense_crowd
+- name: stage_1_ped6_route02
   map: map_empty
   robot: jackal
-  episodes: 10
+  episodes: 1
   timeout: 180.0
-  seed: 101
+  seed: 103
   tm_robots: scenario
   tm_obstacles: random
   config:
     scenario:
-      file: crowd_density_0peds
+      file: cross_route_02
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route03
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 104
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_03
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route04
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 105
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_04
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route05
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 106
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_05
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route06
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 107
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_06
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route07
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 108
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_07
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route08
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 109
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_08
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route09
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 110
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_09
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_1_ped6_route10
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 111
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_10
+    random:
+      dynamic:
+        min: 6
+        max: 6
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route01
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 102
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_01
     random:
       dynamic:
         min: 12
         max: 12
-        models: [arenian]
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route02
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 103
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_02
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route03
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 104
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_03
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route04
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 105
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_04
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route05
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 106
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_05
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route06
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 107
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_06
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route07
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 108
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_07
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route08
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 109
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_08
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route09
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 110
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_09
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
+      static:
+        min: 0
+        max: 0
+      interactive:
+        min: 0
+        max: 0
+- name: stage_2_ped12_route10
+  map: map_empty
+  robot: jackal
+  episodes: 1
+  timeout: 180.0
+  seed: 111
+  tm_robots: scenario
+  tm_obstacles: random
+  config:
+    scenario:
+      file: cross_route_10
+    random:
+      dynamic:
+        min: 12
+        max: 12
+        models:
+        - arenian
       static:
         min: 0
         max: 0
