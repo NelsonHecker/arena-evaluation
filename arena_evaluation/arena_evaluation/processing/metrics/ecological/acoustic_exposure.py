@@ -105,7 +105,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         nulls = {k: None for k in self.output_keys()}
 
-        if episode.is_reference:
+        # Skip heavy calculation for reference runs
+        if episode.is_reference or (episode.run is not None and episode.run.is_reference):
             logger.info("Skipping acoustic calculation for reference episode %s", episode.episode_id)
             return nulls
 
@@ -141,9 +142,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         grid, resolution, origin = map_data
         ox, oy = origin[0], origin[1]
 
-        # Per-pixel door TL: closed = 25 dB, open = carved.
+        # Semantic door geometry + per-frame door state (PR #68 semantics)
+        # Doors are per-pixel entities: closed = door TL (25 dB), open = carved.
         doors = door_segments(map_name, grid, resolution, origin, run_dir=run_dir)
-        tl_cache: dict[tuple, np.ndarray] = {}
+        tl_cache: dict[tuple[str, ...], np.ndarray] = {}
         state_timeline = DoorStateTimeline.from_semantic_frame(
             episode.semantic_snapshot,
             progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
@@ -159,13 +161,18 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             logger.warning("Ground-truth position columns missing for episode %s", episode.episode_id)
             return nulls
 
-        # Forward-fill null ground-truth poses; the solver cannot handle NaN.
+        # tf_gt publishes at ~10 Hz with jitter, so ~40% of aligned frames have
+        # null ground-truth pose (aligner tolerance = 100 ms == tf_gt period).
+        # Forward-fill so the solver never sees NaN positions (which caused
+        # all-inf fields / blank visualizations).
         rx_m = df["pos_x_gt"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
         ry_m = df["pos_y_gt"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
 
         # Source level (from acoustics topic, or fallback)
         if "total_level_af_dba" in df.columns:
-            # Forward-fill dropouts; leading nulls use the idle baseline.
+            # Forward-fill source dropouts; leading nulls fall back to the idle
+            # baseline. fill_null(0.0) previously made gap frames "silent"
+            # (exposure ~= -attenuation), dragging Leq down.
             source_dba = df["total_level_af_dba"].cast(pl.Float64).fill_null(strategy="forward").fill_null(_ACOUSTIC_DEFAULTS["L_base_0"]).to_numpy()
         else:
             # Fallback to constant idle noise if acoustics topic missing
@@ -181,18 +188,16 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         ts_exposure: list[list[float]] = []
         ts_attenuation: list[list[float]] = []
 
-        last_eval_doors = None
-        ped_last_eval_rx: list[float] = []
-        ped_last_eval_ry: list[float] = []
-        ped_last_eval_px: list[float] = []
-        ped_last_eval_py: list[float] = []
+        last_eval_doors: frozenset[str] | None = None
+        last_eval_robot = np.zeros((0, 2), dtype=np.float64)
+        last_eval_peds = np.zeros((0, 2), dtype=np.float64)
         current_attenuations = np.array([], dtype=np.float32)
 
-        POS_THRESHOLD_NEAR = 0.05  # < 2 m
-        POS_THRESHOLD_MID = 0.50  # 2 m - 5 m
-        POS_THRESHOLD_FAR = 1.00  # 5 m - 10 m
-        POS_THRESHOLD_DISTANT = 1.50  # 10 m - 20 m
-        POS_THRESHOLD_REMOTE = 2.00  # >= 20 m
+        POS_THRESHOLD_NEAR = 0.05
+        POS_THRESHOLD_MID = 0.50
+        POS_THRESHOLD_FAR = 1.00
+        POS_THRESHOLD_DISTANT = 1.50
+        POS_THRESHOLD_REMOTE = 2.00
         total_frames = len(rx_m)
         time_ns = df["time_ns"].to_numpy()
 
@@ -224,33 +229,25 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             current_source = source_dba[i]
 
             open_set = state_timeline.open_doors_at(int(time_ns[i])) if state_timeline is not None else frozenset()
-            doors_changed = last_eval_doors is not None and open_set != last_eval_doors
             num_peds = len(pts)
 
             if len(current_attenuations) != num_peds:
                 current_attenuations = np.full(num_peds, np.inf, dtype=np.float32)
-                ped_last_eval_rx = [0.0] * num_peds
-                ped_last_eval_ry = [0.0] * num_peds
-                ped_last_eval_px = [0.0] * num_peds
-                ped_last_eval_py = [0.0] * num_peds
+                last_eval_robot = np.zeros((num_peds, 2), dtype=np.float64)
+                last_eval_peds = np.zeros((num_peds, 2), dtype=np.float64)
                 indices_to_eval = list(range(num_peds))
-            elif last_eval_doors is None or doors_changed:
+            elif last_eval_doors is None or open_set != last_eval_doors:
                 indices_to_eval = list(range(num_peds))
             else:
                 indices_to_eval = []
-                for p_idx in range(num_peds):
-                    p_x, p_y = pts[p_idx]
-                    p_dist = float(np.hypot(p_x - rx_m[i], p_y - ry_m[i]))
-                    thresh = _ped_threshold(p_dist)
-                    r_disp = float(np.hypot(rx_m[i] - ped_last_eval_rx[p_idx], ry_m[i] - ped_last_eval_ry[p_idx]))
-                    p_disp = float(np.hypot(p_x - ped_last_eval_px[p_idx], p_y - ped_last_eval_py[p_idx]))
+                for p_idx, (p_x, p_y) in enumerate(pts):
+                    thresh = _ped_threshold(float(np.hypot(p_x - rx_m[i], p_y - ry_m[i])))
+                    r_disp = float(np.hypot(rx_m[i] - last_eval_robot[p_idx, 0], ry_m[i] - last_eval_robot[p_idx, 1]))
+                    p_disp = float(np.hypot(p_x - last_eval_peds[p_idx, 0], p_y - last_eval_peds[p_idx, 1]))
                     if r_disp > thresh or p_disp > thresh:
                         indices_to_eval.append(p_idx)
-
-            if i == 0:
-                indices_to_eval = list(range(num_peds))
-            elif i == total_frames - 1 and not indices_to_eval:
-                indices_to_eval = list(range(num_peds))
+                if i == total_frames - 1 and not indices_to_eval:
+                    indices_to_eval = list(range(num_peds))
 
             if indices_to_eval:
                 rx_px = (rx_m[i] - ox) / resolution
@@ -272,17 +269,15 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     start_y_px=ry_px,
                     target_xs_px=sub_px,
                     target_ys_px=sub_py,
-                    wall_tl=47.0,  # fallback TL when no pixel_tl (v1 path)
+                    wall_tl=47.0,
                     mic_distance=1.0,
                     pixel_tl=pixel_tl,
                 )
 
-                for k, p_idx in enumerate(indices_to_eval):
-                    current_attenuations[p_idx] = sub_atts[k]
-                    ped_last_eval_rx[p_idx] = rx_m[i]
-                    ped_last_eval_ry[p_idx] = ry_m[i]
-                    ped_last_eval_px[p_idx] = pts[p_idx][0]
-                    ped_last_eval_py[p_idx] = pts[p_idx][1]
+                current_attenuations[indices_to_eval] = sub_atts
+                last_eval_robot[indices_to_eval] = (rx_m[i], ry_m[i])
+                for p_idx in indices_to_eval:
+                    last_eval_peds[p_idx] = pts[p_idx]
 
                 last_eval_doors = open_set
                 solver_evals += 1
@@ -324,8 +319,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         n_frames = len(ts_exposure)
         frame_dt = np.zeros(n_frames, dtype=np.float64)
         if n_frames > 1:
-            frame_dt[:-1] = np.diff(time_s)
-            frame_dt[-1] = frame_dt[-2] if frame_dt[-2] > 0.0 else 0.0
+            frame_dt[:-1] = np.maximum(np.diff(time_s), 0.0)
+            frame_dt[-1] = frame_dt[-2]
 
         all_exp: list[float] = []
         all_w: list[float] = []
@@ -338,21 +333,18 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         if not all_exp:
             logger.info("No acoustic exposure values produced for episode %s", episode.episode_id)
             return {
-                "ped_max_exposure_dba": None,
-                "ped_leq_exposure_dba": None,
-                "ped_max_startle_factor": None,
+                **nulls,
                 "timeseries_acoustic_exposure_dba": ts_exposure,
                 "timeseries_acoustic_attenuation_db": ts_attenuation,
-                "worst_case_acoustic_frame": None,
             }
 
-        all_exp_arr = np.array(all_exp)
+        exp_arr = np.array(all_exp)
         all_w_arr = np.array(all_w)
 
-        max_exp = float(np.max(all_exp_arr))
+        max_exp = float(np.max(exp_arr))
 
         # Duration-weighted equivalent continuous sound level.
-        lin_exp = 10 ** (all_exp_arr / 10.0)
+        lin_exp = 10 ** (exp_arr / 10.0)
         weight_sum = float(np.sum(all_w_arr))
         if weight_sum > 0.0:
             leq_exp = float(10 * np.log10(np.sum(all_w_arr * lin_exp) / weight_sum))

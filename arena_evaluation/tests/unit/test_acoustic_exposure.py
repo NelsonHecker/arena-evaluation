@@ -290,8 +290,9 @@ def test_map_occupancy_is_none_for_unreadable_image(calc, cached_map, module_log
     assert any(m.startswith("Failed to load map image for acoustics") for m in module_log)
 
 
-def test_reference_episode_yields_nulls(calc, cached_map):
-    episode = _episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), cached_map(), is_reference=True)
+def test_reference_run_yields_nulls(calc, cached_map):
+    run = EpisodeDescriptor(episode_dir="ep", benchmark_id="bench", episode_id=7, planner="p", stage="s", is_reference=True)
+    episode = _episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), cached_map(), run=run)
     assert calc.calculate(episode, {}) == NULLS
 
 

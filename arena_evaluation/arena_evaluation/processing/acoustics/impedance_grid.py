@@ -139,8 +139,7 @@ def compute_acoustic_field(
     pixel_tl: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute the full 2D acoustic attenuation field (shape H, W) from start pixel."""
-    if not isinstance(occupancy_grid, np.ndarray) or occupancy_grid.dtype != np.uint8:
-        occupancy_grid = np.ascontiguousarray(occupancy_grid, dtype=np.uint8)
+    occupancy_grid = np.ascontiguousarray(occupancy_grid, dtype=np.uint8)
 
     height, width = occupancy_grid.shape
     out_field = np.empty((height, width), dtype=np.float32)

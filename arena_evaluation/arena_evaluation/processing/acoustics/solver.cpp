@@ -1,4 +1,3 @@
-// Fast C++ Acoustic Propagation Solver with Sparse Early-Exit
 #include <vector>
 #include <queue>
 #include <cmath>
@@ -26,12 +25,10 @@ struct Label {
 struct AcousticSolverWorkspace {
     static const int MAX_WALLS = 4;
     int capacity = 0;
-    vector<float> min_dist;        // size: capacity * MAX_WALLS
-    vector<float> min_cost;        // size: capacity
-    vector<uint8_t> target_status; // size: capacity (0: none, 1: unsettled, 2: settled)
+    vector<float> min_dist;
+    vector<float> min_cost;
+    vector<uint8_t> target_status; // 0: none, 1: unsettled, 2: settled
     vector<int> touched;
-
-    // Summed Area Table (Integral Image) for O(1) empty box obstacle checks
     vector<int> sat;
     int sat_w = 0;
     int sat_h = 0;
@@ -76,7 +73,7 @@ struct AcousticSolverWorkspace {
         return count > 0;
     }
 
-    void reset(const vector<int>& target_indices) {
+    void reset(const vector<int>& target_indices = {}) {
         for (int idx : touched) {
             size_t base = (size_t)idx * MAX_WALLS;
             for (int w = 0; w < MAX_WALLS; ++w) {
@@ -91,13 +88,6 @@ struct AcousticSolverWorkspace {
                 target_status[tidx] = 0;
             }
         }
-    }
-
-    void reset_all(int N) {
-        std::fill(min_dist.begin(), min_dist.begin() + ((size_t)N * MAX_WALLS), numeric_limits<float>::infinity());
-        std::fill(min_cost.begin(), min_cost.begin() + N, numeric_limits<float>::infinity());
-        std::fill(target_status.begin(), target_status.begin() + N, (uint8_t)0);
-        touched.clear();
     }
 };
 
@@ -144,19 +134,13 @@ static inline void run_acoustic_dijkstra(
     int width,
     int height,
     float resolution,
-    float start_x,
-    float start_y,
+    int start_ix,
+    int start_iy,
     float wall_tl,
     float mic_distance,
     const float* pixel_tl,
     int num_unsettled
 ) {
-    int start_ix = (int)round(start_x);
-    int start_iy = (int)round(start_y);
-    if (start_ix < 0 || start_ix >= width || start_iy < 0 || start_iy >= height) {
-        return;
-    }
-
     auto pixel_tl_of = [&](int idx) -> float {
         if (pixel_tl != nullptr) {
             return pixel_tl[idx];
@@ -189,7 +173,7 @@ static inline void run_acoustic_dijkstra(
 
         if (EARLY_EXIT) {
             if (ws.target_status[curr.index] == 1) {
-                ws.target_status[curr.index] = 2; // settled
+                ws.target_status[curr.index] = 2;
                 num_unsettled--;
                 if (num_unsettled <= 0) {
                     break;
@@ -232,21 +216,8 @@ static inline void run_acoustic_dijkstra(
             float next_tl_contrib;
 
             bool can_los = !next_is_wall && !curr_is_wall && (pixel_tl == nullptr || pixel_tl[nidx] <= 0.0f);
-            bool has_los = false;
-            if (can_los) {
-                if (par_x == cx && par_y == cy) {
-                    if (dir < 4) {
-                        has_los = true;
-                    } else {
-                        int c1 = cy * width + nx;
-                        int c2 = ny * width + cx;
-                        has_los = !((grid[c1] > 0 || (pixel_tl && pixel_tl[c1] > 0.0f)) &&
-                                    (grid[c2] > 0 || (pixel_tl && pixel_tl[c2] > 0.0f)));
-                    }
-                } else {
-                    has_los = line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny);
-                }
-            }
+            bool has_los = can_los && (par_x != cx || par_y != cy) &&
+                           line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny);
 
             if (has_los) {
                 float fdx = (float)(nx - par_x) * resolution;
@@ -308,8 +279,12 @@ extern "C" {
         const float* pixel_tl,
         float* out_attenuations
     ) {
-        for (int i = 0; i < num_targets; ++i) {
-            out_attenuations[i] = numeric_limits<float>::infinity();
+        if (num_targets <= 0) {
+            return;
+        }
+        std::fill_n(out_attenuations, num_targets, numeric_limits<float>::infinity());
+        if (width <= 0 || height <= 0) {
+            return;
         }
 
         int start_ix = (int)round(start_x);
@@ -328,7 +303,6 @@ extern "C" {
             int tx = (int)round(target_xs[i]);
             int ty = (int)round(target_ys[i]);
             if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
-                // Direct line-of-sight shortcut: no detour can beat the Euclidean line.
                 if (line_of_sight(grid, pixel_tl, width, height, start_ix, start_iy, tx, ty)) {
                     float fdx = (float)(tx - start_ix) * resolution;
                     float fdy = (float)(ty - start_iy) * resolution;
@@ -352,7 +326,7 @@ extern "C" {
         if (num_unsettled > 0) {
             run_acoustic_dijkstra<true>(
                 grid, width, height, resolution,
-                start_x, start_y, wall_tl, mic_distance, pixel_tl,
+                start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
                 num_unsettled
             );
         }
@@ -379,14 +353,14 @@ extern "C" {
         const float* pixel_tl,
         float* out_field
     ) {
-        const int N = width * height;
-        for (int i = 0; i < N; ++i) {
-            out_field[i] = numeric_limits<float>::infinity();
+        if (width <= 0 || height <= 0) {
+            return;
         }
-
+        const int N = width * height;
         int start_ix = (int)round(start_x);
         int start_iy = (int)round(start_y);
         if (start_ix < 0 || start_ix >= width || start_iy < 0 || start_iy >= height) {
+            std::fill_n(out_field, N, numeric_limits<float>::infinity());
             return;
         }
 
@@ -395,14 +369,11 @@ extern "C" {
 
         run_acoustic_dijkstra<false>(
             grid, width, height, resolution,
-            start_x, start_y, wall_tl, mic_distance, pixel_tl,
+            start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
             0
         );
 
-        for (int i = 0; i < N; ++i) {
-            out_field[i] = ws.min_cost[i];
-        }
-
-        ws.reset_all(N);
+        std::copy_n(ws.min_cost.data(), N, out_field);
+        ws.reset();
     }
 }
