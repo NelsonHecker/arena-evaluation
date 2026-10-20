@@ -306,6 +306,37 @@ def test_pending_steps_come_from_the_episode_recordings(tmp_path: pathlib.Path):
     assert _drive(tmp_path, body) == []
 
 
+def test_build_pending_reference_steps_do_not_overwrite_parent_episode_map(tmp_path: pathlib.Path):
+    async def body(runner: BenchmarkRunner) -> tuple[dict[tuple[str, str, int], int], dict[tuple[str, int], int]]:
+        for idx, (planner, is_ref, ref_type, sim_id) in enumerate(
+            [
+                ("dwb", False, None, 10),
+                ("dwb", True, "unobstructed_robot", 77),
+                ("unhindered_peds", True, "unhindered_peds", 88),
+            ]
+        ):
+            ep_dir = runner._run_dir.path / "episodes" / f"episode_{idx:03d}"
+            ep_dir.mkdir(parents=True)
+            meta = {
+                "planner": planner,
+                "stage": "s1",
+                "is_reference": is_ref,
+                "reference_type": ref_type,
+                "task_generator_episode_id": sim_id,
+                "seed": 3,
+                "outcome_state": 2,
+            }
+            (ep_dir / f"episode_{idx:03d}.yaml").write_text(json.dumps(meta))
+            (ep_dir / f"episode_{idx:03d}.mcap").write_bytes(b"x" * 16)
+        runner._build_pending()
+        return dict(runner._parent_episode_map), dict(runner._stage_episode_map)
+
+    parent_map, stage_map = _drive(tmp_path, body)
+
+    assert parent_map == {("dwb", "s1", 0): 10}
+    assert stage_map == {("s1", 0): 10}
+
+
 def test_despawning_an_env_the_registry_no_longer_lists_only_tears_down_clients(tmp_path: pathlib.Path):
     async def body(runner: BenchmarkRunner) -> list[int]:
         _with_env_clients(runner, 3)
@@ -375,6 +406,25 @@ def test_step_without_episodes_is_failed(tmp_path: pathlib.Path):
     res = _drive(tmp_path, body)
 
     assert (res.status, res.error_kind, res.episodes_run, res.episodes_total, res.lockstep) == ("failed", None, 0, 0, None)
+
+
+def test_partial_step_resume_preserves_kept_counts_in_step_result(tmp_path: pathlib.Path):
+    async def body(runner: BenchmarkRunner) -> tuple[StepResult, StepResult]:
+        _with_env_clients(runner, 3)
+        step = _step(episodes=3)
+        runner._kept_counts[step.key] = (2, 1)
+        res_empty = await runner._run_episodes(step, 3, episode_subset=())
+        runner._on_envs(_registry(3))
+        task = asyncio.create_task(runner._run_episodes(step, 3, slot_index=0, episode_subset=(2,)))
+        await _settle()
+        runner._on_envs(_registry())
+        res_env_died = await asyncio.wait_for(task, 5.0)
+        return res_empty, res_env_died
+
+    res_empty, res_env_died = _drive(tmp_path, body)
+
+    assert (res_empty.status, res_empty.episodes_run, res_empty.episodes_failed, res_empty.episodes_total) == ("partial", 2, 1, 3)
+    assert (res_env_died.status, res_env_died.error_kind, res_env_died.episodes_run, res_env_died.episodes_failed, res_env_died.episodes_total) == ("failed", StepErrorKind.ENV_SETUP, 2, 1, 3)
 
 
 def test_env_vanishing_before_the_episode_goal_is_accepted_fails_the_step(tmp_path: pathlib.Path):

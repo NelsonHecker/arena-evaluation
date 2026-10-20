@@ -11,7 +11,6 @@ import typing
 import yaml
 
 if typing.TYPE_CHECKING:
-    # Annotations only; step.py pulls rclpy in at module scope.
     from .step import Step
 
 _log = logging.getLogger("arena_evaluation.resume")
@@ -102,9 +101,9 @@ def _scan_episode_dirs(root: pathlib.Path) -> list[OnDiskEpisode]:
                     stage=meta.get("stage"),
                     is_reference=bool(meta.get("is_reference", False)),
                     reference_type=meta.get("reference_type"),
-                    sim_episode_id=meta.get("task_generator_episode_id"),
-                    seed=meta.get("seed"),
-                    outcome_state=meta.get("outcome_state"),
+                    sim_episode_id=_as_int(meta.get("task_generator_episode_id")),
+                    seed=_as_int(meta.get("seed")),
+                    outcome_state=_as_int(meta.get("outcome_state")),
                 )
             except (OSError, ValueError, yaml.YAMLError) as exc:
                 _log.warning(f"unreadable episode metadata {yaml_path}: {exc}")
@@ -151,17 +150,27 @@ class StepResumeDecision:
     run_indices: list[int] = dataclasses.field(default_factory=list)
     delete_dirs: list[pathlib.Path] = dataclasses.field(default_factory=list)
     retire_dirs: list[pathlib.Path] = dataclasses.field(default_factory=list)
-    #: ep_idx -> sim episode id of the recording kept this session.
     kept_sim_ids: dict[int, int] = dataclasses.field(default_factory=dict)
+    kept_outcomes: dict[int, int] = dataclasses.field(default_factory=dict)
+
+    @property
+    def kept_run(self) -> int:
+        return len(self.kept_outcomes)
+
+    @property
+    def kept_failed(self) -> int:
+        return sum(1 for outcome in self.kept_outcomes.values() if outcome == _OUTCOME_FAILED)
 
 
 def _as_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
     return value if isinstance(value, int) else None
 
 
 def decide_step(
     step: Step,
-    rows: list[dict],
+    rows: collections.abc.Sequence[collections.abc.Mapping[str, object]],
     live_dirs: list[OnDiskEpisode],
     retired_dirs: list[OnDiskEpisode],
     *,
@@ -174,8 +183,6 @@ def decide_step(
     episode_count = step.episodes
     stage_seed = step.stage.seed
 
-    live_by_sim = {d.sim_episode_id: d for d in live_dirs if d.sim_episode_id is not None}
-    retired_by_sim = {d.sim_episode_id: d for d in retired_dirs if d.sim_episode_id is not None}
     live_by_seed: dict[int, list[OnDiskEpisode]] = {}
     for d in live_dirs:
         if d.seed is not None:
@@ -183,46 +190,48 @@ def decide_step(
 
     claimed: set[pathlib.Path] = set()
 
-    def _claim(d: OnDiskEpisode) -> None:
+    def _discard(d: OnDiskEpisode | None, *, retire_terminal: bool = True) -> None:
+        if d is None or d.path in claimed:
+            return
         claimed.add(d.path)
+        if retire_terminal and d.is_terminal:
+            decision.retire_dirs.append(d.path)
+        else:
+            decision.delete_dirs.append(d.path)
 
-    def _tidy_duplicates(seed: int, keep: OnDiskEpisode | None) -> None:
-        """Retire or delete extra dirs of the same seed besides the kept evidence."""
-        if keep is not None:
-            _claim(keep)
+    def _match_sim_dir(pool: list[OnDiskEpisode], sim_id: int | None, seed: int) -> OnDiskEpisode | None:
+        if sim_id is None:
+            return None
+        matches = [d for d in pool if d.path not in claimed and d.sim_episode_id == sim_id and d.seed in (None, seed)]
+        if not matches:
+            return None
+        return max(matches, key=lambda d: (d.seed == seed, d.number, d.path.name))
+
+    def _tidy_duplicates(seed: int) -> None:
+        """Retire or delete extra dirs of the same seed besides any already-claimed dir."""
         for d in live_by_seed.get(seed, []):
-            if d.path in claimed:
-                continue
-            _claim(d)
-            if d.is_terminal:
-                decision.retire_dirs.append(d.path)
-            else:
-                decision.delete_dirs.append(d.path)
+            _discard(d)
 
     for ep_idx in range(episode_count):
         seed = seed_for_episode(stage_seed, ep_idx)
         attempts = sorted(
-            (r for r in rows if r.get("seed") == seed and _as_int(r.get("seed")) is not None),
+            (r for r in rows if _as_int(r.get("seed")) == seed),
             key=lambda r: str(r.get("ts_iso") or ""),
             reverse=True,
         )
 
-        cur_row: dict | None = None
+        cur_row: collections.abc.Mapping[str, object] | None = None
         cur_dir: OnDiskEpisode | None = None
-        for row in attempts:
-            sim_id = _as_int(row.get("episode_id"))
-            d = live_by_sim.get(sim_id) if sim_id is not None else None
-            if d is not None:
-                cur_row, cur_dir = row, d
-                break
-        if cur_row is None:
+        for pool in (live_dirs, retired_dirs):
             for row in attempts:
-                sim_id = _as_int(row.get("episode_id"))
-                d = retired_by_sim.get(sim_id) if sim_id is not None else None
+                d = _match_sim_dir(pool, _as_int(row.get("episode_id")), seed)
                 if d is not None:
                     cur_row, cur_dir = row, d
                     break
+            if cur_row is not None:
+                break
 
+        live_cur_dir = cur_dir if (cur_dir is not None and cur_dir.path.parent.name != ".superseded") else None
         yaml_seed_dirs = [d for d in live_by_seed.get(seed, []) if d.path not in claimed]
         recorded_without_row: OnDiskEpisode | None = None
         if cur_row is None:
@@ -248,67 +257,33 @@ def decide_step(
             outcome = None
 
         if step.is_reference and step.reference_type == "unhindered_peds":
-            candidate = cur_dir or recorded_without_row
+            candidate = live_cur_dir or recorded_without_row
             if candidate is not None and candidate.has_mcap:
                 outcome = _OUTCOME_SUCCESS
 
-        if outcome == _OUTCOME_SUCCESS:
-            evidence = cur_dir if cur_dir is not None else recorded_without_row
-            if evidence is not None and evidence.has_mcap:
-                _claim(evidence)
-                _tidy_duplicates(seed, keep=evidence)
-                sim_id = _as_int(cur_row.get("episode_id")) if cur_row is not None else None
-                if sim_id is None and evidence.sim_episode_id is not None:
-                    sim_id = evidence.sim_episode_id
-                if sim_id is not None:
-                    decision.kept_sim_ids[ep_idx] = sim_id
-                continue
-            decision.run_indices.append(ep_idx)
-            continue
-
-        if outcome in _RECORDED_NONSUCCESS:
-            if not force_retry:
-                if recorded_without_row is not None and cur_row is None:
-                    _claim(recorded_without_row)
-                if cur_dir is not None and cur_dir.path not in claimed:
-                    _claim(cur_dir)
-                _tidy_duplicates(seed, keep=cur_dir or recorded_without_row)
-                sim_id = _as_int(cur_row.get("episode_id")) if cur_row is not None else None
-                if sim_id is None and recorded_without_row is not None:
-                    sim_id = recorded_without_row.sim_episode_id
-                if sim_id is not None:
-                    decision.kept_sim_ids[ep_idx] = sim_id
-                continue
-            decision.run_indices.append(ep_idx)
-            for d in (cur_dir, recorded_without_row):
-                if d is None or d.path in claimed or not d.is_terminal:
-                    continue
-                _claim(d)
-                if d.path.parent.name != ".superseded":
-                    decision.retire_dirs.append(d.path)
-            _tidy_duplicates(seed, keep=None)
+        evidence = live_cur_dir if live_cur_dir is not None else recorded_without_row
+        keep_episode = evidence is not None and evidence.has_mcap and (outcome == _OUTCOME_SUCCESS or (outcome in _RECORDED_NONSUCCESS and not force_retry))
+        if keep_episode and evidence is not None and outcome is not None:
+            claimed.add(evidence.path)
+            _tidy_duplicates(seed)
+            decision.kept_outcomes[ep_idx] = outcome
+            sim_id = _as_int(cur_row.get("episode_id")) if cur_row is not None else None
+            if sim_id is None:
+                sim_id = evidence.sim_episode_id
+            if sim_id is not None:
+                decision.kept_sim_ids[ep_idx] = sim_id
             continue
 
         decision.run_indices.append(ep_idx)
-        for d in yaml_seed_dirs:
-            _claim(d)
-            if d.is_terminal:
-                decision.retire_dirs.append(d.path)
-            else:
-                decision.delete_dirs.append(d.path)
-        for row in attempts:
-            sim_id = _as_int(row.get("episode_id"))
-            d = live_by_sim.get(sim_id) if sim_id is not None else None
-            if d is not None and d.path not in claimed:
-                _claim(d)
-                if d.is_terminal:
-                    decision.retire_dirs.append(d.path)
-                else:
-                    decision.delete_dirs.append(d.path)
+        retire_terminal = outcome != _OUTCOME_SUCCESS
+        _discard(live_cur_dir, retire_terminal=retire_terminal)
+        _discard(recorded_without_row, retire_terminal=retire_terminal)
+        _tidy_duplicates(seed)
+        if outcome != _OUTCOME_SUCCESS and outcome not in _RECORDED_NONSUCCESS:
+            for row in attempts:
+                _discard(_match_sim_dir(live_dirs, _as_int(row.get("episode_id")), seed))
 
-    # Only sweep leftovers when this step actually re-runs.
     if decision.run_indices:
-        # Rows are unhashable, so collect episode ids.
         bad_sim_ids: set[object] = set()
         for r in rows:
             seed = _as_int(r.get("seed"))
@@ -320,21 +295,16 @@ def decide_step(
             if d.path in claimed:
                 continue
             if d.sim_episode_id in bad_sim_ids:
-                # Never destroy unclassifiable data.
                 _log.warning(f"resume: {step.key}: leaving {d.path.name} untouched (row seed not attributable to an episode index)")
                 continue
-            _claim(d)
-            if d.is_terminal:
-                decision.retire_dirs.append(d.path)
-            else:
-                decision.delete_dirs.append(d.path)
+            _discard(d)
 
     return decision
 
 
 def plan_resume(
     steps: list[Step],
-    rows_by_key: dict[str, list[dict]],
+    rows_by_key: collections.abc.Mapping[str, collections.abc.Sequence[collections.abc.Mapping[str, object]]],
     live_dirs: list[OnDiskEpisode],
     retired_dirs: list[OnDiskEpisode],
     *,

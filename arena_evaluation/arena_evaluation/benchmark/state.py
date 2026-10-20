@@ -211,27 +211,66 @@ def _params_to_json(params: typing.Iterable) -> str:
     return json.dumps(rows)
 
 
-def read_progress_rows(path: pathlib.Path) -> list[dict]:
+_INT_PROGRESS_COLS = frozenset(
+    {
+        "env_id",
+        "episode_id",
+        "parent_episode_id",
+        "seed",
+        "outcome_state",
+        "lockstep_stalls",
+        "lockstep_ticks",
+        "lockstep_beats",
+        "lockstep_beats_due",
+    }
+)
+_FLOAT_PROGRESS_COLS = frozenset(
+    {
+        "started_at",
+        "ended_at",
+        "runtime_s",
+        "lockstep_max_stall_s",
+        "lockstep_rtf",
+        "goal_dist_start",
+        "goal_dist_min",
+        "path_length",
+    }
+)
+
+
+def read_progress_rows(path: pathlib.Path) -> list[dict[str, object]]:
     """Read progress.csv into row dicts; comment lines are skipped and empty cells become None."""
     if not path.exists():
         return []
-    with path.open(newline="") as fh:
-        reader = csv.DictReader(line for line in fh if not line.startswith("#"))
-        rows = []
-        for raw in reader:
-            row: dict = {}
-            for key, value in raw.items():
-                if value == "":
-                    row[key] = None
-                else:
-                    for cast in (int, float):
-                        try:
-                            value = cast(value)
-                            break
-                        except (TypeError, ValueError):
-                            pass
+    lines = _csv_lines(path)
+    if lines and not lines[-1].endswith("\n"):
+        lines.pop()
+    if not lines:
+        return []
+    reader = csv.DictReader(lines)
+    rows: list[dict[str, object]] = []
+    for raw in reader:
+        if None in raw.values():
+            continue
+        row: dict[str, object] = {}
+        for key, value in raw.items():
+            if key is None:
+                continue
+            if value == "" or value is None:
+                row[key] = None
+            elif key in _INT_PROGRESS_COLS:
+                try:
+                    row[key] = int(value)
+                except ValueError:
                     row[key] = value
-            rows.append(row)
+            elif key in _FLOAT_PROGRESS_COLS:
+                try:
+                    row[key] = float(value)
+                except ValueError:
+                    row[key] = value
+            else:
+                row[key] = value
+        rows.append(row)
     return rows
 
 
@@ -362,14 +401,16 @@ def _csv_lines(path: pathlib.Path) -> list[str]:
         return [line for line in fh if line.rstrip("\n") and not line.startswith("#")]
 
 
-def _latest_rows(header: list[str], rows: typing.Iterable[list[str]]) -> dict[tuple[str, str], list[str]]:
-    """Rows keyed by (step_key, episode_id), keeping the latest ts_iso."""
+def _latest_rows(header: list[str], rows: typing.Iterable[list[str]]) -> dict[tuple[str, str, str], list[str]]:
+    """Rows keyed by (step_key, seed, episode_id), keeping the latest ts_iso."""
     step_key_idx = header.index("step_key")
+    seed_idx = header.index("seed") if "seed" in header else None
     episode_id_idx = header.index("episode_id")
     ts_iso_idx = header.index("ts_iso")
-    best: dict[tuple[str, str], list[str]] = {}
+    best: dict[tuple[str, str, str], list[str]] = {}
     for row in rows:
-        key = (row[step_key_idx], row[episode_id_idx])
+        seed_val = row[seed_idx] if seed_idx is not None else ""
+        key = (row[step_key_idx], seed_val, row[episode_id_idx])
         existing = best.get(key)
         if existing is None or row[ts_iso_idx] > existing[ts_iso_idx]:
             best[key] = row
@@ -569,11 +610,13 @@ class RunDir:
         with (episodes_dir / ".episode_id.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             first = 0
-            for d in episodes_dir.glob("episode_*"):
-                try:
-                    first = max(first, int(d.name.split("_")[1]) + 1)
-                except (IndexError, ValueError):
-                    pass
+            for scan_root in (episodes_dir, episodes_dir / ".superseded"):
+                if scan_root.is_dir():
+                    for d in scan_root.glob("episode_*"):
+                        try:
+                            first = max(first, int(d.name.split("_")[1]) + 1)
+                        except (IndexError, ValueError):
+                            pass
             if counter.exists():
                 first = max(first, int(counter.read_text().strip() or 0))
             tmp = episodes_dir / ".next_episode_id.tmp"

@@ -34,6 +34,7 @@ from arena_evaluation.benchmark.state import (
     ProgressLog,
     StateFile,
     compute_config_hash,
+    read_progress_rows,
 )
 from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult
 from task_generator.constants import Constants
@@ -1094,6 +1095,37 @@ def test_dedupe_in_place_preserves_header(tmp_path: pathlib.Path):
         reader = csv.reader(fh)
         headers = next(reader)
     assert headers == _EXPECTED_HEADERS
+
+
+def test_dedupe_in_place_preserves_distinct_seeds_sharing_episode_id(tmp_path: pathlib.Path):
+    path = tmp_path / "progress.csv"
+    log = ProgressLog(path)
+    t0 = time.time()
+    rec_seed0 = _make_episode_record(episode_id=0, seed=0, outcome_info="s0")
+    rec_seed1 = _make_episode_record(episode_id=0, seed=1, outcome_info="s1")
+    log.append(ts_iso="2024-01-01T00:00:01+00:00", run_id="r", step_key="p/s", contestant="p", stage="s", env_id=0, episode_id=0, episode_record=rec_seed0, started_at=t0, ended_at=t0 + 1.0)
+    log.append(ts_iso="2024-01-01T00:00:02+00:00", run_id="r", step_key="p/s", contestant="p", stage="s", env_id=0, episode_id=0, episode_record=rec_seed1, started_at=t0 + 1.0, ended_at=t0 + 2.0)
+    log.dedupe_in_place()
+    log.close()
+
+    rows = read_progress_rows(path)
+    assert [(r["seed"], r["episode_id"], r["outcome_info"]) for r in rows] == [(0, 0, "s0"), (1, 0, "s1")]
+
+
+def test_read_progress_rows_ignores_truncated_tail_and_preserves_string_ids(tmp_path: pathlib.Path):
+    path = tmp_path / "progress.csv"
+    path.write_text("ts_iso,run_id,step_key,contestant,stage,episode_id,seed,outcome_state,runtime_s\n2026-01-01T00:00:00+00:00,12345,42/10,42,10,0,7,2,1.5\n2026-01-01T00:00:01+00:00,12345,42/10,42,10,1")
+
+    rows = read_progress_rows(path)
+
+    assert len(rows) == 1
+    assert rows[0]["run_id"] == "12345"
+    assert rows[0]["contestant"] == "42"
+    assert rows[0]["stage"] == "10"
+    assert rows[0]["episode_id"] == 0
+    assert rows[0]["seed"] == 7
+    assert rows[0]["outcome_state"] == 2
+    assert rows[0]["runtime_s"] == 1.5
 
 
 # ---------------------------------------------------------------------------

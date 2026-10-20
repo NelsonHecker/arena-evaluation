@@ -252,8 +252,6 @@ def _single_decision(
 
 
 def test_pending_reruns_recorded_timeout_without_retry_failed(tmp_path: pathlib.Path):
-    # Upstream retried EPISODE_TIMEOUT on a plain resume; the recordings made
-    # before the sim stalled are not experimental results.
     run_dir = _failed_pair_run(tmp_path)
     _write_state(run_dir, "a/s1", StepErrorKind.EPISODE_TIMEOUT)
 

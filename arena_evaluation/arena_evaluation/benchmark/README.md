@@ -7,6 +7,7 @@ Runs multi-planner benchmark campaigns: spawns simulation environments, drives e
 | File | Purpose |
 |---|---|
 | `runner.py` | `BenchmarkRunner`: spawns environments, executes episodes via `RunEpisode`, writes `progress.csv` and `.benchmark_state.json` |
+| `resume.py` | `OnDiskEpisode`, `StepResumeDecision`, `plan_resume()`: per-episode resume planning and `.superseded/` retirement |
 | `config.py` | `Suite` and `Contest` parsers: YAML schema, sweep expansion, inline contest resolution |
 | `state.py` | `Manifest`, `RunDir`, `StateFile`: run manifest, config hash, resume discovery, git SHA capture |
 | `step.py` | `Step`, `StepResult`, `StepErrorKind`: grid model for contestant x stage combinations |
@@ -145,7 +146,7 @@ runner.run()
 
 ## Run State
 
-`StateFile` manages `.benchmark_state.json` atomically. Each step has status: `ok | partial | failed | skipped | in_progress`. The status tells how completely a step recorded its episodes, not how its planner did: `ok` recorded every episode whatever the outcomes, `partial` lost some (no `EpisodeRecord`, a sim stall), `failed` recorded none or hit an error. Interrupted runs resume with `--resume <run_id>`, which reruns `partial`, `skipped` and `in_progress` steps, and `failed` ones whose error is systemic or a sim stall, or all with `--retry-failed`. A rerun replaces the step's episodes: when progress is deduped or folded, rows written before the step's latest `started_at` move to `superseded_progress.csv`.
+`StateFile` manages `.benchmark_state.json` atomically. Each step has status: `ok | partial | failed | skipped | in_progress`. The status tells how completely a step recorded its episodes, not how its planner did: `ok` recorded every episode whatever the outcomes, `partial` lost some (no `EpisodeRecord`, a sim stall), `failed` recorded none or hit an error. Interrupted runs resume with `--resume [<run_id>]` at episode granularity from `progress.csv` and `episodes/`, moving superseded terminal recordings into `episodes/.superseded/` and deleting incomplete episode directories; a plain resume reruns `partial`, `skipped` and `in_progress` steps, and `failed` ones whose error is systemic or a sim stall, or all with `--retry-failed`. A rerun replaces the step's episodes: when progress is deduped or folded, rows written before the step's latest `started_at` move to `superseded_progress.csv`.
 
 Run ID format: `{YYYYMMDD-HHMMSS}-{suite}-{contest}`, `{YYYYMMDD-HHMMSS}-{lane}-{suite}-{contest}` inside a lane, `{YYYYMMDD-HHMMSS}-{suite}-x{N}` for `--lanes N`.
 

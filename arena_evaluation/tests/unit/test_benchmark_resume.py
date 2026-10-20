@@ -115,7 +115,7 @@ def _write_episode_meta(
     return ep_dir
 
 
-def _row(step_key: str, seed: int, sim_id: int, outcome: int, *, ts: str = "2024-01-01T00:00:00+00:00") -> dict:
+def _row(step_key: str, seed: int, sim_id: int, outcome: int, *, ts: str = "2024-01-01T00:00:00+00:00") -> dict[str, object]:
     contestant, stage = step_key.split("/", 1)
     return {
         "ts_iso": ts,
@@ -487,6 +487,52 @@ def test_recorded_without_row_prefers_newest(tmp_path: pathlib.Path) -> None:
     assert decision.retire_dirs == [older]
     assert newer.exists()
     assert decision.run_indices == [0]
+
+
+def test_decide_step_reused_sim_id_across_sessions_keeps_both_seeds(tmp_path: pathlib.Path) -> None:
+    """When a resumed session restarts task_generator episode_id at 0, earlier seeds with sim_id=0 stay intact."""
+    step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
+    _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=2)
+    _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=0, seed=1, outcome=2)
+    rows = [
+        _row("pa/s1", 0, 0, 2, ts="2026-01-01T00:00:01+00:00"),
+        _row("pa/s1", 1, 0, 2, ts="2026-01-01T00:00:02+00:00"),
+    ]
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+
+    decision = decide_step(step, rows, live, retired, retry_failed=False)
+
+    assert decision.run_indices == []
+    assert decision.retire_dirs == []
+    assert decision.delete_dirs == []
+    assert decision.kept_sim_ids == {0: 0, 1: 0}
+    assert decision.kept_outcomes == {0: 2, 1: 2}
+    assert (decision.kept_run, decision.kept_failed) == (2, 0)
+
+
+def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_failed(tmp_path: pathlib.Path) -> None:
+    """An episode whose only dir is in .superseded/ must rerun on a plain resume."""
+    step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
+    _mk_named_episode(
+        tmp_path / "episodes" / ".superseded",
+        "episode_000",
+        sidecar="episode_000.yaml",
+        planner="pa",
+        stage="s1",
+        sim_id=0,
+        seed=0,
+        outcome=3,
+    )
+    _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=1, seed=1, outcome=3)
+    rows = [_row("pa/s1", 0, 0, 3), _row("pa/s1", 1, 1, 3)]
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+
+    decision = decide_step(step, rows, live, retired, retry_failed=False)
+
+    assert decision.run_indices == [0]
+    assert decision.kept_sim_ids == {1: 1}
+    assert decision.kept_outcomes == {1: 3}
+    assert (decision.kept_run, decision.kept_failed) == (1, 1)
 
 
 if __name__ == "__main__":  # pragma: no cover
