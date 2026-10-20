@@ -964,6 +964,36 @@ def test_episode_record_callback_does_not_reopen_seen_episode():
     node._begin_episode.assert_not_called()
 
 
+def test_update_metadata_from_episode_persists_seed(tmp_path):
+    # The episode's seed must land in the sidecar YAML so per-episode resume can
+    # attribute a recorded dir back to its (step, episode_index).
+    node = _bare_node(
+        current_metadata=_make_run_metadata(),
+        current_metadata_path=tmp_path / "episode_003.yaml",
+        current_sim_episode_id=3,
+    )
+    msg = _episode_message()
+    msg.seed = 42
+    node._update_metadata_from_episode(msg)
+    data = yaml.safe_load((tmp_path / "episode_003.yaml").read_text())
+    assert data["seed"] == 42
+
+
+def test_update_metadata_from_episode_keeps_existing_seed(tmp_path):
+    # A seed already on the metadata (e.g. from a later republish) is not
+    # overwritten.
+    node = _bare_node(
+        current_metadata=_make_run_metadata(seed=7),
+        current_metadata_path=tmp_path / "episode_007.yaml",
+        current_sim_episode_id=3,
+    )
+    msg = _episode_message()
+    msg.seed = 99
+    node._update_metadata_from_episode(msg)
+    data = yaml.safe_load((tmp_path / "episode_007.yaml").read_text())
+    assert data["seed"] == 7
+
+
 def test_semantic_snapshot_callback_writes_state_semantics():
     node = _bare_node(current_time=777)
     node.get_namespace = lambda: "/env_0"

@@ -1059,6 +1059,9 @@ class DataRecorderNode(Node):
             if not self.current_metadata.map or self.current_metadata.map == "unknown":
                 self.current_metadata.map = msg.world
 
+            if self.current_metadata.seed is None:
+                self.current_metadata.seed = int(msg.seed)
+
             self.current_metadata.tm_obstacles = msg.tm_obstacles
             self.current_metadata.tm_robots = msg.tm_robots
             self.current_metadata.tm_modules = list(msg.tm_modules)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import pathlib
 import subprocess
 import time
@@ -283,10 +284,24 @@ def test_env_teardown_releases_every_client_and_setup_is_idempotent(tmp_path: pa
     assert _drive(tmp_path, body) == [0] * 9
 
 
-def test_pending_steps_come_from_the_run_state(tmp_path: pathlib.Path):
+def test_pending_steps_come_from_the_episode_recordings(tmp_path: pathlib.Path):
     async def body(runner: BenchmarkRunner) -> list[str]:
-        runner._run_dir.state.write({"dwb/s1": StepResult("dwb/s1", "ok", 0, 0.0, 1.0, None, None)})
-        return [s.key for s in runner._build_pending()]
+        # A completed recording for the runner's only episode (stage seed 3,
+        # episode index 0) is the evidence that skips the step.
+        ep_dir = runner._run_dir.path / "episodes" / "episode_000"
+        ep_dir.mkdir(parents=True)
+        meta = {
+            "planner": "dwb",
+            "stage": "s1",
+            "task_generator_episode_id": 0,
+            "seed": 3,
+            "outcome_state": 2,
+        }
+        (ep_dir / "episode_000.yaml").write_text(json.dumps(meta))
+        (ep_dir / "episode_000.mcap").write_bytes(b"x" * 16)
+        (runner._run_dir.path / "progress.csv").write_text("ts_iso,step_key,episode_id,seed,outcome_state\n2026-01-01T00:00:00+00:00,dwb/s1,0,3,2\n")
+        decisions, subsets = runner._build_pending()
+        return [d.step.key for d in decisions if d.run_indices]
 
     assert _drive(tmp_path, body) == []
 

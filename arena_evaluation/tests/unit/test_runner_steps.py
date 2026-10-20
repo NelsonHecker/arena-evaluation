@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
 import time
+import typing
 
 import pytest
 
@@ -26,12 +28,13 @@ from arena_evaluation.benchmark.runner import (
     _walk_dict,
     _warn_config_drift,
     build_launch_args,
-    build_pending,
     group_pending,
+    plan_pending_steps,
     resolve_planner_identity,
     robot_has_depth_camera,
     runtime_launch_args,
 )
+from arena_evaluation.benchmark.resume import StepResumeDecision
 from arena_evaluation.benchmark.state import Manifest, RunDir, compute_config_hash
 from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult
 from rcl_interfaces.msg import ParameterType
@@ -55,10 +58,6 @@ def _contest(*names: str, args: dict | None = None) -> Contest:
 
 def _step(contestant: str = "dwb", stage: Suite.Stage | None = None, args: dict | None = None, **kwargs: object) -> Step:
     return Step(contestant=Contest.Contestant(name=contestant, args=args or {}), stage=stage or _stage(), **kwargs)
-
-
-def _result(key: str, status: str, kind: StepErrorKind | None = None) -> StepResult:
-    return StepResult(key, status, 0, 0.0, 1.0, kind, None)
 
 
 def test_launch_args_carry_stage_optim_overrides():
@@ -159,22 +158,152 @@ def test_all_steps_has_no_record_dir():
     assert [(s.key, s.episodes, s.record_dir) for s in steps] == [("a/s1", 3, None)]
 
 
-def test_pending_skips_ok_and_plain_failures_but_retries_systemic_ones(tmp_path: pathlib.Path):
-    suite = _suite(*(_stage(f"s{i}") for i in range(5)))
-    states = {
-        "a/s0": _result("a/s0", "ok"),
-        "a/s1": _result("a/s1", "failed", StepErrorKind.INTERNAL),
-        "a/s2": _result("a/s2", "failed", StepErrorKind.SIM_DEAD),
-        "a/s3": _result("a/s3", "partial"),
+def _write_recording(run_dir: RunDir, *, step_key: str, stage: str, sim_id: int, seed: int, outcome: int) -> None:
+    """Write the evidence resume reads: an episode dir with sidecar + a progress row."""
+    ep_dir = run_dir.path / "episodes" / f"episode_{sim_id:03d}"
+    ep_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "planner": step_key.split("/", 1)[0],
+        "stage": stage,
+        "task_generator_episode_id": sim_id,
+        "seed": seed,
+        "outcome_state": outcome,
     }
-    RunDir.create(tmp_path, "r", _manifest("0" * 40)).state.write(states)
-    run_dir = RunDir.open(tmp_path, "r")
+    (ep_dir / f"episode_{sim_id:03d}.yaml").write_text(json.dumps(meta))
+    (ep_dir / f"episode_{sim_id:03d}.mcap").write_bytes(b"x" * 16)
+    with (run_dir.path / "progress.csv").open("a", newline="") as fh:
+        fh.write(f"2026-01-01T00:00:00+00:00,{step_key},{sim_id},{seed},{outcome}\n")
 
-    pending = build_pending(suite, _contest("a"), 1.0, run_dir, retry_failed=False, record_root=tmp_path / "r")
-    retried = build_pending(suite, _contest("a"), 1.0, run_dir, retry_failed=True, record_root=tmp_path / "r")
 
-    assert [s.key for s in pending] == ["a/s2", "a/s3", "a/s4"]
-    assert [s.key for s in retried] == ["a/s1", "a/s2", "a/s3", "a/s4"]
+def test_pending_reruns_only_episodes_without_terminal_recordings(tmp_path: pathlib.Path):
+    suite = _suite(_stage("s0", episodes=2), _stage("s1", episodes=2), _stage("s2", episodes=2))
+    run_dir = RunDir.create(tmp_path, "r", _manifest("0" * 40))
+    (run_dir.path / "progress.csv").write_text("ts_iso,step_key,episode_id,seed,outcome_state\n")
+
+    # s0: both episodes completed successfully -> nothing to rerun.
+    _write_recording(run_dir, step_key="a/s0", stage="s0", sim_id=0, seed=7, outcome=2)
+    _write_recording(run_dir, step_key="a/s0", stage="s0", sim_id=1, seed=8, outcome=2)
+    # s1: both episodes finished with a recorded FAILED -> preserved unless forced.
+    _write_recording(run_dir, step_key="a/s1", stage="s1", sim_id=2, seed=7, outcome=3)
+    _write_recording(run_dir, step_key="a/s1", stage="s1", sim_id=3, seed=8, outcome=3)
+    # s2: never ran -> all episodes pending.
+
+    pending = plan_pending_steps(suite, _contest("a"), 1.0, run_dir.path, retry_failed=False)
+    retried = plan_pending_steps(suite, _contest("a"), 1.0, run_dir.path, retry_failed=True)
+
+    assert [d.step.key for d in pending if d.run_indices] == ["a/s2"]
+    assert [d.step.key for d in retried if d.run_indices] == ["a/s1", "a/s2"]
+    by_key = {d.step.key: d for d in pending}
+    assert by_key["a/s0"].run_indices == []
+
+
+def test_pending_reruns_skipped_step_without_recordings(tmp_path: pathlib.Path):
+    run_dir = RunDir.create(tmp_path, "r", _manifest("0" * 40))
+    (run_dir.path / "progress.csv").write_text("ts_iso,step_key,episode_id,seed,outcome_state\n")
+    _write_state(run_dir, "a/s1", StepErrorKind.CANCELLED, status="skipped")
+
+    decision = _single_decision(run_dir)
+
+    assert decision.run_indices == [0, 1]
+
+
+def _failed_pair_run(tmp_path: pathlib.Path) -> RunDir:
+    """One run dir whose only step recorded two FAILED episodes (seeds 7, 8)."""
+    run_dir = RunDir.create(tmp_path, "r", _manifest("0" * 40))
+    (run_dir.path / "progress.csv").write_text("ts_iso,step_key,episode_id,seed,outcome_state\n")
+    _write_recording(run_dir, step_key="a/s1", stage="s1", sim_id=0, seed=7, outcome=3)
+    _write_recording(run_dir, step_key="a/s1", stage="s1", sim_id=1, seed=8, outcome=3)
+    return run_dir
+
+
+def _write_state(
+    run_dir: RunDir,
+    step_key: str,
+    error_kind: StepErrorKind,
+    *,
+    status: typing.Literal["ok", "failed", "skipped", "partial", "in_progress"] = "failed",
+) -> None:
+    """Persist the run state the resume planner treats as a retry hint."""
+    run_dir.state.write(
+        {
+            step_key: StepResult(
+                key=step_key,
+                status=status,
+                env_id=None,
+                started_at=0.0,
+                ended_at=1.0,
+                error_kind=error_kind,
+                error_detail="test",
+                episodes_total=2,
+            )
+        }
+    )
+
+
+def _single_decision(
+    run_dir: RunDir,
+    *,
+    retry_failed: bool = False,
+) -> StepResumeDecision:
+    suite = _suite(_stage("s1", episodes=2))
+    decisions = plan_pending_steps(suite, _contest("a"), 1.0, run_dir.path, retry_failed=retry_failed)
+    (decision,) = [d for d in decisions if d.step.key == "a/s1"]
+    return decision
+
+
+def test_pending_reruns_recorded_timeout_without_retry_failed(tmp_path: pathlib.Path):
+    # Upstream retried EPISODE_TIMEOUT on a plain resume; the recordings made
+    # before the sim stalled are not experimental results.
+    run_dir = _failed_pair_run(tmp_path)
+    _write_state(run_dir, "a/s1", StepErrorKind.EPISODE_TIMEOUT)
+
+    decision = _single_decision(run_dir)
+
+    assert decision.run_indices == [0, 1]
+    assert sorted(p.name for p in decision.retire_dirs) == ["episode_000", "episode_001"]
+    assert decision.kept_sim_ids == {}
+
+
+def test_pending_preserves_recorded_failures_of_non_retryable_kind(tmp_path: pathlib.Path):
+    run_dir = _failed_pair_run(tmp_path)
+    _write_state(run_dir, "a/s1", StepErrorKind.INTERNAL)
+
+    decision = _single_decision(run_dir)
+
+    assert decision.run_indices == []
+    assert decision.retire_dirs == []
+    assert decision.kept_sim_ids == {0: 0, 1: 1}
+
+
+def test_pending_reruns_recorded_systemic_failure_without_retry_failed(tmp_path: pathlib.Path):
+    run_dir = _failed_pair_run(tmp_path)
+    _write_state(run_dir, "a/s1", StepErrorKind.SIM_DEAD)
+
+    decision = _single_decision(run_dir)
+
+    assert decision.run_indices == [0, 1]
+    assert sorted(p.name for p in decision.retire_dirs) == ["episode_000", "episode_001"]
+
+
+def test_pending_without_state_file_preserves_recorded_failures(tmp_path: pathlib.Path):
+    # No .benchmark_state.json: the planner must stay evidence-only.
+    run_dir = _failed_pair_run(tmp_path)
+    assert not (run_dir.path / ".benchmark_state.json").exists()
+
+    decision = _single_decision(run_dir)
+
+    assert decision.run_indices == []
+    assert decision.kept_sim_ids == {0: 0, 1: 1}
+
+
+def test_pending_unreadable_state_falls_back_to_evidence(tmp_path: pathlib.Path):
+    run_dir = _failed_pair_run(tmp_path)
+    (run_dir.path / ".benchmark_state.json").write_text("{not valid json")
+
+    decision = _single_decision(run_dir)
+
+    assert decision.run_indices == []
+    assert decision.kept_sim_ids == {0: 0, 1: 1}
 
 
 def test_planner_identity_prefers_the_mobile_cap_planners():

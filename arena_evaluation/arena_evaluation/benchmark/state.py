@@ -211,6 +211,30 @@ def _params_to_json(params: typing.Iterable) -> str:
     return json.dumps(rows)
 
 
+def read_progress_rows(path: pathlib.Path) -> list[dict]:
+    """Read progress.csv into row dicts; comment lines are skipped and empty cells become None."""
+    if not path.exists():
+        return []
+    with path.open(newline="") as fh:
+        reader = csv.DictReader(line for line in fh if not line.startswith("#"))
+        rows = []
+        for raw in reader:
+            row: dict = {}
+            for key, value in raw.items():
+                if value == "":
+                    row[key] = None
+                else:
+                    for cast in (int, float):
+                        try:
+                            value = cast(value)
+                            break
+                        except (TypeError, ValueError):
+                            pass
+                    row[key] = value
+            rows.append(row)
+    return rows
+
+
 class ProgressLog:
     _HEADER = (
         "ts_iso,run_id,step_key,contestant,stage,env_id,episode_id,parent_episode_id,"
