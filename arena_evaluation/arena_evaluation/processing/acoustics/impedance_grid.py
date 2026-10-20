@@ -20,13 +20,13 @@ def _compile_solver():
             return
 
     logger.info("Compiling C++ acoustic solver: %s -> %s", _CPP_FILE, _SO_FILE)
+    # No -ffast-math: it breaks the +infinity sentinels in solver.cpp.
     cmd = [
         "g++",
         "-O3",
-        "-ffast-math",
         "-fPIC",
         "-shared",
-        "-std=c++11",
+        "-std=c++17",
         str(_CPP_FILE),
         "-o",
         str(_SO_FILE),
@@ -57,6 +57,20 @@ _lib.solve_acoustic_field.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags='C_CONTIGUOUS'),  # out_attenuations
 ]
 _lib.solve_acoustic_field.restype = None
+
+_lib.solve_acoustic_grid.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.uint8, ndim=2, flags='C_CONTIGUOUS'),  # grid
+    ctypes.c_int,  # width
+    ctypes.c_int,  # height
+    ctypes.c_float,  # resolution
+    ctypes.c_float,  # start_x
+    ctypes.c_float,  # start_y
+    ctypes.c_float,  # wall_tl
+    ctypes.c_float,  # mic_distance
+    ctypes.c_void_p,  # pixel_tl (NULL when None)
+    np.ctypeslib.ndpointer(dtype=np.float32, ndim=2, flags='C_CONTIGUOUS'),  # out_field
+]
+_lib.solve_acoustic_grid.restype = None
 
 
 def compute_attenuations(
@@ -113,6 +127,45 @@ def compute_attenuations(
     )
 
     return out_attenuations
+
+
+def compute_acoustic_field(
+    occupancy_grid: np.ndarray,
+    resolution: float,
+    start_x_px: float,
+    start_y_px: float,
+    wall_tl: float = 47.0,
+    mic_distance: float = 1.0,
+    pixel_tl: np.ndarray | None = None,
+) -> np.ndarray:
+    """Compute the full 2D acoustic attenuation field (shape H, W) from start pixel."""
+    if not isinstance(occupancy_grid, np.ndarray) or occupancy_grid.dtype != np.uint8:
+        occupancy_grid = np.ascontiguousarray(occupancy_grid, dtype=np.uint8)
+
+    height, width = occupancy_grid.shape
+    out_field = np.empty((height, width), dtype=np.float32)
+
+    tl_ptr = None
+    if pixel_tl is not None:
+        if pixel_tl.shape != (height, width):
+            raise ValueError(f"pixel_tl shape {pixel_tl.shape} != grid shape {(height, width)}")
+        pixel_tl = np.ascontiguousarray(pixel_tl, dtype=np.float32)
+        tl_ptr = pixel_tl.ctypes.data_as(ctypes.c_void_p)
+
+    _lib.solve_acoustic_grid(
+        occupancy_grid,
+        width,
+        height,
+        float(resolution),
+        float(start_x_px),
+        float(start_y_px),
+        float(wall_tl),
+        float(mic_distance),
+        tl_ptr,
+        out_field,
+    )
+
+    return out_field
 
 
 def downsample_occupancy(grid: np.ndarray, ds: int) -> np.ndarray:

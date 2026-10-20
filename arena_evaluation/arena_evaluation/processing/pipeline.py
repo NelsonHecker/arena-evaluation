@@ -652,6 +652,8 @@ class ProcessingPipeline:
                     peds=peds_df,
                     map=ep.map,
                     topics=topics,
+                    is_reference=ep.is_reference,
+                    reference_type=ep.reference_type,
                 )
                 episodes = [aligned_ep]
 

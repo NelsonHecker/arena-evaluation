@@ -217,6 +217,9 @@ class AlignedEpisodeBundle:
     map: str | None = None
     topics: dict[str, pl.DataFrame] | None = None
     env_offset: tuple[float, float] | None = None
+    # Reference episodes carry no robot ego-noise to score.
+    is_reference: bool = False
+    reference_type: str | None = None
 
 
 class PlotSpec(BaseModel):
