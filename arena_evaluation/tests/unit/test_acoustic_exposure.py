@@ -9,6 +9,7 @@ import pytest
 import yaml
 from PIL import Image
 
+from arena_evaluation.processing.acoustics.door_map import DEFAULT_DOOR_TL_DB
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
 from arena_evaluation.processing.metrics.ecological.acoustic_exposure import AcousticExposureCalculator
 from arena_evaluation.storage.folder_manager import FolderManager
@@ -418,11 +419,11 @@ def test_door_opening_switches_attenuation_and_marks_worst_frame_open(tmp_path, 
     data = _frames([(1.0, 2.5)] * 3, [[(4.0, 2.5)]] * 3, source=[60.0] * 3)
     semantic = _semantic([(SECOND_NS, "env_0/front_door/0", True)])
     result = calc.calculate(_episode(data, name, run=run, folder_manager=folder_manager, semantic_snapshot=semantic), {})
-    closed, opened = _att(3.0) + 25.0, _att(3.0)
+    closed, opened = _att(3.0) + DEFAULT_DOOR_TL_DB, _att(3.0)
     assert result["timeseries_acoustic_attenuation_db"] == [pytest.approx([closed], abs=1e-3), pytest.approx([opened], abs=1e-3), pytest.approx([opened], abs=1e-3)]
     assert result["ped_max_exposure_dba"] == pytest.approx(60.0 - opened, abs=1e-3)
     assert result["ped_leq_exposure_dba"] == pytest.approx(_leq([60.0 - closed, 60.0 - opened, 60.0 - opened]), abs=1e-3)
-    assert result["ped_max_startle_factor"] == pytest.approx(25.0, abs=1e-3)
+    assert result["ped_max_startle_factor"] == pytest.approx(DEFAULT_DOOR_TL_DB, abs=1e-3)
     assert result["worst_case_acoustic_frame"]["door_states"] == {"world/front_door": "open"}
 
 
@@ -431,7 +432,7 @@ def test_doors_without_semantic_timeline_stay_closed(tmp_path, calc, cached_map)
     folder_manager, run = _door_run(tmp_path, name)
     data = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
     result = calc.calculate(_episode(data, name, run=run, folder_manager=folder_manager), {})
-    assert result["timeseries_acoustic_attenuation_db"] == [pytest.approx([_att(3.0) + 25.0], abs=1e-3)]
+    assert result["timeseries_acoustic_attenuation_db"] == [pytest.approx([_att(3.0) + DEFAULT_DOOR_TL_DB], abs=1e-3)]
     assert result["worst_case_acoustic_frame"]["door_states"] == {"world/front_door": "closed"}
 
 
@@ -441,7 +442,7 @@ def test_semantic_timeline_for_another_door_keeps_door_closed(tmp_path, calc, ca
     data = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
     semantic = _semantic([(0, "env_0/back_door/0", True)])
     result = calc.calculate(_episode(data, name, run=run, folder_manager=folder_manager, semantic_snapshot=semantic), {})
-    assert result["timeseries_acoustic_attenuation_db"] == [pytest.approx([_att(3.0) + 25.0], abs=1e-3)]
+    assert result["timeseries_acoustic_attenuation_db"] == [pytest.approx([_att(3.0) + DEFAULT_DOOR_TL_DB], abs=1e-3)]
     assert result["worst_case_acoustic_frame"]["door_states"] == {"world/front_door": "closed"}
 
 

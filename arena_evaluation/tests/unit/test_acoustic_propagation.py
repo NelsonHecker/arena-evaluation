@@ -17,6 +17,7 @@ import pathlib
 import numpy as np
 import pytest
 
+from arena_evaluation.processing.acoustics.door_map import DEFAULT_DOOR_TL_DB
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
 
 sys_path = pathlib.Path(__file__).resolve().parents[1] / "unit"  # allow local import in-tree
@@ -27,7 +28,7 @@ if str(sys_path) not in sys.path:
 
 from acoustic_scenarios import scenarios, build, door_pixels, RES, WALL_TL, MIC_DIST  # noqa: E402
 
-DOOR_TL = 25.0  # closed-door transmission loss (lighter than the 47 dB wall)
+DOOR_TL = DEFAULT_DOOR_TL_DB  # closed-door transmission loss (lighter than the 47 dB wall)
 
 WALL = 1
 
@@ -181,7 +182,7 @@ def test_corridor_closed_door_blocks():
 
 
 def test_closed_door_cheaper_than_wall():
-    """A closed door (25 dB) attenuates LESS than a solid wall (47 dB)."""
+    """A closed door (32 dB) attenuates LESS than a solid wall (47 dB)."""
     door = scenarios()["two_rooms_door_closed_middle"]
     wall = scenarios()["two_rooms_wall_only"]
     g_door = build({**door, "_name": "two_rooms_door_closed_middle"})
@@ -191,7 +192,7 @@ def test_closed_door_cheaper_than_wall():
     los = _los_db(door["start"], door["target"])
     assert np.isclose(a_door, los + DOOR_TL, atol=2.0), f"door: {a_door:.1f} vs {los + DOOR_TL:.1f}"
     assert np.isclose(a_wall, los + WALL_TL, atol=2.0), f"wall: {a_wall:.1f} vs {los + WALL_TL:.1f}"
-    assert a_door < a_wall - 15.0, f"door {a_door:.1f} must be cheaper than wall {a_wall:.1f}"
+    assert a_door < a_wall - 10.0, f"door {a_door:.1f} must be cheaper than wall {a_wall:.1f}"
 
 
 def test_open_door_equals_free_space():

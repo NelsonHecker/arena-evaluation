@@ -26,9 +26,8 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Default transmission loss (dB) for a CLOSED door. Doors are lighter than the
-# 47 dB brick wall: 25 dB is a typical sealed interior door.
-DEFAULT_DOOR_TL_DB = 25.0
+# Closed-door transmission loss from DIN 4109-1 T.5 / ISO 717-1.
+DEFAULT_DOOR_TL_DB = 32.0
 
 
 @functools.lru_cache(maxsize=32)
@@ -195,7 +194,7 @@ def build_pixel_tl(
 
     - free space: 0 dB
     - walls: wall_tl_db
-    - closed doors: their door TL (25 dB default)
+    - closed doors: their door TL (32 dB default)
     - open doors (in *open_doors*): 0 dB (carved, sound passes)
 
     Open doors take precedence: a door pixel that is open behaves as free.
