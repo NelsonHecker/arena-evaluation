@@ -15,7 +15,10 @@ from arena_evaluation.processing.acoustics.door_map import (
     build_pixel_tl,
     door_segments,
 )
-from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
+from arena_evaluation.processing.acoustics.door_state import (
+    ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+    DoorStateTimeline,
+)
 from arena_evaluation.processing.acoustics.impedance_grid import (
     compute_acoustic_field,
     downsample_mask,
@@ -1318,7 +1321,10 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         state_timeline = None
         if semantic_path.exists():
             semantic_df = pl.read_parquet(semantic_path)
-            state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
+            state_timeline = DoorStateTimeline.from_semantic_frame(
+                semantic_df,
+                progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+            )
 
         if per_episode:
             gif_path = out_path.with_name(f"{out_path.stem}_{episode_dir_name}.{fmt}")

@@ -73,7 +73,7 @@ class _FakeTimeline:
         return frozenset(self._doors)
 
     @classmethod
-    def from_semantic_frame(cls, df) -> _FakeTimeline:  # noqa: ARG001
+    def from_semantic_frame(cls, df: pl.DataFrame, progress_threshold: float = 0.5) -> _FakeTimeline:  # noqa: ARG001
         return cls([3, 4])
 
 
@@ -141,6 +141,7 @@ def _install_stubs(monkeypatch, *, doors: list[int] | None = None) -> types.Simp
     field_mod.AcousticFieldRenderer = _FakeRenderer
 
     door_state_mod = types.ModuleType("arena_evaluation.processing.acoustics.door_state")
+    door_state_mod.ACOUSTIC_OPEN_PROGRESS_THRESHOLD = 0.15
     door_state_mod.DoorStateTimeline = _FakeTimeline
 
     door_map_mod = types.ModuleType("arena_evaluation.processing.acoustics.door_map")

@@ -158,7 +158,10 @@ def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
     import polars as pl
 
     from arena_evaluation.presentation.plot_types.acoustic_field import AcousticFieldRenderer
-    from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
+    from arena_evaluation.processing.acoustics.door_state import (
+        ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+        DoorStateTimeline,
+    )
     from arena_evaluation.storage.schemas import PlotSpec
 
     renderer = AcousticFieldRenderer(PlotSpec(id="acoustic_field", type="acoustic_field", title="", data_key=""))
@@ -205,7 +208,10 @@ def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
     semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
     if semantic_path.exists():
         semantic_df = pl.read_parquet(semantic_path)
-        state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
+        state_timeline = DoorStateTimeline.from_semantic_frame(
+            semantic_df,
+            progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+        )
 
     # Output path
     if args.output:
@@ -258,7 +264,10 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     import polars as pl
 
     from arena_evaluation.presentation.plot_types.acoustic_field import AcousticFieldRenderer
-    from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
+    from arena_evaluation.processing.acoustics.door_state import (
+        ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+        DoorStateTimeline,
+    )
     from arena_evaluation.storage.schemas import PlotSpec
 
     renderer = AcousticFieldRenderer(PlotSpec(id="acoustic_field", type="acoustic_field", title="", data_key=""))
@@ -301,7 +310,10 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
     if semantic_path.exists():
         semantic_df = pl.read_parquet(semantic_path)
-        state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
+        state_timeline = DoorStateTimeline.from_semantic_frame(
+            semantic_df,
+            progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD,
+        )
 
     # Determine which frame
     rows = episode_df.rows(named=True)
