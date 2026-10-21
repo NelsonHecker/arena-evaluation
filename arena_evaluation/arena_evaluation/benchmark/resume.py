@@ -38,6 +38,7 @@ class OnDiskEpisode:
     seed: int | None = None
     outcome_state: int | None = None
     mcap_bytes: int = 0
+    has_recording: bool = False
     retired: bool = False
 
     def matches_step(self, step: Step) -> bool:
@@ -107,14 +108,13 @@ def _scan_episode_dirs(root: pathlib.Path) -> list[OnDiskEpisode]:
             except (OSError, ValueError, yaml.YAMLError) as exc:
                 _log.warning(f"unreadable episode metadata {yaml_path}: {exc}")
         canonical = d / f"{d.name}.mcap"
+        flat_mcaps = [f for f in d.glob("*.mcap") if f.is_file()]
         if canonical.is_file():
             size = canonical.stat().st_size
         else:
-            size = max(
-                (f.stat().st_size for f in d.glob("*.mcap") if f.is_file()),
-                default=0,
-            )
-        found.append(dataclasses.replace(ep, mcap_bytes=size))
+            size = max((f.stat().st_size for f in flat_mcaps), default=0)
+        has_recording = bool(flat_mcaps or [f for f in d.glob("*/*.mcap") if f.is_file()])
+        found.append(dataclasses.replace(ep, mcap_bytes=size, has_recording=has_recording))
     return found
 
 
@@ -213,11 +213,11 @@ def decide_step(
 
     claimed: set[pathlib.Path] = set()
 
-    def _discard(d: OnDiskEpisode | None, *, retire_terminal: bool = True) -> None:
+    def _discard(d: OnDiskEpisode | None) -> None:
         if d is None or d.path in claimed:
             return
         claimed.add(d.path)
-        if retire_terminal and d.is_terminal:
+        if d.is_terminal or d.has_recording:
             decision.retire_dirs.append(d.path)
         else:
             decision.delete_dirs.append(d.path)
@@ -298,9 +298,8 @@ def decide_step(
             continue
 
         decision.run_indices.append(ep_idx)
-        retire_terminal = outcome != _OUTCOME_SUCCESS
-        _discard(live_cur_dir, retire_terminal=retire_terminal)
-        _discard(recorded_without_row, retire_terminal=retire_terminal)
+        _discard(live_cur_dir)
+        _discard(recorded_without_row)
         _tidy_duplicates(seed)
         if outcome != _OUTCOME_SUCCESS and outcome not in _RECORDED_NONSUCCESS:
             for row in attempts:

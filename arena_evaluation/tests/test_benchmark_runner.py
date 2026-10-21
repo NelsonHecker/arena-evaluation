@@ -942,7 +942,7 @@ def test_plan_pending_steps_recorded_skipped_kept_without_retry(tmp_path: pathli
     assert [d.step.key for d in decisions if d.run_indices] == []
 
 
-def test_plan_pending_steps_in_progress_episode_reruns_and_deletes_dir(tmp_path: pathlib.Path):
+def test_plan_pending_steps_in_progress_episode_reruns_and_retires_dir(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
     _record_episode(tmp_path, step_key="pa/s1", stage="s1", sim_id=0, seed=0, outcome=2)
@@ -952,8 +952,8 @@ def test_plan_pending_steps_in_progress_episode_reruns_and_deletes_dir(tmp_path:
 
     (decision,) = [d for d in decisions if d.step.key == "pa/s1"]
     assert decision.run_indices == [1, 2, 3, 4]
-    assert decision.delete_dirs == [in_progress]
-    assert decision.retire_dirs == []
+    assert decision.retire_dirs == [in_progress]
+    assert decision.delete_dirs == []
 
 
 def test_plan_pending_steps_record_dir_set_from_record_root(tmp_path: pathlib.Path):

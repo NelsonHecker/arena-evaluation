@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 import sys
 
 import pytest
@@ -257,20 +258,20 @@ def test_decide_step_recorded_failure_retired_when_forced(tmp_path: pathlib.Path
     assert decision.delete_dirs == []
 
 
-def test_decide_step_dead_episode_rerun_and_garbage_deleted(tmp_path: pathlib.Path) -> None:
+def test_decide_step_dead_episode_rerun_and_partial_recording_retired(tmp_path: pathlib.Path) -> None:
     stage = _stage(episodes=3, seed=0)
     step = _step(_contestant("pa"), stage)
-    # ep0 finished SUCCESS, ep1 crashed mid-recording (dir, no terminal outcome).
+    # ep0 finished SUCCESS, ep1 crashed mid-recording (dir with an MCAP, no terminal outcome).
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
-    garbage = _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=101, seed=1, outcome=None)
+    partial = _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=101, seed=1, outcome=None)
     rows = [_row("pa/s1", 0, 100, 2)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
     decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == [1, 2]
-    assert decision.delete_dirs == [garbage]
-    assert decision.retire_dirs == []
+    assert decision.retire_dirs == [partial]
+    assert decision.delete_dirs == []
 
 
 def test_decide_step_never_started_episode_is_pending(tmp_path: pathlib.Path) -> None:
@@ -533,6 +534,62 @@ def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_faile
     assert decision.kept_sim_ids == {1: 1}
     assert decision.kept_outcomes == {1: 3}
     assert (decision.kept_run, decision.kept_failed) == (1, 1)
+
+
+def test_decide_step_keeps_a_real_benchmark_episode_from_the_sample_fixture(tmp_path: pathlib.Path) -> None:
+    fixture = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_benchmark" / "episodes" / "episode_000"
+    shutil.copytree(fixture, tmp_path / "episodes" / "episode_000")
+    step = _step(_contestant("dwb"), _stage(name="barn_0", episodes=1, seed=1))
+    rows = [_row("dwb/barn_0", 1, 1, 2)]
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+
+    decision = decide_step(step, rows, live, retired, force_retry=False)
+
+    assert decision.run_indices == []
+    assert decision.kept_outcomes == {0: 2}
+    assert decision.retire_dirs == []
+    assert decision.delete_dirs == []
+
+
+def test_decide_step_retires_an_unclosed_nested_bag_instead_of_deleting_it(tmp_path: pathlib.Path) -> None:
+    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
+    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None, mcap=False)
+    bag_dir = ep_dir / "episode_000"
+    bag_dir.mkdir()
+    (bag_dir / "episode_000_0.mcap").write_bytes(b"")
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+
+    decision = decide_step(step, [], live, retired, force_retry=False)
+
+    assert live[0].has_recording is True
+    assert live[0].has_mcap is False
+    assert decision.run_indices == [0]
+    assert decision.retire_dirs == [ep_dir]
+    assert decision.delete_dirs == []
+
+
+def test_decide_step_retires_an_incomplete_flat_recording_instead_of_deleting_it(tmp_path: pathlib.Path) -> None:
+    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
+    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None)
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+
+    decision = decide_step(step, [], live, retired, force_retry=False)
+
+    assert decision.run_indices == [0]
+    assert decision.retire_dirs == [ep_dir]
+    assert decision.delete_dirs == []
+
+
+def test_decide_step_deletes_an_episode_dir_without_a_recording(tmp_path: pathlib.Path) -> None:
+    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
+    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None, mcap=False)
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+
+    decision = decide_step(step, [], live, retired, force_retry=False)
+
+    assert decision.run_indices == [0]
+    assert decision.delete_dirs == [ep_dir]
+    assert decision.retire_dirs == []
 
 
 if __name__ == "__main__":  # pragma: no cover
