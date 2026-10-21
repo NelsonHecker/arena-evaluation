@@ -89,7 +89,7 @@ struct AcousticSolverWorkspace {
         return count > 0;
     }
 
-    int insert_pareto(int idx, float dist, float tl) {
+    int insert_pareto(int idx, float dist, float tl, float mic_distance) {
         size_t base = (size_t)idx * MAX_FRONTIER;
         for (int s = 0; s < MAX_FRONTIER; ++s) {
             if (frontier_used[base + s] && frontier_dist[base + s] <= dist && frontier_tl[base + s] <= tl) {
@@ -111,11 +111,11 @@ struct AcousticSolverWorkspace {
             }
         }
         if (slot < 0) {
-            float new_cost = 20.0f * log10f(fmaxf(dist, 1.0f)) + tl;
+            float new_cost = 20.0f * log10f(fmaxf(dist, mic_distance)) + tl;
             float worst_cost = -numeric_limits<float>::infinity();
             int worst = 0;
             for (int s = 0; s < MAX_FRONTIER; ++s) {
-                float c = 20.0f * log10f(fmaxf(frontier_dist[base + s], 1.0f)) + frontier_tl[base + s];
+                float c = 20.0f * log10f(fmaxf(frontier_dist[base + s], mic_distance)) + frontier_tl[base + s];
                 if (c > worst_cost) {
                     worst_cost = c;
                     worst = s;
@@ -212,7 +212,7 @@ static inline void run_acoustic_dijkstra(
     bool start_is_barrier = is_acoustic_barrier(grid, pixel_tl, start_idx);
     float start_tl    = start_is_barrier ? pixel_tl_of(start_idx) : 0.0f;
     float init_cost   = 20.0f * log10f(mic_distance) + start_tl;
-    int start_point = ws.insert_pareto(start_idx, 0.0f, start_tl);
+    int start_point = ws.insert_pareto(start_idx, 0.0f, start_tl, mic_distance);
     ws.min_cost[start_idx] = init_cost;
     ws.touched.push_back(start_idx);
 
@@ -291,7 +291,7 @@ static inline void run_acoustic_dijkstra(
             }
 
             float new_tl = curr.tl + next_tl_contrib;
-            int point_id = ws.insert_pareto(nidx, ndist, new_tl);
+            int point_id = ws.insert_pareto(nidx, ndist, new_tl, mic_distance);
             if (point_id < 0) {
                 continue;
             }
@@ -412,13 +412,60 @@ extern "C" {
         ws.ensure_capacity(N);
         ws.ensure_sat(grid, pixel_tl, width, height);
 
-        run_acoustic_dijkstra<false>(
-            grid, width, height, resolution,
-            start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
-            0
-        );
+        int los_samples = 0;
+        int sample_count = 0;
+        int step_x = max(1, width / 4);
+        int step_y = max(1, height / 4);
+        for (int sy = 0; sy < height; sy += step_y) {
+            for (int sx = 0; sx < width; sx += step_x) {
+                if (line_of_sight(grid, pixel_tl, width, height, start_ix, start_iy, sx, sy)) {
+                    los_samples++;
+                }
+                sample_count++;
+            }
+        }
 
-        std::copy_n(ws.min_cost.data(), N, out_field);
-        ws.reset();
+        if (los_samples * 4 >= sample_count * 3) {
+            vector<int> unresolved;
+            unresolved.reserve(N);
+            for (int i = 0; i < N; ++i) {
+                int x = i % width;
+                int y = i / width;
+                if (line_of_sight(grid, pixel_tl, width, height, start_ix, start_iy, x, y)) {
+                    float fdx = (float)(x - start_ix) * resolution;
+                    float fdy = (float)(y - start_iy) * resolution;
+                    float dist = sqrtf(fdx * fdx + fdy * fdy);
+                    out_field[i] = 20.0f * log10f(fmaxf(dist, mic_distance));
+                    ws.target_status[i] = 0;
+                } else {
+                    out_field[i] = numeric_limits<float>::infinity();
+                    ws.target_status[i] = 1;
+                    unresolved.push_back(i);
+                }
+            }
+
+            if (!unresolved.empty()) {
+                run_acoustic_dijkstra<true>(
+                    grid, width, height, resolution,
+                    start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
+                    (int)unresolved.size()
+                );
+                for (int idx : unresolved) {
+                    if (ws.min_cost[idx] != numeric_limits<float>::infinity()) {
+                        out_field[idx] = ws.min_cost[idx];
+                    }
+                }
+            }
+
+            ws.reset(unresolved);
+        } else {
+            run_acoustic_dijkstra<false>(
+                grid, width, height, resolution,
+                start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
+                0
+            );
+            std::copy_n(ws.min_cost.data(), N, out_field);
+            ws.reset();
+        }
     }
 }
