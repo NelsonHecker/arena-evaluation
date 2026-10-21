@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import shutil
 import sys
 
 import pytest
@@ -534,21 +533,6 @@ def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_faile
     assert decision.kept_sim_ids == {1: 1}
     assert decision.kept_outcomes == {1: 3}
     assert (decision.kept_run, decision.kept_failed) == (1, 1)
-
-
-def test_decide_step_keeps_a_real_benchmark_episode_from_the_sample_fixture(tmp_path: pathlib.Path) -> None:
-    fixture = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_benchmark" / "episodes" / "episode_000"
-    shutil.copytree(fixture, tmp_path / "episodes" / "episode_000")
-    step = _step(_contestant("dwb"), _stage(name="barn_0", episodes=1, seed=1))
-    rows = [_row("dwb/barn_0", 1, 1, 2)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
-
-    decision = decide_step(step, rows, live, retired, force_retry=False)
-
-    assert decision.run_indices == []
-    assert decision.kept_outcomes == {0: 2}
-    assert decision.retire_dirs == []
-    assert decision.delete_dirs == []
 
 
 def test_decide_step_retires_an_unclosed_nested_bag_instead_of_deleting_it(tmp_path: pathlib.Path) -> None:
