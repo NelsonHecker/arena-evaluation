@@ -39,15 +39,12 @@ class DoorStateTimeline:
         if len(df) == 0:
             return None
 
-        # per timestamp: build {entity: field -> value}
         timestamps = sorted(df["time_ns"].unique().to_list())
+        by_time = {key[0]: frame for key, frame in df.partition_by("time_ns", as_dict=True).items()}
         open_sets: list[frozenset[str]] = []
         for ts in timestamps:
-            frame = df.filter(pl.col("time_ns") == ts)
             open_doors: set[str] = set()
-            entities = frame["entity"].unique().to_list()
-            for ent in entities:
-                erows = frame.filter(pl.col("entity") == ent)
+            for (entity,), erows in by_time[ts].partition_by("entity", as_dict=True).items():
                 is_open = False
                 for row in erows.iter_rows(named=True):
                     field = row.get("field", "")
@@ -60,7 +57,7 @@ class DoorStateTimeline:
                         if v is not None and not np.isnan(float(v)) and float(v) > progress_threshold:
                             is_open = True
                 if is_open:
-                    open_doors.add(ent)
+                    open_doors.add(entity)
             open_sets.append(frozenset(open_doors))
 
         return cls(np.asarray(timestamps, dtype=np.int64), open_sets)
