@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import math
 import pathlib
+import subprocess
 from collections.abc import Iterator
 
 import numpy as np
@@ -202,6 +204,59 @@ class TestAcousticGridSolverParity:
             field_val = field[int(py), int(px)]
             point_val = point_atts[i]
             assert np.isclose(field_val, point_val, atol=1e-4)
+
+
+class TestParetoFrontierBound:
+    """Verify that the two-label production frontier matches the unbounded one."""
+
+    def test_k2_matches_unbounded_frontier(self, tmp_path: pathlib.Path) -> None:
+        """A K=64 build matches the production K=2 solver on a walled grid."""
+        from arena_evaluation.processing.acoustics import impedance_grid as ig
+
+        source = pathlib.Path(ig.__file__).parent / "solver.cpp"
+        library = tmp_path / "solver_k64.so"
+        subprocess.run(
+            ["g++", "-O3", "-std=c++17", "-fPIC", "-shared", "-DPARETO_K=64", str(source), "-o", str(library)],
+            check=True,
+            capture_output=True,
+        )
+        unbounded = ctypes.CDLL(str(library))
+        unbounded.solve_acoustic_field.argtypes = ig._lib.solve_acoustic_field.argtypes
+        unbounded.solve_acoustic_field.restype = None
+
+        rng = np.random.default_rng(7)
+        height, width = 60, 80
+        grid = (rng.random((height, width)) < 0.12).astype(np.uint8)
+        pixel_tl = np.where(
+            grid == 1,
+            np.where(rng.random((height, width)) < 0.5, 47.0, 25.0),
+            0.0,
+        ).astype(np.float32)
+        start_x, start_y = 5.0, 30.0
+        grid[int(start_y), int(start_x)] = 0
+        pixel_tl[int(start_y), int(start_x)] = 0.0
+
+        target_x = rng.uniform(0.0, width - 1.0, 40).astype(np.float32)
+        target_y = rng.uniform(0.0, height - 1.0, 40).astype(np.float32)
+        expected = compute_attenuations(grid, 0.05, start_x, start_y, target_x, target_y, wall_tl=47.0, mic_distance=1.0, pixel_tl=pixel_tl)
+        actual = np.empty_like(expected)
+        unbounded.solve_acoustic_field(
+            grid,
+            width,
+            height,
+            0.05,
+            start_x,
+            start_y,
+            target_x,
+            target_y,
+            len(target_x),
+            47.0,
+            1.0,
+            pixel_tl.ctypes.data_as(ctypes.c_void_p),
+            actual,
+        )
+
+        assert np.allclose(actual, expected, atol=1e-4)
 
 
 class TestSparseEarlyExitCorrectness:
