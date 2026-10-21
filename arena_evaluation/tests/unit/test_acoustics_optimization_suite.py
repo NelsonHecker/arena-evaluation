@@ -277,11 +277,11 @@ class TestSparseEarlyExitCorrectness:
         assert len(att) == 0
 
 
-class TestWallBudgetReachability:
-    """Verify that barriers follow the TL map and the wall budget stays RAM-bounded."""
+class TestBarrierReachability:
+    """Verify that barriers follow the transmission-loss map."""
 
-    def test_four_closed_walls_exceed_the_budget(self) -> None:
-        """Four solid walls are past the four-barrier budget and report unreachable."""
+    def test_four_closed_walls_are_reachable(self) -> None:
+        """A target behind four solid walls receives a finite attenuation."""
         grid = np.zeros((30, 40), dtype=np.uint8)
         for x in (5, 10, 15, 20):
             grid[:, x] = 1
@@ -289,7 +289,8 @@ class TestWallBudgetReachability:
         ty = np.array([15.0], dtype=np.float32)
 
         att = compute_attenuations(grid, 0.1, 1.0, 15.0, tx, ty)
-        assert np.isinf(att[0])
+        assert np.isfinite(att[0])
+        assert att[0] > 4 * 47.0
 
     def test_four_open_doorways_are_reachable(self) -> None:
         """A target behind four zero-TL doorway pixels is scored as open space."""
