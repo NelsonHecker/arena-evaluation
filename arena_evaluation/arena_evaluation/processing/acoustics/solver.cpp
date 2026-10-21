@@ -6,6 +6,10 @@
 #include <algorithm>
 
 
+#ifndef PARETO_K
+#define PARETO_K 2
+#endif
+
 using namespace std;
 
 struct Label {
@@ -30,19 +34,14 @@ static inline bool is_acoustic_barrier(const uint8_t* grid, const float* pixel_t
     return grid[idx] > 0;
 }
 
-struct ParetoPoint {
-    float dist;
-    float tl;
-    int   next;
-    bool  active;
-};
-
 struct AcousticSolverWorkspace {
+    static const int MAX_FRONTIER = PARETO_K;
     int capacity = 0;
     vector<float> min_cost;
     vector<uint8_t> target_status; // 0: none, 1: unsettled, 2: settled
-    vector<int> frontier_head;
-    vector<ParetoPoint> pool;
+    vector<float> frontier_dist;
+    vector<float> frontier_tl;
+    vector<uint8_t> frontier_used;
     vector<int> touched;
     vector<int> sat;
     int sat_w = 0;
@@ -53,8 +52,9 @@ struct AcousticSolverWorkspace {
             capacity = N;
             min_cost.assign(N, numeric_limits<float>::infinity());
             target_status.assign(N, (uint8_t)0);
-            frontier_head.assign(N, -1);
-            pool.clear();
+            frontier_dist.assign((size_t)N * MAX_FRONTIER, 0.0f);
+            frontier_tl.assign((size_t)N * MAX_FRONTIER, 0.0f);
+            frontier_used.assign((size_t)N * MAX_FRONTIER, (uint8_t)0);
             touched.clear();
         }
     }
@@ -90,45 +90,60 @@ struct AcousticSolverWorkspace {
     }
 
     int insert_pareto(int idx, float dist, float tl) {
-        int p = frontier_head[idx];
-        while (p != -1) {
-            if (pool[p].active && pool[p].dist <= dist && pool[p].tl <= tl) {
+        size_t base = (size_t)idx * MAX_FRONTIER;
+        for (int s = 0; s < MAX_FRONTIER; ++s) {
+            if (frontier_used[base + s] && frontier_dist[base + s] <= dist && frontier_tl[base + s] <= tl) {
                 return -1;
             }
-            p = pool[p].next;
         }
 
-        p = frontier_head[idx];
-        int prev = -1;
-        while (p != -1) {
-            int next = pool[p].next;
-            if (pool[p].active && dist <= pool[p].dist && tl <= pool[p].tl) {
-                pool[p].active = false;
-                if (prev == -1) {
-                    frontier_head[idx] = next;
-                } else {
-                    pool[prev].next = next;
-                }
-            } else if (pool[p].active) {
-                prev = p;
+        for (int s = 0; s < MAX_FRONTIER; ++s) {
+            if (frontier_used[base + s] && dist <= frontier_dist[base + s] && tl <= frontier_tl[base + s]) {
+                frontier_used[base + s] = 0;
             }
-            p = next;
         }
 
-        int id = (int)pool.size();
-        pool.push_back({dist, tl, frontier_head[idx], true});
-        frontier_head[idx] = id;
-        return id;
+        int slot = -1;
+        for (int s = 0; s < MAX_FRONTIER; ++s) {
+            if (!frontier_used[base + s]) {
+                slot = s;
+                break;
+            }
+        }
+        if (slot < 0) {
+            float new_cost = 20.0f * log10f(fmaxf(dist, 1.0f)) + tl;
+            float worst_cost = -numeric_limits<float>::infinity();
+            int worst = 0;
+            for (int s = 0; s < MAX_FRONTIER; ++s) {
+                float c = 20.0f * log10f(fmaxf(frontier_dist[base + s], 1.0f)) + frontier_tl[base + s];
+                if (c > worst_cost) {
+                    worst_cost = c;
+                    worst = s;
+                }
+            }
+            if (new_cost >= worst_cost) {
+                return -1;
+            }
+            slot = worst;
+            frontier_used[base + slot] = 0;
+        }
+
+        frontier_dist[base + slot] = dist;
+        frontier_tl[base + slot] = tl;
+        frontier_used[base + slot] = 1;
+        return slot;
     }
 
     void reset(const vector<int>& target_indices = {}) {
         for (int idx : touched) {
+            size_t base = (size_t)idx * MAX_FRONTIER;
+            for (int s = 0; s < MAX_FRONTIER; ++s) {
+                frontier_used[base + s] = 0;
+            }
             min_cost[idx] = numeric_limits<float>::infinity();
             target_status[idx] = 0;
-            frontier_head[idx] = -1;
         }
         touched.clear();
-        pool.clear();
         for (int tidx : target_indices) {
             if (tidx >= 0 && tidx < capacity) {
                 target_status[tidx] = 0;
@@ -209,8 +224,14 @@ static inline void run_acoustic_dijkstra(
         Label curr = pq.top();
         pq.pop();
 
-        if (curr.point_id < 0 || !ws.pool[curr.point_id].active) {
+        if (curr.point_id < 0 || curr.point_id >= AcousticSolverWorkspace::MAX_FRONTIER) {
             continue;
+        }
+        {
+            size_t _base = (size_t)curr.index * AcousticSolverWorkspace::MAX_FRONTIER + curr.point_id;
+            if (!ws.frontier_used[_base] || ws.frontier_dist[_base] != curr.dist || ws.frontier_tl[_base] != curr.tl) {
+                continue;
+            }
         }
 
         if (EARLY_EXIT) {
