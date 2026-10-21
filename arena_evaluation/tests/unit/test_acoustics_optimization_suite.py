@@ -277,6 +277,34 @@ class TestSparseEarlyExitCorrectness:
         assert len(att) == 0
 
 
+class TestWallBudgetReachability:
+    """Verify that barriers follow the TL map and the wall budget stays RAM-bounded."""
+
+    def test_four_closed_walls_exceed_the_budget(self) -> None:
+        """Four solid walls are past the four-barrier budget and report unreachable."""
+        grid = np.zeros((30, 40), dtype=np.uint8)
+        for x in (5, 10, 15, 20):
+            grid[:, x] = 1
+        tx = np.array([30.0], dtype=np.float32)
+        ty = np.array([15.0], dtype=np.float32)
+
+        att = compute_attenuations(grid, 0.1, 1.0, 15.0, tx, ty)
+        assert np.isinf(att[0])
+
+    def test_four_open_doorways_are_reachable(self) -> None:
+        """A target behind four zero-TL doorway pixels is scored as open space."""
+        grid = np.zeros((30, 40), dtype=np.uint8)
+        for x in (5, 10, 15, 20):
+            grid[:, x] = 1
+        pixel_tl = np.zeros(grid.shape, dtype=np.float32)
+        tx = np.array([30.0], dtype=np.float32)
+        ty = np.array([15.0], dtype=np.float32)
+
+        att = compute_attenuations(grid, 0.1, 1.0, 15.0, tx, ty, pixel_tl=pixel_tl)
+        assert np.isfinite(att[0])
+        assert np.isclose(att[0], 20.0 * np.log10(2.9), atol=0.2)
+
+
 class TestWorkspaceMemorySafety:
     """Verify that the thread-local workspace resets cleanly across calls."""
 
@@ -528,7 +556,6 @@ class TestGranularDoorTransition:
             start_pos=[0.0, 0.0],
             goal_pos=[1.0, 1.0],
             is_reference=True,
-            reference_type="unobstructed_robot",
         )
 
         res = calc.calculate(bundle_ref, {"map": "test_map"})

@@ -211,15 +211,13 @@ class AlignedEpisodeBundle:
     # Final EpisodeRecord.outcome_state of the recording, None when no record was captured.
     outcome_state: int | None = None
     outcome_info: str | None = None
-    run: typing.Any = None
+    run: EpisodeDescriptor | None = None
     folder_manager: typing.Any = None
     peds: pl.DataFrame | None = None
     map: str | None = None
     topics: dict[str, pl.DataFrame] | None = None
     env_offset: tuple[float, float] | None = None
-    # Reference episodes carry no robot ego-noise to score.
     is_reference: bool = False
-    reference_type: str | None = None
 
 
 class PlotSpec(BaseModel):

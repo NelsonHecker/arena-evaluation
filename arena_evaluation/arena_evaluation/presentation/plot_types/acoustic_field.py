@@ -17,7 +17,7 @@ from arena_evaluation.processing.acoustics.door_map import (
 )
 from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
 from arena_evaluation.processing.acoustics.impedance_grid import (
-    compute_attenuations,
+    compute_acoustic_field,
     downsample_mask,
     downsample_occupancy,
 )
@@ -75,23 +75,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
         rx_px = (rx_m - ox) / resolution
         ry_px = (ry_m - oy) / resolution
 
-        yy, xx = np.mgrid[0:h, 0:w]
-        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
-        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
-
-        attenuations = compute_attenuations(
+        att_grid = compute_acoustic_field(
             grid,
             resolution,
             rx_px,
             ry_px,
-            tx,
-            ty,
             wall_tl=47.0,
             mic_distance=1.0,
             pixel_tl=pixel_tl,
         )
-
-        att_grid = attenuations.reshape((h, w))
         field_dba = source_dba - att_grid
         field_dba = np.clip(field_dba, 0, None)
         logger.info("AcousticFieldRenderer: full-field done.")
@@ -837,10 +829,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
             h,
         )
 
-        yy, xx = np.mgrid[0:h, 0:w]
-        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
-        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
-
         tl_cache: dict[tuple, np.ndarray] = {}
         results: list = []
         rows = df.rows(named=True)
@@ -873,19 +861,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
             if source_dba is None or np.isnan(source_dba):
                 source_dba = _FIELD_VMIN_DBA
 
-            attenuations = compute_attenuations(
+            att_grid = compute_acoustic_field(
                 occupancy_grid=grid,
                 resolution=resolution,
                 start_x_px=rx_px,
                 start_y_px=ry_px,
-                target_xs_px=tx,
-                target_ys_px=ty,
                 wall_tl=47.0,
                 mic_distance=1.0,
                 pixel_tl=pixel_tl,
             )
-
-            att_grid = attenuations.reshape((h, w))
             field_dba = float(source_dba) - att_grid
             field_dba = np.clip(field_dba, 0, None)
             # (field, eff_res, (h, w), open_set, source_dba)

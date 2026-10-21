@@ -9,7 +9,7 @@ using namespace std;
 
 struct Label {
     float dist;        // accumulated Euclidean distance (metres) to THIS node
-    int   walls;       // number of air->wall transitions so far
+    int   walls;       // number of air->barrier transitions so far
     int   index;       // grid pixel index (y*width + x)
     float tl;          // accumulated transmission loss (dB) along the path
     float cost;        // 20*log10(max(dist, mic_distance)) + tl  (priority key)
@@ -22,8 +22,15 @@ struct Label {
     }
 };
 
+static inline bool is_acoustic_barrier(const uint8_t* grid, const float* pixel_tl, int idx) {
+    if (pixel_tl != nullptr) {
+        return pixel_tl[idx] > 0.0f;
+    }
+    return grid[idx] > 0;
+}
+
 struct AcousticSolverWorkspace {
-    static const int MAX_WALLS = 4;
+    static const int MAX_WALLS = 4; // maximum TL-bearing barriers a path may cross
     int capacity = 0;
     vector<float> min_dist;
     vector<float> min_cost;
@@ -52,7 +59,7 @@ struct AcousticSolverWorkspace {
             int row_sum = 0;
             for (int x = 0; x < width; ++x) {
                 int idx = y * width + x;
-                int val = (grid[idx] > 0 || (pixel_tl != nullptr && pixel_tl[idx] > 0.0f)) ? 1 : 0;
+                int val = is_acoustic_barrier(grid, pixel_tl, idx) ? 1 : 0;
                 row_sum += val;
                 sat[(y + 1) * sat_w + (x + 1)] = sat[y * sat_w + (x + 1)] + row_sum;
             }
@@ -113,8 +120,7 @@ static inline bool line_of_sight(
     int x = x0, y = y0;
     while (true) {
         int idx = y * width + x;
-        if (grid[idx] > 0) return false;                               // solid wall blocks LoS
-        if (pixel_tl != nullptr && pixel_tl[idx] > 0.0f) return false; // TL barrier (e.g. closed door) blocks LoS
+        if (is_acoustic_barrier(grid, pixel_tl, idx)) return false;
         if (x == x1 && y == y1) break;
         int e2 = 2 * err;
         if (e2 > -ddy) { err -= ddy; x += sx; }
@@ -149,10 +155,10 @@ static inline void run_acoustic_dijkstra(
     };
 
     int start_idx = start_iy * width + start_ix;
-    bool start_is_wall = grid[start_idx] > 0;
-    float start_tl    = start_is_wall ? pixel_tl_of(start_idx) : 0.0f;
+    bool start_is_barrier = is_acoustic_barrier(grid, pixel_tl, start_idx);
+    float start_tl    = start_is_barrier ? pixel_tl_of(start_idx) : 0.0f;
     float init_cost   = 20.0f * log10f(mic_distance) + start_tl;
-    int   start_walls = start_is_wall ? 1 : 0;
+    int   start_walls = start_is_barrier ? 1 : 0;
 
     size_t start_base = (size_t)start_idx * AcousticSolverWorkspace::MAX_WALLS;
     ws.min_dist[start_base + start_walls] = 0.0f;
@@ -187,7 +193,7 @@ static inline void run_acoustic_dijkstra(
         int   par_x    = curr.parent_x;
         int   par_y    = curr.parent_y;
         float par_dist = curr.parent_dist;
-        bool curr_is_wall = grid[curr.index] > 0;
+        bool curr_is_barrier = is_acoustic_barrier(grid, pixel_tl, curr.index);
 
         for (int dir = 0; dir < 8; ++dir) {
             int nx = cx + ddx_arr[dir];
@@ -197,10 +203,9 @@ static inline void run_acoustic_dijkstra(
             }
 
             int nidx = ny * width + nx;
-            // No equal-cost reject: Theta* re-anchors at the parent and can still shorten the path.
 
-            bool next_is_wall = grid[nidx] > 0;
-            int nwalls = curr.walls + ((next_is_wall && !curr_is_wall) ? 1 : 0);
+            bool next_is_barrier = is_acoustic_barrier(grid, pixel_tl, nidx);
+            int nwalls = curr.walls + ((next_is_barrier && !curr_is_barrier) ? 1 : 0);
             if (nwalls >= AcousticSolverWorkspace::MAX_WALLS) {
                 continue;
             }
@@ -215,7 +220,7 @@ static inline void run_acoustic_dijkstra(
             float new_par_dist;
             float next_tl_contrib;
 
-            bool can_los = !next_is_wall && !curr_is_wall && (pixel_tl == nullptr || pixel_tl[nidx] <= 0.0f);
+            bool can_los = !next_is_barrier && !curr_is_barrier;
             bool has_los = can_los && (par_x != cx || par_y != cy) &&
                            line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny);
 
@@ -256,7 +261,6 @@ static inline void run_acoustic_dijkstra(
             if (ncost < ws.min_cost[nidx]) {
                 ws.min_cost[nidx] = ncost;
             }
-            // Always push: an equal-cost re-relaxation can still improve downstream line-of-sight.
             pq.push({ndist, nwalls, nidx, new_tl, ncost,
                      new_par_x, new_par_y, new_par_dist});
         }
