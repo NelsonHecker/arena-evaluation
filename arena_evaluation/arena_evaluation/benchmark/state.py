@@ -238,7 +238,7 @@ _FLOAT_PROGRESS_COLS = frozenset(
 )
 
 
-def read_progress_rows(path: pathlib.Path) -> list[dict[str, object]]:
+def read_progress_rows(path: pathlib.Path, *, step_key: str | None = None) -> list[dict[str, object]]:
     """Read progress.csv into row dicts; comment lines are skipped and empty cells become None."""
     if not path.exists():
         return []
@@ -251,6 +251,8 @@ def read_progress_rows(path: pathlib.Path) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for raw in reader:
         if None in raw.values():
+            continue
+        if step_key is not None and raw.get("step_key") != step_key:
             continue
         row: dict[str, object] = {}
         for key, value in raw.items():

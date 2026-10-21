@@ -205,7 +205,7 @@ def test_decide_step_good_success_is_kept(tmp_path: pathlib.Path) -> None:
         rows.append(_row("pa/s1", i, 100 + i, 2))
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == []
     assert decision.delete_dirs == []
@@ -221,7 +221,7 @@ def test_decide_step_success_without_row_kept_from_yaml(tmp_path: pathlib.Path) 
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [], live, retired, retry_failed=False)
+    decision = decide_step(step, [], live, retired, force_retry=False)
 
     assert decision.run_indices == [1, 2]
     assert decision.kept_sim_ids == {0: 100}
@@ -234,7 +234,7 @@ def test_decide_step_recorded_failure_preserved_by_default(tmp_path: pathlib.Pat
     rows = [_row("pa/s1", 0, 100, 3)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     # The recorded failure is real evidence -> preserved, never re-run in place.
     assert decision.run_indices == [1]
@@ -250,7 +250,7 @@ def test_decide_step_recorded_failure_retired_when_forced(tmp_path: pathlib.Path
     rows = [_row("pa/s1", 0, 100, 3)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=True)
+    decision = decide_step(step, rows, live, retired, force_retry=True)
 
     assert decision.run_indices == [0, 1]
     assert decision.retire_dirs == [ep0]
@@ -266,7 +266,7 @@ def test_decide_step_dead_episode_rerun_and_garbage_deleted(tmp_path: pathlib.Pa
     rows = [_row("pa/s1", 0, 100, 2)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == [1, 2]
     assert decision.delete_dirs == [garbage]
@@ -279,7 +279,7 @@ def test_decide_step_never_started_episode_is_pending(tmp_path: pathlib.Path) ->
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [_row("pa/s1", 0, 100, 2)], live, retired, retry_failed=False)
+    decision = decide_step(step, [_row("pa/s1", 0, 100, 2)], live, retired, force_retry=False)
 
     assert decision.run_indices == [1]
     assert decision.delete_dirs == [] and decision.retire_dirs == []
@@ -295,7 +295,7 @@ def test_decide_step_stale_duplicate_dir_retired(tmp_path: pathlib.Path) -> None
     rows = [_row("pa/s1", 0, 100, 2)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == []
     assert decision.retire_dirs == [dup]
@@ -316,7 +316,7 @@ def test_decide_step_retires_seeded_duplicate_written_by_real_path(tmp_path: pat
     rows = [_row("pa/s1", 0, 100, 2)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == []
     assert decision.retire_dirs == [dup]
@@ -331,7 +331,7 @@ def test_decide_step_unhindered_peds_kept_with_surviving_mcap(tmp_path: pathlib.
     _mk_episode(tmp_path, 0, planner="unhindered_peds", stage="s1", sim_id=100, seed=0, outcome=None, is_reference=True, reference_type="unhindered_peds")
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [], live, retired, retry_failed=False)
+    decision = decide_step(step, [], live, retired, force_retry=False)
 
     assert decision.run_indices == [1]
     assert decision.delete_dirs == []
@@ -401,7 +401,7 @@ def test_legacy_rows_without_seed_do_not_raise(tmp_path: pathlib.Path) -> None:
     step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
     rows = [{"episode_id": 1}, {"episode_id": 2, "seed": None}]
 
-    decision = decide_step(step, rows, [], [], retry_failed=False)
+    decision = decide_step(step, rows, [], [], force_retry=False)
 
     assert decision.run_indices == [0, 1]
 
@@ -481,7 +481,7 @@ def test_recorded_without_row_prefers_newest(tmp_path: pathlib.Path) -> None:
     )
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [], live, retired, retry_failed=False)
+    decision = decide_step(step, [], live, retired, force_retry=False)
 
     assert decision.kept_sim_ids == {1: 200}
     assert decision.retire_dirs == [older]
@@ -500,7 +500,7 @@ def test_decide_step_reused_sim_id_across_sessions_keeps_both_seeds(tmp_path: pa
     ]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == []
     assert decision.retire_dirs == []
@@ -527,7 +527,7 @@ def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_faile
     rows = [_row("pa/s1", 0, 0, 3), _row("pa/s1", 1, 1, 3)]
     live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, retry_failed=False)
+    decision = decide_step(step, rows, live, retired, force_retry=False)
 
     assert decision.run_indices == [0]
     assert decision.kept_sim_ids == {1: 1}

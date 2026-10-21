@@ -15,15 +15,13 @@ if typing.TYPE_CHECKING:
 
 _log = logging.getLogger("arena_evaluation.resume")
 
-_OUTCOME_QUEUED = 0
-_OUTCOME_RUNNING = 1
 _OUTCOME_SUCCESS = 2
 _OUTCOME_FAILED = 3
 _OUTCOME_SKIPPED = 4
 _OUTCOME_FATAL = 5
 
 _TERMINAL = frozenset({_OUTCOME_SUCCESS, _OUTCOME_FAILED, _OUTCOME_SKIPPED, _OUTCOME_FATAL})
-_RECORDED_NONSUCCESS = frozenset({_OUTCOME_FAILED, _OUTCOME_SKIPPED, _OUTCOME_FATAL})
+_RECORDED_NONSUCCESS = _TERMINAL - {_OUTCOME_SUCCESS}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -40,6 +38,7 @@ class OnDiskEpisode:
     seed: int | None = None
     outcome_state: int | None = None
     mcap_bytes: int = 0
+    retired: bool = False
 
     def matches_step(self, step: Step) -> bool:
         """True when this dir's metadata identity equals the step's."""
@@ -122,7 +121,7 @@ def _scan_episode_dirs(root: pathlib.Path) -> list[OnDiskEpisode]:
 def load_episode_dirs(episodes_root: pathlib.Path) -> tuple[list[OnDiskEpisode], list[OnDiskEpisode]]:
     """Return (live dirs under episodes/, retired dirs under episodes/.superseded/)."""
     live = _scan_episode_dirs(episodes_root)
-    retired = _scan_episode_dirs(episodes_root / ".superseded")
+    retired = [dataclasses.replace(d, retired=True) for d in _scan_episode_dirs(episodes_root / ".superseded")]
     return live, retired
 
 
@@ -140,6 +139,32 @@ def episode_index_for_seed(stage_seed: int | None, seed: int, episode_count: int
 
 def dirs_for_step(dirs: list[OnDiskEpisode], step: Step) -> list[OnDiskEpisode]:
     return [d for d in dirs if d.matches_step(step)]
+
+
+def _step_identity(step: Step) -> tuple[str, str, bool, str | None]:
+    return (step.contestant.name, step.stage.name, bool(step.is_reference), step.reference_type)
+
+
+def _dir_identity(d: OnDiskEpisode) -> tuple[str | None, str | None, bool, str | None]:
+    return (d.planner, d.stage, bool(d.is_reference), d.reference_type)
+
+
+def plan_step(
+    step: Step,
+    rows: collections.abc.Sequence[collections.abc.Mapping[str, object]],
+    live_dirs: list[OnDiskEpisode],
+    retired_dirs: list[OnDiskEpisode],
+    *,
+    force_retry: bool = False,
+) -> StepResumeDecision:
+    """Plan one step from evidence already loaded for its run dir."""
+    return decide_step(
+        step,
+        rows,
+        dirs_for_step(live_dirs, step),
+        dirs_for_step(retired_dirs, step),
+        force_retry=force_retry,
+    )
 
 
 @dataclasses.dataclass
@@ -174,11 +199,9 @@ def decide_step(
     live_dirs: list[OnDiskEpisode],
     retired_dirs: list[OnDiskEpisode],
     *,
-    retry_failed: bool,
-    retry_recorded: bool = False,
+    force_retry: bool = False,
 ) -> StepResumeDecision:
     """Classify every episode of *step* from its ledger rows and on-disk dirs."""
-    force_retry = retry_failed or retry_recorded
     decision = StepResumeDecision(step=step)
     episode_count = step.episodes
     stage_seed = step.stage.seed
@@ -231,7 +254,7 @@ def decide_step(
             if cur_row is not None:
                 break
 
-        live_cur_dir = cur_dir if (cur_dir is not None and cur_dir.path.parent.name != ".superseded") else None
+        live_cur_dir = cur_dir if (cur_dir is not None and not cur_dir.retired) else None
         yaml_seed_dirs = [d for d in live_by_seed.get(seed, []) if d.path not in claimed]
         recorded_without_row: OnDiskEpisode | None = None
         if cur_row is None:
@@ -313,16 +336,20 @@ def plan_resume(
 ) -> list[StepResumeDecision]:
     """Plan all *steps*; caller keeps only decisions with run_indices."""
     decisions: list[StepResumeDecision] = []
+    live_index: dict[tuple[str | None, str | None, bool, str | None], list[OnDiskEpisode]] = {}
+    retired_index: dict[tuple[str | None, str | None, bool, str | None], list[OnDiskEpisode]] = {}
+    for d in live_dirs:
+        live_index.setdefault(_dir_identity(d), []).append(d)
+    for d in retired_dirs:
+        retired_index.setdefault(_dir_identity(d), []).append(d)
     for step in steps:
-        step_dirs_live = dirs_for_step(live_dirs, step)
-        step_dirs_retired = dirs_for_step(retired_dirs, step)
+        identity = _step_identity(step)
         decision = decide_step(
             step,
             rows_by_key.get(step.key, []),
-            step_dirs_live,
-            step_dirs_retired,
-            retry_failed=retry_failed,
-            retry_recorded=step.key in retry_recorded_keys,
+            live_index.get(identity, []),
+            retired_index.get(identity, []),
+            force_retry=retry_failed or step.key in retry_recorded_keys,
         )
         decisions.append(decision)
     return decisions

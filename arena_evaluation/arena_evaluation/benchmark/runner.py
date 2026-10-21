@@ -66,11 +66,11 @@ from .lockstep import LockstepMonitor, LockstepSummary, format_report, format_ta
 from .progress_display import BenchmarkProgressDisplay
 from .resume import (
     StepResumeDecision,
-    decide_step,
-    dirs_for_step,
     load_episode_dirs,
     plan_resume,
+    plan_step,
     retire_episode_dir,
+    seed_for_episode,
 )
 from .state import (
     Manifest,
@@ -891,16 +891,10 @@ class BenchmarkRunner(ArenaMixinNode):
             progress_sources.append(self._run_dir.path / f"progress.{self._run_dir.lane}.csv")
         rows: list[dict[str, object]] = []
         for src in progress_sources:
-            rows.extend(r for r in read_progress_rows(src) if r.get("step_key") == step.key)
+            rows.extend(read_progress_rows(src, step_key=step.key))
         episodes_root = self._run_dir.path / "episodes"
         live_dirs, retired_dirs = load_episode_dirs(episodes_root)
-        decision = decide_step(
-            step,
-            rows,
-            dirs_for_step(live_dirs, step),
-            dirs_for_step(retired_dirs, step),
-            retry_failed=self._retry_failed,
-        )
+        decision = plan_step(step, rows, live_dirs, retired_dirs, force_retry=self._retry_failed)
         self._cleanup_stale_episodes([decision])
         self._apply_decision(decision, episode_subsets)
 
@@ -1330,7 +1324,7 @@ class BenchmarkRunner(ArenaMixinNode):
                     )
                 goal = RunEpisode.Goal()
                 goal.world = step.stage.map
-                goal.seed = (step.stage.seed + ep_idx) if step.stage.seed is not None else ep_idx
+                goal.seed = seed_for_episode(step.stage.seed, ep_idx)
 
                 window.append((step.key, ep_idx))
                 self._lockstep.open(window[-1], time.time(), env=env_fqn)
