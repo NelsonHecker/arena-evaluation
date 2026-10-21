@@ -306,6 +306,46 @@ def test_pending_steps_come_from_the_episode_recordings(tmp_path: pathlib.Path):
     assert _drive(tmp_path, body) == []
 
 
+def test_resumed_fully_recorded_failed_step_is_reported_ok(tmp_path: pathlib.Path):
+    async def body(runner: BenchmarkRunner) -> tuple[int, str, int, int, int]:
+        ep_dir = runner._run_dir.path / "episodes" / "episode_000"
+        ep_dir.mkdir(parents=True)
+        meta = {
+            "planner": "dwb",
+            "stage": "s1",
+            "task_generator_episode_id": 0,
+            "seed": 3,
+            "outcome_state": 3,
+        }
+        (ep_dir / "episode_000.yaml").write_text(json.dumps(meta))
+        (ep_dir / "episode_000.mcap").write_bytes(b"x" * 16)
+        (runner._run_dir.path / "progress.csv").write_text("ts_iso,step_key,episode_id,seed,outcome_state\n2026-01-01T00:00:00+00:00,dwb/s1,0,3,3\n")
+        rc = await runner._run_steps()
+        res = runner._run_dir.state.steps["dwb/s1"]
+        return rc, res.status, res.episodes_run, res.episodes_failed, res.episodes_total
+
+    assert _drive(tmp_path, body) == (0, "ok", 1, 1, 1)
+
+
+def test_fail_remaining_keeps_resumed_episode_counts(tmp_path: pathlib.Path):
+    async def body(runner: BenchmarkRunner) -> tuple[str, int, int, int]:
+        step = _step(episodes=3)
+        runner._kept_counts[step.key] = (2, 1)
+        queue: asyncio.Queue[Step] = asyncio.Queue()
+        queue.put_nowait(step)
+        flushed: list[StepResult] = []
+
+        def flush(res: StepResult) -> bool:
+            flushed.append(res)
+            return False
+
+        runner._fail_remaining(queue, None, "spawn failed", flush)
+        res = flushed[0]
+        return res.status, res.episodes_run, res.episodes_failed, res.episodes_total
+
+    assert _drive(tmp_path, body) == ("failed", 2, 1, 3)
+
+
 def test_build_pending_reference_steps_do_not_overwrite_parent_episode_map(tmp_path: pathlib.Path):
     async def body(runner: BenchmarkRunner) -> tuple[dict[tuple[str, str, int], int], dict[tuple[str, int], int]]:
         for idx, (planner, is_ref, ref_type, sim_id) in enumerate(

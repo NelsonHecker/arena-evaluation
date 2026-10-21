@@ -1607,6 +1607,7 @@ class BenchmarkRunner(ArenaMixinNode):
                 step = q.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            kept_run, kept_failed = self._kept_counts.get(step.key, (0, 0))
             res = StepResult(
                 step.key,
                 "failed",
@@ -1615,6 +1616,8 @@ class BenchmarkRunner(ArenaMixinNode):
                 time.time(),
                 StepErrorKind.ENV_SETUP,
                 detail,
+                episodes_run=kept_run,
+                episodes_failed=kept_failed,
                 episodes_total=step.episodes,
             )
             if flush_cb(res):
@@ -2046,9 +2049,9 @@ class BenchmarkRunner(ArenaMixinNode):
             if decision.run_indices or decision.kept_run == 0:
                 continue
             existing = results.get(decision.step.key)
-            if existing is not None and existing.status != "in_progress" and existing.episodes_run >= decision.kept_run:
+            reconciled_status = step_status(decision.kept_run, decision.step.episodes)
+            if existing is not None and existing.status == reconciled_status and existing.episodes_run >= decision.kept_run:
                 continue
-            reconciled_status: typing.Literal["ok", "partial", "failed"] = "ok" if decision.kept_failed == 0 else ("partial" if decision.kept_failed < decision.kept_run else "failed")
             results[decision.step.key] = StepResult(
                 decision.step.key,
                 reconciled_status,
@@ -2059,7 +2062,12 @@ class BenchmarkRunner(ArenaMixinNode):
                 None,
                 episodes_run=decision.kept_run,
                 episodes_failed=decision.kept_failed,
+                episodes_weak=existing.episodes_weak if existing is not None else 0,
+                episodes_compromised=existing.episodes_compromised if existing is not None else 0,
+                episodes_worst_progress=existing.episodes_worst_progress if existing is not None else None,
                 episodes_total=decision.step.episodes,
+                sim_s=existing.sim_s if existing is not None else 0.0,
+                lockstep=existing.lockstep if existing is not None else None,
             )
             owned.add(decision.step.key)
 

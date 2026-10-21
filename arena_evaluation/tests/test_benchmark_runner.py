@@ -1105,7 +1105,7 @@ def test_dedupe_in_place_preserves_distinct_seeds_sharing_episode_id(tmp_path: p
     rec_seed1 = _make_episode_record(episode_id=0, seed=1, outcome_info="s1")
     log.append(ts_iso="2024-01-01T00:00:01+00:00", run_id="r", step_key="p/s", contestant="p", stage="s", env_id=0, episode_id=0, episode_record=rec_seed0, started_at=t0, ended_at=t0 + 1.0)
     log.append(ts_iso="2024-01-01T00:00:02+00:00", run_id="r", step_key="p/s", contestant="p", stage="s", env_id=0, episode_id=0, episode_record=rec_seed1, started_at=t0 + 1.0, ended_at=t0 + 2.0)
-    log.dedupe_in_place()
+    log.dedupe_in_place({})
     log.close()
 
     rows = read_progress_rows(path)
