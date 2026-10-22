@@ -332,6 +332,41 @@ def _all_steps_grid(
     return steps
 
 
+class _WithSteps(typing.Protocol):
+    steps: dict[str, StepResult]
+
+
+class _HasStateSteps(typing.Protocol):
+    """Structural interface required by build_pending: any object with .state.steps."""
+
+    @property
+    def state(self) -> _WithSteps: ...
+
+
+def build_pending(
+    suite: Suite,
+    contest: Contest,
+    scale_episodes: float,
+    run_dir: _HasStateSteps,
+    retry_failed: bool,
+    record_root: pathlib.Path,
+) -> list[Step]:
+    """Return the list of steps that still need to be run."""
+    state_steps = run_dir.state.steps
+    pending: list[Step] = []
+    for step in _all_steps_grid(suite, contest, scale_episodes, record_root):
+        existing = state_steps.get(step.key)
+        if existing is None:
+            pending.append(step)
+            continue
+        if existing.status == "ok":
+            continue
+        if existing.status == "failed" and not retry_failed and existing.error_kind not in _RETRY_ON_RESUME:
+            continue
+        pending.append(step)
+    return pending
+
+
 def _recorded_retry_steps(run_dir_path: pathlib.Path) -> set[str]:
     """Step keys the run state marks as retried on a plain resume."""
     try:
@@ -2052,23 +2087,29 @@ class BenchmarkRunner(ArenaMixinNode):
             reconciled_status = step_status(decision.kept_run, decision.step.episodes)
             if existing is not None and existing.status == reconciled_status and existing.episodes_run >= decision.kept_run:
                 continue
-            results[decision.step.key] = StepResult(
-                decision.step.key,
-                reconciled_status,
-                existing.env_id if existing is not None else None,
-                existing.started_at if existing is not None else now,
-                existing.ended_at if (existing is not None and existing.ended_at is not None) else now,
-                None,
-                None,
-                episodes_run=decision.kept_run,
-                episodes_failed=decision.kept_failed,
-                episodes_weak=existing.episodes_weak if existing is not None else 0,
-                episodes_compromised=existing.episodes_compromised if existing is not None else 0,
-                episodes_worst_progress=existing.episodes_worst_progress if existing is not None else None,
-                episodes_total=decision.step.episodes,
-                sim_s=existing.sim_s if existing is not None else 0.0,
-                lockstep=existing.lockstep if existing is not None else None,
-            )
+            if existing is not None:
+                results[decision.step.key] = dataclasses.replace(
+                    existing,
+                    status=reconciled_status,
+                    error_kind=None,
+                    error_detail=None,
+                    episodes_run=decision.kept_run,
+                    episodes_failed=decision.kept_failed,
+                    episodes_total=decision.step.episodes,
+                )
+            else:
+                results[decision.step.key] = StepResult(
+                    decision.step.key,
+                    reconciled_status,
+                    None,
+                    now,
+                    now,
+                    None,
+                    None,
+                    episodes_run=decision.kept_run,
+                    episodes_failed=decision.kept_failed,
+                    episodes_total=decision.step.episodes,
+                )
             owned.add(decision.step.key)
 
         steps_total = len(results.keys() | {d.step.key for d in decisions})

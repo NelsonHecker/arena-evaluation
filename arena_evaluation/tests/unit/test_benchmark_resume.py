@@ -63,8 +63,11 @@ def _mk_episode(
     is_reference: bool = False,
     reference_type: str | None = None,
     mcap: bool = True,
+    dirname: str | None = None,
+    sidecar: str | None = None,
 ) -> pathlib.Path:
-    ep_dir = root / "episodes" / ("episode_%03d" % number)
+    name = dirname or ("episode_%03d" % number)
+    ep_dir = (root if root.name == "episodes" or root.parent.name == "episodes" else root / "episodes") / name
     ep_dir.mkdir(parents=True, exist_ok=True)
     meta = {
         "planner": planner,
@@ -75,9 +78,10 @@ def _mk_episode(
         "seed": seed,
         "outcome_state": outcome,
     }
-    (ep_dir / ("episode_%03d.yaml" % number)).write_text(json.dumps(meta))
+    yaml_name = sidecar or (name + ".yaml")
+    (ep_dir / yaml_name).write_text(json.dumps(meta))
     if mcap:
-        (ep_dir / ("episode_%03d.mcap" % number)).write_bytes(b"x" * 128)
+        (ep_dir / yaml_name.replace(".yaml", ".mcap")).write_bytes(b"x" * 128)
     return ep_dir
 
 
@@ -126,6 +130,11 @@ def _row(step_key: str, seed: int, sim_id: int, outcome: int, *, ts: str = "2024
         "seed": seed,
         "outcome_state": outcome,
     }
+
+
+def _decide(tmp_path: pathlib.Path, step: Step, rows: list[dict[str, object]] | None = None, *, force: bool = False):
+    live, retired = load_episode_dirs(tmp_path / "episodes")
+    return decide_step(step, rows or [], live, retired, force_retry=force)
 
 
 # --- pure helpers ----------------------------------------------------------
@@ -196,61 +205,46 @@ def test_retire_episode_dir_moves_and_uniquifies(tmp_path: pathlib.Path) -> None
 
 
 def test_decide_step_good_success_is_kept(tmp_path: pathlib.Path) -> None:
-    stage = _stage(episodes=3, seed=0)
-    step = _step(_contestant("pa"), stage)
-    dirs = []
-    rows = []
+    step = _step(_contestant("pa"), _stage(episodes=3, seed=0))
     for i in range(3):
-        dirs.append(_mk_episode(tmp_path, i, planner="pa", stage="s1", sim_id=100 + i, seed=i, outcome=2))
-        rows.append(_row("pa/s1", i, 100 + i, 2))
-    live, retired = load_episode_dirs(tmp_path / "episodes")
+        _mk_episode(tmp_path, i, planner="pa", stage="s1", sim_id=100 + i, seed=i, outcome=2)
+    rows = [_row("pa/s1", i, 100 + i, 2) for i in range(3)]
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
     assert decision.run_indices == []
-    assert decision.delete_dirs == []
-    assert decision.retire_dirs == []
+    assert decision.delete_dirs == [] and decision.retire_dirs == []
     assert decision.kept_sim_ids == {0: 100, 1: 101, 2: 102}
 
 
 def test_decide_step_success_without_row_kept_from_yaml(tmp_path: pathlib.Path) -> None:
-    # Recorder wrote the terminal outcome into the YAML but the runner died
-    # before appending the progress row: the dir alone keeps the episode.
-    stage = _stage(episodes=3, seed=0)
-    step = _step(_contestant("pa"), stage)
+    step = _step(_contestant("pa"), _stage(episodes=3, seed=0))
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [], live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, [])
 
     assert decision.run_indices == [1, 2]
     assert decision.kept_sim_ids == {0: 100}
 
 
 def test_decide_step_recorded_failure_preserved_by_default(tmp_path: pathlib.Path) -> None:
-    stage = _stage(episodes=2, seed=0)
-    step = _step(_contestant("pa"), stage)
+    step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=3)
     rows = [_row("pa/s1", 0, 100, 3)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
-    # The recorded failure is real evidence -> preserved, never re-run in place.
     assert decision.run_indices == [1]
-    assert decision.delete_dirs == []
-    assert decision.retire_dirs == []
+    assert decision.delete_dirs == [] and decision.retire_dirs == []
     assert decision.kept_sim_ids == {0: 100}
 
 
 def test_decide_step_recorded_failure_retired_when_forced(tmp_path: pathlib.Path) -> None:
-    stage = _stage(episodes=2, seed=0)
-    step = _step(_contestant("pa"), stage)
+    step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
     ep0 = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=3)
     rows = [_row("pa/s1", 0, 100, 3)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=True)
+    decision = _decide(tmp_path, step, rows, force=True)
 
     assert decision.run_indices == [0, 1]
     assert decision.retire_dirs == [ep0]
@@ -258,15 +252,12 @@ def test_decide_step_recorded_failure_retired_when_forced(tmp_path: pathlib.Path
 
 
 def test_decide_step_dead_episode_rerun_and_partial_recording_retired(tmp_path: pathlib.Path) -> None:
-    stage = _stage(episodes=3, seed=0)
-    step = _step(_contestant("pa"), stage)
-    # ep0 finished SUCCESS, ep1 crashed mid-recording (dir with an MCAP, no terminal outcome).
+    step = _step(_contestant("pa"), _stage(episodes=3, seed=0))
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
     partial = _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=101, seed=1, outcome=None)
     rows = [_row("pa/s1", 0, 100, 2)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
     assert decision.run_indices == [1, 2]
     assert decision.retire_dirs == [partial]
@@ -274,49 +265,38 @@ def test_decide_step_dead_episode_rerun_and_partial_recording_retired(tmp_path: 
 
 
 def test_decide_step_never_started_episode_is_pending(tmp_path: pathlib.Path) -> None:
-    stage = _stage(episodes=2, seed=0)
-    step = _step(_contestant("pa"), stage)
+    step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
     _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [_row("pa/s1", 0, 100, 2)], live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, [_row("pa/s1", 0, 100, 2)])
 
     assert decision.run_indices == [1]
     assert decision.delete_dirs == [] and decision.retire_dirs == []
 
 
 def test_decide_step_stale_duplicate_dir_retired(tmp_path: pathlib.Path) -> None:
-    # Two surviving dirs attributed to the same episode seed; the newest (the
-    # row's sim id) is kept, the older duplicate is retired, not deleted.
-    stage = _stage(episodes=1, seed=0)
-    step = _step(_contestant("pa"), stage)
+    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
     keep = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
     dup = _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=200, seed=0, outcome=2)
     rows = [_row("pa/s1", 0, 100, 2)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
     assert decision.run_indices == []
     assert decision.retire_dirs == [dup]
     assert decision.delete_dirs == []
-    # decide_step is pure: the kept dir stays on disk and is never scheduled for
-    # retirement or deletion; only the stale duplicate is retired.
     assert keep.exists()
     assert keep not in decision.retire_dirs and keep not in decision.delete_dirs
     assert decision.kept_sim_ids == {0: 100}
 
 
 def test_decide_step_retires_seeded_duplicate_written_by_real_path(tmp_path: pathlib.Path) -> None:
-    """A duplicate of an already-SUCCESS episode is retired even when nothing re-runs."""
-    stage = _stage(episodes=1, seed=0)
-    step = _step(_contestant("pa"), stage)
+    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
     _write_episode_meta(tmp_path, 0, planner="pa", stage="s1", sim_id=100, seed=0, outcome=2)
     dup = _write_episode_meta(tmp_path, 1, planner="pa", stage="s1", sim_id=200, seed=0, outcome=2)
     rows = [_row("pa/s1", 0, 100, 2)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
     assert decision.run_indices == []
     assert decision.retire_dirs == [dup]
@@ -324,14 +304,10 @@ def test_decide_step_retires_seeded_duplicate_written_by_real_path(tmp_path: pat
 
 
 def test_decide_step_unhindered_peds_kept_with_surviving_mcap(tmp_path: pathlib.Path) -> None:
-    stage = _stage(episodes=2, seed=0)
-    step = _step(_contestant("unhindered_peds"), stage, is_reference=True, reference_type="unhindered_peds")
-    # unhindered_peds legitimately emits no terminal outcome; a surviving mcap
-    # means the reference run completed.
+    step = _step(_contestant("unhindered_peds"), _stage(episodes=2, seed=0), is_reference=True, reference_type="unhindered_peds")
     _mk_episode(tmp_path, 0, planner="unhindered_peds", stage="s1", sim_id=100, seed=0, outcome=None, is_reference=True, reference_type="unhindered_peds")
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, [], live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, [])
 
     assert decision.run_indices == [1]
     assert decision.delete_dirs == []
@@ -406,38 +382,12 @@ def test_legacy_rows_without_seed_do_not_raise(tmp_path: pathlib.Path) -> None:
     assert decision.run_indices == [0, 1]
 
 
-def _mk_named_episode(
-    root: pathlib.Path,
-    dirname: str,
-    *,
-    sidecar: str,
-    planner: str,
-    stage: str,
-    sim_id: int,
-    seed: int,
-    outcome: int | None,
-) -> pathlib.Path:
-    ep_dir = root / dirname
-    ep_dir.mkdir(parents=True, exist_ok=True)
-    meta = {
-        "planner": planner,
-        "stage": stage,
-        "is_reference": False,
-        "reference_type": None,
-        "task_generator_episode_id": sim_id,
-        "seed": seed,
-        "outcome_state": outcome,
-    }
-    (ep_dir / sidecar).write_text(json.dumps(meta))
-    (ep_dir / sidecar.replace(".yaml", ".mcap")).write_bytes(b"x" * 128)
-    return ep_dir
-
-
 def test_retired_numbered_dirs_are_scanned(tmp_path: pathlib.Path) -> None:
     """A retired `episode_003_1` must stay visible, sidecar included."""
-    _mk_named_episode(
+    _mk_episode(
         tmp_path / "episodes" / ".superseded",
-        "episode_003_1",
+        3,
+        dirname="episode_003_1",
         sidecar="episode_003.yaml",
         planner="pa",
         stage="s1",
@@ -459,9 +409,10 @@ def test_retired_numbered_dirs_are_scanned(tmp_path: pathlib.Path) -> None:
 def test_recorded_without_row_prefers_newest(tmp_path: pathlib.Path) -> None:
     """A newer SUCCESS dir must not be shadowed by an older duplicate."""
     step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
-    older = _mk_named_episode(
+    older = _mk_episode(
         tmp_path / "episodes",
-        "episode_001",
+        1,
+        dirname="episode_001",
         sidecar="episode_001.yaml",
         planner="pa",
         stage="s1",
@@ -469,9 +420,10 @@ def test_recorded_without_row_prefers_newest(tmp_path: pathlib.Path) -> None:
         seed=1,
         outcome=2,
     )
-    newer = _mk_named_episode(
+    newer = _mk_episode(
         tmp_path / "episodes",
-        "episode_001_1",
+        1,
+        dirname="episode_001_1",
         sidecar="episode_001.yaml",
         planner="pa",
         stage="s1",
@@ -479,9 +431,7 @@ def test_recorded_without_row_prefers_newest(tmp_path: pathlib.Path) -> None:
         seed=1,
         outcome=2,
     )
-    live, retired = load_episode_dirs(tmp_path / "episodes")
-
-    decision = decide_step(step, [], live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, [])
 
     assert decision.kept_sim_ids == {1: 200}
     assert decision.retire_dirs == [older]
@@ -498,9 +448,8 @@ def test_decide_step_reused_sim_id_across_sessions_keeps_both_seeds(tmp_path: pa
         _row("pa/s1", 0, 0, 2, ts="2026-01-01T00:00:01+00:00"),
         _row("pa/s1", 1, 0, 2, ts="2026-01-01T00:00:02+00:00"),
     ]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
     assert decision.run_indices == []
     assert decision.retire_dirs == []
@@ -513,9 +462,10 @@ def test_decide_step_reused_sim_id_across_sessions_keeps_both_seeds(tmp_path: pa
 def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_failed(tmp_path: pathlib.Path) -> None:
     """An episode whose only dir is in .superseded/ must rerun on a plain resume."""
     step = _step(_contestant("pa"), _stage(episodes=2, seed=0))
-    _mk_named_episode(
+    _mk_episode(
         tmp_path / "episodes" / ".superseded",
-        "episode_000",
+        0,
+        dirname="episode_000",
         sidecar="episode_000.yaml",
         planner="pa",
         stage="s1",
@@ -525,9 +475,8 @@ def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_faile
     )
     _mk_episode(tmp_path, 1, planner="pa", stage="s1", sim_id=1, seed=1, outcome=3)
     rows = [_row("pa/s1", 0, 0, 3), _row("pa/s1", 1, 1, 3)]
-    live, retired = load_episode_dirs(tmp_path / "episodes")
 
-    decision = decide_step(step, rows, live, retired, force_retry=False)
+    decision = _decide(tmp_path, step, rows)
 
     assert decision.run_indices == [0]
     assert decision.kept_sim_ids == {1: 1}
@@ -535,45 +484,23 @@ def test_decide_step_retired_failure_without_live_dir_reruns_without_retry_faile
     assert (decision.kept_run, decision.kept_failed) == (1, 1)
 
 
-def test_decide_step_retires_an_unclosed_nested_bag_instead_of_deleting_it(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    ("rec_type", "expect_retire"),
+    [("nested_empty", True), ("flat", True), ("none", False)],
+)
+def test_decide_step_unclosed_or_missing_recording_cleanup(tmp_path: pathlib.Path, rec_type: str, expect_retire: bool) -> None:
     step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
-    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None, mcap=False)
-    bag_dir = ep_dir / "episode_000"
-    bag_dir.mkdir()
-    (bag_dir / "episode_000_0.mcap").write_bytes(b"")
-    live, retired = load_episode_dirs(tmp_path / "episodes")
-
-    decision = decide_step(step, [], live, retired, force_retry=False)
-
-    assert live[0].has_recording is True
-    assert live[0].has_mcap is False
+    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None, mcap=(rec_type == "flat"))
+    if rec_type == "nested_empty":
+        bag = ep_dir / "episode_000"
+        bag.mkdir()
+        (bag / "episode_000_0.mcap").write_bytes(b"")
+    decision = _decide(tmp_path, step)
     assert decision.run_indices == [0]
-    assert decision.retire_dirs == [ep_dir]
-    assert decision.delete_dirs == []
-
-
-def test_decide_step_retires_an_incomplete_flat_recording_instead_of_deleting_it(tmp_path: pathlib.Path) -> None:
-    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
-    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None)
-    live, retired = load_episode_dirs(tmp_path / "episodes")
-
-    decision = decide_step(step, [], live, retired, force_retry=False)
-
-    assert decision.run_indices == [0]
-    assert decision.retire_dirs == [ep_dir]
-    assert decision.delete_dirs == []
-
-
-def test_decide_step_deletes_an_episode_dir_without_a_recording(tmp_path: pathlib.Path) -> None:
-    step = _step(_contestant("pa"), _stage(episodes=1, seed=0))
-    ep_dir = _mk_episode(tmp_path, 0, planner="pa", stage="s1", sim_id=0, seed=0, outcome=None, mcap=False)
-    live, retired = load_episode_dirs(tmp_path / "episodes")
-
-    decision = decide_step(step, [], live, retired, force_retry=False)
-
-    assert decision.run_indices == [0]
-    assert decision.delete_dirs == [ep_dir]
-    assert decision.retire_dirs == []
+    if expect_retire:
+        assert decision.retire_dirs == [ep_dir] and decision.delete_dirs == []
+    else:
+        assert decision.delete_dirs == [ep_dir] and decision.retire_dirs == []
 
 
 if __name__ == "__main__":  # pragma: no cover

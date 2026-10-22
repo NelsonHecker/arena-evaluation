@@ -22,10 +22,10 @@ from arena_evaluation.benchmark.runner import (
     _requeue_front,
     _resolve_resume_config,
     build_launch_args,
+    build_pending,
     cell_verdict,
     closed_fraction,
     pick_block,
-    plan_pending_steps,
     step_status,
 )
 from arena_evaluation.benchmark.state import (
@@ -782,15 +782,20 @@ def test_build_launch_args_dict_cap_stage_collision_dropped():
 
 
 # ---------------------------------------------------------------------------
-# plan_pending_steps
+# build_pending
 # ---------------------------------------------------------------------------
 
 
-def _make_suite(*stage_names: str, episodes: int = 5) -> Suite:
+def _fake_run_dir(state_steps: dict[str, StepResult]) -> types.SimpleNamespace:
+    state = types.SimpleNamespace(steps=state_steps)
+    return types.SimpleNamespace(state=state)
+
+
+def _make_suite(*stage_names: str) -> Suite:
     stages = [
         Suite.Stage(
             name=n,
-            episodes=episodes,
+            episodes=5,
             robot="turtlebot3_burger",
             map="map1",
             tm_robots=Constants.TaskMode.TM_Robots.RANDOM,
@@ -814,64 +819,14 @@ def _make_contest(*contestant_names: str) -> Contest:
     )
 
 
-def _record_episode(
-    run_dir: pathlib.Path,
-    *,
-    step_key: str,
-    stage: str,
-    sim_id: int,
-    seed: int,
-    outcome: int,
-) -> pathlib.Path:
-    """Write the evidence resume reads: an episode dir with sidecar + a progress row."""
-    ep_dir = run_dir / "episodes" / f"episode_{sim_id:03d}"
-    ep_dir.mkdir(parents=True, exist_ok=True)
-    meta = {
-        "planner": step_key.split("/", 1)[0],
-        "stage": stage,
-        "is_reference": False,
-        "reference_type": None,
-        "task_generator_episode_id": sim_id,
-        "seed": seed,
-        "outcome_state": outcome,
-    }
-    (ep_dir / f"episode_{sim_id:03d}.yaml").write_text(json.dumps(meta))
-    (ep_dir / f"episode_{sim_id:03d}.mcap").write_bytes(b"x" * 16)
-    progress = run_dir / "progress.csv"
-    if not progress.exists():
-        progress.write_text("ts_iso,step_key,episode_id,seed,outcome_state\n")
-    with progress.open("a", newline="") as fh:
-        fh.write(f"2026-01-01T00:00:00+00:00,{step_key},{sim_id},{seed},{outcome}\n")
-    return ep_dir
-
-
-def _record_all(
-    run_dir: pathlib.Path,
-    *,
-    step_key: str,
-    stage: str,
-    count: int,
-    outcome: int,
-    first_sim_id: int,
-) -> None:
-    for ep_idx in range(count):
-        _record_episode(
-            run_dir,
-            step_key=step_key,
-            stage=stage,
-            sim_id=first_sim_id + ep_idx,
-            seed=ep_idx,
-            outcome=outcome,
-        )
-
-
-def test_plan_pending_steps_empty_run_dir_all_steps_pending(tmp_path: pathlib.Path):
+def test_build_pending_empty_state_all_steps_pending(tmp_path: pathlib.Path):
     suite = _make_suite("s1", "s2")
+    suite = suite._replace(references=False)
     contest = _make_contest("pa", "pb")
-
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
-
-    assert {d.step.key for d in decisions if d.run_indices} == {
+    run_dir = _fake_run_dir({})
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    keys = {c.key for c in steps}
+    assert keys == {
         "pa/s1",
         "pa/s2",
         "pb/s1",
@@ -879,111 +834,182 @@ def test_plan_pending_steps_empty_run_dir_all_steps_pending(tmp_path: pathlib.Pa
     }
 
 
-def test_plan_pending_steps_success_recordings_skipped(tmp_path: pathlib.Path):
+def test_build_pending_ok_steps_skipped(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
-    _record_all(tmp_path, step_key="pa/s1", stage="s1", count=5, outcome=2, first_sim_id=0)
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "ok", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    assert steps == []
 
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
 
-    assert [d.step.key for d in decisions if d.run_indices] == []
-
-
-def test_plan_pending_steps_recorded_failure_kept_without_retry(tmp_path: pathlib.Path):
+def test_build_pending_failed_without_retry_skipped(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
-    _record_all(tmp_path, step_key="pa/s1", stage="s1", count=5, outcome=3, first_sim_id=0)
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "failed", None, 0.0, 1.0, None, None, episodes_run=1, episodes_failed=1),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "failed", None, 0.0, 1.0, None, None, episodes_run=1, episodes_failed=1),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "failed", None, 0.0, 1.0, None, None, episodes_run=1, episodes_failed=1),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    assert steps == []
 
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
 
-    assert [d.step.key for d in decisions if d.run_indices] == []
-
-
-def test_plan_pending_steps_recorded_failure_retried_with_flag(tmp_path: pathlib.Path):
+def test_build_pending_systemic_failure_retried_without_flag(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
-    _record_all(tmp_path, step_key="pa/s1", stage="s1", count=5, outcome=3, first_sim_id=0)
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "failed", None, 0.0, 1.0, StepErrorKind.ENV_SETUP, "error"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "failed", None, 0.0, 1.0, StepErrorKind.INTERNAL, "error"),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    assert [s.key for s in steps] == ["pa/s1"]
 
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=True)
 
-    (decision,) = [d for d in decisions if d.step.key == "pa/s1"]
-    assert decision.run_indices == [0, 1, 2, 3, 4]
-    assert len(decision.retire_dirs) == 5
-
-
-def test_plan_pending_steps_partial_recording_reruns_only_missing(tmp_path: pathlib.Path):
+def test_build_pending_sim_stalled_failure_retried_without_flag(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
-    for ep_idx in range(3):
-        _record_episode(
-            tmp_path,
-            step_key="pa/s1",
-            stage="s1",
-            sim_id=ep_idx,
-            seed=ep_idx,
-            outcome=2,
-        )
-
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
-
-    (decision,) = [d for d in decisions if d.step.key == "pa/s1"]
-    assert decision.run_indices == [3, 4]
-    assert decision.delete_dirs == []
-    assert decision.retire_dirs == []
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "failed", None, 0.0, 1.0, StepErrorKind.EPISODE_TIMEOUT, "sim stalled 60s"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    assert [s.key for s in steps] == ["pa/s1"]
 
 
-def test_plan_pending_steps_recorded_skipped_kept_without_retry(tmp_path: pathlib.Path):
+def test_build_pending_failed_with_retry_included(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
-    _record_all(tmp_path, step_key="pa/s1", stage="s1", count=5, outcome=4, first_sim_id=0)
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "failed", None, 0.0, 1.0, StepErrorKind.ENV_SETUP, "error"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=True, record_root=tmp_path)
+    assert len(steps) == 1
+    assert steps[0].key == "pa/s1"
 
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
 
-    assert [d.step.key for d in decisions if d.run_indices] == []
-
-
-def test_plan_pending_steps_in_progress_episode_reruns_and_retires_dir(tmp_path: pathlib.Path):
+def test_build_pending_partial_always_retried(tmp_path: pathlib.Path):
+    # partial = definitionally incomplete; retry regardless of --retry-failed.
     suite = _make_suite("s1")
     contest = _make_contest("pa")
-    _record_episode(tmp_path, step_key="pa/s1", stage="s1", sim_id=0, seed=0, outcome=2)
-    in_progress = _record_episode(tmp_path, step_key="pa/s1", stage="s1", sim_id=1, seed=1, outcome=1)
+    state_steps = {
+        "pa/s1": StepResult(
+            "pa/s1",
+            "partial",
+            None,
+            0.0,
+            1.0,
+            None,
+            None,
+            episodes_run=3,
+            episodes_failed=2,
+        ),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps_no_flag = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    steps_with_flag = build_pending(suite, contest, 1.0, run_dir, retry_failed=True, record_root=tmp_path)
+    assert len(steps_no_flag) == 1
+    assert len(steps_with_flag) == 1
 
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
 
-    (decision,) = [d for d in decisions if d.step.key == "pa/s1"]
-    assert decision.run_indices == [1, 2, 3, 4]
-    assert decision.retire_dirs == [in_progress]
-    assert decision.delete_dirs == []
-
-
-def test_plan_pending_steps_record_dir_set_from_record_root(tmp_path: pathlib.Path):
+def test_build_pending_skipped_always_retried(tmp_path: pathlib.Path):
     suite = _make_suite("s1")
     contest = _make_contest("pa")
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "skipped", None, 0.0, 1.0, StepErrorKind.CANCELLED, "cancelled"),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    assert len(steps) == 1
 
-    decisions = plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
 
-    (decision,) = [d for d in decisions if d.step.key == "pa/s1"]
-    # All steps share the flat episodes/ directory under the run dir.
-    assert decision.step.record_dir == tmp_path / "episodes"
+def test_build_pending_in_progress_always_retried(tmp_path: pathlib.Path):
+    suite = _make_suite("s1")
+    contest = _make_contest("pa")
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "in_progress", None, 0.0, None, None, None),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    assert len(steps) == 1
 
 
-def test_plan_pending_steps_duplicate_key_raises(tmp_path: pathlib.Path):
+def test_build_pending_mixed_states(tmp_path: pathlib.Path):
+    suite = _make_suite("s1", "s2", "s3", "s4")
+    contest = _make_contest("pa")
+    state_steps = {
+        "pa/s1": StepResult("pa/s1", "ok", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s1": StepResult("pa_unobstructed_robot/s1", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s1": StepResult("unhindered_peds/s1", "ok", None, 0.0, 1.0, None, None),
+        "pa/s2": StepResult("pa/s2", "failed", None, 0.0, 1.0, StepErrorKind.INTERNAL, "err"),
+        "pa_unobstructed_robot/s2": StepResult("pa_unobstructed_robot/s2", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s2": StepResult("unhindered_peds/s2", "ok", None, 0.0, 1.0, None, None),
+        "pa/s3": StepResult("pa/s3", "partial", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s3": StepResult("pa_unobstructed_robot/s3", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s3": StepResult("unhindered_peds/s3", "ok", None, 0.0, 1.0, None, None),
+        "pa_unobstructed_robot/s4": StepResult("pa_unobstructed_robot/s4", "ok", None, 0.0, 1.0, None, None),
+        "unhindered_peds/s4": StepResult("unhindered_peds/s4", "ok", None, 0.0, 1.0, None, None),
+        # pa/s4 not in state -> pending
+    }
+    run_dir = _fake_run_dir(state_steps)
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    keys = {c.key for c in steps}
+    # ok=skipped, failed+no-retry=skipped, partial=retried, missing=pending
+    assert keys == {"pa/s3", "pa/s4"}
+
+
+def test_build_pending_record_dir_set_from_record_root(tmp_path: pathlib.Path):
+    suite = _make_suite("s1")
+    suite = suite._replace(references=False)
+    contest = _make_contest("pa")
+    run_dir = _fake_run_dir({})
+    steps = build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
+    # All steps share the flat episodes/ directory under record_root.
+    assert steps[0].record_dir == tmp_path / "episodes"
+
+
+def test_build_pending_duplicate_key_raises(tmp_path: pathlib.Path):
     # Two contestants with the same name produce duplicate step keys.
+    from arena_evaluation.benchmark.config import Contestant
+
     suite = _make_suite("s1")
-    contest = _make_contest("pa", "pa")
-
+    # Bypass Contest._reject_duplicate_names by constructing directly.
+    contest = Contest(
+        name="dup",
+        description=None,
+        contestants=[Contestant(name="pa", args={}), Contestant(name="pa", args={})],
+    )
+    run_dir = _fake_run_dir({})
     with pytest.raises(ValueError, match="duplicate step key"):
-        plan_pending_steps(suite, contest, 1.0, tmp_path, retry_failed=False)
+        build_pending(suite, contest, 1.0, run_dir, retry_failed=False, record_root=tmp_path)
 
 
-def test_plan_pending_steps_scale_episodes(tmp_path: pathlib.Path):
+def test_build_pending_scale_episodes(tmp_path: pathlib.Path):
     suite = _make_suite("s1")  # stage has episodes=5
     contest = _make_contest("pa")
+    run_dir = _fake_run_dir({})
 
-    decisions = plan_pending_steps(suite, contest, 2.0, tmp_path, retry_failed=False)
+    steps = build_pending(suite, contest, 2.0, run_dir, retry_failed=False, record_root=tmp_path)
 
-    (decision,) = [d for d in decisions if d.step.key == "pa/s1"]
-    assert decision.step.episodes == 10
+    assert steps[0].episodes == 10
 
 
 # ---------------------------------------------------------------------------

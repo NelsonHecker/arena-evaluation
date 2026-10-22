@@ -211,33 +211,6 @@ def _params_to_json(params: typing.Iterable) -> str:
     return json.dumps(rows)
 
 
-_INT_PROGRESS_COLS = frozenset(
-    {
-        "env_id",
-        "episode_id",
-        "parent_episode_id",
-        "seed",
-        "outcome_state",
-        "lockstep_stalls",
-        "lockstep_ticks",
-        "lockstep_beats",
-        "lockstep_beats_due",
-    }
-)
-_FLOAT_PROGRESS_COLS = frozenset(
-    {
-        "started_at",
-        "ended_at",
-        "runtime_s",
-        "lockstep_max_stall_s",
-        "lockstep_rtf",
-        "goal_dist_start",
-        "goal_dist_min",
-        "path_length",
-    }
-)
-
-
 def read_progress_rows(path: pathlib.Path, *, step_key: str | None = None) -> list[dict[str, object]]:
     """Read progress.csv into row dicts; comment lines are skipped and empty cells become None."""
     if not path.exists():
@@ -247,12 +220,9 @@ def read_progress_rows(path: pathlib.Path, *, step_key: str | None = None) -> li
         lines.pop()
     if not lines:
         return []
-    reader = csv.DictReader(lines)
     rows: list[dict[str, object]] = []
-    for raw in reader:
-        if None in raw.values():
-            continue
-        if step_key is not None and raw.get("step_key") != step_key:
+    for raw in csv.DictReader(lines):
+        if None in raw.values() or (step_key is not None and raw.get("step_key") != step_key):
             continue
         row: dict[str, object] = {}
         for key, value in raw.items():
@@ -260,12 +230,12 @@ def read_progress_rows(path: pathlib.Path, *, step_key: str | None = None) -> li
                 continue
             if value == "" or value is None:
                 row[key] = None
-            elif key in _INT_PROGRESS_COLS:
+            elif key in ("episode_id", "seed", "outcome_state", "env_id"):
                 try:
                     row[key] = int(value)
                 except ValueError:
                     row[key] = value
-            elif key in _FLOAT_PROGRESS_COLS:
+            elif key == "runtime_s":
                 try:
                     row[key] = float(value)
                 except ValueError:

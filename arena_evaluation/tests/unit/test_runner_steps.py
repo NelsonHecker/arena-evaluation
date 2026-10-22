@@ -251,55 +251,31 @@ def _single_decision(
     return decision
 
 
-def test_pending_reruns_recorded_timeout_without_retry_failed(tmp_path: pathlib.Path):
+@pytest.mark.parametrize(
+    ("error_kind", "expect_retry"),
+    [
+        (StepErrorKind.EPISODE_TIMEOUT, True),
+        (StepErrorKind.SIM_DEAD, True),
+        (StepErrorKind.INTERNAL, False),
+    ],
+)
+def test_pending_reruns_recorded_failures_by_error_kind(tmp_path: pathlib.Path, error_kind: StepErrorKind, expect_retry: bool):
     run_dir = _failed_pair_run(tmp_path)
-    _write_state(run_dir, "a/s1", StepErrorKind.EPISODE_TIMEOUT)
-
+    _write_state(run_dir, "a/s1", error_kind)
     decision = _single_decision(run_dir)
+    assert (decision.run_indices == [0, 1]) is expect_retry
+    if expect_retry:
+        assert sorted(p.name for p in decision.retire_dirs) == ["episode_000", "episode_001"]
+    else:
+        assert decision.kept_sim_ids == {0: 0, 1: 1}
 
-    assert decision.run_indices == [0, 1]
-    assert sorted(p.name for p in decision.retire_dirs) == ["episode_000", "episode_001"]
-    assert decision.kept_sim_ids == {}
 
-
-def test_pending_preserves_recorded_failures_of_non_retryable_kind(tmp_path: pathlib.Path):
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_pending_missing_or_corrupt_state_falls_back_to_evidence(tmp_path: pathlib.Path, corrupt: bool):
     run_dir = _failed_pair_run(tmp_path)
-    _write_state(run_dir, "a/s1", StepErrorKind.INTERNAL)
-
+    if corrupt:
+        (run_dir.path / ".benchmark_state.json").write_text("{not valid json")
     decision = _single_decision(run_dir)
-
-    assert decision.run_indices == []
-    assert decision.retire_dirs == []
-    assert decision.kept_sim_ids == {0: 0, 1: 1}
-
-
-def test_pending_reruns_recorded_systemic_failure_without_retry_failed(tmp_path: pathlib.Path):
-    run_dir = _failed_pair_run(tmp_path)
-    _write_state(run_dir, "a/s1", StepErrorKind.SIM_DEAD)
-
-    decision = _single_decision(run_dir)
-
-    assert decision.run_indices == [0, 1]
-    assert sorted(p.name for p in decision.retire_dirs) == ["episode_000", "episode_001"]
-
-
-def test_pending_without_state_file_preserves_recorded_failures(tmp_path: pathlib.Path):
-    # No .benchmark_state.json: the planner must stay evidence-only.
-    run_dir = _failed_pair_run(tmp_path)
-    assert not (run_dir.path / ".benchmark_state.json").exists()
-
-    decision = _single_decision(run_dir)
-
-    assert decision.run_indices == []
-    assert decision.kept_sim_ids == {0: 0, 1: 1}
-
-
-def test_pending_unreadable_state_falls_back_to_evidence(tmp_path: pathlib.Path):
-    run_dir = _failed_pair_run(tmp_path)
-    (run_dir.path / ".benchmark_state.json").write_text("{not valid json")
-
-    decision = _single_decision(run_dir)
-
     assert decision.run_indices == []
     assert decision.kept_sim_ids == {0: 0, 1: 1}
 
