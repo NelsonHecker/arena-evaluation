@@ -5,7 +5,6 @@
 #include <limits>
 #include <algorithm>
 
-
 #ifndef PARETO_K
 #define PARETO_K 2
 #endif
@@ -13,14 +12,14 @@
 using namespace std;
 
 struct Label {
-    float dist;        // accumulated Euclidean distance (metres) to THIS node
+    float dist;        // accumulated Euclidean distance (metres)
     int   index;       // grid pixel index (y*width + x)
-    float tl;          // accumulated transmission loss (dB) along the path
-    float cost;        // 20*log10(max(dist, mic_distance)) + tl  (priority key)
-    int   point_id;    // index into the Pareto pool, -1 when inactive
-    int   parent_x;    // pixel x of THIS label's parent node (for Theta*)
-    int   parent_y;    // pixel y of THIS label's parent node (for Theta*)
-    float parent_dist; // accumulated distance at the parent node (for Theta*)
+    float tl;          // accumulated transmission loss (dB)
+    float cost;        // 20*log10(max(dist, mic_distance)) + tl (priority key)
+    int   slot;        // frontier slot index (0 .. PARETO_K-1)
+    int   parent_x;    // parent x for Theta*
+    int   parent_y;    // parent y for Theta*
+    float parent_dist; // parent distance for Theta*
 
     bool operator>(const Label& other) const {
         return cost > other.cost;
@@ -183,12 +182,7 @@ static inline bool line_of_sight(
     return true;
 }
 
-static const int ddx_arr[] = {-1, 1, 0, 0, -1, -1, 1, 1};
-static const int ddy_arr[] = { 0, 0, -1, 1, -1,  1, -1, 1};
-static const float step_dist[] = {1.0f, 1.0f, 1.0f, 1.0f,
-                                  1.41421356f, 1.41421356f, 1.41421356f, 1.41421356f};
-
-template <bool EARLY_EXIT>
+template <bool EarlyExit>
 static inline void run_acoustic_dijkstra(
     const uint8_t* grid,
     int width,
@@ -199,80 +193,68 @@ static inline void run_acoustic_dijkstra(
     float wall_tl,
     float mic_distance,
     const float* pixel_tl,
-    int num_unsettled
+    int num_unsettled_targets
 ) {
+    int start_idx = start_iy * width + start_ix;
+
     auto pixel_tl_of = [&](int idx) -> float {
-        if (pixel_tl != nullptr) {
-            return pixel_tl[idx];
-        }
+        if (pixel_tl != nullptr) return pixel_tl[idx];
         return grid[idx] > 0 ? wall_tl : 0.0f;
     };
 
-    int start_idx = start_iy * width + start_ix;
     bool start_is_barrier = is_acoustic_barrier(grid, pixel_tl, start_idx);
     float start_tl    = start_is_barrier ? pixel_tl_of(start_idx) : 0.0f;
     float init_cost   = 20.0f * log10f(mic_distance) + start_tl;
-    int start_point = ws.insert_pareto(start_idx, 0.0f, start_tl, mic_distance);
+    int start_slot = ws.insert_pareto(start_idx, 0.0f, start_tl, mic_distance);
     ws.min_cost[start_idx] = init_cost;
     ws.touched.push_back(start_idx);
 
     priority_queue<Label, vector<Label>, greater<Label>> pq;
-    pq.push({0.0f, start_idx, start_tl, init_cost, start_point,
+    pq.push({0.0f, start_idx, start_tl, init_cost, start_slot,
              start_ix, start_iy, 0.0f});
+
+    const int ddx_arr[] = {-1, 1, 0, 0, -1, -1, 1, 1};
+    const int ddy_arr[] = { 0, 0, -1, 1, -1,  1, -1, 1};
+    const float step_dist[] = {1.0f, 1.0f, 1.0f, 1.0f,
+                               1.41421356f, 1.41421356f, 1.41421356f, 1.41421356f};
+
+    int remaining = num_unsettled_targets;
 
     while (!pq.empty()) {
         Label curr = pq.top();
         pq.pop();
 
-        if (curr.point_id < 0 || curr.point_id >= AcousticSolverWorkspace::MAX_FRONTIER) {
+        size_t c_base = (size_t)curr.index * ws.MAX_FRONTIER;
+        if (curr.slot < 0 || !ws.frontier_used[c_base + curr.slot] ||
+            ws.frontier_dist[c_base + curr.slot] != curr.dist ||
+            ws.frontier_tl[c_base + curr.slot] != curr.tl) {
             continue;
         }
-        {
-            size_t _base = (size_t)curr.index * AcousticSolverWorkspace::MAX_FRONTIER + curr.point_id;
-            if (!ws.frontier_used[_base] || ws.frontier_dist[_base] != curr.dist || ws.frontier_tl[_base] != curr.tl) {
-                continue;
-            }
-        }
 
-        if (EARLY_EXIT) {
+        if constexpr (EarlyExit) {
             if (ws.target_status[curr.index] == 1) {
                 ws.target_status[curr.index] = 2;
-                num_unsettled--;
-                if (num_unsettled <= 0) {
-                    break;
-                }
+                remaining--;
+                if (remaining <= 0) break;
             }
         }
 
         int cx = curr.index % width;
         int cy = curr.index / width;
-
-        int   par_x    = curr.parent_x;
-        int   par_y    = curr.parent_y;
+        int par_x    = curr.parent_x;
+        int par_y    = curr.parent_y;
         float par_dist = curr.parent_dist;
-        bool curr_is_barrier = is_acoustic_barrier(grid, pixel_tl, curr.index);
 
         for (int dir = 0; dir < 8; ++dir) {
             int nx = cx + ddx_arr[dir];
             int ny = cy + ddy_arr[dir];
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-                continue;
-            }
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
 
             int nidx = ny * width + nx;
+            float ndist, new_par_dist, next_tl_contrib;
+            int new_par_x, new_par_y;
 
-            bool next_is_barrier = is_acoustic_barrier(grid, pixel_tl, nidx);
-
-            float ndist;
-            int   new_par_x, new_par_y;
-            float new_par_dist;
-            float next_tl_contrib;
-
-            bool can_los = !next_is_barrier && !curr_is_barrier;
-            bool has_los = can_los && (par_x != cx || par_y != cy) &&
-                           line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny);
-
-            if (has_los) {
+            if (line_of_sight(grid, pixel_tl, width, height, par_x, par_y, nx, ny)) {
                 float fdx = (float)(nx - par_x) * resolution;
                 float fdy = (float)(ny - par_y) * resolution;
                 ndist         = par_dist + sqrtf(fdx * fdx + fdy * fdy);
@@ -291,10 +273,9 @@ static inline void run_acoustic_dijkstra(
             }
 
             float new_tl = curr.tl + next_tl_contrib;
-            int point_id = ws.insert_pareto(nidx, ndist, new_tl, mic_distance);
-            if (point_id < 0) {
-                continue;
-            }
+            int slot = ws.insert_pareto(nidx, ndist, new_tl, mic_distance);
+            if (slot < 0) continue;
+
             if (ws.min_cost[nidx] == numeric_limits<float>::infinity()) {
                 ws.touched.push_back(nidx);
             }
@@ -302,8 +283,7 @@ static inline void run_acoustic_dijkstra(
             if (ncost < ws.min_cost[nidx]) {
                 ws.min_cost[nidx] = ncost;
             }
-            pq.push({ndist, nidx, new_tl, ncost, point_id,
-                     new_par_x, new_par_y, new_par_dist});
+            pq.push({ndist, nidx, new_tl, ncost, slot, new_par_x, new_par_y, new_par_dist});
         }
     }
 }
@@ -324,19 +304,13 @@ extern "C" {
         const float* pixel_tl,
         float* out_attenuations
     ) {
-        if (num_targets <= 0) {
-            return;
-        }
-        std::fill_n(out_attenuations, num_targets, numeric_limits<float>::infinity());
-        if (width <= 0 || height <= 0) {
-            return;
+        for (int i = 0; i < num_targets; ++i) {
+            out_attenuations[i] = numeric_limits<float>::infinity();
         }
 
         int start_ix = (int)round(start_x);
         int start_iy = (int)round(start_y);
-        if (start_ix < 0 || start_ix >= width || start_iy < 0 || start_iy >= height) {
-            return;
-        }
+        if (start_ix < 0 || start_ix >= width || start_iy < 0 || start_iy >= height) return;
 
         const int N = width * height;
         ws.ensure_capacity(N);
@@ -398,9 +372,7 @@ extern "C" {
         const float* pixel_tl,
         float* out_field
     ) {
-        if (width <= 0 || height <= 0) {
-            return;
-        }
+        if (width <= 0 || height <= 0) return;
         const int N = width * height;
         int start_ix = (int)round(start_x);
         int start_iy = (int)round(start_y);
@@ -412,60 +384,12 @@ extern "C" {
         ws.ensure_capacity(N);
         ws.ensure_sat(grid, pixel_tl, width, height);
 
-        int los_samples = 0;
-        int sample_count = 0;
-        int step_x = max(1, width / 4);
-        int step_y = max(1, height / 4);
-        for (int sy = 0; sy < height; sy += step_y) {
-            for (int sx = 0; sx < width; sx += step_x) {
-                if (line_of_sight(grid, pixel_tl, width, height, start_ix, start_iy, sx, sy)) {
-                    los_samples++;
-                }
-                sample_count++;
-            }
-        }
-
-        if (los_samples * 4 >= sample_count * 3) {
-            vector<int> unresolved;
-            unresolved.reserve(N);
-            for (int i = 0; i < N; ++i) {
-                int x = i % width;
-                int y = i / width;
-                if (line_of_sight(grid, pixel_tl, width, height, start_ix, start_iy, x, y)) {
-                    float fdx = (float)(x - start_ix) * resolution;
-                    float fdy = (float)(y - start_iy) * resolution;
-                    float dist = sqrtf(fdx * fdx + fdy * fdy);
-                    out_field[i] = 20.0f * log10f(fmaxf(dist, mic_distance));
-                    ws.target_status[i] = 0;
-                } else {
-                    out_field[i] = numeric_limits<float>::infinity();
-                    ws.target_status[i] = 1;
-                    unresolved.push_back(i);
-                }
-            }
-
-            if (!unresolved.empty()) {
-                run_acoustic_dijkstra<true>(
-                    grid, width, height, resolution,
-                    start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
-                    (int)unresolved.size()
-                );
-                for (int idx : unresolved) {
-                    if (ws.min_cost[idx] != numeric_limits<float>::infinity()) {
-                        out_field[idx] = ws.min_cost[idx];
-                    }
-                }
-            }
-
-            ws.reset(unresolved);
-        } else {
-            run_acoustic_dijkstra<false>(
-                grid, width, height, resolution,
-                start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
-                0
-            );
-            std::copy_n(ws.min_cost.data(), N, out_field);
-            ws.reset();
-        }
+        run_acoustic_dijkstra<false>(
+            grid, width, height, resolution,
+            start_ix, start_iy, wall_tl, mic_distance, pixel_tl,
+            0
+        );
+        std::copy_n(ws.min_cost.data(), N, out_field);
+        ws.reset();
     }
 }

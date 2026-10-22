@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from arena_evaluation.processing.acoustics.door_map import DEFAULT_DOOR_TL_DB
-from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
+from arena_evaluation.processing.acoustics.impedance_grid import compute_acoustic_field, compute_attenuations
 
 sys_path = pathlib.Path(__file__).resolve().parents[1] / "unit"  # allow local import in-tree
 import sys  # noqa: E402
@@ -271,3 +271,23 @@ def test_world_door_leaf_spans_free_doorway(tmp_path):
     assert np.isclose(att, los + DOOR_TL, atol=0.5), f"closed door must block: {att:.1f} vs LOS {los:.1f}"
     att_open = _solve(grid, start, target, pixel_tl=build_pixel_tl(grid, doors, open_doors={"world/d"}))
     assert np.isclose(att_open, los, atol=0.5), f"open door should be LOS: {att_open:.1f} vs {los:.1f}"
+
+
+def test_acoustic_field_matches_sparse_points():
+    """compute_acoustic_field matches compute_attenuations on points in free space and detours."""
+    grid = np.zeros((30, 30), dtype=np.uint8)
+    grid[5:25, 15] = 1
+    grid[12:18, 15] = 0
+    res = 0.1
+    sx, sy = 5.0, 15.0
+
+    field = compute_acoustic_field(grid, res, sx, sy, wall_tl=47.0, mic_distance=1.0)
+    assert field.shape == (30, 30)
+
+    test_pts = [(10.0, 15.0), (20.0, 15.0), (25.0, 25.0)]
+    tx = np.array([p[0] for p in test_pts], dtype=np.float32)
+    ty = np.array([p[1] for p in test_pts], dtype=np.float32)
+    pt_atts = compute_attenuations(grid, res, sx, sy, tx, ty, wall_tl=47.0, mic_distance=1.0)
+    for i, (px, py) in enumerate(test_pts):
+        assert np.isclose(field[int(py), int(px)], pt_atts[i], atol=1e-3)
+

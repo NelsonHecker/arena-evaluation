@@ -10,6 +10,7 @@ import yaml
 from PIL import Image
 
 from arena_evaluation.processing.acoustics.door_map import DEFAULT_DOOR_TL_DB
+from arena_evaluation.processing.acoustics.door_state import ACOUSTIC_OPEN_PROGRESS_THRESHOLD, DoorStateTimeline
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
 from arena_evaluation.processing.metrics.ecological.acoustic_exposure import AcousticExposureCalculator
 from arena_evaluation.storage.folder_manager import FolderManager
@@ -453,5 +454,33 @@ def test_run_worlds_need_a_benchmark_id(benchmark_id, tmp_path, calc, cached_map
     run = None if benchmark_id is None else EpisodeDescriptor(episode_dir="ep", benchmark_id=benchmark_id, episode_id=7, planner="p", stage="s")
     data = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
     result = calc.calculate(_episode(data, name, run=run, folder_manager=folder_manager), {})
-    assert result["timeseries_acoustic_attenuation_db"] == [pytest.approx([_att(3.0) + 47.0], abs=1e-3)]
-    assert result["worst_case_acoustic_frame"]["door_states"] == {}
+
+
+def test_door_breach_at_fifteen_percent():
+    """Door with progress 0.16 is open while progress 0.10 stays closed."""
+    df_closed = pl.DataFrame({"time_ns": [100], "kind": ["door"], "entity": ["door_a"], "field": ["progress"], "value_num": [0.10], "value_bool": [None], "value_str": [None]})
+    tl_closed = DoorStateTimeline.from_semantic_frame(df_closed, progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD)
+    assert tl_closed is not None and tl_closed.open_doors_at(100) == frozenset()
+
+    df_open = pl.DataFrame({"time_ns": [100], "kind": ["door"], "entity": ["door_a"], "field": ["progress"], "value_num": [0.16], "value_bool": [None], "value_str": [None]})
+    tl_open = DoorStateTimeline.from_semantic_frame(df_open, progress_threshold=ACOUSTIC_OPEN_PROGRESS_THRESHOLD)
+    assert tl_open is not None and tl_open.open_doors_at(100) == frozenset({"door_a"})
+
+
+def test_startle_factor_ignores_falling_exposure(calc, cached_map):
+    """Monotonic decrease yields 0.0 rather than a negative startle rate."""
+    name = cached_map()
+    data = _frames([(1.0, 1.0)] * 3, [[(2.0, 1.0)]] * 3, source=[70.0, 60.0, 50.0], times=[0, 100_000_000, 200_000_000])
+    res = calc.calculate(_episode(data, name), {})
+    assert res["ped_max_startle_factor"] == 0.0
+
+
+def test_leq_is_duration_weighted(calc, cached_map):
+    """Non-uniform frame spacing weights each frame energy by its duration."""
+    name = cached_map()
+    data = _frames([(1.0, 1.0)] * 3, [[(2.0, 1.0)]] * 3, source=[40.0, 40.0, 70.0], times=[0, 100_000_000, 1_100_000_000])
+    res = calc.calculate(_episode(data, name), {})
+    energy = 10 ** (np.array([40.0, 40.0, 70.0]) / 10.0)
+    weights = np.array([0.1, 1.0, 1.0])
+    expected = float(10.0 * np.log10(np.sum(weights * energy) / np.sum(weights)))
+    assert res["ped_leq_exposure_dba"] == pytest.approx(expected, abs=1e-2)

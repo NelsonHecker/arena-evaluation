@@ -40,17 +40,6 @@ def _compile_solver():
 # Compile on import
 _compile_solver()
 _lib = ctypes.CDLL(str(_SO_FILE))
-try:
-    _ = (_lib.solve_acoustic_field, _lib.solve_acoustic_grid)
-except AttributeError:
-    logger.warning("Stale acoustic solver at %s; rebuilding", _SO_FILE)
-    _SO_FILE.unlink(missing_ok=True)
-    _compile_solver()
-    _lib = ctypes.CDLL(str(_SO_FILE))
-    try:
-        _ = (_lib.solve_acoustic_field, _lib.solve_acoustic_grid)
-    except AttributeError as exc:
-        raise RuntimeError(f"Acoustic solver {_SO_FILE} is missing required symbols") from exc
 
 _lib.solve_acoustic_field.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.uint8, ndim=2, flags='C_CONTIGUOUS'),  # grid
