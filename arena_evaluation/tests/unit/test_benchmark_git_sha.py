@@ -38,3 +38,16 @@ def test_capture_git_sha_reports_a_dirty_checkout(tmp_path: pathlib.Path) -> Non
     install, repo = _workspace(tmp_path)
     (repo / "README.md").write_text("changed\n")
     assert capture_git_sha(install) == (_git(repo, "rev-parse", "HEAD"), True)
+
+
+def test_capture_git_sha_keeps_the_sha_when_git_status_fails(tmp_path: pathlib.Path) -> None:
+    install, repo = _workspace(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    (repo / ".git" / "index").write_bytes(b"corrupt")
+    assert capture_git_sha(install) == (head, None)
+
+
+def test_capture_git_sha_is_none_outside_any_checkout(tmp_path: pathlib.Path) -> None:
+    install = tmp_path / "plain" / "install"
+    install.mkdir(parents=True)
+    assert capture_git_sha(install) == (None, None)
