@@ -125,6 +125,9 @@ _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
             ("phases", pa.string()),
             ("robots_params", pa.string()),
             ("conditions", pa.string()),
+            ("world", pa.string()),
+            ("seed", pa.int64()),
+            ("human_params", pa.string()),
         ]
     ),
     "interactions": pa.schema(
@@ -688,6 +691,10 @@ class MCAPReader:
                                 pass
                             target["robots_params"].append(robots_yaml)
                             target["conditions"].append(str(ros_msg.conditions or "") if "conditions" in ros_msg.__slots__ else "")
+                            record_fields = set(ros_msg.__slots__)
+                            target["world"].append(str(ros_msg.world) if "world" in record_fields else None)
+                            target["seed"].append(int(ros_msg.seed) if "seed" in record_fields else None)
+                            target["human_params"].append(json.dumps({p.name: self._param_value_to_py(p.value) for p in ros_msg.human_params}) if "human_params" in record_fields else None)
                             appended = True
 
                         # Semantic snapshot (latched, one row per annotated entity)
