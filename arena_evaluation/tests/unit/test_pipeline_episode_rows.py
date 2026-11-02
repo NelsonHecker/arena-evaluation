@@ -33,6 +33,21 @@ def test_episode_window_spans_the_running_episode_only() -> None:
     assert _episode_window(_bag_records()) == (100, 900)
 
 
+def test_episode_window_keeps_its_end_on_equal_time_stamps() -> None:
+    record = pl.DataFrame(
+        {
+            "time_ns": [100, 100],
+            "episode_id": [23, 23],
+            "outcome_state": [1, 2],
+            "outcome_info": ["", ""],
+            "integrity": [[], []],
+            "conditions": ["[]", "[]"],
+            "phases": ["", ""],
+        }
+    )
+    assert _episode_window(record) == (100, 100)
+
+
 def test_record_conditions_ignore_the_previous_episodes_latched_record() -> None:
     assert _record_conditions(_bag_records()) is None
 

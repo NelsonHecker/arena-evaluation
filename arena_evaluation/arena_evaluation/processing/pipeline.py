@@ -191,7 +191,7 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
     if len(df) == 0 or "time_ns" not in df.columns:
         return None, None
-    df = df.sort("time_ns")
+    df = df.sort("time_ns", maintain_order=True)
     if "outcome_state" not in df.columns:
         return int(df["time_ns"][0]), int(df["time_ns"][-1])
     df = _episode_rows(df)
@@ -587,7 +587,7 @@ def _suite_metrics(episode_dir: pathlib.Path, data_root: pathlib.Path) -> dict[s
         manifest_path = parent / "manifest.yaml"
         if manifest_path.exists():
             try:
-                suite = yaml.safe_load(manifest_path.read_text()).get("suite") or {}
+                suite = yaml.safe_load(manifest_path.read_text(encoding="utf-8")).get("suite") or {}
                 raw = suite.get("metrics") or {}
             except Exception as e:
                 _log.warning(f"{manifest_path}: unreadable, ignoring suite metrics: {e!r}")
