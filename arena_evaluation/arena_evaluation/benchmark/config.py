@@ -40,12 +40,31 @@ _STAGE_OWNED_PREFIXES = ("task.", "record.")
 _SUITE_METRIC_KEYS = frozenset({"max_collisions", "barn"})
 
 
+def _check_robots_visible(stages: list[Suite.Stage]) -> None:
+    """humansim.robots_visible is a bool set on every stage or on none, since a set value carries over to later episodes."""
+    values: dict[str, object] = {}
+    for stage in stages:
+        block = (stage.config or {}).get("humansim")
+        values[stage.name] = block.get("robots_visible") if isinstance(block, dict) else None
+    set_on = [name for name, value in values.items() if value is not None]
+    if not set_on:
+        return
+    missing = [name for name, value in values.items() if value is None]
+    if missing:
+        raise ValueError(f"suite: humansim.robots_visible is set on {set_on} but not on {missing}, a set value carries over to later episodes, so set it on every stage")
+    wrong = [name for name, value in values.items() if not isinstance(value, bool)]
+    if wrong:
+        raise ValueError(f"suite: humansim.robots_visible must be true or false, stages {wrong} give another value")
+
+
 class Suite(typing.NamedTuple):
     @classmethod
     def parse(cls, name: str, obj: dict) -> Suite:
+        stages = [cls.Stage.parse(stage) for stage in obj["stages"]]
+        _check_robots_visible(stages)
         return cls(
             name=name,
-            stages=[cls.Stage.parse(stage) for stage in obj["stages"]],
+            stages=stages,
             launch_args=cls._parse_launch(obj.get("launch") or {}),
             references=bool(obj.get("references", False)),
             metrics=cls._parse_metrics(obj.get("metrics") or {}),
