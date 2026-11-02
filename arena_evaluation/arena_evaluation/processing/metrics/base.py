@@ -25,6 +25,8 @@ class BaseMetricCalculator(ABC):
     UNITS: dict[str, str] = {}
     PRIMARY_OUTPUTS: list[str] = []
     OUTPUT_DIRECTIONS: dict[str, str] = {}
+    SCOPES: set[str] = {"episode"}
+    ROLLUP: dict[str, str] = {}
     world: str | None = None
 
     def __init__(self, robot_params: RobotParams):

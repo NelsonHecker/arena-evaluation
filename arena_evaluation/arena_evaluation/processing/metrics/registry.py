@@ -59,11 +59,21 @@ class MetricRegistry:
     def get_all_units(cls) -> dict[str, str]:
         """Returns a combined dictionary of all units from all metrics."""
         cls.discover_calculators_cls()
-        units = {}
+        units: dict[str, str] = {}
         for calc_cls in BaseMetricCalculator.__subclasses__():
             if not inspect.isabstract(calc_cls):
                 units.update(calc_cls.UNITS)
         return units
+
+    @classmethod
+    def get_all_rollups(cls) -> dict[str, str]:
+        """Combined dictionary of output key to rollup rule across all metrics."""
+        cls.discover_calculators_cls()
+        rollups: dict[str, str] = {}
+        for calc_cls in BaseMetricCalculator.__subclasses__():
+            if not inspect.isabstract(calc_cls):
+                rollups.update(calc_cls.ROLLUP)
+        return rollups
 
     def _compute_execution_order(self) -> list[list[str]]:
         """Compute topological sort of calculators using Kahn's algorithm."""
@@ -114,6 +124,8 @@ class MetricRegistry:
                 "outputs": calc.output_keys(),
                 "primary_outputs": list(calc.PRIMARY_OUTPUTS),
                 "output_directions": dict(calc.OUTPUT_DIRECTIONS),
+                "scopes": sorted(calc.SCOPES),
+                "rollup": dict(calc.ROLLUP),
             }
             for name, calc in self.calculators.items()
         ]
@@ -128,6 +140,7 @@ class MetricRegistry:
         *,
         available_topics: set[str],
         pedsim_available: bool = True,
+        scope: str | None = None,
         progress_callback: typing.Callable[[str, int, int], None] | None = None,
     ) -> dict[str, typing.Any]:
         """Executes all calculators in topological order."""
@@ -140,6 +153,9 @@ class MetricRegistry:
             for calc_name in stage:
                 calc_idx += 1
                 calc = self.calculators[calc_name]
+
+                if scope is not None and scope not in calc.SCOPES:
+                    continue
 
                 # Check topic dependencies
                 skip_due_to_topics = False
