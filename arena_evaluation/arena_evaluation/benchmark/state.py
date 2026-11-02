@@ -65,9 +65,13 @@ def find_most_recent_resumable(data_root: pathlib.Path) -> str | None:
 
 
 def capture_git_sha(workspace: pathlib.Path) -> tuple[str | None, bool]:
+    """HEAD sha and dirty flag of the Arena checkout at or above workspace, (None, False) when git fails."""
+    from arena_evaluation.ingestion.metadata import IngestionMetadata
+
+    repo = IngestionMetadata.resolve_git_workspace(str(workspace))
     try:
         sha = subprocess.run(
-            ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+            ["git", "-C", repo, "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -75,7 +79,7 @@ def capture_git_sha(workspace: pathlib.Path) -> tuple[str | None, bool]:
         if sha.returncode != 0:
             return None, False
         dirty_out = subprocess.run(
-            ["git", "-C", str(workspace), "status", "--porcelain"],
+            ["git", "-C", repo, "status", "--porcelain"],
             capture_output=True,
             text=True,
             timeout=5,
