@@ -83,6 +83,12 @@ _PEDS_SCHEMA = pa.schema(
         ("peds_animation_states", pa.list_(pa.int64())),
         ("peds_interaction_ids", pa.list_(pa.int64())),
         ("peds_interaction_types", pa.list_(pa.int64())),
+        ("peds_radii", pa.list_(pa.float64())),
+        ("peds_desired_speeds", pa.list_(pa.float64())),
+        ("peds_policies", pa.list_(pa.string())),
+        ("peds_agent_types", pa.list_(pa.string())),
+        ("peds_gait_phases", pa.list_(pa.float64())),
+        ("peds_gait_cadences", pa.list_(pa.float64())),
     ]
 )
 
@@ -321,6 +327,7 @@ class MCAPReader:
         robot_data = defaultdict(new_robot_data)
 
         env_prefix = None
+        agent_meta: dict[str, tuple[list[str], dict[int, str]]] = {}
         gesture_envs: set[str] = set()
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -482,6 +489,10 @@ class MCAPReader:
                             target["effort"].append(list(ros_msg.effort))
                             appended = True
 
+                        # Latched crowd-engine metadata: policy names by index and agent types by id
+                        elif topic.endswith("/agent_meta") and schema.name == "arena_humansim_msgs/msg/AgentMeta":
+                            agent_meta[env_key] = ([str(p) for p in ros_msg.policies], dict(zip((int(i) for i in ros_msg.agent_id), (str(t) for t in ros_msg.agent_type), strict=True)))
+
                         # Pedestrians
                         elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
                             target = env_data[env_key]["peds_physics" if topic.endswith("/agent_states") else "peds"]
@@ -509,6 +520,20 @@ class MCAPReader:
                                 else:
                                     interaction_ids = [-1] * len(ids)
                                     interaction_types = [0] * len(ids)
+                                frame_fields = set(ros_msg.__slots__)
+
+                                def per_human(field: str) -> list[float | None]:
+                                    values = getattr(ros_msg, field) if field in frame_fields else ()
+                                    return np.asarray(values, dtype=np.float64)[humans].tolist() if len(values) == len(humans) else [None] * len(ids)
+
+                                policy_names, agent_types_by_id = agent_meta.get(env_key, ([], {}))
+                                policy_idx = np.asarray(ros_msg.policy_idx, dtype=np.int64)[humans].tolist() if "policy_idx" in frame_fields and len(ros_msg.policy_idx) == len(humans) else [-1] * len(ids)
+                                radii = per_human("radius")
+                                desired_speeds = per_human("desired_velocity")
+                                agent_policies = [policy_names[i] if 0 <= i < len(policy_names) else None for i in policy_idx]
+                                agent_types = [agent_types_by_id.get(i) for i in ids]
+                                gait_phases = per_human("gait_phase")
+                                gait_cadences = per_human("gait_cadence")
                             elif schema.name == "arena_people_msgs/msg/Pedestrians":
                                 rendered = list(ros_msg.pedestrians)
                                 names = [str(p.name) for p in rendered]
@@ -528,6 +553,13 @@ class MCAPReader:
                                 anim_states = [int(p.animation_state) for p in rendered] if has_anim else [0] * len(ids)
                                 interaction_ids = [int(p.interaction_id) for p in rendered] if has_interaction else [-1] * len(ids)
                                 interaction_types = [int(p.interaction_type) for p in rendered] if has_interaction else [0] * len(ids)
+                                ped_fields = set(rendered[0].__slots__) if rendered else set()
+                                radii = [None] * len(ids)
+                                desired_speeds = [None] * len(ids)
+                                agent_policies = [None] * len(ids)
+                                agent_types = [str(p.agent_type) for p in rendered] if "agent_type" in ped_fields else [None] * len(ids)
+                                gait_phases = [float(p.gait_phase) for p in rendered] if "gait_phase" in ped_fields else [None] * len(ids)
+                                gait_cadences = [float(p.gait_cadence) for p in rendered] if "gait_cadence" in ped_fields else [None] * len(ids)
                             else:
                                 agents = [a for a in ros_msg.agents if a.kind == 0]
                                 names = [str(a.agent_id) for a in agents]
@@ -541,6 +573,13 @@ class MCAPReader:
                                 anim_states = [int(p.animation_state) for p in agents] if has_anim else [0] * len(ids)
                                 interaction_ids = [-1] * len(agents)
                                 interaction_types = [0] * len(agents)
+                                agent_fields = set(agents[0].__slots__) if agents else set()
+                                radii = [float(a.radius) for a in agents] if "radius" in agent_fields else [None] * len(agents)
+                                desired_speeds = [float(a.desired_velocity) for a in agents] if "desired_velocity" in agent_fields else [None] * len(agents)
+                                agent_policies = [str(a.policy) for a in agents] if "policy" in agent_fields else [None] * len(agents)
+                                agent_types = [str(a.agent_type) for a in agents] if "agent_type" in agent_fields else [None] * len(agents)
+                                gait_phases = [None] * len(agents)
+                                gait_cadences = [None] * len(agents)
 
                             target["peds_names"].append(names)
                             target["num_pedestrians"].append(len(ids))
@@ -551,6 +590,12 @@ class MCAPReader:
                             target["peds_animation_states"].append(anim_states)
                             target["peds_interaction_ids"].append(interaction_ids)
                             target["peds_interaction_types"].append(interaction_types)
+                            target["peds_radii"].append(radii)
+                            target["peds_desired_speeds"].append(desired_speeds)
+                            target["peds_policies"].append(agent_policies)
+                            target["peds_agent_types"].append(agent_types)
+                            target["peds_gait_phases"].append(gait_phases)
+                            target["peds_gait_cadences"].append(gait_cadences)
 
                             if has_gestures:
                                 gesture_envs.add(env_key)
