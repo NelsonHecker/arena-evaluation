@@ -185,7 +185,7 @@ _RECORD_SUCCESS = 2  # task_generator_msgs/msg/EpisodeRecord.SUCCESS
 
 
 def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | None, int | None]:
-    """[RUNNING stamp, terminal stamp] of the episode record, a bound is None when its row is missing."""
+    """[RUNNING stamp, terminal stamp] of the episode's own records, a bound is None when its row is missing."""
     if record is None:
         return None, None
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
@@ -194,6 +194,7 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     df = df.sort("time_ns")
     if "outcome_state" not in df.columns:
         return int(df["time_ns"][0]), int(df["time_ns"][-1])
+    df = _episode_rows(df)
     states = df["outcome_state"].to_list()
     stamps = df["time_ns"].to_list()
     start = next((int(t) for t, s in zip(stamps, states, strict=True) if s == _RECORD_RUNNING), None)
@@ -356,7 +357,7 @@ def _outcome_verdict(outcome_state: int | None, outcome_info: str | None) -> tup
 
 
 def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
-    """The episode's own records in publish order, up to its first terminal record after it ran, without the next episode's queued records that share its last timestamp."""
+    """The episode's own records in publish order: the RUNNING record's episode id, up to its first terminal record."""
     df = record.sort("time_ns", maintain_order=True)
     if "outcome_state" not in df.columns:
         return df
@@ -364,6 +365,10 @@ def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
     started = next((i for i, state in enumerate(states) if state == _RECORD_RUNNING), None)
     if started is None:
         return df
+    if "episode_id" in df.columns and df["episode_id"][started] is not None:
+        df = df.filter(pl.col("episode_id") == df["episode_id"][started])
+        states = df["outcome_state"].to_list()
+        started = states.index(_RECORD_RUNNING)
     end = next((i for i in range(started, len(states)) if states[i] is not None and states[i] >= _RECORD_SUCCESS), None)
     return df if end is None else df.head(end + 1)
 
@@ -410,7 +415,7 @@ def _record_integrity(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunM
     """Integrity reasons of the last recorded record, from the yaml when no record carries them."""
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
     if df is not None and len(df) > 0 and "integrity" in df.columns and "time_ns" in df.columns:
-        return df.sort("time_ns").row(-1, named=True)["integrity"] or []
+        return _episode_rows(df).row(-1, named=True)["integrity"] or []
     if metadata is not None:
         return list(metadata.integrity)
     return []
