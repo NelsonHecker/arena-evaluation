@@ -60,6 +60,7 @@ Positions in the shared `map` frame (`tf_gt`, `plan`, `initialpose`, `peds`, epi
 | animation_states | one row per (ped, overlay slot), `slot` empty for a base-only ped: `time_ns`, `ped_id`, `ped_name`, `base`, `base_phase`, `slot`, `kind`, `channel`, `phase`, `clip`, `animation`, `playhead`, `duration`, `weight`, `loop` |
 | episode_record | `time_ns`, `episode_id`, `outcome_state`, `outcome_info`, `goal_uuid`, `integrity` (list of reasons the episode is compromised, empty when intact or recorded before the field existed), `phases`, `robots_params`, `conditions`, `world` (raw identifier, may carry a level filter such as `name[1,3]`), `seed`, `human_params` (JSON object of the human params the backend accepted); world and seed are null while the episode is unresolved, and all three are null when the recording predates them |
 | collision_events | `time_ns`, `collision_event` |
+| collision_contacts | one row per `CollisionEvent`: `time_ns`, `stamp_ns`, `kind`, `obstacle_id`, `obstacle_x`, `obstacle_y`, `obstacle_z` (as published, before any env anchor shift), `distance` |
 | collision_monitor_state | `time_ns`, `action_type`, `polygon_name` |
 | tf / tf_static | `time_ns`, frame/child/trans/rot columns |
 | tf_gt | `time_ns`, `stamp_ns_gt`, `pos_x_gt`, `pos_y_gt`, `yaw_gt`, `frame_id` |

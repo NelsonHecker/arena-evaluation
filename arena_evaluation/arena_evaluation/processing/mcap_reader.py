@@ -120,6 +120,19 @@ _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
             ("collision_obstacle_ids", pa.list_(pa.string())),
         ]
     ),
+    # obstacle_* as published, before any env anchor shift
+    "collision_contacts": pa.schema(
+        [
+            ("time_ns", pa.int64()),
+            ("stamp_ns", pa.int64()),
+            ("kind", pa.string()),
+            ("obstacle_id", pa.string()),
+            ("obstacle_x", pa.float64()),
+            ("obstacle_y", pa.float64()),
+            ("obstacle_z", pa.float64()),
+            ("distance", pa.float64()),
+        ]
+    ),
     "episode_record": pa.schema(
         [
             ("time_ns", pa.int64()),
@@ -306,6 +319,7 @@ class MCAPReader:
                 "cmd_vel_controller": defaultdict(list),
                 "joint_states": defaultdict(list),
                 "collision_events": defaultdict(list),
+                "collision_contacts": defaultdict(list),
                 "collision_monitor_state": defaultdict(list),
                 "power": defaultdict(list),
                 "energy": defaultdict(list),
@@ -785,6 +799,19 @@ class MCAPReader:
                             target["collision_static"].append(static_count)
                             target["collision_pedestrian"].append(pedestrian_count)
                             target["collision_obstacle_ids"].append(sorted({ev.obstacle_id for ev in ros_msg.events}))
+                            contacts = robot_data[robot_name]["collision_contacts"]
+                            stamp = self._stamp_ns(ros_msg.header) if "header" in ros_msg.__slots__ else None
+                            for ev in ros_msg.events:
+                                event_fields = set(ev.__slots__)
+                                position = ev.obstacle_position if "obstacle_position" in event_fields else None
+                                contacts["time_ns"].append(ts_ns)
+                                contacts["stamp_ns"].append(stamp)
+                                contacts["kind"].append(ev.kind if has_kind else None)
+                                contacts["obstacle_id"].append(ev.obstacle_id)
+                                contacts["obstacle_x"].append(position.x if position is not None else None)
+                                contacts["obstacle_y"].append(position.y if position is not None else None)
+                                contacts["obstacle_z"].append(position.z if position is not None else None)
+                                contacts["distance"].append(float(ev.distance) if "distance" in event_fields else None)
                             appended = True
 
                         # Collision Monitor State (Nav2)

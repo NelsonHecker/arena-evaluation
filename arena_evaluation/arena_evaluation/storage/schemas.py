@@ -175,6 +175,7 @@ class TopicBundle:
     animation_states: pl.DataFrame | pl.LazyFrame | None = None
     episode_record: pl.DataFrame | pl.LazyFrame | None = None
     collision_events: pl.DataFrame | pl.LazyFrame | None = None
+    collision_contacts: pl.DataFrame | pl.LazyFrame | None = None
     collision_monitor_state: pl.DataFrame | pl.LazyFrame | None = None
     power: pl.DataFrame | pl.LazyFrame | None = None
     energy: pl.DataFrame | pl.LazyFrame | None = None

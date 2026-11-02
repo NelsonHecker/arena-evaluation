@@ -73,6 +73,7 @@ class TopicBundle:
     animation_states: pl.DataFrame | None
     episode_record: pl.DataFrame | None
     collision_events: pl.DataFrame | None
+    collision_contacts: pl.DataFrame | None
 ```
 
 ### `AlignedEpisodeBundle`
