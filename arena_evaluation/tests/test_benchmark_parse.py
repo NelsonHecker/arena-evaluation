@@ -674,3 +674,18 @@ def test_suite_parse_rejects_a_non_bool_robots_visible():
     obj = {"stages": [_make_stage_dict(config={"humansim": {"robots_visible": "false"}})]}
     with pytest.raises(ValueError, match="true or false"):
         Suite.parse("visibility", obj)
+
+
+def test_a_null_robots_visible_is_rejected():
+    from arena_evaluation.benchmark.config import Suite
+
+    obj = {"stages": [_make_stage_dict(config={"humansim": {"robots_visible": None}})]}
+    with pytest.raises(ValueError, match="true or false"):
+        Suite.parse("visibility", obj)
+
+
+def test_a_stage_with_an_empty_config_parses():
+    from arena_evaluation.benchmark.config import Suite
+
+    suite = Suite.parse("visibility", {"stages": [_make_stage_dict(config=None)]})
+    assert [stage.name for stage in suite.stages] == ["stage_one"]

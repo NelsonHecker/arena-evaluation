@@ -42,19 +42,19 @@ _SUITE_METRIC_KEYS = frozenset({"max_collisions", "barn"})
 
 def _check_robots_visible(stages: list[Suite.Stage]) -> None:
     """humansim.robots_visible is a bool set on every stage or on none, since a set value carries over to later episodes."""
-    values: dict[str, object] = {}
+    values: list[tuple[str, object]] = []
+    unset: list[str] = []
     for stage in stages:
         block = (stage.config or {}).get("humansim")
-        values[stage.name] = block.get("robots_visible") if isinstance(block, dict) else None
-    set_on = [name for name, value in values.items() if value is not None]
-    if not set_on:
-        return
-    missing = [name for name, value in values.items() if value is None]
-    if missing:
-        raise ValueError(f"suite: humansim.robots_visible is set on {set_on} but not on {missing}, a set value carries over to later episodes, so set it on every stage")
-    wrong = [name for name, value in values.items() if not isinstance(value, bool)]
+        if isinstance(block, dict) and "robots_visible" in block:
+            values.append((stage.name, block["robots_visible"]))
+        else:
+            unset.append(stage.name)
+    wrong = [name for name, value in values if not isinstance(value, bool)]
     if wrong:
         raise ValueError(f"suite: humansim.robots_visible must be true or false, stages {wrong} give another value")
+    if values and unset:
+        raise ValueError(f"suite: humansim.robots_visible is set on {[name for name, _ in values]} but not on {unset}, a set value carries over to later episodes, so set it on every stage")
 
 
 class Suite(typing.NamedTuple):
