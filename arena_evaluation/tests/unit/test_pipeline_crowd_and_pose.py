@@ -28,6 +28,7 @@ def test_crowd_visibility_prefers_the_cli_launch_arg_over_the_suite_launch_block
 def test_crowd_visibility_reads_the_suite_launch_block() -> None:
     manifest = {"cli_args": ["--suite", "s"], "suite": {"launch": {"human.robots.visible": "false"}}}
     assert _crowd_visibility(None, manifest)["crowd_condition"] == "blind"
+    assert _crowd_visibility(None, manifest)["crowd_visibility_source"] == "launch_arg"
 
 
 def test_crowd_visibility_defaults_to_visible_and_says_so() -> None:
@@ -56,3 +57,36 @@ def test_pose_frame_is_the_most_frequent_parent_inside_the_window() -> None:
     assert _pose_frame(tf_gt, (None, None)) == "env_0/jackal/odom"
     assert _pose_frame(tf_gt.lazy(), (4, None)) == "map"
     assert _pose_frame(None, (None, None)) is None
+
+
+def test_crowd_visibility_takes_the_last_accepted_value_of_the_episode() -> None:
+    record = _record('{"humansim.robots_visible": false}', '{"humansim.robots_visible": true}')
+    assert _crowd_visibility(record, None) == {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "episode_param"}
+
+
+def test_crowd_visibility_ignores_a_param_value_that_is_not_a_bool() -> None:
+    record = _record('{"humansim.robots_visible": "false"}')
+    assert _crowd_visibility(record, None) == {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
+
+
+def test_crowd_visibility_is_null_without_a_record_when_the_stages_set_it() -> None:
+    manifest = {"cli_args": [], "suite": {"stages": [{"name": "blind", "config": {"humansim": {"robots_visible": False}}}]}}
+    assert _crowd_visibility(None, manifest) == {"crowd_visible": None, "crowd_condition": None, "crowd_visibility_source": None}
+
+
+def test_run_manifest_is_none_when_the_file_is_not_text(tmp_path: pathlib.Path) -> None:
+    root = tmp_path / "benchmarks"
+    episode = root / "run_a" / "episodes" / "episode_000"
+    episode.mkdir(parents=True)
+    (root / "run_a" / "manifest.yaml").write_bytes(b"\xff\xfe\x00")
+    assert _run_manifest(episode, root) is None
+
+
+def test_pose_frame_is_none_when_the_window_excludes_every_row() -> None:
+    tf_gt = pl.DataFrame({"time_ns": [1, 2], "frame_id": ["map", "map"]})
+    assert _pose_frame(tf_gt, (10, 20)) is None
+
+
+def test_pose_frame_ignores_null_frame_ids() -> None:
+    tf_gt = pl.DataFrame({"time_ns": [1, 2, 3], "frame_id": [None, None, "map"]})
+    assert _pose_frame(tf_gt, (None, None)) == "map"

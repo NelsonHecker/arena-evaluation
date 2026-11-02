@@ -406,7 +406,7 @@ def _run_manifest(episode_dir: pathlib.Path, data_root: pathlib.Path) -> dict[st
         if manifest_path.exists():
             try:
                 data = yaml.safe_load(manifest_path.read_text())
-            except (OSError, yaml.YAMLError) as e:
+            except (OSError, ValueError, yaml.YAMLError) as e:
                 _log.warning(f"{manifest_path}: unreadable: {e!r}")
                 return None
             return data if isinstance(data, dict) else None
@@ -434,16 +434,35 @@ def _crowd_columns(visible: bool, source: str) -> dict[str, typing.Any]:
     return {"crowd_visible": visible, "crowd_condition": "visible" if visible else "blind", "crowd_visibility_source": source}
 
 
+def _stages_set_robots_visible(manifest: dict[str, typing.Any] | None) -> bool:
+    """Whether the run's suite sets humansim.robots_visible on its stages."""
+    suite = manifest.get("suite") if manifest else None
+    stages = suite.get("stages") if isinstance(suite, dict) else None
+    for stage in stages if isinstance(stages, list) else []:
+        config = stage.get("config") if isinstance(stage, dict) else None
+        block = config.get("humansim") if isinstance(config, dict) else None
+        if isinstance(block, dict) and "robots_visible" in block:
+            return True
+    return False
+
+
 def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict[str, typing.Any] | None) -> dict[str, typing.Any]:
-    """Whether the crowd saw the robot: the episode's accepted humansim.robots_visible, else the run's launch arg, else the launch default."""
+    """Crowd visibility from the episode param, else the launch arg, else the default; null for record-less episodes of per-stage suites."""
     import json
 
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
-    if df is not None and len(df) > 0 and "human_params" in df.columns and "time_ns" in df.columns:
+    has_record = df is not None and len(df) > 0
+    if has_record and "human_params" in df.columns and "time_ns" in df.columns:
         for raw in reversed(_episode_rows(df)["human_params"].to_list()):
-            params = json.loads(raw) if raw else {}
-            if _ROBOTS_VISIBLE_PARAM in params:
-                return _crowd_columns(bool(params[_ROBOTS_VISIBLE_PARAM]), "episode_param")
+            try:
+                params = json.loads(raw) if raw else {}
+            except ValueError:
+                continue
+            value = params.get(_ROBOTS_VISIBLE_PARAM) if isinstance(params, dict) else None
+            if isinstance(value, bool):
+                return _crowd_columns(value, "episode_param")
+    if not has_record and _stages_set_robots_visible(manifest):
+        return {"crowd_visible": None, "crowd_condition": None, "crowd_visibility_source": None}
     launched = _launch_robots_visible(manifest)
     if launched is not None:
         return _crowd_columns(launched, "launch_arg")
@@ -460,6 +479,7 @@ def _pose_frame(tf_gt: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | N
         df = df.filter(pl.col("time_ns") >= start_ns)
     if end_ns is not None:
         df = df.filter(pl.col("time_ns") <= end_ns)
+    df = df.filter(pl.col("frame_id").is_not_null())
     if len(df) == 0:
         return None
     counts = df.group_by("frame_id").len().sort(["len", "frame_id"], descending=[True, False])
@@ -728,7 +748,7 @@ class ProcessingPipeline:
                 if aligned_df is None or len(aligned_df) < 5:
                     reason = f"{0 if aligned_df is None else len(aligned_df)} odom rows inside the episode window"
                     _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
-                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
+                    all_results.append({**_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record), "pose_frame": pose_frame})
                     continue
 
                 # Resolve the pose frame once so all calculators share it
@@ -736,7 +756,7 @@ class ProcessingPipeline:
                 if aligned_df is None or len(aligned_df) < 5:
                     reason = f"{0 if aligned_df is None else len(aligned_df)} pose rows after resolution"
                     _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
-                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
+                    all_results.append({**_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record), "pose_frame": pose_frame})
                     continue
 
                 topics = _collect_native_topics(bundle)
