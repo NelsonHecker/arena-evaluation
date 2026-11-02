@@ -9,7 +9,7 @@ import re
 import shutil
 import typing
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 import polars as pl
@@ -207,6 +207,11 @@ _TOPIC_SCHEMAS: dict[str, pa.Schema] = {
         ]
     ),
 }
+
+
+def _per_human(values: Sequence[float], humans: np.ndarray) -> list[float | None]:
+    """Per-human values of a per-agent array, all null when the array is absent or misaligned."""
+    return np.asarray(values, dtype=np.float64)[humans].tolist() if len(values) == len(humans) else [None] * int(humans.sum())
 
 
 def _ped_fields(schema: Schema, cache: dict[int, tuple[bool, bool, bool]]) -> tuple[bool, bool, bool]:
@@ -489,9 +494,12 @@ class MCAPReader:
                             target["effort"].append(list(ros_msg.effort))
                             appended = True
 
-                        # Latched crowd-engine metadata: policy names by index and agent types by id
+                        # Latched crowd-engine metadata: policy names by index and agent types by id, "" is the adult type
                         elif topic.endswith("/agent_meta") and schema.name == "arena_humansim_msgs/msg/AgentMeta":
-                            agent_meta[env_key] = ([str(p) for p in ros_msg.policies], dict(zip((int(i) for i in ros_msg.agent_id), (str(t) for t in ros_msg.agent_type), strict=True)))
+                            meta_fields = set(ros_msg.__slots__)
+                            policies = [str(p) for p in ros_msg.policies] if "policies" in meta_fields else []
+                            typed = {"agent_id", "agent_type"} <= meta_fields and len(ros_msg.agent_id) == len(ros_msg.agent_type)
+                            agent_meta[env_key] = (policies, {int(i): str(t) or "adult" for i, t in zip(ros_msg.agent_id, ros_msg.agent_type, strict=True)} if typed else {})
 
                         # Pedestrians
                         elif topic.endswith("/arena_peds") or topic.endswith("/peds") or topic.endswith("/agent_states"):
@@ -521,19 +529,15 @@ class MCAPReader:
                                     interaction_ids = [-1] * len(ids)
                                     interaction_types = [0] * len(ids)
                                 frame_fields = set(ros_msg.__slots__)
-
-                                def per_human(field: str) -> list[float | None]:
-                                    values = getattr(ros_msg, field) if field in frame_fields else ()
-                                    return np.asarray(values, dtype=np.float64)[humans].tolist() if len(values) == len(humans) else [None] * len(ids)
-
                                 policy_names, agent_types_by_id = agent_meta.get(env_key, ([], {}))
                                 policy_idx = np.asarray(ros_msg.policy_idx, dtype=np.int64)[humans].tolist() if "policy_idx" in frame_fields and len(ros_msg.policy_idx) == len(humans) else [-1] * len(ids)
-                                radii = per_human("radius")
-                                desired_speeds = per_human("desired_velocity")
+                                radii = _per_human(ros_msg.radius if "radius" in frame_fields else (), humans)
+                                desired_speeds = _per_human(ros_msg.desired_velocity if "desired_velocity" in frame_fields else (), humans)
                                 agent_policies = [policy_names[i] if 0 <= i < len(policy_names) else None for i in policy_idx]
                                 agent_types = [agent_types_by_id.get(i) for i in ids]
-                                gait_phases = per_human("gait_phase")
-                                gait_cadences = per_human("gait_cadence")
+                                # gait 0 is the producer's "unknown"
+                                gait_phases = [g or None for g in _per_human(ros_msg.gait_phase if "gait_phase" in frame_fields else (), humans)]
+                                gait_cadences = [g or None for g in _per_human(ros_msg.gait_cadence if "gait_cadence" in frame_fields else (), humans)]
                             elif schema.name == "arena_people_msgs/msg/Pedestrians":
                                 rendered = list(ros_msg.pedestrians)
                                 names = [str(p.name) for p in rendered]
@@ -557,9 +561,10 @@ class MCAPReader:
                                 radii = [None] * len(ids)
                                 desired_speeds = [None] * len(ids)
                                 agent_policies = [None] * len(ids)
-                                agent_types = [str(p.agent_type) for p in rendered] if "agent_type" in ped_fields else [None] * len(ids)
-                                gait_phases = [float(p.gait_phase) for p in rendered] if "gait_phase" in ped_fields else [None] * len(ids)
-                                gait_cadences = [float(p.gait_cadence) for p in rendered] if "gait_cadence" in ped_fields else [None] * len(ids)
+                                # "" is the adult type and gait 0 the producer's "unknown"
+                                agent_types = [str(p.agent_type) or "adult" for p in rendered] if "agent_type" in ped_fields else [None] * len(ids)
+                                gait_phases = [float(p.gait_phase) or None for p in rendered] if "gait_phase" in ped_fields else [None] * len(ids)
+                                gait_cadences = [float(p.gait_cadence) or None for p in rendered] if "gait_cadence" in ped_fields else [None] * len(ids)
                             else:
                                 agents = [a for a in ros_msg.agents if a.kind == 0]
                                 names = [str(a.agent_id) for a in agents]
@@ -576,8 +581,9 @@ class MCAPReader:
                                 agent_fields = set(agents[0].__slots__) if agents else set()
                                 radii = [float(a.radius) for a in agents] if "radius" in agent_fields else [None] * len(agents)
                                 desired_speeds = [float(a.desired_velocity) for a in agents] if "desired_velocity" in agent_fields else [None] * len(agents)
-                                agent_policies = [str(a.policy) for a in agents] if "policy" in agent_fields else [None] * len(agents)
-                                agent_types = [str(a.agent_type) for a in agents] if "agent_type" in agent_fields else [None] * len(agents)
+                                # "" is a teleport-only policy and the unrecorded global default type
+                                agent_policies = [str(a.policy) or None for a in agents] if "policy" in agent_fields else [None] * len(agents)
+                                agent_types = [str(a.agent_type) or None for a in agents] if "agent_type" in agent_fields else [None] * len(agents)
                                 gait_phases = [None] * len(agents)
                                 gait_cadences = [None] * len(agents)
 
