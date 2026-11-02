@@ -98,7 +98,7 @@ For each episode:
 6. Computes metrics with `MetricRegistry`.
 7. Attaches run identifiers and writes `metrics.parquet`.
 
-Every recorded episode yields a row. `status` is `evaluated`, `path_only` (no map-frame pose), `no_trajectory`, `no_recording` or `error`, with `status_reason`; rows without a trajectory carry the runtime verdict in `result` and `success` and null metrics. `pose_source` (`tf`, `anchored`, `tf_sparse`, `odom`), `pose_samples` and `pose_anchor_residual_m` say how the robot pose was obtained. `integrity` (`List(String)`) holds the reasons the episode is compromised from the last `EpisodeRecord` of the episode's own id, or from the episode yaml when none was recorded, and is empty when the episode is intact. The report lists every non-`evaluated` row above the summary.
+Every recorded episode yields a row. `status` is `evaluated`, `path_only` (no map-frame pose), `no_trajectory`, `no_recording` or `error`, with `status_reason`; rows without a trajectory carry the runtime verdict in `result` and `success` and null metrics. `pose_source` (`tf`, `anchored`, `tf_sparse`, `odom`), `pose_samples` and `pose_anchor_residual_m` say how the robot pose was obtained. `integrity` (`List(String)`) holds the reasons the episode is compromised from the last `EpisodeRecord` of the episode's own id, or from the episode yaml when none was recorded, and is empty when the episode is intact. A bag without a RUNNING record cannot be told apart from its neighbours, so all of its records count. The report lists every non-`evaluated` row above the summary.
 
 ---
 

@@ -357,7 +357,7 @@ def _outcome_verdict(outcome_state: int | None, outcome_info: str | None) -> tup
 
 
 def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
-    """The episode's own records in publish order: the RUNNING record's episode id, up to its first terminal record."""
+    """The episode's own records in publish order: the RUNNING record's episode id up to its first terminal record, every record when none is RUNNING."""
     df = record.sort("time_ns", maintain_order=True)
     if "outcome_state" not in df.columns:
         return df
@@ -412,7 +412,7 @@ def _record_outcome(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMet
 
 
 def _record_integrity(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMetadata | None) -> list[str]:
-    """Integrity reasons of the last recorded record, from the yaml when no record carries them."""
+    """Integrity reasons of the episode's own last record, from the yaml when no record carries them."""
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
     if df is not None and len(df) > 0 and "integrity" in df.columns and "time_ns" in df.columns:
         return _episode_rows(df).row(-1, named=True)["integrity"] or []
