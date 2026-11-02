@@ -32,12 +32,12 @@ def test_crowd_visibility_reads_the_suite_launch_block() -> None:
 
 
 def test_crowd_visibility_defaults_to_visible_and_says_so() -> None:
-    assert _crowd_visibility(_record(None), None) == {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
+    assert _crowd_visibility(_record(None), {"cli_args": [], "suite": {"stages": []}}) == {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
 
 
 def test_crowd_visibility_ignores_the_previous_episodes_latched_param() -> None:
     record = pl.DataFrame({"time_ns": [50, 100, 900], "episode_id": [4, 5, 5], "outcome_state": [3, 1, 2], "human_params": ['{"humansim.robots_visible": false}', "{}", "{}"]})
-    assert _crowd_visibility(record, None)["crowd_visibility_source"] == "default"
+    assert _crowd_visibility(record, {"cli_args": [], "suite": {"stages": []}})["crowd_visibility_source"] == "default"
 
 
 def test_run_manifest_is_the_one_above_the_episode_dir(tmp_path: pathlib.Path) -> None:
@@ -66,7 +66,7 @@ def test_crowd_visibility_takes_the_last_accepted_value_of_the_episode() -> None
 
 def test_crowd_visibility_ignores_a_param_value_that_is_not_a_bool() -> None:
     record = _record('{"humansim.robots_visible": "false"}')
-    assert _crowd_visibility(record, None) == {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
+    assert _crowd_visibility(record, {"cli_args": [], "suite": {"stages": []}}) == {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
 
 
 def test_crowd_visibility_is_null_without_a_record_when_the_stages_set_it() -> None:
@@ -90,3 +90,12 @@ def test_pose_frame_is_none_when_the_window_excludes_every_row() -> None:
 def test_pose_frame_ignores_null_frame_ids() -> None:
     tf_gt = pl.DataFrame({"time_ns": [1, 2, 3], "frame_id": [None, None, "map"]})
     assert _pose_frame(tf_gt, (None, None)) == "map"
+
+
+def test_crowd_visibility_is_null_without_a_manifest_or_an_accepted_value() -> None:
+    assert _crowd_visibility(_record("{}"), None) == {"crowd_visible": None, "crowd_condition": None, "crowd_visibility_source": None}
+
+
+def test_crowd_visibility_reads_an_earlier_value_when_the_latest_one_is_not_json() -> None:
+    record = _record('{"humansim.robots_visible": false}', "{not json")
+    assert _crowd_visibility(record, None) == {"crowd_visible": False, "crowd_condition": "blind", "crowd_visibility_source": "episode_param"}

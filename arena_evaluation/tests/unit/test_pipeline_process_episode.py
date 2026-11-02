@@ -90,7 +90,7 @@ def test_process_episode_replays_the_task_on_the_episode_world(tmp_path: pathlib
     assert rows[0]["phase_outcomes"] == ["met"]
     assert rows[0]["judge_agrees"] is True
     assert rows[0]["judge_disagreements"] == []
-    assert rows[0]["crowd_visible"] is True
-    assert rows[0]["crowd_visibility_source"] == "default"
+    assert rows[0]["crowd_visible"] is None
+    assert rows[0]["crowd_visibility_source"] is None
     assert rows[0]["pose_frame"] is None
     assert (tmp_path / "run" / "episodes" / "nav2" / "episode_000" / "metrics.parquet").exists()

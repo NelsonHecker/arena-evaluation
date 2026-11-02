@@ -405,7 +405,7 @@ def _run_manifest(episode_dir: pathlib.Path, data_root: pathlib.Path) -> dict[st
         manifest_path = parent / "manifest.yaml"
         if manifest_path.exists():
             try:
-                data = yaml.safe_load(manifest_path.read_text())
+                data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
             except (OSError, ValueError, yaml.YAMLError) as e:
                 _log.warning(f"{manifest_path}: unreadable: {e!r}")
                 return None
@@ -447,7 +447,7 @@ def _stages_set_robots_visible(manifest: dict[str, typing.Any] | None) -> bool:
 
 
 def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict[str, typing.Any] | None) -> dict[str, typing.Any]:
-    """Crowd visibility from the episode param, else the launch arg, else the default; null for record-less episodes of per-stage suites."""
+    """Crowd visibility from the episode param, else the run's launch arg or launch default; null when the run manifest or a per-stage episode's record is missing."""
     import json
 
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
@@ -461,7 +461,7 @@ def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict
             value = params.get(_ROBOTS_VISIBLE_PARAM) if isinstance(params, dict) else None
             if isinstance(value, bool):
                 return _crowd_columns(value, "episode_param")
-    if not has_record and _stages_set_robots_visible(manifest):
+    if manifest is None or (not has_record and _stages_set_robots_visible(manifest)):
         return {"crowd_visible": None, "crowd_condition": None, "crowd_visibility_source": None}
     launched = _launch_robots_visible(manifest)
     if launched is not None:
