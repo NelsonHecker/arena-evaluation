@@ -33,7 +33,7 @@ INTERACTION_EVENT_NAMES = {0: "ACTIVATED", 1: "HOLD_ONSET", 2: "RELEASED", 3: "I
 MEMBER_ROLE_PARTICIPANT = 0
 MEMBER_ROLE_QUEUED = 1
 ENV_STATE_TABLES = ("peds_physics", "ped_gestures", "interactions", "interaction_events", "animation_states")
-KEPT_EMPTY_TABLES = ("ped_gestures",)
+KEPT_EMPTY_TABLES = ("ped_gestures", "collision_contacts")
 
 Anchor = tuple[int, float, float]
 
@@ -348,6 +348,7 @@ class MCAPReader:
         env_prefix = None
         agent_meta: dict[str, tuple[list[str], dict[int, str]]] = {}
         gesture_envs: set[str] = set()
+        collision_event_robots: set[str] = set()
 
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -799,10 +800,11 @@ class MCAPReader:
                             target["collision_static"].append(static_count)
                             target["collision_pedestrian"].append(pedestrian_count)
                             target["collision_obstacle_ids"].append(sorted({ev.obstacle_id for ev in ros_msg.events}))
+                            collision_event_robots.add(robot_name)
                             contacts = robot_data[robot_name]["collision_contacts"]
                             stamp = self._stamp_ns(ros_msg.header) if "header" in ros_msg.__slots__ else None
+                            event_fields = set(ros_msg.events[0].__slots__) if ros_msg.events else set()
                             for ev in ros_msg.events:
-                                event_fields = set(ev.__slots__)
                                 position = ev.obstacle_position if "obstacle_position" in event_fields else None
                                 contacts["time_ns"].append(ts_ns)
                                 contacts["stamp_ns"].append(stamp)
@@ -942,6 +944,10 @@ class MCAPReader:
                 if (env_key, "ped_gestures") not in writers:
                     (out_dir / env_key).mkdir(parents=True, exist_ok=True)
                     pq.write_table(_TOPIC_SCHEMAS["ped_gestures"].empty_table(), out_dir / env_key / "ped_gestures.parquet", compression="zstd")
+            for robot_name in collision_event_robots:
+                if (robot_name, "collision_contacts") not in writers:
+                    (out_dir / robot_name).mkdir(parents=True, exist_ok=True)
+                    pq.write_table(_TOPIC_SCHEMAS["collision_contacts"].empty_table(), out_dir / robot_name / "collision_contacts.parquet", compression="zstd")
             for env_dir in (d for d in out_dir.iterdir() if d.is_dir()):
                 engine_peds = env_dir / "peds_physics.parquet"
                 arena_peds = env_dir / "peds.parquet"
