@@ -324,6 +324,10 @@ _METRIC_DTYPES = {
     "collision_amount_pedestrian": pl.Int64,
     "collision_obstacles": pl.List(pl.String),
     "pose_source": pl.String,
+    "pose_frame": pl.String,
+    "crowd_visible": pl.Boolean,
+    "crowd_condition": pl.String,
+    "crowd_visibility_source": pl.String,
     "pose_samples": pl.Int64,
     "pose_anchor_residual_m": pl.Float64,
     "status": pl.String,
@@ -387,6 +391,79 @@ def _record_conditions(record: pl.DataFrame) -> list[dict] | None:
         if parsed:
             return parsed
     return None
+
+
+_ROBOTS_VISIBLE_PARAM = "humansim.robots_visible"
+_ROBOTS_VISIBLE_LAUNCH = "human.robots.visible"
+
+
+def _run_manifest(episode_dir: pathlib.Path, data_root: pathlib.Path) -> dict[str, typing.Any] | None:
+    """The manifest.yaml of the run above episode_dir, None for bare episode dirs and unreadable files."""
+    import yaml
+
+    for parent in episode_dir.parents:
+        manifest_path = parent / "manifest.yaml"
+        if manifest_path.exists():
+            try:
+                data = yaml.safe_load(manifest_path.read_text())
+            except (OSError, yaml.YAMLError) as e:
+                _log.warning(f"{manifest_path}: unreadable: {e!r}")
+                return None
+            return data if isinstance(data, dict) else None
+        if parent == data_root:
+            break
+    return None
+
+
+def _launch_robots_visible(manifest: dict[str, typing.Any] | None) -> bool | None:
+    """human.robots.visible from the run's CLI passthrough, else from its suite launch block, None when neither sets it."""
+    if manifest is None:
+        return None
+    for token in reversed(manifest.get("cli_args") or []):
+        key, sep, value = str(token).partition(":=")
+        if sep and key == _ROBOTS_VISIBLE_LAUNCH:
+            return value.strip().lower() == "true"
+    suite = manifest.get("suite")
+    launch = suite.get("launch") if isinstance(suite, dict) else None
+    if isinstance(launch, dict) and _ROBOTS_VISIBLE_LAUNCH in launch:
+        return str(launch[_ROBOTS_VISIBLE_LAUNCH]).strip().lower() == "true"
+    return None
+
+
+def _crowd_columns(visible: bool, source: str) -> dict[str, typing.Any]:
+    return {"crowd_visible": visible, "crowd_condition": "visible" if visible else "blind", "crowd_visibility_source": source}
+
+
+def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict[str, typing.Any] | None) -> dict[str, typing.Any]:
+    """Whether the crowd saw the robot: the episode's accepted humansim.robots_visible, else the run's launch arg, else the launch default."""
+    import json
+
+    df = record.collect() if isinstance(record, pl.LazyFrame) else record
+    if df is not None and len(df) > 0 and "human_params" in df.columns and "time_ns" in df.columns:
+        for raw in reversed(_episode_rows(df)["human_params"].to_list()):
+            params = json.loads(raw) if raw else {}
+            if _ROBOTS_VISIBLE_PARAM in params:
+                return _crowd_columns(bool(params[_ROBOTS_VISIBLE_PARAM]), "episode_param")
+    launched = _launch_robots_visible(manifest)
+    if launched is not None:
+        return _crowd_columns(launched, "launch_arg")
+    return _crowd_columns(True, "default")
+
+
+def _pose_frame(tf_gt: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> str | None:
+    """TF parent frame of the pose stream inside the episode window, the most frequent one when several appear."""
+    df = tf_gt.collect() if isinstance(tf_gt, pl.LazyFrame) else tf_gt
+    if df is None or len(df) == 0 or "frame_id" not in df.columns:
+        return None
+    start_ns, end_ns = window
+    if start_ns is not None:
+        df = df.filter(pl.col("time_ns") >= start_ns)
+    if end_ns is not None:
+        df = df.filter(pl.col("time_ns") <= end_ns)
+    if len(df) == 0:
+        return None
+    counts = df.group_by("frame_id").len().sort(["len", "frame_id"], descending=[True, False])
+    return str(counts["frame_id"][0])
 
 
 def _record_outcome(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMetadata | None) -> tuple[int | None, str | None]:
@@ -594,14 +671,19 @@ class ProcessingPipeline:
             except Exception as e:
                 _log.warning(f"episode_{ep.episode_id:03d}: could not read metadata: {e}")
 
+        bundles = self.extract_episode(ep, force_extract=force_extract)
+        record = next((bundle.episode_record for bundle in (bundles or {}).values() if bundle.episode_record is not None), None)
+        crowd = _crowd_visibility(record, _run_manifest(episode_dir, self.folder_manager.data_root))
+
         def finish(rows: list[dict]) -> list[dict]:
+            for row in rows:
+                row.update(crowd)
             try:
                 ParquetStore.write_rows(rows, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES)
             except Exception as e:
                 _log.warning(f"episode_{ep.episode_id:03d}: metrics.parquet not written, the combined frame is the only copy: {e!r}")
             return rows
 
-        bundles = self.extract_episode(ep, force_extract=force_extract)
         if bundles is None or len(bundles) == 0:
             return finish([_status_row(ep, metadata, _metadata_robot(metadata), "no_recording", "no MCAP or empty extraction")])
 
@@ -624,6 +706,7 @@ class ProcessingPipeline:
             for robot_name, bundle in robots.items():
                 window = _episode_window(bundle.episode_record)
                 tf_gt, pose_source = resolve_pose_source(bundle, window)
+                pose_frame = _pose_frame(tf_gt, window)
                 bundle.tf_gt = tf_gt
 
                 peds_count = 0
@@ -760,6 +843,7 @@ class ProcessingPipeline:
                     if pose_source.kind == "odom":
                         ep_metrics["num_pedestrians"] = aligned_ep.num_pedestrians
                     ep_metrics["pose_source"] = pose_source.kind
+                    ep_metrics["pose_frame"] = pose_frame
                     ep_metrics["pose_samples"] = pose_source.samples
                     ep_metrics["pose_anchor_residual_m"] = pose_source.residual_m
                     if pose_source.kind == "odom":
