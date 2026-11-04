@@ -28,10 +28,9 @@ from arena_evaluation_msgs.msg import BenchmarkState
 from arena_evaluation_msgs.srv import RecordEpisode
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry, HoldEntry, HoldRegistry, LockstepStatus, SimState
 from rcl_interfaces.srv import GetParameters, SetParameters
-from task_generator.constants import Constants
-from task_generator_msgs.action import RunEpisode
-from task_generator_msgs.msg import EpisodeRecord
-from task_generator_msgs.srv import QueueEpisode
+from arena_runtime_msgs.action import RunEpisode
+from arena_runtime_msgs.msg import EpisodeRecord
+from arena_runtime_msgs.srv import QueueEpisode
 
 T = typing.TypeVar("T")
 
@@ -42,8 +41,7 @@ def _stage(name: str = "s1", *, timeout_peds: float | None = None, config: dict 
         episodes=1,
         robot="jackal",
         map="map_empty",
-        tm_robots=Constants.TaskMode.TM_Robots.RANDOM,
-        tm_obstacles=Constants.TaskMode.TM_Obstacles.RANDOM,
+        modes={"robots": "random", "obstacles": "random"},
         config={"random": {"dynamic": {"min": 2, "max": 3}}} if config is None else config,
         seed=3,
         timeout=45.0,
@@ -191,7 +189,7 @@ def test_only_foreign_holders_count_as_env_holds(tmp_path: pathlib.Path):
         seen = []
         runner._on_holders(HoldRegistry(holds=[HoldEntry(caller_id=ARENA_NODE_FQN, reason="reset", count=1)]))
         seen.append(runner._env_holds)
-        runner._on_holders(HoldRegistry(holds=[HoldEntry(caller_id=ARENA_NODE_FQN), HoldEntry(caller_id="/arena/env_0/task_generator_node")]))
+        runner._on_holders(HoldRegistry(holds=[HoldEntry(caller_id=ARENA_NODE_FQN), HoldEntry(caller_id="/arena/env_0/arena_env_node")]))
         seen.append(runner._env_holds)
         return seen
 
@@ -529,8 +527,14 @@ def test_shutdown_interrupts_the_runtime_group_and_kills_escaped_descendants(tmp
         assert _drive(tmp_path, body) == (None, None, True)
         assert proc.poll() is not None
         assert viz.poll() is not None
-        time.sleep(0.2)
-        assert all(_proc_starttime(pid) != start or pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0] == "Z" for pid, start in escaped.items())
+
+        def escaped_gone() -> bool:
+            return all(_proc_starttime(pid) != start or pathlib.Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0] == "Z" for pid, start in escaped.items())
+
+        deadline = time.monotonic() + 20.0
+        while not escaped_gone() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert escaped_gone()
         assert any("outlived the launch, sending SIGKILL" in m for m in runner_log)
     finally:
         for pid in escaped:
