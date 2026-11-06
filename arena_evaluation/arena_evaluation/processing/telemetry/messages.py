@@ -1,0 +1,110 @@
+"""Decoded ROS message helpers, recorded schema declarations, and the robot and environment identities of messages."""
+
+from __future__ import annotations
+
+import dataclasses
+import functools
+import math
+import re
+import typing
+from collections.abc import Sequence
+
+if typing.TYPE_CHECKING:
+    from mcap.records import Schema
+
+NS_PER_SECOND = 1_000_000_000
+DEFAULT_ENV_ID = "env_0"
+_ENV_TOKEN = re.compile(r"(env_\d+)")
+_FIELD_DECLARATION = re.compile(r"^\s*[A-Za-z_][\w/]*(?:\[\d*\])?\s+([A-Za-z_]\w*)", re.MULTILINE)
+_CONTROLLER_SUFFIX = "_controller"
+_POWER_PUBLISHER = "power_publisher"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RobotRef:
+    """Environment and robot of a message; environment-level topics name the environment as their robot."""
+
+    env_id: str
+    robot_id: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Envelope:
+    """A decoded message with its log time, its recorded schema, and the robot it belongs to."""
+
+    t_ns: int
+    ref: RobotRef
+    schema: Schema
+    body: typing.Any
+
+
+def stamp_ns(header: typing.Any) -> int:
+    """Header stamp of a message in nanoseconds."""
+    return int(header.stamp.sec) * NS_PER_SECOND + int(header.stamp.nanosec)
+
+
+def yaw_from_orientation(orientation: typing.Any) -> float:
+    """Heading angle of a geometry_msgs quaternion."""
+    x, y, z, w = orientation.x, orientation.y, orientation.z, orientation.w
+    return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+
+
+def declares(schema: Schema, body: typing.Any, field: str) -> bool:
+    """Whether the recorded schema declares a field; without schema text the message class decides."""
+    if schema.data:
+        return field in _declared_fields(schema.data.decode())
+    return field in {slot.lstrip("_") for slot in body.__slots__}
+
+
+@functools.lru_cache(maxsize=256)
+def _declared_fields(text: str) -> frozenset[str]:
+    return frozenset(_FIELD_DECLARATION.findall(text))
+
+
+def env_id_in(text: str, default: str = DEFAULT_ENV_ID) -> str:
+    """The env_N token of a topic or frame name, or the default when the name has none."""
+    match = _ENV_TOKEN.search(text)
+    return match.group(1) if match else default
+
+
+def topic_parts(topic: str) -> list[str]:
+    """Non-empty path segments of a topic name."""
+    return [part for part in topic.strip("/").split("/") if part]
+
+
+def robot_id_of(parts: Sequence[str], env_id: str) -> str:
+    """Robot named by the segment before the topic name; controller and power-publisher segments name their robot's parent."""
+    if len(parts) < 2:
+        return f"{env_id}_unknown"
+    segment = parts[-2]
+    if segment == env_id:
+        return env_id
+    if segment.endswith(_CONTROLLER_SUFFIX) or segment == _POWER_PUBLISHER:
+        segment = parts[-3] if len(parts) >= 3 else segment
+    return f"{env_id}_{segment}"
+
+
+def is_controller_topic(topic: str) -> bool:
+    """Whether the topic is published by a robot's diff-drive controller."""
+    parts = topic_parts(topic)
+    return len(parts) >= 2 and parts[-2].endswith(_CONTROLLER_SUFFIX)
+
+
+def pedestrian_id(number: int) -> str:
+    """Canonical pedestrian identifier from the engine's numeric agent id."""
+    return f"Pedestrian_{number}"
+
+
+def robot_row(envelope: Envelope, **columns: typing.Any) -> dict[str, typing.Any]:
+    """A row of a robot-scoped table."""
+    return {"t_ns": envelope.t_ns, "env_id": envelope.ref.env_id, "robot_id": envelope.ref.robot_id, **columns}
+
+
+def env_row(envelope: Envelope, **columns: typing.Any) -> dict[str, typing.Any]:
+    """A row of an environment-scoped table."""
+    return {"t_ns": envelope.t_ns, "env_id": envelope.ref.env_id, **columns}
+
+
+def value_at(values: Sequence[float], index: int) -> float | None:
+    """The value at an index of a parallel array, None when the array is shorter."""
+    return float(values[index]) if index < len(values) else None

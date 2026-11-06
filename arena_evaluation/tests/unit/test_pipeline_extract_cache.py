@@ -26,17 +26,17 @@ def _episode(tmp_path: pathlib.Path) -> tuple[ProcessingPipeline, EpisodeDescrip
     return ProcessingPipeline(FolderManager(tmp_path), workers=1), descriptor, bag
 
 
-def test_extract_episode_reextracts_a_cache_written_by_an_older_layout(tmp_path: pathlib.Path) -> None:
+def test_extract_episode_reextracts_a_cache_without_the_completion_marker(tmp_path: pathlib.Path) -> None:
     pipeline, episode, _ = _episode(tmp_path)
     topics = pathlib.Path(episode.episode_dir) / "topics"
     (topics / "env_0_jackal").mkdir(parents=True)
-    pl.DataFrame({"time_ns": [1], "pos_x": [999.0]}).write_parquet(topics / "env_0_jackal" / "odom.parquet")
+    pl.DataFrame({"t_ns": [1], "odom_x": [999.0]}).write_parquet(topics / "env_0_jackal" / "odom.parquet")
     assert not TopicParquetStore.is_current(topics)
 
     bundles = pipeline.extract_episode(episode)
 
     assert bundles is not None
-    assert bundles["env_0_jackal"].odom.collect()["pos_x"].to_list() == [1.0]
+    assert bundles["env_0_jackal"].robot_odom.collect()["odom_x"].to_list() == [1.0]
     assert TopicParquetStore.is_current(topics)
 
 
@@ -48,4 +48,4 @@ def test_extract_episode_reuses_a_cache_written_by_this_layout(tmp_path: pathlib
     second = pipeline.extract_episode(episode)
 
     assert first is not None and second is not None
-    assert second["env_0_jackal"].odom.collect().equals(first["env_0_jackal"].odom.collect())
+    assert second["env_0_jackal"].robot_odom.collect().equals(first["env_0_jackal"].robot_odom.collect())

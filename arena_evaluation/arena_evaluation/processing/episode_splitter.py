@@ -6,12 +6,13 @@ import polars as pl
 import yaml
 
 from arena_evaluation.processing.mcap_reader import anchor_at
+from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, peak_pedestrian_count
 from arena_evaluation.processing.topic_aligner import TopicAligner
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, TopicBundle
 
 
 def _parse_conditions(raw: str | None) -> list[dict] | None:
-    """Parse the recorded episode_record `conditions` JSON string into a list of dicts."""
+    """Parse the recorded episode `conditions_yaml` JSON string into a list of dicts."""
     if not raw:
         return None
     try:
@@ -25,13 +26,13 @@ def _env_offset(tf_static: pl.DataFrame | None, at_ns: int | None = None) -> tup
     """Env packing translation from the `map -> env_<n>/map` transform in effect at `at_ns` (the latest when None), None if multi-env ambiguous."""
     if tf_static is None or len(tf_static) == 0:
         return (0.0, 0.0)
-    rows = tf_static.filter((pl.col("frame_id") == "map") & pl.col("child_frame_id").str.contains(r"^env_\d+/map$"))
+    rows = tf_static.filter((pl.col("parent_frame") == "map") & pl.col("child_frame").str.contains(r"^env_\d+/map$"))
     if len(rows) == 0:
         return (0.0, 0.0)
-    if rows["child_frame_id"].n_unique() > 1:
+    if rows["child_frame"].n_unique() > 1:
         return None
-    times = rows["time_ns"].to_list() if "time_ns" in rows.columns else [0] * len(rows)
-    anchors = list(zip(times, rows["trans_x"].cast(pl.Float64).to_list(), rows["trans_y"].cast(pl.Float64).to_list(), strict=True))
+    times = rows["t_ns"].to_list()
+    anchors = list(zip(times, rows["tx"].cast(pl.Float64).to_list(), rows["ty"].cast(pl.Float64).to_list(), strict=True))
     return anchor_at(anchors, at_ns) if at_ns is not None else anchors[-1][1:]
 
 
@@ -41,22 +42,24 @@ def _episode_snapshot(snapshot: pl.DataFrame | None, start_time: int, end_time: 
     if snapshot is None or len(snapshot) == 0:
         return None
 
-    window = snapshot.filter((pl.col("time_ns") >= start_time) & (pl.col("time_ns") <= end_time))
+    window = snapshot.filter((pl.col("t_ns") >= start_time) & (pl.col("t_ns") <= end_time))
 
-    seed_candidates = snapshot.filter(pl.col("time_ns") <= start_time)
+    seed_candidates = snapshot.filter(pl.col("t_ns") <= start_time)
     if len(seed_candidates) > 0:
-        seed_time = seed_candidates["time_ns"].max()
+        seed_time = seed_candidates["t_ns"].max()
     elif len(window) > 0:
-        seed_time = window["time_ns"].min()
+        seed_time = window["t_ns"].min()
     else:
         return None
 
-    seed = snapshot.filter(pl.col("time_ns") == seed_time)
-    return pl.concat([seed, window]).unique().sort("time_ns")
+    seed = snapshot.filter(pl.col("t_ns") == seed_time)
+    return pl.concat([seed, window]).unique().sort("t_ns")
 
 
 def _params_start_goal(raw: str | None) -> tuple[list, list]:
     """Start and goal of the first robot keyed in the episode params YAML, empty when it carries none."""
+    if not raw:
+        return [], []
     try:
         params = yaml.safe_load(raw) if raw else {}
     except yaml.YAMLError:
@@ -67,6 +70,33 @@ def _params_start_goal(raw: str | None) -> tuple[list, list]:
     if robot is None:
         return [], []
     return params.get(f"{robot}.start", []), params.get(f"{robot}.goal", [])
+
+
+def _plan_yaw_at(plan: pl.DataFrame, start_time: int) -> float | None:
+    """Heading of the first waypoint of the first plan published at or after start_time."""
+    later = plan.filter(pl.col("t_ns") >= start_time)
+    if len(later) == 0:
+        return None
+    first_stamp = later["t_ns"].min()
+    return float(later.filter(pl.col("t_ns") == first_stamp).sort("waypoint_idx")["yaw"][0])
+
+
+def _plan_goal_within(plan: pl.DataFrame, start_time: int, end_time: int) -> list[float]:
+    """(x, y, yaw) of the last waypoint of the first plan published inside the episode window, empty when none."""
+    inside = plan.filter((pl.col("t_ns") >= start_time) & (pl.col("t_ns") <= end_time))
+    if len(inside) == 0:
+        return []
+    first_stamp = inside["t_ns"].min()
+    last = inside.filter(pl.col("t_ns") == first_stamp).sort("waypoint_idx").row(-1, named=True)
+    return [last["x"], last["y"], last["yaw"]]
+
+
+def _ground_truth_pose(aligned_df: pl.DataFrame, index: int) -> list[float]:
+    """Ground-truth (x, y, yaw) of an aligned sample, empty without one: odometry never stands in for the trajectory."""
+    row = aligned_df.row(index, named=True)
+    if row.get("pos_x_gt") is None:
+        return []
+    return [row["pos_x_gt"], row["pos_y_gt"], row.get("yaw_gt", 0.0)]
 
 
 class EpisodeSplitter:
@@ -82,7 +112,7 @@ class EpisodeSplitter:
         """
         Split the raw bundle into aligned episodes.
         """
-        if bundle.odom is None:
+        if bundle.robot_odom is None:
             return []
 
         def _to_df(lf_or_df: pl.DataFrame | pl.LazyFrame | None) -> pl.DataFrame | None:
@@ -90,42 +120,30 @@ class EpisodeSplitter:
                 return lf_or_df.collect()
             return lf_or_df
 
-        odom_is_empty = False
-        if isinstance(bundle.odom, pl.LazyFrame):
-            odom_is_empty = bundle.odom.limit(1).collect().height == 0
-        else:
-            odom_is_empty = len(bundle.odom) == 0
-
-        if odom_is_empty:
+        odometry = _to_df(bundle.robot_odom)
+        if odometry is None or len(odometry) == 0:
             return []
+        last_odom_ns = int(odometry["t_ns"].max())
 
-        record_df = _to_df(bundle.episode_record)
-        initialpose_df = _to_df(bundle.initialpose)
-        plan_df = _to_df(bundle.plan)
-        semantic_snapshot_df = _to_df(bundle.semantic_snapshot)
+        record_df = _to_df(bundle.episode_lifecycle)
+        initialpose_df = _to_df(bundle.robot_initialpose)
+        plan_df = _to_df(bundle.robot_plans)
+        semantic_snapshot_df = _to_df(bundle.world_semantics)
         tf_static_df = _to_df(bundle.tf_static)
+        peds_df = _to_df(bundle.pedestrian_tracks)
 
         episodes = []
 
         if record_df is None or len(record_df) == 0:
-            aligned_df = self.aligner.align(bundle)
-            aligned_df = _to_df(aligned_df)
+            aligned_df = _to_df(self.aligner.align(bundle))
             if aligned_df is not None and len(aligned_df) >= self.min_episode_frames:
-                start_pos, goal_pos = [], []
-                first_row = aligned_df.row(0, named=True)
-                last_row = aligned_df.row(-1, named=True)
-                if "pos_x" in first_row and "pos_y" in first_row and first_row["pos_x"] is not None:
-                    start_pos = [first_row["pos_x"], first_row["pos_y"], first_row.get("yaw", 0.0)]
-                if "pos_x" in last_row and "pos_y" in last_row and last_row["pos_x"] is not None:
-                    goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
-
                 episodes.append(
                     AlignedEpisodeBundle(
                         episode_id=0,
                         data=aligned_df,
-                        start_pos=start_pos,
-                        goal_pos=goal_pos,
-                        num_pedestrians=self._estimate_peds(aligned_df),
+                        start_pos=_ground_truth_pose(aligned_df, 0),
+                        goal_pos=_ground_truth_pose(aligned_df, -1),
+                        num_pedestrians=peak_pedestrian_count(peds_df, *_window_bounds(aligned_df)),
                         robot_name=robot_name,
                         semantic_snapshot=semantic_snapshot_df,
                         env_offset=_env_offset(tf_static_df),
@@ -138,31 +156,24 @@ class EpisodeSplitter:
         i = 0
         while i < len(rows):
             row = rows[i]
-            start_time = row["time_ns"]
+            start_time = row["t_ns"]
 
             if i + 1 < len(rows) and rows[i + 1]["episode_id"] == row["episode_id"]:
-                end_time = rows[i + 1]["time_ns"]
+                end_time = rows[i + 1]["t_ns"]
                 i += 2
             else:
-                if i + 1 < len(rows):
-                    end_time = rows[i + 1]["time_ns"] - 1
-                else:
-                    if isinstance(bundle.odom, pl.LazyFrame):
-                        end_time = bundle.odom.select(pl.col("time_ns").max()).collect().item()
-                    else:
-                        end_time = bundle.odom.select(pl.col("time_ns").max()).item()
+                end_time = rows[i + 1]["t_ns"] - 1 if i + 1 < len(rows) else last_odom_ns
                 i += 1
 
-            aligned_df = self.aligner.align(bundle, start_time, end_time)
-            aligned_df = _to_df(aligned_df)
+            aligned_df = _to_df(self.aligner.align(bundle, start_time, end_time))
 
             if aligned_df is None or len(aligned_df) < self.min_episode_frames:
                 continue
 
-            start_pos, goal_pos = _params_start_goal(row["params"])
+            start_pos, goal_pos = _params_start_goal(row["params_yaml"])
 
             if not start_pos and initialpose_df is not None and len(initialpose_df) > 0:
-                df_init = initialpose_df.filter(pl.col("time_ns") >= start_time)
+                df_init = initialpose_df.filter(pl.col("t_ns") >= start_time)
                 if len(df_init) > 0:
                     row_init = df_init.row(0, named=True)
                 else:
@@ -170,30 +181,18 @@ class EpisodeSplitter:
                 start_pos = [row_init["pos_x"], row_init["pos_y"], row_init["yaw"]]
 
             if start_pos and len(start_pos) == 3 and plan_df is not None and len(plan_df) > 0:
-                df_plan = plan_df.filter(pl.col("time_ns") >= start_time)
-                if len(df_plan) > 0:
-                    row_plan = df_plan.row(0, named=True)
-                    if "poses_yaw" in row_plan and len(row_plan["poses_yaw"]) > 0:
-                        plan_yaw = row_plan["poses_yaw"][0]
-                        if plan_yaw != 0.0 and abs(start_pos[2] - plan_yaw) > 1.0:
-                            start_pos[2] = plan_yaw
+                plan_yaw = _plan_yaw_at(plan_df, start_time)
+                if plan_yaw is not None and plan_yaw != 0.0 and abs(start_pos[2] - plan_yaw) > 1.0:
+                    start_pos[2] = plan_yaw
 
             if not start_pos and aligned_df is not None and len(aligned_df) > 0:
-                first_row = aligned_df.row(0, named=True)
-                if "pos_x" in first_row and "pos_y" in first_row:
-                    start_pos = [first_row["pos_x"], first_row["pos_y"], first_row.get("yaw", 0.0)]
+                start_pos = _ground_truth_pose(aligned_df, 0)
 
             if not goal_pos and plan_df is not None and len(plan_df) > 0:
-                df_plan_ep = plan_df.filter((pl.col("time_ns") >= start_time) & (pl.col("time_ns") <= end_time))
-                if len(df_plan_ep) > 0:
-                    row_plan = df_plan_ep.row(0, named=True)
-                    if "poses_x" in row_plan and len(row_plan["poses_x"]) > 0:
-                        goal_pos = [row_plan["poses_x"][-1], row_plan["poses_y"][-1], row_plan["poses_yaw"][-1]]
+                goal_pos = _plan_goal_within(plan_df, start_time, end_time)
 
             if not goal_pos and aligned_df is not None and len(aligned_df) > 0:
-                last_row = aligned_df.row(-1, named=True)
-                if "pos_x" in last_row and "pos_y" in last_row:
-                    goal_pos = [last_row["pos_x"], last_row["pos_y"], last_row.get("yaw", 0.0)]
+                goal_pos = _ground_truth_pose(aligned_df, -1)
 
             episodes.append(
                 AlignedEpisodeBundle(
@@ -201,19 +200,17 @@ class EpisodeSplitter:
                     data=aligned_df,
                     start_pos=start_pos,
                     goal_pos=goal_pos,
-                    num_pedestrians=self._estimate_peds(aligned_df),
+                    num_pedestrians=peak_pedestrian_count(peds_df, start_time - ALIGN_TOLERANCE_NS, end_time),
                     robot_name=robot_name,
                     semantic_snapshot=_episode_snapshot(semantic_snapshot_df, start_time, end_time),
-                    conditions=_parse_conditions(row.get("conditions")),
+                    conditions=_parse_conditions(row.get("conditions_yaml")),
                     env_offset=_env_offset(tf_static_df, start_time),
                 )
             )
 
         return episodes
 
-    def _estimate_peds(self, df: pl.DataFrame) -> int:
-        if "num_pedestrians" in df.columns:
-            peds = df["num_pedestrians"].drop_nulls()
-            if len(peds) > 0:
-                return int(peds.max())  # pyright: ignore[reportArgumentType]
-        return 0
+
+def _window_bounds(aligned_df: pl.DataFrame) -> tuple[int, int]:
+    """Start and end stamps of an aligned frame on the odometry clock."""
+    return int(aligned_df["time_ns"].min()), int(aligned_df["time_ns"].max())  # pyright: ignore[reportArgumentType]

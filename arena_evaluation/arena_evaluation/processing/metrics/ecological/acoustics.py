@@ -27,7 +27,7 @@ class AcousticsCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["path_metrics"]
-    REQUIRED_TOPICS = ["acoustics"]
+    REQUIRED_TOPICS = ["robot_acoustics"]
 
     UNITS = {
         "l_aeq_t": "dBA",
@@ -72,7 +72,7 @@ class AcousticsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
         topics = self.native_topics(episode)
-        acous = topics.get("acoustics")
+        acous = topics.get("robot_acoustics")
         if acous is None or "total_level_af_dba" not in acous.columns or "time_ns" not in acous.columns:
             return {k: None for k in self.output_keys()}
 

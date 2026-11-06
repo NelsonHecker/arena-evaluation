@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import ast
 import typing
 
 import numpy as np
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -16,7 +16,7 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics", "path_metrics"]
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     # Hall's proxemic zones (meters), edge-to-edge
     _INTIMATE_R = 0.45
@@ -88,16 +88,14 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
         peds_df = self.native_ped_frame(episode)
-        if peds_df is None or "peds_positions" not in peds_df.columns:
+        if peds_df is None or "x" not in peds_df.columns:
             return {k: None for k in self.output_keys()}
         pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
         if len(pos_x) == 0:
             return {k: None for k in self.output_keys()}
 
-        peds_time_ns = peds_df["time_ns"].to_numpy()
-        peds_positions = peds_df["peds_positions"].to_list()
-        num_peds_col = peds_df["num_pedestrians"].to_numpy() if "num_pedestrians" in peds_df.columns else None
-        peds_twists_list = peds_df["peds_twists"].to_list() if "peds_twists" in peds_df.columns else None
+        frames = frames_of(peds_df)
+        peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
 
         N = len(peds_time_ns)
         if N == 0:
@@ -138,12 +136,9 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
                 return "social"
             return "public"
 
-        for i in range(N):
+        for i, frame in enumerate(frames):
             rx, ry = float(rpx[i]), float(rpy[i])
-            peds_arr = self._parse_peds(
-                peds_positions[i],
-                num_peds_col[i] if num_peds_col is not None else None,
-            )
+            peds_arr = frame.select("x", "y").to_numpy()
 
             if peds_arr.shape[0] == 0:
                 min_clearances.append(None)
@@ -176,25 +171,12 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             if d_eff < self._PERSONAL_R:
                 psii_sum += (self._PERSONAL_R - max(d_eff, 0.0)) * dt[i]
 
-            ped_vels = None
-            if peds_twists_list is not None and i < len(peds_twists_list):
-                tw_raw = peds_twists_list[i]
-                if tw_raw and len(tw_raw) > 0:
-                    if isinstance(tw_raw, str):
-                        try:
-                            tw_raw = ast.literal_eval(tw_raw)
-                        except Exception:
-                            tw_raw = []
-                    tw_arr = np.array(tw_raw, dtype=np.float64)
-                    if tw_arr.size > 0 and len(tw_arr) % 3 == 0:
-                        ped_vels = tw_arr.reshape(-1, 3)
+            ped_vels = frame.select("vx", "vy").to_numpy()
 
             for j in range(peds_arr.shape[0]):
                 p_rel = np.array([peds_arr[j, 0] - rx, peds_arr[j, 1] - ry])
                 d_ij = dists[j]
-                v_ped = np.array([0.0, 0.0])
-                if ped_vels is not None and j < ped_vels.shape[0]:
-                    v_ped = ped_vels[j, :2]
+                v_ped = ped_vels[j]
                 v_rel = v_ped - v_robot
                 rel_speed = float(np.linalg.norm(v_rel))
                 if rel_speed > 0.05 and np.dot(p_rel, v_rel) < 0:

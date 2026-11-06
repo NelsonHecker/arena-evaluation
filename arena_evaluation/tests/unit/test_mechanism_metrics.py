@@ -1,5 +1,9 @@
+import dataclasses
+
 import numpy as np
 import pytest
+from flat_peds import flat_peds
+from snapshot_rows import snapshot_frame
 
 pl = pytest.importorskip("polars")
 
@@ -50,66 +54,45 @@ def _calc(world=None):
     return calc
 
 
-def _data(points, step_s=1.0, **columns):
+@dataclasses.dataclass
+class Scene:
+    """An episode's aligned frame with the flat pedestrian table recorded alongside it."""
+
+    data: pl.DataFrame
+    peds: pl.DataFrame | None
+
+
+def _data(points, step_s=1.0, peds=None, **columns):
+    """Robot samples on a 1 Hz clock: odometry and ground truth at the given points, with optional pedestrians."""
     n = len(points)
     frame = {
         "time_ns": [int(i * step_s * T) for i in range(n)],
         "pos_x": [float(p[0]) for p in points],
         "pos_y": [float(p[1]) for p in points],
         "yaw": [0.0] * n,
+        "pos_x_gt": [float(p[0]) for p in points],
+        "pos_y_gt": [float(p[1]) for p in points],
+        "yaw_gt": [0.0] * n,
     }
     frame.update(columns)
-    return pl.DataFrame(frame)
+    return Scene(pl.DataFrame(frame), peds)
 
 
-def _peds(per_sample, names=True):
-    """Ped columns from per-sample lists of (name, x, y, vx, vy)."""
-    positions, twists, counts, row_names = [], [], [], []
-    for peds in per_sample:
-        positions.append([v for _n, x, y, _vx, _vy in peds for v in (float(x), float(y), 0.0)])
-        twists.append([v for _n, _x, _y, vx, vy in peds for v in (float(vx), float(vy), 0.0)])
-        counts.append(len(peds))
-        row_names.append([n for n, *_ in peds])
-    columns = {
-        "peds_positions": pl.Series(positions, dtype=pl.List(pl.Float64)),
-        "peds_twists": pl.Series(twists, dtype=pl.List(pl.Float64)),
-        "num_pedestrians": counts,
-    }
-    if names:
-        columns["peds_names"] = pl.Series(row_names, dtype=pl.List(pl.Utf8))
-    return columns
+def _peds(per_sample):
+    """The pedestrian table of per-sample lists of (name, x, y, vx, vy), one frame per 1 Hz sample."""
+    return flat_peds([(i * T, [{"ped_id": name, "ped_name": name, "x": x, "y": y, "vx": vx, "vy": vy} for name, x, y, vx, vy in peds]) for i, peds in enumerate(per_sample)])
 
 
 def _snap(rows):
-    """Long-format snapshot rows: (time_s, entity, kind, field, field_kind, value)."""
-    cols = {k: [] for k in ("time_ns", "entity", "kind", "field", "field_kind", "value_str", "value_num", "value_bool", "value_list")}
-    for t, e, k, f, fk, v in rows:
-        cols["time_ns"].append(int(t * T))
-        cols["entity"].append(e)
-        cols["kind"].append(k)
-        cols["field"].append(f)
-        cols["field_kind"].append(fk)
-        cols["value_str"].append(v if fk == "discrete" else None)
-        cols["value_num"].append(float(v) if fk == "continuous" else None)
-        cols["value_bool"].append(bool(v) if fk == "predicate" else None)
-        cols["value_list"].append(list(v) if fk == "members" else None)
-    schema = {
-        "time_ns": pl.Int64,
-        "entity": pl.Utf8,
-        "kind": pl.Utf8,
-        "field": pl.Utf8,
-        "field_kind": pl.Utf8,
-        "value_str": pl.Utf8,
-        "value_num": pl.Float64,
-        "value_bool": pl.Boolean,
-        "value_list": pl.List(pl.Utf8),
-    }
-    return pl.DataFrame(cols, schema=schema)
+    """World-semantics rows: (time_s, entity, kind, field, field_kind, value), members given as a list of names."""
+    return snapshot_frame([(int(t * T), e, k, f, fk, v) for t, e, k, f, fk, v in rows])
 
 
-def _episode(data, snapshot=None, robot_name=ROBOT):
+def _episode(scene, snapshot=None, robot_name=ROBOT):
+    data, peds = (scene.data, scene.peds) if isinstance(scene, Scene) else (scene, None)
     start = [data["pos_x"][0], data["pos_y"][0], 0.0] if len(data) else []
-    return AlignedEpisodeBundle(episode_id=1, data=data, start_pos=start, goal_pos=[], robot_name=robot_name, semantic_snapshot=snapshot)
+    topics = {} if peds is None else {"pedestrian_tracks": peds}
+    return AlignedEpisodeBundle(episode_id=1, data=data, start_pos=start, goal_pos=[], robot_name=robot_name, semantic_snapshot=snapshot, peds=peds, topics=topics)
 
 
 def _ctx(episode, world=None):
@@ -120,7 +103,7 @@ def _ctx(episode, world=None):
         view=SemanticView.from_episode(episode),
         world=world,
         identity=robot_identity(episode),
-        peds=ped_tracks(episode.data, track.time_ns),
+        peds=ped_tracks(episode.peds, track.time_ns),
         robot_radius=0.25,
     )
 
@@ -174,9 +157,9 @@ def test_parse_members_round_trip():
 
 def test_robot_env_snapshot_filters_multi_env_only():
     snap = _snap([(0, "env_0/door_1/0", "door", "state", "discrete", "open"), (0, "env_1/door_1/0", "door", "state", "discrete", "closed")])
-    assert robot_env_snapshot(snap, "env_1_jackal")["entity"].to_list() == ["env_1/door_1/0"]
+    assert robot_env_snapshot(snap, "env_1_jackal")["entity_name"].to_list() == ["env_1/door_1/0"]
     assert len(robot_env_snapshot(snap, None)) == 2
-    single = snap.filter(pl.col("entity").str.starts_with("env_0"))
+    single = snap.filter(pl.col("entity_name").str.starts_with("env_0"))
     assert len(robot_env_snapshot(single, "env_5_jackal")) == 1
     assert robot_env_snapshot(None, ROBOT) is None
 
@@ -216,18 +199,13 @@ def test_geometry_helpers():
     assert list(in_call_area(np.array([4.0, 1.0, 9.0]), np.array([1.0, 1.0, 1.0]), elev)) == [True, False, False]
 
 
-def test_ped_tracks_named_index_and_finite_difference():
-    data = _data([(0, 0)] * 2, **_peds([[("env_0/p1", 0, 0, 0.3, 0)], [("env_0/p1", 1, 0, 0.3, 0)]]))
-    tracks = ped_tracks(data)
+def test_ped_tracks_holds_each_named_pedestrian_on_the_robot_axis():
+    scene = _data([(0, 0)] * 2, peds=_peds([[("env_0/p1", 0, 0, 0.3, 0)], [("env_0/p1", 1, 0, 0.3, 0)]]))
+    tracks = ped_tracks(scene.peds, np.array([0, T]))
     assert tracks.named and tracks.keys[0] == ["env_0/p1"]
     assert tracks.vel[1][0, 0] == pytest.approx(0.3)
-
-    no_names = _data([(0, 0)] * 2, peds_positions=[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], num_pedestrians=[1, 1])
-    tracks = ped_tracks(no_names)
-    assert not tracks.named and tracks.keys[1] == ["#0"]
-    assert tracks.vel[1][0, 0] == pytest.approx(2.0)
-    assert tracks.position_of(1, "#0") == (2.0, 0.0)
-    assert ped_tracks(_data([(0, 0)])) is None
+    assert tracks.position_of(1, "env_0/p1") == (1.0, 0.0)
+    assert ped_tracks(None, np.array([0, T])) is None
 
 
 def test_mechanism_world_from_description_shifts_levels_and_reads_params():
@@ -301,7 +279,7 @@ def test_robot_never_near_mechanisms():
             (0, ELEV, "elevator", "members", "members", []),
         ]
     )
-    data = _data([(30, 30), (31, 30), (32, 30)], **_peds([[], [], []]))
+    data = _data([(30, 30), (31, 30), (32, 30)], peds=_peds([[("env_0/far", 50.0, 50.0, 0.0, 0.0)]] * 3))
     results = _calc(world).calculate(_episode(data, snap), {})
     assert results["boarded_before_exit"] == 0
     assert results["entered_full_cabin"] == 0
@@ -347,7 +325,7 @@ def test_boarded_before_exit_counts_boarding_while_arrivals_inside():
 
 def test_boarded_before_exit_zero_after_arrivals_left():
     snap = _ride_snapshot(ped_exits_at=4)
-    snap = snap.filter(~((pl.col("time_ns") == 5 * T) & (pl.col("field") == "members")))
+    snap = snap.filter(~((pl.col("t_ns") == 5 * T) & (pl.col("field_name") == "members")))
     snap = pl.concat([snap, _snap([(5, ELEV, "elevator", "members", "members", [ROBOT_MEMBER])])])
     results = _calc().calculate(_episode(_data([(9, 9)] * 9), snap), {})
     assert results["boarded_before_exit"] == 0
@@ -431,7 +409,7 @@ def _pass_by_snapshot():
 def test_elevator_unnecessary_call_when_robot_passes_by():
     world = MechanismWorld(elevators=[_elevator()])
     points = [(8, 1), (4.5, 1), (4.5, 2), (4.5, 3), (8, 5), (9, 5)]
-    data = _data(points, **_peds([[]] * 6))
+    data = _data(points, peds=_peds([[("env_0/far", 50.0, 50.0, 0.0, 0.0)]] * 6))
     results = _calc(world).calculate(_episode(data, _pass_by_snapshot()), {})
     assert results["elevator_unnecessary_calls"] == 1
     assert results["elevator_wait_to_board_s"] is None
@@ -442,7 +420,7 @@ def test_elevator_call_not_attributed_when_ped_waits():
     world = MechanismWorld(elevators=[_elevator()])
     points = [(8, 1), (4.5, 1), (4.5, 2), (4.5, 3), (8, 5), (9, 5)]
     ped = [(PED, 3.0, 2.0, 0.0, 0.0)]
-    data = _data(points, **_peds([ped] * 6))
+    data = _data(points, peds=_peds([ped] * 6))
     results = _calc(world).calculate(_episode(data, _pass_by_snapshot()), {})
     assert results["elevator_unnecessary_calls"] == 0
 
@@ -469,7 +447,7 @@ def _queue_episode(ped_leaves):
     gone = (PED, 9.0, 9.0, 0.0, 0.0)
     peds = [[waiting], [waiting], [gone if ped_leaves else waiting], [gone if ped_leaves else waiting], [waiting]]
     snap = _snap([(0, ELEV, "elevator", "members", "members", []), (3, ELEV, "elevator", "members", "members", [ROBOT_MEMBER])])
-    return _episode(_data(points, **_peds(peds)), snap)
+    return _episode(_data(points, peds=_peds(peds)), snap)
 
 
 def test_elevator_queue_jump_over_waiting_ped():
@@ -563,7 +541,7 @@ def test_door_freeze_uses_open_predicate_when_state_missing():
 def _crossing(ped):
     points = [(-2, 1), (-1, 1), (-0.2, 1), (0.3, 1), (1.5, 1)]
     snap = _snap([(0, DOOR, "door", "state", "discrete", "open")])
-    return _episode(_data(points, **_peds([[ped]] * 5)), snap)
+    return _episode(_data(points, peds=_peds([[ped]] * 5)), snap)
 
 
 def test_door_yield_violation_ped_approaching_from_far_side():
@@ -581,20 +559,20 @@ def test_ped_mechanism_delay_seconds():
     world = MechanismWorld(doors=[_door()])
     ped = [(PED, 1.0, 1.0, 0.0, 0.0)]
     closed = _snap([(0, DOOR, "door", "state", "discrete", "closed")])
-    data = _data([(10, 10)] * 4, **_peds([ped] * 4))
+    data = _data([(10, 10)] * 4, peds=_peds([ped] * 4))
     assert _calc(world).calculate(_episode(data, closed), {})["ped_mechanism_delay_seconds"] == pytest.approx(3.0)
 
     opened = _snap([(0, DOOR, "door", "state", "discrete", "open")])
     assert _calc(world).calculate(_episode(data, opened), {})["ped_mechanism_delay_seconds"] == 0.0
 
-    walking = _data([(10, 10)] * 4, **_peds([[(PED, 1.0, 1.0, 1.0, 0.0)]] * 4))
+    walking = _data([(10, 10)] * 4, peds=_peds([[(PED, 1.0, 1.0, 1.0, 0.0)]] * 4))
     assert _calc(world).calculate(_episode(walking, closed), {})["ped_mechanism_delay_seconds"] == 0.0
 
 
 def test_ped_mechanism_delay_at_closed_elevator():
     world = MechanismWorld(elevators=[_elevator()])
     snap = _snap([(0, ELEV, "elevator", "cabin_door", "discrete", "closed"), (2, ELEV, "elevator", "cabin_door", "discrete", "open")])
-    data = _data([(10, 10)] * 4, **_peds([[(PED, 3.5, 1.0, 0.0, 0.0)]] * 4))
+    data = _data([(10, 10)] * 4, peds=_peds([[(PED, 3.5, 1.0, 0.0, 0.0)]] * 4))
     assert _calc(world).calculate(_episode(data, snap), {})["ped_mechanism_delay_seconds"] == pytest.approx(2.0)
 
 

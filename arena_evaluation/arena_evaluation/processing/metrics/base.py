@@ -1,17 +1,37 @@
 from __future__ import annotations
 
-import ast
 import typing
 from abc import ABC, abstractmethod
-from collections.abc import Sized
 
 import numpy as np
 import polars as pl
 
-from ..pose_segments import ride_arrival_times, teleport_jumps
+from ..pose_segments import consistent_segment, ride_arrival_times
 
 if typing.TYPE_CHECKING:
     from ...storage.schemas import AlignedEpisodeBundle, RobotParams
+
+
+def _anchored_odometry(
+    xs: np.ndarray,
+    ys: np.ndarray,
+    yaws: np.ndarray,
+    origin: tuple[float, float, float],
+    start_pos: list[float] | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Odometry turned and moved so that its first sample sits at the episode's start pose; unchanged without one."""
+    if not start_pos or len(start_pos) < 2 or len(xs) == 0:
+        return xs, ys, yaws
+    start_yaw = start_pos[2] if len(start_pos) >= 3 else 0.0
+    origin_x, origin_y, origin_yaw = origin
+    theta = start_yaw - origin_yaw
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    dx = xs - origin_x
+    dy = ys - origin_y
+    x = start_pos[0] + dx * cos_t - dy * sin_t
+    y = start_pos[1] + dx * sin_t + dy * cos_t
+    yaw = (yaws + theta + np.pi) % (2 * np.pi) - np.pi
+    return x, y, yaw
 
 
 class BaseMetricCalculator(ABC):
@@ -33,108 +53,31 @@ class BaseMetricCalculator(ABC):
         self.metrics_config: dict[str, typing.Any] = {}
 
     def resolve_robot_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Map-frame robot pose (pos_x, pos_y, yaw), the longest teleport-free piece of the track."""
-        if episode.data is not None and len(episode.data) > 0:
-            if "pos_x_gt" in episode.data.columns:
-                episode.data = episode.data.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
-            elif "pos_x" in episode.data.columns:
-                episode.data = episode.data.filter(pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan() & pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan() & pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan())
+        """Map-frame ground-truth pose (pos_x, pos_y, yaw) of the longest teleport-free piece of the track.
 
-        if episode.data is not None and len(episode.data) > 0:
-            if "pos_x_gt" in episode.data.columns:
-                odom_x = episode.data["pos_x_gt"].to_numpy().copy()
-                odom_y = episode.data["pos_y_gt"].to_numpy().copy()
-                odom_yaw = episode.data["yaw_gt"].to_numpy().copy()
-            elif "pos_x" in episode.data.columns:
-                odom_x = episode.data["pos_x"].to_numpy().copy()
-                odom_y = episode.data["pos_y"].to_numpy().copy()
-                odom_yaw = episode.data["yaw"].to_numpy().copy()
-            else:
-                odom_x = np.array([], dtype=np.float64)
-                odom_y = np.array([], dtype=np.float64)
-                odom_yaw = np.array([], dtype=np.float64)
+        The second triple is the odometry of the same piece, anchored to the episode start: an estimate for drift only.
+        Without ground truth both are empty, because odometry never stands in for the trajectory.
+        """
+        empty = np.array([], dtype=np.float64)
+        if episode.data is None or "pos_x_gt" not in episode.data.columns:
+            return empty, empty, empty, empty, empty, empty
+        episode.data = episode.data.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
+        if len(episode.data) == 0:
+            return empty, empty, empty, empty, empty, empty
 
-            raw_odom_x0 = odom_x[0] if len(odom_x) > 0 else 0.0
-            raw_odom_y0 = odom_y[0] if len(odom_y) > 0 else 0.0
-            raw_odom_yaw0 = odom_yaw[0] if len(odom_yaw) > 0 else 0.0
-            if len(odom_x) > 1:
-                stamp_col = "stamp_ns_gt" if "pos_x_gt" in episode.data.columns else "stamp_ns"
-                jumps = teleport_jumps(
-                    odom_x,
-                    odom_y,
-                    episode.data[stamp_col].to_numpy() if stamp_col in episode.data.columns else None,
-                    exempt_ns=self._ride_arrivals(episode),
-                    exempt_time_ns=episode.data["time_ns"].to_numpy() if "time_ns" in episode.data.columns else None,
-                )
+        track_x = episode.data["pos_x_gt"].to_numpy().copy()
+        track_y = episode.data["pos_y_gt"].to_numpy().copy()
+        track_yaw = episode.data["yaw_gt"].to_numpy().copy()
+        has_odometry = "pos_x" in episode.data.columns
+        odom_x = episode.data["pos_x"].to_numpy().astype(np.float64) if has_odometry else empty
+        odom_y = episode.data["pos_y"].to_numpy().astype(np.float64) if has_odometry else empty
+        odom_yaw = episode.data["yaw"].to_numpy().astype(np.float64) if has_odometry else empty
+        odometry_origin = (odom_x[0], odom_y[0], odom_yaw[0]) if has_odometry and len(odom_x) > 0 else (0.0, 0.0, 0.0)
 
-                if len(jumps) > 0:
-                    split_indices = jumps + 1
-                    segments_x = np.split(odom_x, split_indices)
-                    segments_y = np.split(odom_y, split_indices)
-
-                    best_seg_idx = -1
-                    best_len = -1.0
-
-                    for i in range(len(segments_x)):
-                        seg_x = segments_x[i]
-                        seg_y = segments_y[i]
-                        if len(seg_x) < 2:
-                            seg_len = 0.0
-                        else:
-                            seg_len = np.sum(np.sqrt(np.diff(seg_x) ** 2 + np.diff(seg_y) ** 2))
-
-                        if seg_len >= 0.2 and seg_len > best_len:
-                            best_len = seg_len
-                            best_seg_idx = i
-
-                    if best_seg_idx != -1:
-                        start_idx = 0 if best_seg_idx == 0 else int(split_indices[best_seg_idx - 1])
-                        end_idx = int(split_indices[best_seg_idx]) if best_seg_idx < len(split_indices) - 1 else len(odom_x)
-
-                        odom_x = odom_x[start_idx:end_idx]
-                        odom_y = odom_y[start_idx:end_idx]
-                        odom_yaw = odom_yaw[start_idx:end_idx]
-                        episode.data = episode.data.slice(start_idx, end_idx - start_idx)
-
-        else:
-            odom_x = np.array([], dtype=np.float64)
-            odom_y = np.array([], dtype=np.float64)
-            odom_yaw = np.array([], dtype=np.float64)
-            raw_odom_x0 = raw_odom_y0 = raw_odom_yaw0 = 0.0
-
-        if episode.start_pos and len(episode.start_pos) >= 2 and len(odom_x) > 0:
-            start_x, start_y = episode.start_pos[0], episode.start_pos[1]
-            start_yaw = episode.start_pos[2] if len(episode.start_pos) >= 3 else 0.0
-
-            odom_x0 = raw_odom_x0
-            odom_y0 = raw_odom_y0
-            odom_yaw0 = raw_odom_yaw0
-
-            theta = start_yaw - odom_yaw0
-            cos_t = np.cos(theta)
-            sin_t = np.sin(theta)
-
-            dx = odom_x - odom_x0
-            dy = odom_y - odom_y0
-
-            odom_x_trans = start_x + dx * cos_t - dy * sin_t
-            odom_y_trans = start_y + dx * sin_t + dy * cos_t
-            odom_yaw_trans = odom_yaw + theta
-            odom_yaw_trans = (odom_yaw_trans + np.pi) % (2 * np.pi) - np.pi
-        else:
-            odom_x_trans, odom_y_trans, odom_yaw_trans = odom_x, odom_y, odom_yaw
-
-        use_gt = episode.data is not None and "pos_x_gt" in episode.data.columns
-        if use_gt:
-            pos_x = episode.data["pos_x_gt"].to_numpy().copy()
-            pos_y = episode.data["pos_y_gt"].to_numpy().copy()
-            yaw = episode.data["yaw_gt"].to_numpy().copy()
-        else:
-            pos_x = odom_x_trans
-            pos_y = odom_y_trans
-            yaw = odom_yaw_trans
-
-        return pos_x, pos_y, yaw, odom_x_trans, odom_y_trans, odom_yaw_trans
+        start, end = consistent_segment(track_x, track_y, episode.data["time_ns"].to_numpy(), self._ride_arrivals(episode))
+        episode.data = episode.data.slice(start, end - start)
+        odom_x_trans, odom_y_trans, odom_yaw_trans = _anchored_odometry(odom_x[start:end], odom_y[start:end], odom_yaw[start:end], odometry_origin, episode.start_pos)
+        return track_x[start:end], track_y[start:end], track_yaw[start:end], odom_x_trans, odom_y_trans, odom_yaw_trans
 
     @staticmethod
     def _ride_arrivals(episode: AlignedEpisodeBundle) -> np.ndarray:
@@ -148,62 +91,28 @@ class BaseMetricCalculator(ABC):
         return episode.topics if isinstance(episode.topics, dict) else {}
 
     def resolve_native_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Ground-truth-first robot pose on the native odom time axis.
+        """Ground-truth robot pose on the native clock: (pos_x, pos_y, yaw, time_ns) float64 arrays, empty without ground truth.
 
-        Returns (pos_x, pos_y, yaw, time_ns) float64 arrays.
-        tf_gt is the trusted source when recorded (world frame,
-        offset-corrected at extraction). Otherwise raw odom is transformed
-        from the robot-local origin via the episode start pose, the same
-        transform ``resolve_robot_pose`` applies.
+        The robot's /tf track is the only trajectory source; wheel odometry never stands in for it.
         """
-        topics = self.native_topics(episode)
-        odom = topics.get("odom")
-        tf_gt = topics.get("tf_gt")
-
-        if tf_gt is not None and "pos_x_gt" in tf_gt.columns:
-            t_df = tf_gt.drop_nulls(["pos_x_gt", "pos_y_gt", "yaw_gt"]).sort("time_ns")
-            if len(t_df) > 0:
-                return (
-                    t_df["pos_x_gt"].to_numpy().astype(np.float64),
-                    t_df["pos_y_gt"].to_numpy().astype(np.float64),
-                    t_df["yaw_gt"].to_numpy().astype(np.float64),
-                    t_df["time_ns"].to_numpy().astype(np.int64),
-                )
-
-        if odom is None or "pos_x" not in odom.columns:
-            return np.array([]), np.array([]), np.array([]), np.array([])
-
-        o_df = odom.drop_nulls(["pos_x", "pos_y", "yaw"]).sort("time_ns")
-        if len(o_df) == 0:
-            return np.array([]), np.array([]), np.array([]), np.array([])
-
-        ox = o_df["pos_x"].to_numpy().astype(np.float64)
-        oy = o_df["pos_y"].to_numpy().astype(np.float64)
-        oyaw = o_df["yaw"].to_numpy().astype(np.float64)
-        time_ns = o_df["time_ns"].to_numpy().astype(np.int64)
-
-        if episode.start_pos and len(episode.start_pos) >= 2:
-            start_x, start_y = float(episode.start_pos[0]), float(episode.start_pos[1])
-            start_yaw = float(episode.start_pos[2]) if len(episode.start_pos) >= 3 else 0.0
-            theta = start_yaw - float(oyaw[0])
-            c, s = np.cos(theta), np.sin(theta)
-            dx = ox - ox[0]
-            dy = oy - oy[0]
-            ox = start_x + dx * c - dy * s
-            oy = start_y + dx * s + dy * c
-            oyaw = (oyaw + theta + np.pi) % (2 * np.pi) - np.pi
-
-        return ox, oy, oyaw, time_ns
+        empty = np.array([])
+        tracks = self.native_topics(episode).get("robot_tracks")
+        if tracks is None or not {"x", "y", "yaw"} <= set(tracks.columns):
+            return empty, empty, empty, empty
+        t_df = tracks.drop_nulls(["x", "y", "yaw"]).sort("t_ns")
+        return (
+            t_df["x"].to_numpy().astype(np.float64),
+            t_df["y"].to_numpy().astype(np.float64),
+            t_df["yaw"].to_numpy().astype(np.float64),
+            t_df["t_ns"].to_numpy().astype(np.int64),
+        )
 
     def native_ped_frame(self, episode: AlignedEpisodeBundle) -> pl.DataFrame | None:
-        """Raw pedestrian frame (native rate) sorted by time_ns, or None."""
-        topics = self.native_topics(episode)
-        peds = topics.get("peds")
-        if peds is None:
+        """The robot's pedestrians as flat rows, one per pedestrian per frame, sorted by t_ns; None when absent."""
+        peds = self.native_topics(episode).get("pedestrian_tracks")
+        if peds is None or "t_ns" not in peds.columns:
             return None
-        if "time_ns" not in peds.columns:
-            return None
-        return peds.sort("time_ns")
+        return peds.sort("t_ns")
 
     def pose_at_times(
         self,
@@ -304,62 +213,6 @@ class BaseMetricCalculator(ABC):
         vx[1:] = np.diff(pos_x) / dt_safe
         vy[1:] = np.diff(pos_y) / dt_safe
         return np.nan_to_num(vx, nan=0.0), np.nan_to_num(vy, nan=0.0)
-
-    @staticmethod
-    def _parse_peds(peds_raw: object, num_peds_hint: float | None = None) -> np.ndarray:
-        """Parse pedestrian positions into an (N, 2) or (N, 3) array of coordinates."""
-        if peds_raw is None or (isinstance(peds_raw, Sized) and len(peds_raw) == 0):
-            return np.empty((0, 2))
-        if isinstance(peds_raw, str):
-            try:
-                peds_raw = ast.literal_eval(peds_raw)
-            except (ValueError, SyntaxError):
-                return np.empty((0, 2))
-
-        if isinstance(peds_raw, (list, tuple, np.ndarray)):
-            if len(peds_raw) == 0:
-                return np.empty((0, 2))
-            first = peds_raw[0]
-            if isinstance(first, (list, tuple, np.ndarray)):
-                pts = []
-                for p in peds_raw:
-                    if len(p) >= 2:
-                        try:
-                            pts.append([float(v) for v in p])
-                        except (ValueError, TypeError):
-                            pass
-                if pts:
-                    return np.array(pts, dtype=np.float64)
-                return np.empty((0, 2))
-
-            try:
-                flat = [float(v) for v in peds_raw if v is not None]
-            except (ValueError, TypeError):
-                return np.empty((0, 2))
-
-            if len(flat) == 0:
-                return np.empty((0, 2))
-
-            # The hint arrives as a float column after the asof join, NaN where no sample matched.
-            hint = int(num_peds_hint) if num_peds_hint is not None and num_peds_hint == num_peds_hint else 0
-            if hint > 0:
-                if len(flat) == hint * 3:
-                    return np.array(flat, dtype=np.float64).reshape(hint, 3)
-                elif len(flat) == hint * 2:
-                    return np.array(flat, dtype=np.float64).reshape(hint, 2)
-                elif len(flat) >= hint * 2:
-                    stride = len(flat) // hint
-                    pts = [flat[k * stride : k * stride + 2] for k in range(hint)]
-                    return np.array(pts, dtype=np.float64)
-                else:
-                    return np.empty((0, 2))
-
-            if len(flat) % 3 == 0:
-                return np.array(flat, dtype=np.float64).reshape(-1, 3)
-            elif len(flat) % 2 == 0:
-                return np.array(flat, dtype=np.float64).reshape(-1, 2)
-
-        return np.empty((0, 2))
 
     @classmethod
     @abstractmethod

@@ -15,6 +15,7 @@ from arena_evaluation.processing.metrics.social.hhi_contact import (
     window_bounds,
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from flat_peds import flat_peds
 
 SEC = 1_000_000_000
 
@@ -72,11 +73,13 @@ def test_point_segment_distance() -> None:
     assert d.tolist() == pytest.approx([1.0, 1.0])
 
 
-def test_pair_track_follows_ids_not_order() -> None:
-    ids = [[1, 2], [2, 1], [2]]
-    pos = [[0.0, 0.0, 0.0, 5.0, 5.0, 0.0], [5.0, 5.0, 0.0, 1.0, 1.0, 0.0], [5.0, 5.0, 0.0]]
-    track = pair_track(ids, pos, 1)
-    assert track[:2].tolist() == [[0.0, 0.0], [1.0, 1.0]]
+def test_pair_track_follows_the_pedestrian_id_at_each_robot_time() -> None:
+    held = pl.DataFrame({"time_ns": [0, SEC, SEC], "ped_id": ["a", "b", "a"], "x": [0.0, 5.0, 1.0], "y": [0.0, 5.0, 1.0]})
+
+    track = pair_track(held, np.array([0, SEC, 2 * SEC]), "a")
+
+    assert track[0].tolist() == [0.0, 0.0]
+    assert track[1].tolist() == [1.0, 1.0]
     assert np.isnan(track[2]).all()
 
 
@@ -87,30 +90,27 @@ def _episode(release: bool = True) -> AlignedEpisodeBundle:
     for i, ti in enumerate(t):
         x[i] = min(ti, 12.0) if ti < 12.0 else (12.0 if ti < 16.0 else 12.0 + (ti - 16.0))
     y = np.zeros_like(t)
-    peds_ids = [[1, 2]] * len(t)
-    peds_positions = [[6.0, -0.6, 0.0, 6.0, 0.6, 0.0]] * len(t)
     data = pl.DataFrame(
         {
             "time_ns": (t * SEC).astype(np.int64),
             "pos_x": x,
             "pos_y": y,
             "yaw": np.zeros_like(t),
-            "peds_ids": peds_ids,
-            "peds_positions": peds_positions,
+            "pos_x_gt": x,
+            "pos_y_gt": y,
+            "yaw_gt": np.zeros_like(t),
         }
     )
-    names = ["ACTIVATED", "HOLD_ONSET"] + (["RELEASED"] if release else [])
-    times = [4.0, 5.0] + ([11.0] if release else [])
+    peds = flat_peds([(int(ti * SEC), [{"ped_id": "Pedestrian_1", "x": 6.0, "y": -0.6}, {"ped_id": "Pedestrian_2", "x": 6.0, "y": 0.6}]) for ti in t])
+    steps = [("ACTIVATED", 0, 4.0), ("HOLD_ONSET", 1, 5.0)] + ([("RELEASED", 2, 11.0)] if release else [])
     events = pl.DataFrame(
-        {
-            "time_ns": [int(s * SEC) for s in times],
-            "interaction_id": [3] * len(names),
-            "interaction_type": [10] * len(names),
-            "event_name": names,
-            "participants": [[1, 2]] * len(names),
-        }
+        [
+            {"t_ns": int(s * SEC), "env_id": "env_0", "interaction_id": 3, "interaction_type": 10, "event": code, "event_name": name, "ped_id": ped}
+            for name, code, s in steps
+            for ped in ("Pedestrian_1", "Pedestrian_2")
+        ]
     )
-    return AlignedEpisodeBundle(episode_id=0, data=data, start_pos=[0.0, 0.0, 0.0], goal_pos=[30.0, 0.0], topics={"interaction_events": events})
+    return AlignedEpisodeBundle(episode_id=0, data=data, start_pos=[0.0, 0.0, 0.0], goal_pos=[30.0, 0.0], topics={"pedestrian_tracks": peds, "pedestrian_interaction_events": events})
 
 
 def test_calculator_on_a_synthetic_episode() -> None:
@@ -157,15 +157,9 @@ def test_crossings_need_a_robot_move() -> None:
     assert segment_crossings(np.zeros((1, 2)), np.zeros((1, 2)), np.zeros((1, 2))).tolist() == []
 
 
-def test_pair_track_skips_rows_without_pedestrians() -> None:
-    track = pair_track([None, [1]], [None, [3.0, 4.0, 0.0]], 1)
-    assert np.isnan(track[0]).all()
-    assert track[1].tolist() == [3.0, 4.0]
-
-
 def test_calculator_without_an_activation_edge_sees_no_interaction() -> None:
     ep = _episode()
-    ep.topics = {"interaction_events": ep.topics["interaction_events"].filter(pl.col("event_name") == "RELEASED")}
+    ep.topics = {**ep.topics, "pedestrian_interaction_events": ep.topics["pedestrian_interaction_events"].filter(pl.col("event_name") == "RELEASED")}
     out = ContactInteractionCalculator(RobotParams()).calculate(ep, {})
     assert out["hhi_interaction"] is None and out["hhi_hold_onset_s"] is None and out["hhi_release_s"] is None
     assert out["hhi_stall_count"] == 1
@@ -176,5 +170,5 @@ def test_calculator_on_too_short_or_unlocatable_data_is_all_none() -> None:
     short = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"time_ns": [0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
     assert ContactInteractionCalculator(RobotParams()).calculate(short, {}) == empty
     nan = float("nan")
-    lost = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"time_ns": [0, SEC], "pos_x": [nan, nan], "pos_y": [nan, nan], "yaw": [0.0, 0.0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
+    lost = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"time_ns": [0, SEC], "pos_x_gt": [nan, nan], "pos_y_gt": [nan, nan], "yaw_gt": [0.0, 0.0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
     assert ContactInteractionCalculator(RobotParams()).calculate(lost, {}) == empty

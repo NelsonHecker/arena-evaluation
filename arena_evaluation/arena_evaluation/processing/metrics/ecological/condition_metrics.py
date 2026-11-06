@@ -12,6 +12,7 @@ from arena_simulation_setup.shared.conditions import EpisodeCondition, Node
 from arena_simulation_setup.shared.judge import NodeMonitor, Sample, WallGrid, operator_verdict, values_equal, zone_polygons
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, frames_of
 from arena_evaluation.processing.metrics.ecological.compliance_metrics import (
     _extract_zone_geometry,
     _reconstruct_events,
@@ -50,10 +51,10 @@ def _values_equal(recorded: str, expected: str) -> bool:
 
 def _entity_roster(snapshot: pl.DataFrame | None) -> dict[str, str]:
     """Bare entity name -> recorded sim_path, for names resolving to a single sim_path, a world entity also by its name without the level suffix or the world object prefix."""
-    if snapshot is None or len(snapshot) == 0 or "entity" not in snapshot.columns:
+    if snapshot is None or len(snapshot) == 0 or "entity_name" not in snapshot.columns:
         return {}
     paths: dict[str, set[str]] = defaultdict(set)
-    for entity in snapshot["entity"].unique().to_list():
+    for entity in snapshot["entity_name"].unique().to_list():
         paths[_strip_env(entity)].add(entity)
     unsuffixed: dict[str, set[str]] = defaultdict(set)
     for bare, recorded in paths.items():
@@ -71,17 +72,14 @@ def _ped_aliases(name: str) -> list[str]:
     return [bare, bare.rsplit("/", 1)[0]] if "/" in bare else [bare]
 
 
-def _ped_roster(data: pl.DataFrame) -> dict[str, str]:
+def _ped_roster(peds: pl.DataFrame | None) -> dict[str, str]:
     """Bare ped name -> recorded name, only for names that resolve uniquely on the axis."""
-    if "peds_names" not in data.columns:
+    if peds is None or len(peds) == 0 or "ped_name" not in peds.columns:
         return {}
     grouped: dict[str, set[str]] = defaultdict(set)
-    for names in data["peds_names"].to_list():
-        if not names:
-            continue
-        for name in names:
-            for alias in _ped_aliases(name):
-                grouped[alias].add(name)
+    for name in peds["ped_name"].unique().to_list():
+        for alias in _ped_aliases(name):
+            grouped[alias].add(name)
     return {bare: next(iter(full)) for bare, full in grouped.items() if len(full) == 1}
 
 
@@ -167,18 +165,18 @@ def load_wall_grid(world_name: str) -> WallGrid | None:
 
 
 def clips_on_axis(peds: pl.DataFrame | None, gestures: pl.DataFrame | None, time_ns: np.ndarray) -> list[dict[str, frozenset[str]]] | None:
-    """Per instant, the gesture clips of every pedestrian in the peds message held at it, None when the recording carries no ped_gestures table."""
-    if gestures is None or peds is None or len(peds) == 0 or "peds_ids" not in peds.columns:
+    """Per instant, the gesture clips of every pedestrian in the frame held at it, None when the recording carries no pedestrian_gestures table."""
+    if gestures is None or peds is None or len(peds) == 0:
         return None
-    playing: dict[int, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
-    for t, ped_id, clip in zip(gestures["time_ns"].to_list(), gestures["ped_id"].to_list(), gestures["clip"].to_list(), strict=True):
-        playing[int(t)][int(ped_id)].add(str(clip))
-    peds = peds.sort("time_ns")
-    times = peds["time_ns"].to_numpy()
-    rows: list[dict[str, frozenset[str]]] = []
-    for t, names, ids in zip(times.tolist(), peds["peds_names"].to_list(), peds["peds_ids"].to_list(), strict=True):
-        at = playing.get(int(t), {})
-        rows.append({_strip_env(name): frozenset(at.get(int(ped_id), ())) for name, ped_id in zip(names or [], ids or [], strict=True)})
+    playing: dict[int, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for t, ped_id, clip in zip(gestures["t_ns"].to_list(), gestures["ped_id"].to_list(), gestures["clip"].to_list(), strict=True):
+        playing[int(t)][str(ped_id)].add(str(clip))
+    frames = frames_of(peds)
+    times = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
+    rows: list[dict[str, frozenset[str]]] = [
+        {_strip_env(name): frozenset(playing.get(int(times[k]), {}).get(ped_id, ())) for name, ped_id in zip(frame["ped_name"].to_list(), frame["ped_id"].to_list(), strict=True)}
+        for k, frame in enumerate(frames)
+    ]
     idx = np.searchsorted(times, time_ns, side="right") - 1
     return [rows[i] if i >= 0 else {} for i in idx]
 
@@ -202,11 +200,8 @@ class _EvalContext:
     clips: list[dict[str, frozenset[str]]] | None = None
     _fields: dict[tuple[str, str], tuple[np.ndarray, list[str]] | None] = dataclasses.field(default_factory=dict, init=False, repr=False)
     _families: dict[tuple[str, str], dict[str, tuple[np.ndarray, list[str]]] | None] = dataclasses.field(default_factory=dict, init=False, repr=False)
-    _ped_rows: tuple[list, list] | None = dataclasses.field(default=None, init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        if "peds_names" in self.data.columns and "peds_positions" in self.data.columns:
-            self._ped_rows = (self.data["peds_names"].to_list(), self.data["peds_positions"].to_list())
+    peds_frames: list[pl.DataFrame] = dataclasses.field(default_factory=list)
+    peds_times: np.ndarray = dataclasses.field(default_factory=lambda: np.zeros(0, dtype=np.int64))
 
     def field_at(self, entity: str, field: str, t_ns: int) -> str | None:
         key = (entity, field)
@@ -230,19 +225,17 @@ class _EvalContext:
         return {member: _value_at(times, values, t_ns) for member, (times, values) in members.items()}
 
     def peds_at(self, i: int) -> dict[str, tuple[float, float]]:
-        if self._ped_rows is None:
+        """Pedestrians of the latest frame at or before sample i, within the alignment tolerance."""
+        if len(self.peds_times) == 0:
             return {}
-        names = self._ped_rows[0][i]
-        positions = self._ped_rows[1][i]
-        if not names or not positions:
+        idx = int(np.searchsorted(self.peds_times, self.time_ns[i], side="right")) - 1
+        if idx < 0 or int(self.time_ns[i]) - int(self.peds_times[idx]) > ALIGN_TOLERANCE_NS:
             return {}
         peds: dict[str, tuple[float, float]] = {}
-        for j, name in enumerate(names):
-            if 3 * j + 1 >= len(positions):
-                break
+        for name, x, y in self.peds_frames[idx].select("ped_name", "x", "y").iter_rows():
             for alias in _ped_aliases(name):
                 if self.ped_roster.get(alias, name) == name:
-                    peds[alias] = (positions[3 * j], positions[3 * j + 1])
+                    peds[alias] = (x, y)
         return peds
 
     def sample(self, i: int) -> Sample:
@@ -335,7 +328,7 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
 
     NAME = "condition_compliance"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = ["odom"]
+    REQUIRED_TOPICS = ["robot_odom"]
 
     UNITS = {
         "condition_success": "",
@@ -390,6 +383,8 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
         if len(time_ns) == 0 or len(pos_x) != len(time_ns):
             return empty
 
+        peds_df = self.native_ped_frame(episode)
+        peds_frames = frames_of(peds_df) if peds_df is not None and len(peds_df) > 0 else []
         ctx = _EvalContext(
             events=_reconstruct_events(episode.semantic_snapshot),
             time_ns=time_ns,
@@ -398,12 +393,14 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
             data=episode.data,
             zones_by_name={zone.name: zone for zone in zones},
             entity_roster=_entity_roster(episode.semantic_snapshot),
-            ped_roster=_ped_roster(episode.data),
+            ped_roster=_ped_roster(peds_df),
             pose_valid=bool(episode.start_pos),
             yaw=yaw,
             fleet=_resample_fleet(episode.fleet, time_ns, bare_robot_name(episode.robot_name or "")),
             walls=load_wall_grid(self.world),
-            clips=clips_on_axis(episode.peds, episode.topics.get("ped_gestures") if episode.topics else None, time_ns),
+            clips=clips_on_axis(peds_df, episode.topics.get("pedestrian_gestures") if episode.topics else None, time_ns),
+            peds_frames=peds_frames,
+            peds_times=np.array([int(frame["t_ns"][0]) for frame in peds_frames], dtype=np.int64),
         )
 
         verdicts = [_clause_verdict(clause, ctx) for clause in conditions]

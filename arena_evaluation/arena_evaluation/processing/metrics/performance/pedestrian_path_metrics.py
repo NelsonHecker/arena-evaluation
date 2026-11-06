@@ -3,8 +3,10 @@ from __future__ import annotations
 import typing
 
 import numpy as np
+import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -14,7 +16,7 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
     NAME = "pedestrian_path_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["peds"]
+    REQUIRED_TOPICS = ["pedestrian_tracks"]
     REQUIRES_PEDSIM = True
 
     UNITS = {"pedestrian_path": "m"}
@@ -25,43 +27,25 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
 
-        if episode.data is None or "peds_positions" not in episode.data.columns:
+        peds_df = self.native_ped_frame(episode)
+        if episode.data is None or peds_df is None or len(peds_df) == 0:
             return {"pedestrian_path": []}
 
-        peds_positions = episode.data["peds_positions"].to_list()
-
-        T = len(peds_positions)
+        time_ns = episode.data["time_ns"].to_numpy()
+        T = len(time_ns)
         if T == 0:
             return {"pedestrian_path": []}
 
-        max_peds = 0
-        for step_peds in peds_positions:
-            if isinstance(step_peds, list):
-                max_peds = max(max_peds, len(step_peds) // 3)
+        paths = {ped_id: [[float("nan")] * 3 for _ in range(T)] for ped_id in peds_df["ped_id"].unique().sort().to_list()}
+        row_of = {int(stamp): row for row, stamp in enumerate(time_ns)}
+        present = pedestrians_at(pl.Series("time_ns", time_ns.astype(np.int64)), peds_df)
+        for ped_id, stamp, x, y, z in present.select("ped_id", "time_ns", "x", "y", "z").iter_rows():
+            paths[ped_id][row_of[int(stamp)]] = [x, y, z]
 
-        if max_peds == 0:
-            return {"pedestrian_path": []}
+        for path in paths.values():
+            for t in range(1, T):
+                if np.isnan(path[t][0]):
+                    path[t] = path[t - 1]
 
-        paths = [[[float('nan'), float('nan'), float('nan')] for _ in range(T)] for _ in range(max_peds)]
-
-        for t, step_peds in enumerate(peds_positions):
-            if not isinstance(step_peds, list):
-                if t > 0:
-                    for k in range(max_peds):
-                        paths[k][t] = paths[k][t - 1]
-                continue
-
-            num_peds = len(step_peds) // 3
-            for k in range(num_peds):
-                paths[k][t] = [step_peds[3 * k], step_peds[3 * k + 1], step_peds[3 * k + 2]]
-
-            for k in range(num_peds, max_peds):
-                if t > 0:
-                    paths[k][t] = paths[k][t - 1]
-
-        valid_paths = []
-        for path in paths:
-            if any(not np.isnan(pt[0]) for pt in path):
-                valid_paths.append(path)
-
+        valid_paths = [path for path in paths.values() if any(not np.isnan(pt[0]) for pt in path)]
         return {"pedestrian_path": valid_paths}

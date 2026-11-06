@@ -1,9 +1,10 @@
 import json
 import pathlib
 
+import polars as pl
 import pytest
 
-pl = pytest.importorskip("polars")
+pytest.importorskip("polars")
 pytest.importorskip("mcap_ros2.writer")
 
 from arena_evaluation.processing.mcap_reader import MCAPReader
@@ -29,5 +30,5 @@ def test_reader_keeps_episode_conditions(tmp_path: pathlib.Path):
 
     MCAPReader(bag).read(tmp_path / "raw")
 
-    er = pl.read_parquet(tmp_path / "raw" / "env_0" / "episode_record.parquet")
-    assert er["conditions"].to_list() == ["", clauses]
+    episodes = pl.read_parquet(tmp_path / "raw" / "episode_lifecycle.parquet")
+    assert episodes["conditions_yaml"].to_list() == ["", clauses]

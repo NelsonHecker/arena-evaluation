@@ -29,7 +29,7 @@ class MechanismStatesCalculator(BaseMetricCalculator):
     NAME = "mechanism_states"
     CATEGORY = "ecological"
     DEPENDS_ON = ["time_metrics"]
-    REQUIRED_TOPICS = [("tf_gt", "odom")]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
     UNITS = {"mechanism_states": ""}
 
     @classmethod

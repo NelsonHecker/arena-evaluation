@@ -16,10 +16,11 @@ from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquet
 from arena_evaluation.processing.pipeline import _METRIC_DTYPES, ProcessingPipeline, _record_integrity, _status_row
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.manifest import MetadataWriter
-from arena_evaluation.storage.schemas import EpisodeDescriptor, RunMetadata, TopicBundle
+from arena_evaluation.storage.schemas import EpisodeDescriptor, RunMetadata
 
 S = 1_000_000_000
 WORLD = "synthetic_integrity_world"
+ENV = "env_0"
 ROBOT = "env_0_jackal_0"
 PHASES = {"jackal_0": {"phases": [{"goto": [1.0, 1.0, 0.0], "tolerance_radius": 0.5, "tolerance_angle": 0.0, "hold_time": 0.0}], "conditions": [], "map_poses": [[1.0, 1.0, 0.0]]}}
 MOVED = "env_0/jackal_0 moved by hand"
@@ -46,49 +47,85 @@ def _descriptor(episode_dir: pathlib.Path) -> EpisodeDescriptor:
 
 
 def _records(*integrity: list[str]) -> pl.DataFrame:
+    """The episode's records as episode_lifecycle rows, one per message."""
     n = len(integrity)
     return pl.DataFrame(
         {
-            "time_ns": [i * S for i in range(n)],
+            "t_ns": [i * S for i in range(n)],
+            "env_id": [ENV] * n,
             "episode_id": [1] * n,
             "outcome_state": [1] * (n - 1) + [2],
             "outcome_info": [""] * (n - 1) + ["finished"],
-            "integrity": pl.Series(list(integrity), dtype=pl.List(pl.String)),
-            "phases": [json.dumps(PHASES)] * n,
+            "phases_yaml": [json.dumps(PHASES)] * n,
+            "conditions_yaml": [""] * n,
         }
     )
 
 
-def _track(points: list[tuple[float, float, float]]) -> pl.DataFrame:
-    return pl.DataFrame(
+def _flags(*integrity: list[str]) -> pl.DataFrame:
+    """The integrity flags each record carried, as episode_integrity rows."""
+    rows = [(i * S, ENV, index, flag) for i, reasons in enumerate(integrity) for index, flag in enumerate(reasons)]
+    return pl.DataFrame(rows, schema={"t_ns": pl.Int64, "env_id": pl.String, "flag_idx": pl.Int64, "flag": pl.String}, orient="row")
+
+
+def _write_topics(topics: pathlib.Path, integrity: tuple[list[str], ...]) -> None:
+    """A driven track of 3 s at 10 Hz with its episode records, as a complete flat topic cache."""
+    topics.mkdir()
+    samples = 31
+    stamps = [int(i * S / 10) for i in range(samples)]
+    xs = [0.1 * i for i in range(samples)]
+    pl.DataFrame(
         {
-            "time_ns": [int(t * S) for t, _, _ in points],
-            "stamp_ns": [int(t * S) for t, _, _ in points],
-            "pos_x": [x for _, x, _ in points],
-            "pos_y": [y for _, _, y in points],
-            "yaw": [0.0] * len(points),
-            "vel_linear": [0.5] * len(points),
-            "vel_angular": [0.0] * len(points),
+            "t_ns": stamps,
+            "env_id": [ENV] * samples,
+            "robot_id": [ROBOT] * samples,
+            "odom_x": xs,
+            "odom_y": [0.0] * samples,
+            "odom_yaw": [0.0] * samples,
+            "odom_vx": [1.0] * samples,
+            "odom_wz": [0.0] * samples,
+            "drift_error_m": [0.0] * samples,
         }
-    )
+    ).write_parquet(topics / "robot_odom.parquet")
+    pl.DataFrame(
+        {
+            "t_ns": stamps,
+            "env_id": [ENV] * samples,
+            "robot_id": [ROBOT] * samples,
+            "x": xs,
+            "y": [0.0] * samples,
+            "z": [0.0] * samples,
+            "yaw": [0.0] * samples,
+            "vx": [1.0] * samples,
+            "vy": [0.0] * samples,
+            "vz": [0.0] * samples,
+            "omega_z": [0.0] * samples,
+            "speed_mps": [1.0] * samples,
+            "pose_source": ["tf_gt"] * samples,
+        }
+    ).write_parquet(topics / "robot_tracks.parquet")
+    _records(*integrity).write_parquet(topics / "episode_lifecycle.parquet")
+    _flags(*integrity).write_parquet(topics / "episode_integrity.parquet")
+    TopicParquetStore.mark_complete(topics)
 
 
-def test_record_integrity_takes_the_last_record_by_time() -> None:
-    records = _records([], [MOVED], [MOVED, RETASKED]).reverse()
-    assert _record_integrity(records, _meta()) == [MOVED, RETASKED]
-    assert _record_integrity(records.lazy(), None) == [MOVED, RETASKED]
+def test_record_integrity_takes_the_flags_of_the_last_record_by_time() -> None:
+    integrity = ([], [MOVED], [MOVED, RETASKED])
+    assert _record_integrity(_records(*integrity).reverse(), _flags(*integrity), _meta()) == [MOVED, RETASKED]
+    assert _record_integrity(_records(*integrity).lazy(), _flags(*integrity).lazy(), None) == [MOVED, RETASKED]
 
 
-def test_record_integrity_falls_back_to_the_episode_yaml() -> None:
-    without_column = pl.DataFrame({"time_ns": [0], "outcome_state": [2]})
-    assert _record_integrity(None, _meta(MOVED)) == [MOVED]
-    assert _record_integrity(without_column, _meta(MOVED)) == [MOVED]
-    assert _record_integrity(None, None) == []
+def test_record_integrity_falls_back_to_the_episode_yaml_when_no_record_carries_any() -> None:
+    without_flags = pl.DataFrame({"t_ns": [0], "outcome_state": [2]})
+    assert _record_integrity(None, None, _meta(MOVED)) == [MOVED]
+    assert _record_integrity(without_flags, None, _meta(MOVED)) == [MOVED]
+    assert _record_integrity(_records([]), _flags([]), _meta(MOVED)) == [MOVED]
+    assert _record_integrity(None, None, None) == []
 
 
 def test_status_rows_carry_integrity_as_a_string_list_column(tmp_path: pathlib.Path) -> None:
     ep = _descriptor(tmp_path)
-    compromised = _status_row(ep, _meta(), "jackal", "no_trajectory", "no odom rows", _records([], [MOVED]))
+    compromised = _status_row(ep, _meta(), "jackal", "no_trajectory", "no odom rows", _records([], [MOVED]), _flags([], [MOVED]))
     from_yaml = _status_row(ep, _meta(RETASKED), "jackal", "no_recording", "no MCAP or empty extraction")
     intact = _status_row(ep, _meta(), "jackal", "no_recording", "no MCAP or empty extraction")
     assert compromised["integrity"] == [MOVED]
@@ -108,9 +145,7 @@ def test_metric_rows_carry_integrity_of_the_last_record(tmp_path: pathlib.Path) 
     episode_dir.mkdir(parents=True)
     (episode_dir / "episode_000.mcap").touch()
     MetadataWriter.write(_meta(), episode_dir / "episode_000.yaml")
-    track = [(t / 10, 5.0 - 0.4 * t, 5.0 - 0.4 * t) for t in range(11)] + [(t / 10, 1.0, 1.0) for t in range(11, 31)]
-    bundle = TopicBundle(odom=_track(track), task_pose=_track(track), episode_record=_records([], [MOVED], [MOVED, RETASKED]))
-    TopicParquetStore.write({ROBOT: bundle}, episode_dir / "topics")
+    _write_topics(episode_dir / "topics", ([], [MOVED], [MOVED, RETASKED]))
 
     rows = ProcessingPipeline(FolderManager(data_root=tmp_path), workers=1).process_episode(_descriptor(episode_dir))
 

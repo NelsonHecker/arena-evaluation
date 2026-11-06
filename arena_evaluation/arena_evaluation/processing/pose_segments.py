@@ -1,6 +1,6 @@
 """Teleport detection on a recorded robot pose track.
 
-The longest-consistent-segment rule (``pipeline._resolve_odom_frame`` and
+The longest-consistent-segment rule (``pipeline._consistent_pose_segment`` and
 ``MetricCalculator.resolve_robot_pose``) splits a track wherever the robot
 "jumps" and keeps the longest piece, so a reset teleport caught in the
 recording does not stretch the path across the map. A jump used to be any
@@ -11,12 +11,11 @@ consecutive samples 0.5-2 m apart and a healthy episode is chopped into
 fragments, of which only one survives (observed: 24 m corridor transits
 reported as 4-13 m paths).
 
-A teleport is a step the platform cannot have driven: distance over the
-sample interval above ``MAX_SPEED_MPS``. The interval must be sim time (the
-message header stamp, ``stamp_ns`` / ``stamp_ns_gt``), never the recorder's
-log time: under lockstep the wall clock runs at an arbitrary real-time
-factor, and a reset happens with the sim paused, so in wall time it is a
-slow drift rather than a jump. Without sim stamps the distance rule stands.
+A teleport is a step the platform cannot have driven: distance over the sample
+interval above ``MAX_SPEED_MPS``. The interval is the recorded log time
+(``t_ns``) of the flat telemetry. Sim-time header stamps are not part of that
+contract, so under lockstep a reset that happens with the sim paused can read
+as slow drift rather than a jump.
 
 An elevator ride or a stair crossing is a teleport too, but one that belongs to the episode. A
 jump landing within ``RIDE_ARRIVAL_TOLERANCE_NS`` of a ride arrival (`just_arrived` rising on an
@@ -35,6 +34,7 @@ if typing.TYPE_CHECKING:
 
 MIN_JUMP_M = 0.5
 MAX_SPEED_MPS = 5.0  # above any ground robot in the fleet; a reset moves the robot within one sample
+MIN_SEGMENT_M = 0.2  # a piece shorter than this cannot be the episode's path
 
 
 RIDE_ARRIVAL_TOLERANCE_NS = 2_000_000_000
@@ -86,6 +86,23 @@ def teleport_jumps(
     return _drop_exempt(np.where(big & (speed > MAX_SPEED_MPS))[0], exempt_ns, exempt_time_ns, len(x))
 
 
+def consistent_segment(x: np.ndarray, y: np.ndarray, time_ns: np.ndarray, exempt_ns: np.ndarray | None = None) -> tuple[int, int]:
+    """[start, end) of the longest teleport-free piece of at least MIN_SEGMENT_M; the whole track when nothing is cut."""
+    n = len(x)
+    jumps = teleport_jumps(x, y, time_ns, exempt_ns=exempt_ns, exempt_time_ns=time_ns)
+    if len(jumps) == 0:
+        return 0, n
+    bounds = np.concatenate(([0], np.asarray(jumps) + 1, [n]))
+    best: tuple[int, int] | None = None
+    best_len = -1.0
+    for start, end in zip(bounds[:-1].tolist(), bounds[1:].tolist(), strict=True):
+        seg_x, seg_y = x[start:end], y[start:end]
+        seg_len = 0.0 if len(seg_x) < 2 else float(np.sum(np.hypot(np.diff(seg_x), np.diff(seg_y))))
+        if seg_len >= MIN_SEGMENT_M and seg_len > best_len:
+            best, best_len = (start, end), seg_len
+    return best if best is not None else (0, n)
+
+
 def ride_arrival_times(snapshot: pl.DataFrame | pl.LazyFrame | None) -> np.ndarray:
     """Log times (ns) where an elevator's `just_arrived` or a stair's `just_crossed` predicate rises."""
     import polars as pl
@@ -94,14 +111,14 @@ def ride_arrival_times(snapshot: pl.DataFrame | pl.LazyFrame | None) -> np.ndarr
         return np.array([], dtype=np.int64)
     lazy = snapshot.lazy() if isinstance(snapshot, pl.DataFrame) else snapshot
     names = lazy.collect_schema().names()
-    if not {"kind", "field", "value_bool", "entity", "time_ns"}.issubset(names):
+    if not {"kind", "field_name", "value_bool", "entity_name", "t_ns"}.issubset(names):
         return np.array([], dtype=np.int64)
-    arrival = pl.any_horizontal([(pl.col("kind") == kind) & (pl.col("field") == field) for kind, field in RIDE_ARRIVALS.items()])
-    rows = lazy.filter(arrival).select("time_ns", "entity", "value_bool").collect()
+    arrival = pl.any_horizontal([(pl.col("kind") == kind) & (pl.col("field_name") == field) for kind, field in RIDE_ARRIVALS.items()])
+    rows = lazy.filter(arrival).select("t_ns", "entity_name", "value_bool").collect()
     times: list[int] = []
-    for _entity, group in rows.group_by("entity"):
+    for _entity, group in rows.group_by("entity_name"):
         prev = False
-        for t, value in group.sort("time_ns").select("time_ns", "value_bool").iter_rows():
+        for t, value in group.sort("t_ns").select("t_ns", "value_bool").iter_rows():
             value = bool(value)
             if value and not prev:
                 times.append(int(t))

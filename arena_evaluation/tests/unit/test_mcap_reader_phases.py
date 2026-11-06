@@ -2,6 +2,10 @@ import json
 import pathlib
 
 import polars as pl
+import pytest
+
+pytest.importorskip("mcap_ros2.writer")
+
 from mcap_ros2.writer import Writer
 
 from arena_evaluation.processing.mcap_reader import MCAPReader
@@ -68,18 +72,18 @@ def _records(tmp_path: pathlib.Path, payloads: list[str | None]) -> pl.DataFrame
     out = tmp_path / "topics"
     out.mkdir()
     MCAPReader(bag).read(out)
-    return pl.read_parquet(out / "env_0" / "episode_record.parquet")
+    return pl.read_parquet(out / "episode_lifecycle.parquet")
 
 
 def test_phases_of_the_episode_record_reach_the_robot(tmp_path: pathlib.Path) -> None:
     records = _records(tmp_path, ["", json.dumps(_PHASES)])
-    assert records["phases"].to_list() == ["", json.dumps(_PHASES)]
-    assert _robot_phases(records.sort("time_ns"), "env_0_jackal") == _PHASES["jackal"]
-    assert _robot_phases(records.sort("time_ns"), "env_0_burger") is None
+    assert records["phases_yaml"].to_list() == ["", json.dumps(_PHASES)]
+    assert _robot_phases(records.sort("t_ns"), "env_0_jackal") == _PHASES["jackal"]
+    assert _robot_phases(records.sort("t_ns"), "env_0_burger") is None
 
 
 def test_recording_from_before_phases_reads_none_for_the_robot(tmp_path: pathlib.Path) -> None:
     records = _records(tmp_path, [None, None])
-    assert records["phases"].to_list() == ["", ""]
+    assert records["phases_yaml"].to_list() == ["", ""]
     assert records["outcome_state"].to_list() == [1, 2]
-    assert _robot_phases(records.sort("time_ns"), "env_0_jackal") is None
+    assert _robot_phases(records.sort("t_ns"), "env_0_jackal") is None

@@ -14,7 +14,7 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
     NAME = "path_efficiency"
     CATEGORY = "performance"
     DEPENDS_ON = ["path_metrics", "trajectory_naturalness"]
-    REQUIRED_TOPICS = [("tf_gt", "odom")]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
     UNITS = {"path_efficiency": ""}
 
     PRIMARY_OUTPUTS = ["path_efficiency"]

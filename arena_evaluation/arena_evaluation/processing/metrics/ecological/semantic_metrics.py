@@ -36,7 +36,7 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
 
     NAME = "semantic_interaction_metrics"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = ["semantic_snapshot"]
+    REQUIRED_TOPICS = ["world_semantics"]
 
     UNITS = {
         "time_waiting_at_doors": "s",

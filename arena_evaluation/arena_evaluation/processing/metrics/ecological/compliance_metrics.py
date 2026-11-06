@@ -8,6 +8,7 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name, robot_env_snapshot
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
@@ -169,9 +170,6 @@ def _stringify_snapshot_value(row: dict) -> str:
         return "true" if row["value_bool"] else "false"
     if row["field_kind"] == "continuous":
         return str(row["value_num"])
-    if row["field_kind"] == "members":
-        members = row.get("value_list")
-        return ",".join(sorted(str(m) for m in members)) if members else ""
     return row["value_str"] if row["value_str"] is not None else ""
 
 
@@ -186,7 +184,7 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
     if snapshot is None or len(snapshot) == 0:
         return empty
 
-    rows = snapshot.sort("time_ns")
+    rows = snapshot.sort("t_ns")
     if len(rows) == 0:
         return empty
 
@@ -197,12 +195,12 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
     out_previous: list[str] = []
     out_current: list[str] = []
 
-    for (entity, kind, field), group in rows.group_by(["entity", "kind", "field"]):
+    for (entity, kind, field), group in rows.group_by(["entity_name", "kind", "field_name"]):
         previous: str | None = None
-        for row in group.sort("time_ns").iter_rows(named=True):
+        for row in group.sort("t_ns").iter_rows(named=True):
             current = _stringify_snapshot_value(row)
             if current != previous:
-                out_time.append(row["time_ns"])
+                out_time.append(row["t_ns"])
                 out_entity.append(entity)
                 out_kind.append(kind)
                 out_field.append(field)
@@ -276,7 +274,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
     passing_convention = "right"
 
     UNITS = {
@@ -368,14 +366,15 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
 
     def _compute_passing_compliance(self, episode: AlignedEpisodeBundle) -> float | None:
         peds_df = self.native_ped_frame(episode)
-        if peds_df is None or "peds_positions" not in peds_df.columns:
+        if peds_df is None or "x" not in peds_df.columns:
             return None
 
         pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
         if len(pos_x) == 0:
             return None
 
-        peds_time_ns = peds_df["time_ns"].to_numpy()
+        frames = frames_of(peds_df)
+        peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
         N = len(peds_time_ns)
         if N == 0:
             return None
@@ -386,10 +385,6 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom)
         dt = np.diff(peds_time_ns, prepend=peds_time_ns[0]) / 1e9
 
-        peds_positions = peds_df["peds_positions"].to_list()
-        num_peds_col = peds_df["num_pedestrians"].to_numpy() if "num_pedestrians" in peds_df.columns else None
-        peds_twists_list = peds_df["peds_twists"].to_list() if "peds_twists" in peds_df.columns else None
-
         in_encounter = False
         min_dist = float('inf')
         lat_offset_at_min = 0.0
@@ -397,33 +392,9 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         encounters_total = 0
         encounters_compliant = 0
 
-        prev_peds_arr: np.ndarray | None = None
-        for i in range(N):
-            peds_arr = self._parse_peds(peds_positions[i], num_peds_col[i] if num_peds_col is not None else None)
-            if peds_arr.shape[0] == 0:
-                prev_peds_arr = None
-                continue
-
-            ped_vels = None
-            if peds_twists_list is not None and i < len(peds_twists_list):
-                tw_raw = peds_twists_list[i]
-                if tw_raw and len(tw_raw) > 0:
-                    import ast
-
-                    if isinstance(tw_raw, str):
-                        try:
-                            tw_raw = ast.literal_eval(tw_raw)
-                        except Exception:
-                            tw_raw = []
-                    tw_arr = np.array(tw_raw, dtype=np.float64)
-                    if tw_arr.size > 0 and len(tw_arr) % 3 == 0:
-                        ped_vels = tw_arr.reshape(-1, 3)
-
-            # Finite difference fallback if twists missing
-            if ped_vels is None and prev_peds_arr is not None and prev_peds_arr.shape == peds_arr.shape:
-                dt_i = max(float(dt[i]), 1e-3)
-                ped_vels = (peds_arr - prev_peds_arr) / dt_i
-            prev_peds_arr = peds_arr
+        for i, frame in enumerate(frames):
+            peds_arr = frame.select("x", "y").to_numpy()
+            ped_vels = frame.select("vx", "vy").to_numpy()
 
             rx, ry = float(rpx[i]), float(rpy[i])
             vr_x, vr_y = float(rvx[i]), float(rvy[i])

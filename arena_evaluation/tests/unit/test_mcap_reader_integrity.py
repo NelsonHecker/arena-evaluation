@@ -4,11 +4,10 @@ import pathlib
 
 import pytest
 
-pl = pytest.importorskip("polars")
+pytest.importorskip("polars")
 pytest.importorskip("mcap_ros2.writer")
 
-import pyarrow as pa
-import pyarrow.parquet as pq
+import polars as pl
 from mcap_ros2.writer import Writer
 
 from arena_evaluation.processing.mcap_reader import MCAPReader
@@ -53,14 +52,18 @@ def extracted(tmp_path: pathlib.Path) -> pathlib.Path:
     return out
 
 
-def test_episode_record_frame_carries_integrity_reasons_as_they_accrue(extracted: pathlib.Path) -> None:
-    table = pq.read_table(extracted / "env_0" / "episode_record.parquet")
-    assert table.schema.field("integrity").type == pa.list_(pa.string())
-    assert table.column("integrity").to_pylist() == [[], ["robot jackal spawned by hand"], ["robot jackal spawned by hand", "task parameters changed mid-episode"]]
+def test_each_flag_of_each_record_is_kept_as_it_accrues(extracted: pathlib.Path) -> None:
+    flags = pl.read_parquet(extracted / "episode_integrity.parquet")
+    assert flags.select("t_ns", "env_id", "flag_idx", "flag").rows() == [
+        (2 * SEC, "env_0", 0, "robot jackal spawned by hand"),
+        (3 * SEC, "env_0", 0, "robot jackal spawned by hand"),
+        (3 * SEC, "env_0", 1, "task parameters changed mid-episode"),
+    ]
 
 
-@pytest.mark.parametrize("env", ["env_1", "env_2"])
-def test_episode_record_of_an_older_schema_reads_integrity_as_empty(extracted: pathlib.Path, env: str) -> None:
-    frame = pl.read_parquet(extracted / env / "episode_record.parquet")
-    assert frame.schema["integrity"] == pl.List(pl.String)
-    assert frame["integrity"].to_list() == [[]]
+def test_a_boolean_integrity_of_an_older_schema_carries_no_reasons(extracted: pathlib.Path) -> None:
+    assert "env_1" not in pl.read_parquet(extracted / "episode_integrity.parquet")["env_id"].to_list()
+
+
+def test_a_record_without_integrity_carries_no_reasons(extracted: pathlib.Path) -> None:
+    assert "env_2" not in pl.read_parquet(extracted / "episode_integrity.parquet")["env_id"].to_list()

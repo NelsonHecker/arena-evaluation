@@ -39,7 +39,7 @@ class RecordedEpisodes:
         from arena_evaluation.processing.pipeline import ProcessingPipeline
 
         bundles = ProcessingPipeline(self._folders, workers=1).extract_episode(self.episode(episode_id)) or {}
-        return {name: bundle for name, bundle in bundles.items() if bundle.odom is not None}
+        return {name: bundle for name, bundle in bundles.items() if bundle.robot_odom is not None}
 
     def frames(self, episode_id: int = 0, robot: str | None = None) -> pl.DataFrame:
         """One row per odom sample of the episode, the other topics joined as the evaluation pipeline joins them."""

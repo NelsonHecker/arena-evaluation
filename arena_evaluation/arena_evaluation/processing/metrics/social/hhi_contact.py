@@ -13,6 +13,7 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 CONTACT_TYPES = {10: "hug", 11: "shake_hand"}
@@ -130,16 +131,12 @@ def point_segment_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.nd
     return np.linalg.norm(p - (a + ab * t[:, None]), axis=1)
 
 
-def pair_track(peds_ids: list, peds_positions: list, pid: int) -> np.ndarray:
-    """(N, 2) position of ped pid per aligned row, NaN where it is absent."""
-    out = np.full((len(peds_ids), 2), np.nan)
-    for i, (ids, pos) in enumerate(zip(peds_ids, peds_positions, strict=True)):
-        if ids is None or pos is None:
-            continue
-        ids = list(ids)
-        if pid in ids:
-            j = ids.index(pid)
-            out[i] = (pos[3 * j], pos[3 * j + 1])
+def pair_track(held: pl.DataFrame, time_ns: np.ndarray, ped_id: str) -> np.ndarray:
+    """(N, 2) position of one pedestrian at each robot time, NaN where it is not in the frame held at that time."""
+    out = np.full((len(time_ns), 2), np.nan)
+    row_of = {int(stamp): i for i, stamp in enumerate(time_ns)}
+    for stamp, x, y in held.filter(pl.col("ped_id") == ped_id).select("time_ns", "x", "y").iter_rows():
+        out[row_of[int(stamp)]] = (x, y)
     return out
 
 
@@ -149,7 +146,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
     NAME = "hhi_contact"
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
-    REQUIRED_TOPICS = ["odom", "peds", "interaction_events"]
+    REQUIRED_TOPICS = ["robot_odom", "pedestrian_tracks", "pedestrian_interaction_events"]
 
     UNITS = {
         "hhi_hold_onset_s": "s",
@@ -184,23 +181,25 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         ]
 
     @staticmethod
-    def _contact_edges(events: pl.DataFrame | None, t0_ns: int) -> tuple[int | None, list[int], float | None, float | None]:
-        """(type, participants, hold onset s, release s) of the episode's first contact interaction."""
+    def _contact_edges(events: pl.DataFrame | None, t0_ns: int) -> tuple[int | None, list[str], float | None, float | None]:
+        """(type, participant ped_ids, hold onset s, release s) of the episode's first contact interaction."""
         if events is None or events.height == 0:
             return None, [], None, None
-        contact = events.filter(pl.col("interaction_type").is_in(list(CONTACT_TYPES))).sort("time_ns")
+        contact = events.filter(pl.col("interaction_type").is_in(list(CONTACT_TYPES))).sort("t_ns")
         activated = contact.filter(pl.col("event_name").is_in([EVENT_ACTIVATED, EVENT_HOLD_ONSET]))
         if activated.height == 0:
             return None, [], None, None
         first = activated.row(0, named=True)
         iid = first["interaction_id"]
         mine = contact.filter(pl.col("interaction_id") == iid)
+        same_event = mine.filter((pl.col("t_ns") == first["t_ns"]) & (pl.col("event_name") == first["event_name"]))
+        participants = same_event["ped_id"].drop_nulls().to_list()
 
         def at(name: str) -> float | None:
             rows = mine.filter(pl.col("event_name") == name)
-            return None if rows.height == 0 else (int(rows["time_ns"][0]) - t0_ns) / 1e9
+            return None if rows.height == 0 else (int(rows["t_ns"][0]) - t0_ns) / 1e9
 
-        return int(first["interaction_type"]), [int(p) for p in first["participants"]], at(EVENT_HOLD_ONSET), at(EVENT_RELEASED)
+        return int(first["interaction_type"]), participants, at(EVENT_HOLD_ONSET), at(EVENT_RELEASED)
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         out: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
@@ -219,7 +218,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         t_s = (time_ns - t0_ns) / 1e9
         t_end = float(t_s[-1])
 
-        itype, participants, hold_onset, release = self._contact_edges(topics.get("interaction_events"), t0_ns)
+        itype, participants, hold_onset, release = self._contact_edges(topics.get("pedestrian_interaction_events"), t0_ns)
         out["hhi_interaction"] = CONTACT_TYPES.get(itype) if itype is not None else None
         out["hhi_hold_onset_s"] = hold_onset
         out["hhi_release_s"] = release
@@ -240,9 +239,10 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         for w, (a, b) in windows.items():
             out[f"hhi_share_{w}"] = (b - a) / t_end if t_end > 0 else None
 
-        if len(participants) >= 2 and "peds_ids" in data.columns and "peds_positions" in data.columns:
-            ids, positions = data["peds_ids"].to_list()[:n], data["peds_positions"].to_list()[:n]
-            a, b = pair_track(ids, positions, participants[0]), pair_track(ids, positions, participants[1])
+        peds_df = self.native_ped_frame(episode)
+        if len(participants) >= 2 and peds_df is not None:
+            held = pedestrians_at(pl.Series("time_ns", time_ns), peds_df)
+            a, b = pair_track(held, time_ns, participants[0]), pair_track(held, time_ns, participants[1])
             robot = np.column_stack([pos_x, pos_y])
             present = np.isfinite(a).all(axis=1) & np.isfinite(b).all(axis=1)
             if hold_onset is not None:

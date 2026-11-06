@@ -496,7 +496,7 @@ class MechanismMetricsCalculator(BaseMetricCalculator):
 
     NAME = "mechanism_metrics"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = [("tf_gt", "odom")]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
 
     UNITS = {
         "boarded_before_exit": "",
@@ -550,7 +550,7 @@ class MechanismMetricsCalculator(BaseMetricCalculator):
             view=view,
             world=self._mechanism_world(),
             identity=robot_identity(episode),
-            peds=ped_tracks(episode.data, track.time_ns),
+            peds=ped_tracks(episode.peds, track.time_ns),
             robot_radius=float(self.robot_params.robot_radius),
         )
 

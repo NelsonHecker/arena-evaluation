@@ -6,6 +6,7 @@ import pytest
 
 from arena_evaluation.processing.metrics.social.pedestrian_disturbance import PedestrianDisturbanceCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from flat_peds import flat_peds
 
 S = 1_000_000_000
 ALL_NONE = {"ped_path_deflection_m": None, "ped_velocity_delay_ratio": None, "ped_round_trips_completed": None}
@@ -13,14 +14,21 @@ deflection = PedestrianDisturbanceCalculator._compute_trajectory_deflection
 
 
 def _frame(rows: list, seconds: list[float] | None = None) -> pl.DataFrame:
-    columns: dict = {"peds_positions": pl.Series(rows, dtype=pl.List(pl.Float64))}
-    if seconds is not None:
-        columns["time_ns"] = pl.Series([int(s * S) for s in seconds], dtype=pl.Int64)
-    return pl.DataFrame(columns)
+    """Each row is one frame: its pedestrians as flat (x, y, z) triples, stamped at seconds[i] (or i)."""
+    times = seconds if seconds is not None else list(range(len(rows)))
+    frames = []
+    for t, row in zip(times, rows, strict=True):
+        values = row or []
+        pedestrians = [{"ped_id": f"Pedestrian_{j}", "x": values[3 * j], "y": values[3 * j + 1]} for j in range(len(values) // 3)]
+        frames.append((int(t * S), pedestrians))
+    return flat_peds(frames)
 
 
-def _calc(data: pl.DataFrame | None) -> dict:
-    episode = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[])
+def _calc(peds: pl.DataFrame | None) -> dict:
+    """The robot's time axis is the pedestrian frames' own times here."""
+    topics = {} if peds is None else {"pedestrian_tracks": peds}
+    data = None if peds is None else pl.DataFrame({"time_ns": peds["t_ns"].unique().sort()})
+    episode = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], peds=peds, topics=topics)
     return PedestrianDisturbanceCalculator(RobotParams()).calculate(episode, {})
 
 
@@ -59,12 +67,8 @@ def test_deflection_with_infinite_reference_falls_back_to_dense_distances():
     assert deflection(actual, reference) == pytest.approx((2.0 + 1.0) / 2.0, abs=1e-12)
 
 
-def test_missing_frame_yields_none():
+def test_missing_pedestrian_table_yields_none():
     assert _calc(None) == ALL_NONE
-
-
-def test_frame_without_peds_column_yields_none():
-    assert _calc(pl.DataFrame({"time_ns": [0, S]})) == ALL_NONE
 
 
 def test_empty_frame_yields_none():
@@ -120,11 +124,6 @@ def test_deflection_and_delay_average_over_all_agents():
 def test_stationary_pedestrians_report_zero_delay():
     rows = [[1.0, 1.0, 0.0]] * 5
     assert _calc(_frame(rows, [0, 1, 2, 3, 4])) == {"ped_path_deflection_m": 0.0, "ped_velocity_delay_ratio": 0.0, "ped_round_trips_completed": 0.0}
-
-
-def test_delay_is_zero_without_timestamps():
-    rows = _walk((0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0))
-    assert _calc(_frame(rows))["ped_velocity_delay_ratio"] == 0.0
 
 
 def test_delay_is_zero_for_single_sample():

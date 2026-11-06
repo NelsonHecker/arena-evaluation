@@ -35,17 +35,17 @@ class DoorStateTimeline:
             return None
 
         # per timestamp: build {entity: field -> value}
-        timestamps = sorted(df["time_ns"].unique().to_list())
+        timestamps = sorted(df["t_ns"].unique().to_list())
         open_sets: list[frozenset[str]] = []
         for ts in timestamps:
-            frame = df.filter(pl.col("time_ns") == ts)
+            frame = df.filter(pl.col("t_ns") == ts)
             open_doors: set[str] = set()
-            entities = frame["entity"].unique().to_list()
+            entities = frame["entity_name"].unique().to_list()
             for ent in entities:
-                erows = frame.filter(pl.col("entity") == ent)
+                erows = frame.filter(pl.col("entity_name") == ent)
                 is_open = False
                 for row in erows.iter_rows(named=True):
-                    field = row.get("field", "")
+                    field = row.get("field_name", "")
                     if field == "open" and row.get("value_bool") is True:
                         is_open = True
                     elif field == "state" and str(row.get("value_str", "")) == "open":

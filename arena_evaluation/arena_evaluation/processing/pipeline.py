@@ -8,7 +8,6 @@ import os
 import pathlib
 import re
 import shutil
-import tempfile
 import time
 import typing
 
@@ -29,7 +28,8 @@ from arena_evaluation.storage.schemas import (
 _log = logging.getLogger(__name__)
 
 # Frames shared across robots or scoped to the whole episode, never per-robot sample data.
-_SHARED_FRAMES = frozenset({"tf", "tf_static", "semantic_snapshot", "episode_record"})
+_SHARED_FRAMES = frozenset({"tf", "tf_static", "world_semantics", "episode_lifecycle", "episode_integrity"})
+KEPT_EMPTY_TABLES = ("collision_contacts", "pedestrian_gestures")
 
 
 def _worker_init():
@@ -120,55 +120,19 @@ def _process_worker(
     return ep.episode_id, result
 
 
-def _resolve_odom_frame(aligned_df: pl.DataFrame | None, ride_arrivals_ns: np.ndarray | None = None) -> pl.DataFrame | None:
-    """Filter null poses and slice to longest consistent segment, elevator ride and stair crossing jumps excepted."""
-    import numpy as np
+def _consistent_pose_segment(aligned_df: pl.DataFrame | None, ride_arrivals_ns: np.ndarray | None = None) -> pl.DataFrame | None:
+    """The rows with a finite ground-truth pose, cut to the longest stretch free of teleport jumps (elevator rides and stair crossings excepted)."""
     import polars as pl
 
-    from .pose_segments import teleport_jumps
+    from .pose_segments import consistent_segment
 
     if aligned_df is None or len(aligned_df) == 0:
         return aligned_df
-
-    if "pos_x_gt" in aligned_df.columns:
-        aligned_df = aligned_df.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
-    else:
-        aligned_df = aligned_df.filter(pl.col("pos_x").is_not_null() & ~pl.col("pos_x").is_nan() & pl.col("pos_y").is_not_null() & ~pl.col("pos_y").is_nan() & pl.col("yaw").is_not_null() & ~pl.col("yaw").is_nan())
-    if len(aligned_df) == 0:
+    aligned_df = aligned_df.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
+    if len(aligned_df) < 2:
         return aligned_df
-
-    use_gt = "pos_x_gt" in aligned_df.columns
-    odom_x = aligned_df["pos_x_gt" if use_gt else "pos_x"].to_numpy()
-    odom_y = aligned_df["pos_y_gt" if use_gt else "pos_y"].to_numpy()
-    if len(odom_x) > 1:
-        stamp_col = "stamp_ns_gt" if use_gt else "stamp_ns"
-        jumps = teleport_jumps(
-            odom_x,
-            odom_y,
-            aligned_df[stamp_col].to_numpy() if stamp_col in aligned_df.columns else None,
-            exempt_ns=ride_arrivals_ns,
-            exempt_time_ns=aligned_df["time_ns"].to_numpy() if "time_ns" in aligned_df.columns else None,
-        )
-        if len(jumps) > 0:
-            split_indices = jumps + 1
-            segments_x = np.split(odom_x, split_indices)
-            segments_y = np.split(odom_y, split_indices)
-            best_seg_idx = -1
-            best_len = -1.0
-            for i in range(len(segments_x)):
-                seg_x, seg_y = segments_x[i], segments_y[i]
-                if len(seg_x) < 2:
-                    seg_len = 0.0
-                else:
-                    seg_len = float(np.sum(np.sqrt(np.diff(seg_x) ** 2 + np.diff(seg_y) ** 2)))
-                if seg_len >= 0.2 and seg_len > best_len:
-                    best_len = seg_len
-                    best_seg_idx = i
-            if best_seg_idx != -1:
-                start_idx = 0 if best_seg_idx == 0 else int(split_indices[best_seg_idx - 1])
-                end_idx = int(split_indices[best_seg_idx]) if best_seg_idx < len(split_indices) - 1 else len(odom_x)
-                aligned_df = aligned_df.slice(start_idx, end_idx - start_idx)
-    return aligned_df
+    start, end = consistent_segment(aligned_df["pos_x_gt"].to_numpy(), aligned_df["pos_y_gt"].to_numpy(), aligned_df["time_ns"].to_numpy(), ride_arrivals_ns)
+    return aligned_df.slice(start, end - start)
 
 
 def _metric_world(metadata: RunMetadata | None, ep: EpisodeDescriptor) -> str | None:
@@ -189,33 +153,20 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     if record is None:
         return None, None
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
-    if len(df) == 0 or "time_ns" not in df.columns:
+    if len(df) == 0 or "t_ns" not in df.columns:
         return None, None
-    df = df.sort("time_ns")
+    df = df.sort("t_ns")
     if "outcome_state" not in df.columns:
-        return int(df["time_ns"][0]), int(df["time_ns"][-1])
+        return int(df["t_ns"][0]), int(df["t_ns"][-1])
     states = df["outcome_state"].to_list()
-    stamps = df["time_ns"].to_list()
+    stamps = df["t_ns"].to_list()
     start = next((int(t) for t, s in zip(stamps, states, strict=True) if s == _RECORD_RUNNING), None)
     end = None if states[-1] == _RECORD_RUNNING else int(stamps[-1])
     return start, end
 
 
-_ALIGN_TOLERANCE_NS = 100_000_000
 
 
-def _peds_count(peds: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> int:
-    """Peak pedestrian count over the episode window."""
-    if peds is None:
-        return 0
-    df = peds.collect() if isinstance(peds, pl.LazyFrame) else peds
-    start_ns, end_ns = window
-    if start_ns is not None:
-        df = df.filter(pl.col("time_ns") >= start_ns - _ALIGN_TOLERANCE_NS)
-    if end_ns is not None:
-        df = df.filter(pl.col("time_ns") <= end_ns)
-    counts = df["num_pedestrians"].drop_nulls()
-    return int(counts.max()) if len(counts) > 0 else 0  # pyright: ignore[reportArgumentType]
 
 
 def _episode_endpoints(
@@ -237,13 +188,12 @@ def _episode_endpoints(
         goal_pos = [last_row[x], last_row[y], last_row.get(yaw, 0.0)]
 
     plan_df = plan.collect() if isinstance(plan, pl.LazyFrame) else plan
-    if plan_df is not None and "time_ns" in plan_df.columns and "time_ns" in aligned_df.columns:
+    if plan_df is not None and "t_ns" in plan_df.columns:
         # A recording can outlive its episode by a beat and catch the next episode's first plan.
-        plan_df = plan_df.filter(pl.col("time_ns") <= aligned_df["time_ns"].max())
+        plan_df = plan_df.filter(pl.col("t_ns") <= aligned_df["time_ns"].max())
     if plan_df is not None and len(plan_df) > 0:
-        row_plan = plan_df.row(-1, named=True)
-        if "poses_x" in row_plan and len(row_plan["poses_x"]) > 0:
-            goal_pos = [row_plan["poses_x"][-1], row_plan["poses_y"][-1], row_plan["poses_yaw"][-1]]
+        latest_plan = plan_df.filter(pl.col("plan_id") == plan_df["plan_id"].max()).sort("waypoint_idx")
+        goal_pos = [latest_plan["x"][-1], latest_plan["y"][-1], latest_plan["yaw"][-1]]
 
     gotos = [pose for pose in phases["map_poses"] if pose is not None] if phases else []
     if gotos:
@@ -253,14 +203,14 @@ def _episode_endpoints(
 
 def _robot_phases(record: pl.DataFrame, robot_dir: str) -> dict | None:
     """This robot's {phases, conditions, map_poses, goal_inputs, instructions} from the last EpisodeRecord row that carries any, None without."""
-    if "phases" not in record.columns:
+    if "phases_yaml" not in record.columns:
         return None
     import json
 
     from arena_evaluation.processing.metrics.ecological.condition_metrics import bare_robot_name
 
     bare = bare_robot_name(robot_dir)
-    for raw in reversed(record["phases"].to_list()):
+    for raw in reversed(record["phases_yaml"].to_list()):
         if not raw:
             continue
         try:
@@ -279,15 +229,15 @@ def _fleet_poses(robots: dict[str, TopicBundle], window: tuple[int | None, int |
     start_ns, end_ns = window
     fleet: dict[str, pl.DataFrame] = {}
     for name, bundle in robots.items():
-        frame = bundle.task_pose
+        frame = bundle.robot_task_pose
         if frame is None:
             continue
         if isinstance(frame, pl.LazyFrame):
             frame = frame.collect()
         if start_ns is not None:
-            frame = frame.filter(pl.col("time_ns") >= start_ns - _ALIGN_TOLERANCE_NS)
+            frame = frame.filter(pl.col("t_ns") >= start_ns - _ALIGN_TOLERANCE_NS)
         if end_ns is not None:
-            frame = frame.filter(pl.col("time_ns") <= end_ns + _ALIGN_TOLERANCE_NS)
+            frame = frame.filter(pl.col("t_ns") <= end_ns + _ALIGN_TOLERANCE_NS)
         if len(frame) > 0:
             fleet[bare_robot_name(name)] = frame
     return fleet
@@ -306,9 +256,11 @@ def _collect_native_topics(bundle: TopicBundle) -> dict[str, pl.DataFrame]:
 
 
 from arena_evaluation.benchmark.profiler import PipelineProfiler
-from arena_evaluation.processing.mcap_reader import KEPT_EMPTY_TABLES, MCAPReader
+from arena_evaluation.processing.mcap_reader import MCAPReader
 from arena_evaluation.processing.metrics.ecological.mechanism_common import robot_env_snapshot
 from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquetStore
+from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS as _ALIGN_TOLERANCE_NS
+from arena_evaluation.processing.pedestrian_frames import peak_pedestrian_count
 from arena_evaluation.processing.pose_anchor import resolve_pose_source
 from arena_evaluation.processing.pose_segments import ride_arrival_times
 from arena_evaluation.processing.topic_aligner import TopicAligner
@@ -324,7 +276,6 @@ _METRIC_DTYPES = {
     "collision_obstacles": pl.List(pl.String),
     "pose_source": pl.String,
     "pose_samples": pl.Int64,
-    "pose_anchor_residual_m": pl.Float64,
     "status": pl.String,
     "status_reason": pl.String,
     "result": pl.String,
@@ -357,7 +308,7 @@ def _outcome_verdict(outcome_state: int | None, outcome_info: str | None) -> tup
 
 def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
     """The episode's own records in publish order, up to its first terminal record after it ran, without the next episode's queued records that share its last timestamp."""
-    df = record.sort("time_ns", maintain_order=True)
+    df = record.sort("t_ns", maintain_order=True)
     if "outcome_state" not in df.columns:
         return df
     states = df["outcome_state"].to_list()
@@ -372,9 +323,9 @@ def _record_conditions(record: pl.DataFrame) -> list[dict] | None:
     """The episode's conditions: the last of its own records whose `conditions` JSON is a non-empty list."""
     import json
 
-    if "conditions" not in record.columns or "time_ns" not in record.columns:
+    if "conditions_yaml" not in record.columns or "t_ns" not in record.columns:
         return None
-    for raw in reversed(_episode_rows(record)["conditions"].to_list()):
+    for raw in reversed(_episode_rows(record)["conditions_yaml"].to_list()):
         try:
             parsed = json.loads(raw) if raw else None
         except ValueError:
@@ -387,12 +338,12 @@ def _record_conditions(record: pl.DataFrame) -> list[dict] | None:
 def _record_outcome(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMetadata | None) -> tuple[int | None, str | None]:
     """(outcome_state, outcome_info): the episode's own terminal record, else the runner's yaml outcome, else the last record."""
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
-    rows = df is not None and len(df) > 0 and "outcome_state" in df.columns and "time_ns" in df.columns
+    rows = df is not None and len(df) > 0 and "outcome_state" in df.columns and "t_ns" in df.columns
     if rows:
         assert df is not None
         df = _episode_rows(df)
         running = df.filter(pl.col("outcome_state") == _RECORD_RUNNING)
-        after = df.filter(pl.col("time_ns") > running["time_ns"][0]) if len(running) else df
+        after = df.filter(pl.col("t_ns") > running["t_ns"][0]) if len(running) else df
         terminal = after.filter(pl.col("outcome_state") != _RECORD_RUNNING)
         if len(terminal):
             last = terminal.row(-1, named=True)
@@ -406,11 +357,17 @@ def _record_outcome(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMet
     return None, None
 
 
-def _record_integrity(record: pl.DataFrame | pl.LazyFrame | None, metadata: RunMetadata | None) -> list[str]:
-    """Integrity reasons of the last recorded record, from the yaml when no record carries them."""
+def _record_integrity(
+    record: pl.DataFrame | pl.LazyFrame | None,
+    flags: pl.DataFrame | pl.LazyFrame | None,
+    metadata: RunMetadata | None,
+) -> list[str]:
+    """Integrity reasons of the last recorded record, from the episode yaml when no record carries any."""
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
-    if df is not None and len(df) > 0 and "integrity" in df.columns and "time_ns" in df.columns:
-        return df.sort("time_ns").row(-1, named=True)["integrity"] or []
+    reasons = flags.collect() if isinstance(flags, pl.LazyFrame) else flags
+    if df is not None and len(df) > 0 and "t_ns" in df.columns and reasons is not None and len(reasons) > 0:
+        last_stamp = df["t_ns"].max()
+        return reasons.filter(pl.col("t_ns") == last_stamp).sort("flag_idx")["flag"].to_list()
     if metadata is not None:
         return list(metadata.integrity)
     return []
@@ -431,6 +388,7 @@ def _status_row(
     status: str,
     reason: str,
     record: pl.DataFrame | pl.LazyFrame | None = None,
+    flags: pl.DataFrame | pl.LazyFrame | None = None,
 ) -> dict:
     """Identity and runtime verdict of an episode without metrics."""
     local_planner, inter_planner = _planner_split(ep, metadata)
@@ -453,7 +411,7 @@ def _status_row(
         "status_reason": reason,
         "pose_source": None,
         "outcome_info": outcome_info,
-        "integrity": _record_integrity(record, metadata),
+        "integrity": _record_integrity(record, flags, metadata),
         "result": result,
         "success": success,
     }
@@ -542,12 +500,8 @@ class ProcessingPipeline:
         with _ctx:
             if topics_dir.exists():
                 shutil.rmtree(topics_dir)
-            with tempfile.TemporaryDirectory(dir=episode_dir, prefix=".extract-") as scratch:
-                bundles = MCAPReader(mcap_path).read(pathlib.Path(scratch), map_name_fallback=ep.map)
-                TopicParquetStore.write(bundles, topics_dir, overwrite=True)
-            bundles = TopicParquetStore.read(topics_dir)
-            if bundles is None:
-                raise RuntimeError(f"no parquet written to {topics_dir}")
+            bundles = MCAPReader(mcap_path).read(topics_dir)
+            TopicParquetStore.mark_complete(topics_dir)
             return bundles
 
     def _describe_run_dir(self, run_dir: pathlib.Path) -> EpisodeDescriptor:
@@ -612,59 +566,52 @@ class ProcessingPipeline:
             registry = MetricRegistry(robot_params, world=_metric_world(metadata, ep), metrics_config=_suite_metrics(episode_dir, self.folder_manager.data_root))
 
             all_results: list[dict] = []
-            robots = {name: bundle for name, bundle in bundles.items() if bundle.odom is not None}
+            robots = {name: bundle for name, bundle in bundles.items() if bundle.robot_tracks is not None}
             if not robots:
-                any_record = next((b.episode_record for b in bundles.values() if b.episode_record is not None), None)
-                return finish([_status_row(ep, metadata, _metadata_robot(metadata, bundles), "no_trajectory", "no odom rows", any_record)])
+                any_record = next((b.episode_lifecycle for b in bundles.values() if b.episode_lifecycle is not None), None)
+                return finish([_status_row(ep, metadata, _metadata_robot(metadata, bundles), "no_trajectory", "no tf ground-truth rows", any_record)])
             for robot_name, bundle in robots.items():
-                window = _episode_window(bundle.episode_record)
-                tf_gt, pose_source = resolve_pose_source(bundle, window)
-                bundle.tf_gt = tf_gt
+                window = _episode_window(bundle.episode_lifecycle)
+                tracks, pose_source = resolve_pose_source(bundle, window)
+                if tracks is None:
+                    reason = "no tf ground-truth rows inside the episode window"
+                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_lifecycle, bundle.episode_integrity))
+                    continue
 
-                peds_count = 0
-                if pose_source.kind == "odom":
-                    peds_count = _peds_count(bundle.peds, window)
-                    bundle.peds = None
-
-                if bundle.peds is not None:
+                if bundle.pedestrian_tracks is not None:
                     pedsim_avail = True
-                robot_pedsim = pedsim_avail and pose_source.kind != "odom"
+                robot_pedsim = pedsim_avail
 
                 available_topics = bundle.available()
 
-                aligner = TopicAligner()
-                aligned_df = aligner.align(bundle, *window)
+                aligned_df = TopicAligner().align(bundle, *window)
                 if isinstance(aligned_df, pl.LazyFrame):
                     aligned_df = aligned_df.collect()
 
                 if aligned_df is None or len(aligned_df) < 5:
                     reason = f"{0 if aligned_df is None else len(aligned_df)} odom rows inside the episode window"
                     _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
-                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
+                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_lifecycle, bundle.episode_integrity))
                     continue
 
                 # Resolve the pose frame once so all calculators share it
-                aligned_df = _resolve_odom_frame(aligned_df, ride_arrival_times(robot_env_snapshot(bundle.semantic_snapshot, robot_name)))
+                aligned_df = _consistent_pose_segment(aligned_df, ride_arrival_times(robot_env_snapshot(bundle.world_semantics, robot_name)))
                 if aligned_df is None or len(aligned_df) < 5:
                     reason = f"{0 if aligned_df is None else len(aligned_df)} pose rows after resolution"
                     _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
-                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_record))
+                    all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_lifecycle, bundle.episode_integrity))
                     continue
 
                 topics = _collect_native_topics(bundle)
                 if len(aligned_df) > 0:
                     t0 = int(aligned_df["time_ns"][0])
                     t1 = int(aligned_df["time_ns"][-1])
-                    tol = 100_000_000
-                    topics = {name: df.filter((pl.col("time_ns") >= t0 - tol) & (pl.col("time_ns") <= t1 + tol)) if "time_ns" in df.columns else df for name, df in topics.items()}
+                    topics = {name: df.filter((pl.col("t_ns") >= t0 - _ALIGN_TOLERANCE_NS) & (pl.col("t_ns") <= t1 + _ALIGN_TOLERANCE_NS)) if "t_ns" in df.columns else df for name, df in topics.items()}
 
-                num_pedestrians = peds_count if pose_source.kind == "odom" else 0
-                if "num_pedestrians" in aligned_df.columns:
-                    peds = aligned_df["num_pedestrians"].drop_nulls()
-                    if len(peds) > 0:
-                        num_pedestrians = int(peds.max())  # pyright: ignore[reportArgumentType]
+                peds_df = bundle.pedestrian_tracks.collect() if isinstance(bundle.pedestrian_tracks, pl.LazyFrame) else bundle.pedestrian_tracks
+                num_pedestrians = peak_pedestrian_count(peds_df, None if window[0] is None else window[0] - _ALIGN_TOLERANCE_NS, window[1])
 
-                semantic_snapshot_df = bundle.semantic_snapshot
+                semantic_snapshot_df = bundle.world_semantics
                 if isinstance(semantic_snapshot_df, pl.LazyFrame):
                     semantic_snapshot_df = semantic_snapshot_df.collect()
 
@@ -672,21 +619,20 @@ class ProcessingPipeline:
                 phases = None
                 outcome_state = None
                 outcome_info = None
-                if bundle.episode_record is not None:
-                    er = bundle.episode_record
+                if bundle.episode_lifecycle is not None:
+                    er = bundle.episode_lifecycle
                     if isinstance(er, pl.LazyFrame):
                         er = er.collect()
                     if len(er) > 0:
                         conditions = _record_conditions(er)
-                        if "outcome_state" in er.columns and "time_ns" in er.columns:
+                        if "outcome_state" in er.columns and "t_ns" in er.columns:
                             phases = _robot_phases(_episode_rows(er), robot_name)
                         outcome_state, outcome_info = _record_outcome(er, metadata)
 
-                integrity = _record_integrity(bundle.episode_record, metadata)
-                start_pos, goal_pos = _episode_endpoints(aligned_df, bundle.plan, phases)
+                integrity = _record_integrity(bundle.episode_lifecycle, bundle.episode_integrity, metadata)
+                start_pos, goal_pos = _episode_endpoints(aligned_df, bundle.robot_plans, phases)
 
                 fleet = _fleet_poses(robots, window)
-                peds_df = bundle.peds.collect() if isinstance(bundle.peds, pl.LazyFrame) else bundle.peds
 
                 aligned_ep = AlignedEpisodeBundle(
                     episode_id=ep.episode_id,
@@ -752,17 +698,10 @@ class ProcessingPipeline:
                     ep_metrics["is_reference"] = ep.is_reference
                     ep_metrics["reference_type"] = ep.reference_type
                     ep_metrics["integrity"] = integrity
-                    if pose_source.kind == "odom":
-                        ep_metrics["num_pedestrians"] = aligned_ep.num_pedestrians
                     ep_metrics["pose_source"] = pose_source.kind
                     ep_metrics["pose_samples"] = pose_source.samples
-                    ep_metrics["pose_anchor_residual_m"] = pose_source.residual_m
-                    if pose_source.kind == "odom":
-                        ep_metrics["status"] = "path_only"
-                        ep_metrics["status_reason"] = "no map-frame pose sample, robot track in odom frame"
-                    else:
-                        ep_metrics["status"] = _STATUS_EVALUATED
-                        ep_metrics["status_reason"] = None
+                    ep_metrics["status"] = _STATUS_EVALUATED
+                    ep_metrics["status_reason"] = None
                     all_results.append(ep_metrics)
 
             return finish(all_results)
