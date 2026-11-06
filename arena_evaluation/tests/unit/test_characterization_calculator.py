@@ -242,7 +242,7 @@ def test_recorded_schedule_beats_the_rebuild():
         start_pos=[],
         goal_pos=[],
         robot_name="env_0_jackal",
-        topics={"characterization_schedule": schedule},
+        topics={"robot_characterization_schedule": schedule},
     )
     out = _calc().calculate(ep, {})
     assert out["char_phase_coverage"] == 1.0
@@ -283,7 +283,7 @@ def test_duplicate_recorded_schedule_rows_do_not_duplicate_samples():
         start_pos=[],
         goal_pos=[],
         robot_name="env_0_jackal",
-        topics={"characterization_schedule": schedule},
+        topics={"robot_characterization_schedule": schedule},
     )
     out = _calc().calculate(ep, {})
     assert len(out["timeseries_char_time_s"]) == 2

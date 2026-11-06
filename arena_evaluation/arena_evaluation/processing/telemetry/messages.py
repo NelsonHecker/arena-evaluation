@@ -10,7 +10,9 @@ import typing
 from collections.abc import Sequence
 
 if typing.TYPE_CHECKING:
+    from geometry_msgs.msg import Quaternion
     from mcap.records import Schema
+    from std_msgs.msg import Header
 
 NS_PER_SECOND = 1_000_000_000
 DEFAULT_ENV_ID = "env_0"
@@ -18,6 +20,12 @@ _ENV_TOKEN = re.compile(r"(env_\d+)")
 _FIELD_DECLARATION = re.compile(r"^\s*[A-Za-z_][\w/]*(?:\[\d*\])?\s+([A-Za-z_]\w*)", re.MULTILINE)
 _CONTROLLER_SUFFIX = "_controller"
 _POWER_PUBLISHER = "power_publisher"
+
+
+class HasSlots(typing.Protocol):
+    """An object declaring __slots__."""
+
+    __slots__: tuple[str, ...] | list[str]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -29,27 +37,27 @@ class RobotRef:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class Envelope:
+class Envelope[T]:
     """A decoded message with its log time, its recorded schema, and the robot it belongs to."""
 
     t_ns: int
     ref: RobotRef
     schema: Schema
-    body: typing.Any
+    body: T
 
 
-def stamp_ns(header: typing.Any) -> int:
+def stamp_ns(header: Header) -> int:
     """Header stamp of a message in nanoseconds."""
     return int(header.stamp.sec) * NS_PER_SECOND + int(header.stamp.nanosec)
 
 
-def yaw_from_orientation(orientation: typing.Any) -> float:
+def yaw_from_orientation(orientation: Quaternion) -> float:
     """Heading angle of a geometry_msgs quaternion."""
     x, y, z, w = orientation.x, orientation.y, orientation.z, orientation.w
     return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
 
 
-def declares(schema: Schema, body: typing.Any, field: str) -> bool:
+def declares(schema: Schema, body: HasSlots, field: str) -> bool:
     """Whether the recorded schema declares a field; without schema text the message class decides."""
     if schema.data:
         return field in _declared_fields(schema.data.decode())

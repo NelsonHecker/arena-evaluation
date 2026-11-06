@@ -23,42 +23,28 @@ class DoorStateTimeline:
         if semantic is None:
             return None
         if isinstance(semantic, pl.LazyFrame):
-            semantic = semantic.collect()  # lazy -> eager
+            semantic = semantic.collect()
         if len(semantic) == 0:
             return None
 
         df = semantic
-        if "kind" not in df.columns:
+        if not {"t_ns", "entity_name", "kind", "field_name"} <= set(df.columns):
             return None
         df = df.filter(pl.col("kind") == "door")
         if len(df) == 0:
             return None
 
-        # per timestamp: build {entity: field -> value}
-        timestamps = sorted(df["t_ns"].unique().to_list())
-        open_sets: list[frozenset[str]] = []
-        for ts in timestamps:
-            frame = df.filter(pl.col("t_ns") == ts)
-            open_doors: set[str] = set()
-            entities = frame["entity_name"].unique().to_list()
-            for ent in entities:
-                erows = frame.filter(pl.col("entity_name") == ent)
-                is_open = False
-                for row in erows.iter_rows(named=True):
-                    field = row.get("field_name", "")
-                    if field == "open" and row.get("value_bool") is True:
-                        is_open = True
-                    elif field == "state" and str(row.get("value_str", "")) == "open":
-                        is_open = True
-                    elif field == "progress":
-                        v = row.get("value_num")
-                        if v is not None and not np.isnan(float(v)) and float(v) > OPEN_PROGRESS_THRESHOLD:
-                            is_open = True
-                if is_open:
-                    open_doors.add(ent)
-            open_sets.append(frozenset(open_doors))
-
-        return cls(np.asarray(timestamps, dtype=np.int64), open_sets)
+        is_open_expr = (
+            ((pl.col("field_name") == "open") & (pl.col("value_bool") == True))  # noqa: E712
+            | ((pl.col("field_name") == "state") & (pl.col("value_str") == "open"))
+            | ((pl.col("field_name") == "progress") & pl.col("value_num").is_not_nan() & (pl.col("value_num") > OPEN_PROGRESS_THRESHOLD))
+        )
+        all_timestamps = df.select("t_ns").unique().sort("t_ns")
+        open_by_ts = df.filter(is_open_expr).group_by("t_ns").agg(pl.col("entity_name").unique().alias("open_doors"))
+        timeline_df = all_timestamps.join(open_by_ts, on="t_ns", how="left").sort("t_ns")
+        timestamps = timeline_df["t_ns"].to_numpy()
+        open_sets = [frozenset(doors) if doors is not None else frozenset() for doors in timeline_df["open_doors"]]
+        return cls(timestamps, open_sets)
 
     def open_doors_at(self, time_ns: int) -> frozenset[str]:
         """Backward-asof: door state at or before *time_ns* (empty before first)."""

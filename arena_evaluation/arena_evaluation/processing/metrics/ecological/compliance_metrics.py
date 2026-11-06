@@ -8,8 +8,8 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name, robot_env_snapshot
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 if typing.TYPE_CHECKING:
@@ -182,6 +182,8 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
     """
     empty = pl.DataFrame(schema=_RECONSTRUCTED_EVENTS_SCHEMA)
     if snapshot is None or len(snapshot) == 0:
+        return empty
+    if not {"t_ns", "entity_name", "kind", "field_name"} <= set(snapshot.columns):
         return empty
 
     rows = snapshot.sort("t_ns")
@@ -391,10 +393,22 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
 
         encounters_total = 0
         encounters_compliant = 0
+        prev_peds_arr: np.ndarray | None = None
 
         for i, frame in enumerate(frames):
             peds_arr = frame.select("x", "y").to_numpy()
+            if peds_arr.shape[0] == 0:
+                prev_peds_arr = None
+                continue
+
             ped_vels = frame.select("vx", "vy").to_numpy()
+            if np.isnan(ped_vels).any():
+                ped_vels = None
+
+            if ped_vels is None and prev_peds_arr is not None and prev_peds_arr.shape == peds_arr.shape:
+                dt_i = max(float(dt[i]), 1e-3)
+                ped_vels = (peds_arr - prev_peds_arr) / dt_i
+            prev_peds_arr = peds_arr
 
             rx, ry = float(rpx[i]), float(rpy[i])
             vr_x, vr_y = float(rvx[i]), float(rvy[i])

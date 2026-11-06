@@ -29,34 +29,32 @@ from arena_evaluation.processing.acoustics.door_state import (
 
 _SEM_SCHEMA = pl.Schema(
     {
-        "time_ns": pl.Int64,
-        "env_id": pl.Int64,
+        "t_ns": pl.Int64,
+        "env_id": pl.String,
         "world": pl.String,
-        "entity": pl.String,
+        "entity_name": pl.String,
         "kind": pl.String,
-        "field": pl.String,
+        "field_name": pl.String,
         "field_kind": pl.String,
         "value_str": pl.String,
         "value_num": pl.Float64,
         "value_bool": pl.Boolean,
-        "value_list": pl.List(pl.Utf8),
     }
 )
 
 
 def _row(time_ns: int, entity: str, field: str, kind: str = "door", vstr: str | None = None, vnum: float | None = None, vbool: bool | None = None) -> dict:
     return {
-        "time_ns": time_ns,
-        "env_id": 0,
+        "t_ns": time_ns,
+        "env_id": "env_0",
         "world": "w",
-        "entity": entity,
+        "entity_name": entity,
         "kind": kind,
-        "field": field,
+        "field_name": field,
         "field_kind": "",
         "value_str": vstr,
         "value_num": vnum,
         "value_bool": vbool,
-        "value_list": None,
     }
 
 

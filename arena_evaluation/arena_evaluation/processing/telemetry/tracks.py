@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
+from geometry_msgs.msg import TransformStamped, Twist, TwistStamped
+from nav_msgs.msg import Odometry
 
 from arena_evaluation.processing.telemetry.messages import NS_PER_SECOND, Envelope, RobotRef, robot_row, yaw_from_orientation
 from arena_evaluation.processing.telemetry.writer import TableSink
@@ -72,6 +74,14 @@ def is_ground_truth(parent: str, child: str) -> bool:
     return _named_frame(parent.strip("/").lower(), _GROUND_TRUTH_FRAMES) and is_base_frame(child.strip("/").lower())
 
 
+def _command_twist(envelope: Envelope[Twist | TwistStamped]) -> Twist:
+    if envelope.schema.name == TWIST_STAMPED_SCHEMA:
+        stamped: Any = envelope.body
+        return stamped.twist
+    raw: Any = envelope.body
+    return raw
+
+
 class KinematicsRecorder:
     """Collects ground-truth poses and odometry per robot, then writes the derived kinematic tables."""
 
@@ -80,10 +90,10 @@ class KinematicsRecorder:
         self._poses: dict[RobotRef, list[tuple[int, Pose3]]] = defaultdict(list)
         self._odometry: dict[tuple[str, RobotRef], list[_Odometry]] = defaultdict(list)
 
-    def record_ground_truth(self, envelope: Envelope, pose: Pose3) -> None:
+    def record_ground_truth(self, envelope: Envelope[TransformStamped], pose: Pose3) -> None:
         self._poses[envelope.ref].append((envelope.t_ns, pose))
 
-    def record_odometry(self, table: str, envelope: Envelope) -> None:
+    def record_odometry(self, table: str, envelope: Envelope[Odometry]) -> None:
         odometry = envelope.body
         pose = odometry.pose.pose
         self._odometry[(table, envelope.ref)].append(
@@ -97,8 +107,8 @@ class KinematicsRecorder:
             )
         )
 
-    def record_command(self, table: str, envelope: Envelope) -> None:
-        twist = envelope.body.twist if envelope.schema.name == TWIST_STAMPED_SCHEMA else envelope.body
+    def record_command(self, table: str, envelope: Envelope[Twist | TwistStamped]) -> None:
+        twist = _command_twist(envelope)
         self._sink.append(
             table,
             robot_row(

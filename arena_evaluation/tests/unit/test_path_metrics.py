@@ -4,11 +4,21 @@ from arena_evaluation.storage.schemas import RobotParams, AlignedEpisodeBundle
 from arena_evaluation.processing.metrics.performance.path_metrics import PathMetricsCalculator
 
 
+def _bundle(odom_df):
+    if odom_df is not None and "pos_x" in odom_df.columns and "pos_x_gt" not in odom_df.columns:
+        odom_df = odom_df.with_columns(
+            pl.col("pos_x").alias("pos_x_gt"),
+            pl.col("pos_y").alias("pos_y_gt"),
+            pl.col("yaw").alias("yaw_gt"),
+        )
+    return AlignedEpisodeBundle(episode_id=1, data=odom_df, start_pos=[], goal_pos=[])
+
+
 def test_path_length_straight():
     # Straight line along X axis
     odom_df = pl.DataFrame({"time_ns": [1, 2, 3, 4], "pos_x": [0.0, 1.0, 2.0, 3.0], "pos_y": [0.0, 0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0, 0.0]})
 
-    episode = AlignedEpisodeBundle(episode_id=1, data=odom_df, start_pos=[], goal_pos=[])
+    episode = _bundle(odom_df)
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PathMetricsCalculator(params)
 
@@ -24,7 +34,7 @@ def test_path_length_stationary():
     # Stationary robot
     odom_df = pl.DataFrame({"time_ns": [1, 2, 3, 4], "pos_x": [0.0, 0.0, 0.0, 0.0], "pos_y": [0.0, 0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0, 0.0]})
 
-    episode = AlignedEpisodeBundle(episode_id=1, data=odom_df, start_pos=[], goal_pos=[])
+    episode = _bundle(odom_df)
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PathMetricsCalculator(params)
 
@@ -38,7 +48,7 @@ def test_path_length_with_nans():
     # Straight line along X axis with some nulls/NaNs
     odom_df = pl.DataFrame({"time_ns": [1, 2, 3, 4], "pos_x": [0.0, None, 2.0, 3.0], "pos_y": [0.0, 0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0, 0.0]})
 
-    episode = AlignedEpisodeBundle(episode_id=1, data=odom_df, start_pos=[], goal_pos=[])
+    episode = _bundle(odom_df)
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PathMetricsCalculator(params)
 

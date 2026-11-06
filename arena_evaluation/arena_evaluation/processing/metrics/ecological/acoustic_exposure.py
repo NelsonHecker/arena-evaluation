@@ -339,7 +339,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     max_idx = i
 
         # Re-parse the pedestrians for the worst-case frame
-        worst_pts = self._parse_pedestrian_positions(peds_pos[max_idx])
+        worst_frame_peds = peds_at_time.get(int(time_ns[max_idx]))
+        worst_pts = [(float(x), float(y)) for x, y in worst_frame_peds.select("x", "y").iter_rows()] if worst_frame_peds is not None else []
         worst_frame = {
             "robot_x": float(rx_m[max_idx]),
             "robot_y": float(ry_m[max_idx]),

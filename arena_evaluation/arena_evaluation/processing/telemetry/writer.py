@@ -253,10 +253,7 @@ _GLOBAL_TABLES = {
 
 
 def _schemas(keys: tuple, tables: Mapping[str, tuple]) -> dict[str, pa.Schema]:
-    return {
-        name: pa.schema([pa.field("t_ns", _INT, nullable=False), *(pa.field(column, dtype) for column, dtype in keys), *(pa.field(column, dtype) for column, dtype in columns)])
-        for name, columns in tables.items()
-    }
+    return {name: pa.schema([pa.field("t_ns", _INT, nullable=False), *(pa.field(column, dtype) for column, dtype in keys), *(pa.field(column, dtype) for column, dtype in columns)]) for name, columns in tables.items()}
 
 
 ROBOT_TABLES: tuple[str, ...] = tuple(_ROBOT_TABLES)

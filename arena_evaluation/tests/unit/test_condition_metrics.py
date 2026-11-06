@@ -26,6 +26,7 @@ from arena_evaluation.processing.metrics.ecological.condition_metrics import (
     load_wall_grid,
     load_zone_geometry,
 )
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 from snapshot_rows import snapshot_frame
 
@@ -41,6 +42,12 @@ def _start_pos(data):
 
 
 def _episode(data, semantic_snapshot=None, conditions=None):
+    if data is not None and "pos_x" in data.columns and "pos_x_gt" not in data.columns:
+        data = data.with_columns(
+            pl.col("pos_x").alias("pos_x_gt"),
+            pl.col("pos_y").alias("pos_y_gt"),
+            pl.col("yaw").alias("yaw_gt"),
+        )
     return AlignedEpisodeBundle(
         episode_id=1,
         data=data,
@@ -63,22 +70,29 @@ def _square(name):
     )
 
 
-def _ctx(time_ns, pos_x=None, pos_y=None, snapshot=None, data=None, zones=None):
+def _ctx(time_ns, pos_x=None, pos_y=None, snapshot=None, data=None, peds=None, zones=None):
     n = len(time_ns)
-    time_arr = np.asarray(time_ns)
+    time_arr = np.asarray(time_ns, dtype=np.int64)
     pos_x = np.zeros(n) if pos_x is None else np.asarray(pos_x, dtype=float)
     pos_y = np.zeros(n) if pos_y is None else np.asarray(pos_y, dtype=float)
     zones = zones or []
-    data = data if data is not None else pl.DataFrame({"time_ns": list(time_ns)})
+    data_df = data if data is not None else pl.DataFrame({"time_ns": list(time_ns)})
+    peds_df = peds
+    if peds_df is None and data is not None and "ped_name" in data.columns:
+        peds_df = data
+    peds_frames = frames_of(peds_df) if peds_df is not None and len(peds_df) > 0 else []
+    peds_times = np.array([int(frame["t_ns"][0]) for frame in peds_frames], dtype=np.int64)
     return _EvalContext(
         events=_reconstruct_events(snapshot),
         time_ns=time_arr,
         pos_x=pos_x,
         pos_y=pos_y,
-        data=data,
+        data=data_df,
         zones_by_name={z.name: z for z in zones},
         entity_roster=_entity_roster(snapshot),
-        ped_roster=_ped_roster(data),
+        ped_roster=_ped_roster(peds_df),
+        peds_frames=peds_frames,
+        peds_times=peds_times,
     )
 
 
@@ -329,13 +343,20 @@ def test_robot_zone_unresolvable_without_pose_anchor():
 
 
 def _ped_data(time_ns, names, positions):
-    return pl.DataFrame(
-        {
-            "time_ns": list(time_ns),
-            "peds_names": names,
-            "peds_positions": positions,
-        }
-    )
+    rows = []
+    for t, n_list, p_list in zip(time_ns, names, positions):
+        pts = []
+        if p_list and isinstance(p_list[0], (list, tuple)):
+            pts = [(p[0], p[1]) for p in p_list]
+        elif p_list:
+            for j in range(0, len(p_list), 3):
+                if j + 1 < len(p_list):
+                    pts.append((p_list[j], p_list[j + 1]))
+        for idx, (name, (x, y)) in enumerate(zip(n_list, pts)):
+            rows.append({"t_ns": int(t), "ped_id": f"ped_{idx}", "ped_name": str(name), "x": float(x), "y": float(y)})
+    if rows:
+        return pl.DataFrame(rows, schema={"t_ns": pl.Int64, "ped_id": pl.Utf8, "ped_name": pl.Utf8, "x": pl.Float64, "y": pl.Float64})
+    return pl.DataFrame(schema={"t_ns": pl.Int64, "ped_id": pl.Utf8, "ped_name": pl.Utf8, "x": pl.Float64, "y": pl.Float64})
 
 
 def test_ped_zone_zero_order_hold_and_before_first_sample_false():
@@ -538,8 +559,8 @@ def test_calculate_success_when_all_true():
 def _gestures(rows):
     return pl.DataFrame(
         {
-            "time_ns": [t for t, _, _ in rows],
-            "ped_id": [pid for _, pid, _ in rows],
+            "t_ns": [t for t, _, _ in rows],
+            "ped_id": [str(pid) for _, pid, _ in rows],
             "slot": ["body"] * len(rows),
             "clip": [clip for _, _, clip in rows],
             "hand": [""] * len(rows),
@@ -554,13 +575,14 @@ def _gestures(rows):
 def test_clips_on_axis_holds_the_peds_message_and_names_every_pedestrian_in_it():
     peds = pl.DataFrame(
         {
-            "time_ns": [1_000_000_000, 3_000_000_000],
-            "peds_names": [["env_0/alice", "env_0/bob"], ["env_0/alice"]],
-            "peds_ids": [[1, 2], [1]],
-            "peds_positions": [[1.0, 1.0, 0.0, 2.0, 2.0, 0.0], [1.0, 1.0, 0.0]],
+            "t_ns": [1_000_000_000, 1_000_000_000, 3_000_000_000],
+            "ped_name": ["env_0/alice", "env_0/bob", "env_0/alice"],
+            "ped_id": ["1", "2", "1"],
+            "x": [1.0, 2.0, 1.0],
+            "y": [1.0, 2.0, 1.0],
         }
     )
-    gestures = _gestures([(1_000_000_000, 2, "wave"), (3_000_000_000, 1, "beckon"), (3_000_000_000, 1, "gaze")])
+    gestures = _gestures([(1_000_000_000, "2", "wave"), (3_000_000_000, "1", "beckon"), (3_000_000_000, "1", "gaze")])
     axis = np.array([0, 1_000_000_000, 2_000_000_000, 3_000_000_000, 4_000_000_000])
 
     assert clips_on_axis(peds, gestures, axis) == [
@@ -572,7 +594,7 @@ def test_clips_on_axis_holds_the_peds_message_and_names_every_pedestrian_in_it()
     ]
     assert clips_on_axis(peds, gestures.clear(), axis) == [{}, {"alice": frozenset(), "bob": frozenset()}, {"alice": frozenset(), "bob": frozenset()}, {"alice": frozenset()}, {"alice": frozenset()}]
     assert clips_on_axis(peds, None, axis) is None
-    assert clips_on_axis(peds.drop("peds_ids"), gestures, axis) is None
+    assert clips_on_axis(peds.drop("ped_id"), gestures, axis) is None
     assert clips_on_axis(None, gestures, axis) is None
 
 
@@ -582,21 +604,28 @@ def test_calculate_plays_atom_from_the_recorded_gestures():
     calc._world_cache["synthetic_conditions4"] = [_square("pharmacy")]
     _wall_cache["synthetic_conditions4"] = None
     times = [0, 1_000_000_000, 2_000_000_000]
-    data = pl.DataFrame({"time_ns": times, "pos_x": [1.0] * 3, "pos_y": [1.0] * 3, "yaw": [0.0] * 3, "peds_names": [["env_0/alice"]] * 3, "peds_positions": [[2.0, 2.0, 0.0]] * 3})
-    peds = pl.DataFrame({"time_ns": times, "peds_names": [["env_0/alice"]] * 3, "peds_ids": [[1]] * 3, "peds_positions": [[2.0, 2.0, 0.0]] * 3})
-    gestures = _gestures([(2_000_000_000, 1, "beckon")])
+    data = pl.DataFrame({"time_ns": times, "pos_x": [1.0] * 3, "pos_y": [1.0] * 3, "yaw": [0.0] * 3})
+    peds = pl.DataFrame(
+        {
+            "t_ns": times,
+            "ped_name": ["env_0/alice"] * 3,
+            "ped_id": ["1"] * 3,
+            "x": [2.0] * 3,
+            "y": [2.0] * 3,
+        }
+    )
+    gestures = _gestures([(2_000_000_000, "1", "beckon")])
     conditions = [{"op": "eventually", "p": "alice plays beckon"}, {"op": "always", "p": "not alice plays wave"}, {"op": "eventually", "p": "bob plays beckon"}]
 
     episode = _episode(data, conditions=conditions)
-    episode.peds = peds
-    episode.topics = {"ped_gestures": gestures}
+    episode.topics = {"pedestrian_tracks": peds, "pedestrian_gestures": gestures}
     results = calc.calculate(episode, {})
 
     assert results["clauses_passed"] == 2
     assert results["clauses_unknown"] == 1
     assert results["condition_success"] is None
 
-    episode.topics = {"ped_gestures": gestures.clear()}
+    episode.topics = {"pedestrian_tracks": peds, "pedestrian_gestures": gestures.clear()}
     results = calc.calculate(episode, {})
 
     assert results["condition_success"] == 0.0

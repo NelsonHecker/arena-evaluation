@@ -206,7 +206,9 @@ def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
 
     # Load door state timeline
     state_timeline = None
-    semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
+    semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "world_semantics.parquet"
+    if not semantic_path.exists():
+        semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
     if semantic_path.exists():
         semantic_df = pl.read_parquet(semantic_path)
         state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)
@@ -302,7 +304,9 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=args.benchmark_dir)
 
     state_timeline = None
-    semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
+    semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "world_semantics.parquet"
+    if not semantic_path.exists():
+        semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "semantic_snapshot.parquet"
     if semantic_path.exists():
         semantic_df = pl.read_parquet(semantic_path)
         state_timeline = DoorStateTimeline.from_semantic_frame(semantic_df)

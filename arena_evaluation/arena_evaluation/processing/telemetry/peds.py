@@ -6,12 +6,17 @@ import dataclasses
 import math
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from arena_evaluation.processing.telemetry.messages import Envelope, declares, env_row, pedestrian_id, yaw_from_orientation
 from arena_evaluation.processing.telemetry.writer import TableSink
+
+if TYPE_CHECKING:
+    from arena_humansim_msgs.msg import AgentFrame, AgentStates
+    from arena_humansim_msgs.msg import AgentMeta as RosAgentMeta
+    from arena_people_msgs.msg import Pedestrians
 
 ADULT_AGENT_TYPE = "adult"
 HUMAN_KIND = 0
@@ -89,10 +94,10 @@ class PedestrianRecorder:
         self._meta: dict[str, AgentMeta] = {}
         self._frames: dict[tuple[str, str], set[str]] = defaultdict(set)
 
-    def record_meta(self, envelope: Envelope) -> None:
+    def record_meta(self, envelope: Envelope[RosAgentMeta]) -> None:
         self._meta[envelope.ref.env_id] = _agent_meta(envelope)
 
-    def record_frame(self, table: str, envelope: Envelope) -> None:
+    def record_frame(self, table: str, envelope: Envelope[Pedestrians | AgentFrame | AgentStates]) -> None:
         env_id = envelope.ref.env_id
         self._frames[(env_id, table)].add(envelope.body.header.frame_id.strip("/"))
         for agent in _agents(envelope, self._meta.get(env_id, AgentMeta())):
@@ -104,7 +109,7 @@ class PedestrianRecorder:
         return {key: frozenset(frames) for key, frames in self._frames.items()}
 
 
-def _agent_meta(envelope: Envelope) -> AgentMeta:
+def _agent_meta(envelope: Envelope[RosAgentMeta]) -> AgentMeta:
     meta, schema = envelope.body, envelope.schema
     policies = tuple(str(policy) for policy in meta.policies) if declares(schema, meta, "policies") else ()
     typed = declares(schema, meta, "agent_type") and len(meta.agent_id) == len(meta.agent_type)
@@ -112,18 +117,18 @@ def _agent_meta(envelope: Envelope) -> AgentMeta:
     return AgentMeta(policies=policies, types_by_id=types)
 
 
-def _agents(envelope: Envelope, meta: AgentMeta) -> list[_Agent]:
+def _agents(envelope: Envelope[Pedestrians | AgentFrame | AgentStates], meta: AgentMeta) -> list[_Agent]:
     schema_name = envelope.schema.name
     if schema_name == PEDESTRIANS_SCHEMA:
-        columns = _pedestrians_columns(envelope)
+        columns = _pedestrians_columns(envelope)  # type: ignore[arg-type]
     elif schema_name == AGENT_FRAME_SCHEMA:
-        columns = _agent_frame_columns(envelope, meta)
+        columns = _agent_frame_columns(envelope, meta)  # type: ignore[arg-type]
     else:
-        columns = _agent_states_columns(envelope)
+        columns = _agent_states_columns(envelope)  # type: ignore[arg-type]
     return [_Agent(**dict(zip(columns, values, strict=True))) for values in zip(*columns.values(), strict=True)]
 
 
-def _pedestrians_columns(envelope: Envelope) -> dict[str, list[Any]]:
+def _pedestrians_columns(envelope: Envelope[Pedestrians]) -> dict[str, list[Any]]:
     frame, schema = envelope.body, envelope.schema
     peds = frame.pedestrians
     has_animation = declares(schema, frame, "animation_state")
@@ -154,7 +159,7 @@ def _pedestrians_columns(envelope: Envelope) -> dict[str, list[Any]]:
     }
 
 
-def _agent_frame_columns(envelope: Envelope, meta: AgentMeta) -> dict[str, list[Any]]:
+def _agent_frame_columns(envelope: Envelope[AgentFrame], meta: AgentMeta) -> dict[str, list[Any]]:
     frame, schema = envelope.body, envelope.schema
     humans = np.frombuffer(bytes(frame.kind), dtype=np.uint8) == HUMAN_KIND
     agent_ids = np.asarray(frame.agent_id, dtype=np.int64)[humans].tolist()
@@ -190,7 +195,7 @@ def _agent_frame_columns(envelope: Envelope, meta: AgentMeta) -> dict[str, list[
     }
 
 
-def _agent_states_columns(envelope: Envelope) -> dict[str, list[Any]]:
+def _agent_states_columns(envelope: Envelope[AgentStates]) -> dict[str, list[Any]]:
     state, schema = envelope.body, envelope.schema
     agents = [agent for agent in state.agents if agent.kind == HUMAN_KIND]
     nulls = [None] * len(agents)
@@ -241,7 +246,7 @@ def _gesture_rows(envelope: Envelope) -> list[dict[str, Any]]:
     ]
 
 
-def _per_human(values: Sequence[Any] | None, humans: np.ndarray, cast: Callable[[Any], Any], missing: Any) -> list[Any]:
+def _per_human(values: Sequence[Any] | np.ndarray | None, humans: np.ndarray, cast: Callable[[Any], Any], missing: object) -> list[Any]:
     """Values of the human agents of a parallel array, `missing` for each human when the array is absent or misaligned."""
     if values is None or len(values) != len(humans):
         return [missing] * int(humans.sum())
@@ -252,19 +257,19 @@ def _floats(values: Sequence[float], humans: np.ndarray) -> list[float]:
     return np.asarray(values, dtype=np.float64)[humans].tolist()
 
 
-def _byte_values(raw: Any) -> np.ndarray:
-    return np.frombuffer(bytes(raw), dtype=np.uint8)
+def _byte_values(raw: object) -> np.ndarray:
+    return np.frombuffer(bytes(raw), dtype=np.uint8)  # pyright: ignore[reportArgumentType]
 
 
 def _policy_name(policies: Sequence[str], index: int | None) -> str | None:
     return policies[index] if index is not None and 0 <= index < len(policies) else None
 
 
-def _agent_type(raw: Any) -> str:
+def _agent_type(raw: object) -> str:
     return str(raw) or ADULT_AGENT_TYPE
 
 
-def _text_or_none(raw: Any) -> str | None:
+def _text_or_none(raw: object) -> str | None:
     return str(raw) or None
 
 

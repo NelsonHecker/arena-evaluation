@@ -103,13 +103,7 @@ def _episode(release: bool = True) -> AlignedEpisodeBundle:
     )
     peds = flat_peds([(int(ti * SEC), [{"ped_id": "Pedestrian_1", "x": 6.0, "y": -0.6}, {"ped_id": "Pedestrian_2", "x": 6.0, "y": 0.6}]) for ti in t])
     steps = [("ACTIVATED", 0, 4.0), ("HOLD_ONSET", 1, 5.0)] + ([("RELEASED", 2, 11.0)] if release else [])
-    events = pl.DataFrame(
-        [
-            {"t_ns": int(s * SEC), "env_id": "env_0", "interaction_id": 3, "interaction_type": 10, "event": code, "event_name": name, "ped_id": ped}
-            for name, code, s in steps
-            for ped in ("Pedestrian_1", "Pedestrian_2")
-        ]
-    )
+    events = pl.DataFrame([{"t_ns": int(s * SEC), "env_id": "env_0", "interaction_id": 3, "interaction_type": 10, "event": code, "event_name": name, "ped_id": ped} for name, code, s in steps for ped in ("Pedestrian_1", "Pedestrian_2")])
     return AlignedEpisodeBundle(episode_id=0, data=data, start_pos=[0.0, 0.0, 0.0], goal_pos=[30.0, 0.0], topics={"pedestrian_tracks": peds, "pedestrian_interaction_events": events})
 
 

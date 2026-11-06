@@ -50,8 +50,30 @@ def test_efficiency_adversarial_zero_length():
 
 def test_pedestrian_disturbance_adversarial_chaotic():
     # Infinite velocities, massive jumps, and NaNs
-    df = pl.DataFrame({"time_ns": [0, 1, 2, 3, 4, 5, 6], "peds_positions": [[(0.0, 0.0)], [(1.0, 1.0)], [(float('inf'), float('inf'))], [(-float('inf'), 1e300)], [(float('nan'), float('nan'))], [(1.0, 1.0)], [(2.0, 2.0)]]})
-    episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
+    t_ns = [0, 1, 2, 3, 4, 5, 6]
+    peds = pl.DataFrame(
+        {
+            "t_ns": t_ns,
+            "env_id": ["env_0"] * 7,
+            "ped_id": ["ped_0"] * 7,
+            "ped_name": ["ped_0"] * 7,
+            "x": [0.0, 1.0, float("inf"), -float("inf"), float("nan"), 1.0, 2.0],
+            "y": [0.0, 1.0, float("inf"), 1e300, float("nan"), 1.0, 2.0],
+            "z": [0.0] * 7,
+            "yaw": [0.0] * 7,
+            "vx": [0.0] * 7,
+            "vy": [0.0] * 7,
+            "vz": [0.0] * 7,
+            "speed_mps": [0.0] * 7,
+            "radius_m": [0.35] * 7,
+            "desired_speed": [1.0] * 7,
+            "policy": [""] * 7,
+            "agent_type": [""] * 7,
+            "animation_state": [0] * 7,
+        }
+    )
+    data = pl.DataFrame({"time_ns": t_ns})
+    episode = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], topics={"pedestrian_tracks": peds})
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PedestrianDisturbanceCalculator(params)
     prior = {}
@@ -78,13 +100,60 @@ def test_gaze_adversarial_chaotic():
 
 
 def test_proxemics_adversarial_chaotic():
-    df = pl.DataFrame({"time_ns": [0, 1000000000, 2000000000], "pos_x": [0.0, 0.0, 0.0], "pos_y": [0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0], "peds_positions": [[(0.0, 0.0)], [(float('inf'), float('inf'))], [(float('nan'), float('nan'))]], "num_pedestrians": [1, 1, 1]})
-    episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
+    t_ns = [0, 1_000_000_000, 2_000_000_000]
+    df = pl.DataFrame(
+        {
+            "time_ns": t_ns,
+            "pos_x": [0.0, 0.0, 0.0],
+            "pos_y": [0.0, 0.0, 0.0],
+            "yaw": [0.0, 0.0, 0.0],
+            "pos_x_gt": [0.0, 0.0, 0.0],
+            "pos_y_gt": [0.0, 0.0, 0.0],
+            "yaw_gt": [0.0, 0.0, 0.0],
+        }
+    )
+    peds = pl.DataFrame(
+        {
+            "t_ns": t_ns,
+            "env_id": ["env_0"] * 3,
+            "ped_id": ["ped_0"] * 3,
+            "ped_name": ["ped_0"] * 3,
+            "x": [0.0, float("inf"), float("nan")],
+            "y": [0.0, float("inf"), float("nan")],
+            "z": [0.0] * 3,
+            "yaw": [0.0] * 3,
+            "vx": [0.0] * 3,
+            "vy": [0.0] * 3,
+            "vz": [0.0] * 3,
+            "speed_mps": [0.0] * 3,
+            "radius_m": [0.35] * 3,
+            "desired_speed": [1.0] * 3,
+            "policy": [""] * 3,
+            "agent_type": [""] * 3,
+            "animation_state": [0] * 3,
+        }
+    )
+    robot_tracks = pl.DataFrame(
+        {
+            "t_ns": t_ns,
+            "x": [0.0, 0.0, 0.0],
+            "y": [0.0, 0.0, 0.0],
+            "yaw": [0.0, 0.0, 0.0],
+            "pose_source": ["tf_gt"] * 3,
+        }
+    )
+    episode = AlignedEpisodeBundle(
+        episode_id=1,
+        data=df,
+        start_pos=[],
+        goal_pos=[],
+        topics={"pedestrian_tracks": peds, "robot_tracks": robot_tracks},
+    )
     episode.num_pedestrians = 1
     params = RobotParams(0.2, 0.0, 10.0)
     calc = ProxemicsCalculator(params)
 
-    prior = {"velocity": [1.0, float('inf'), float('nan')]}
+    prior = {"velocity": [1.0, float("inf"), float("nan")]}
     results = calc.calculate(episode, prior)
 
     assert not np.isnan(results["avg_velocity_in_personal_space"])

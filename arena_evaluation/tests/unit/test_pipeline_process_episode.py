@@ -57,7 +57,9 @@ def _episode(tmp_path: pathlib.Path) -> tuple[FolderManager, EpisodeDescriptor]:
     topics = episode_dir / "topics"
     topics.mkdir()
     pl.DataFrame(_robot_frame(track, {"odom_x": lambda x, _: x, "odom_y": lambda _, y: y, "odom_yaw": lambda *_: 0.0, "odom_vx": lambda *_: 0.5, "odom_wz": lambda *_: 0.0, "drift_error_m": lambda *_: 0.0})).write_parquet(topics / "robot_odom.parquet")
-    pl.DataFrame(_robot_frame(track, {"x": lambda x, _: x, "y": lambda _, y: y, "z": lambda *_: 0.0, "yaw": lambda *_: 0.0, "vx": lambda *_: 0.0, "vy": lambda *_: 0.0, "vz": lambda *_: 0.0, "omega_z": lambda *_: 0.0, "speed_mps": lambda *_: 0.0, "pose_source": lambda *_: "tf_gt"})).write_parquet(topics / "robot_tracks.parquet")
+    pl.DataFrame(_robot_frame(track, {"x": lambda x, _: x, "y": lambda _, y: y, "z": lambda *_: 0.0, "yaw": lambda *_: 0.0, "vx": lambda *_: 0.0, "vy": lambda *_: 0.0, "vz": lambda *_: 0.0, "omega_z": lambda *_: 0.0, "speed_mps": lambda *_: 0.0, "pose_source": lambda *_: "tf_gt"})).write_parquet(
+        topics / "robot_tracks.parquet"
+    )
     pl.DataFrame(_robot_frame(track, {"stamp_ns": lambda *_: 0, "pos_x": lambda x, _: x, "pos_y": lambda _, y: y, "yaw": lambda *_: 0.0})).write_parquet(topics / "robot_task_pose.parquet")
     pl.DataFrame(
         {

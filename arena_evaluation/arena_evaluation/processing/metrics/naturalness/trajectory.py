@@ -6,10 +6,10 @@ import numpy as np
 from scipy.spatial.distance import cdist
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.processing.path.theta_star import (
     compute_theta_star_for_episode,
 )
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 

@@ -26,13 +26,13 @@ def _calc(world="synthetic_task", walls=None):
 
 
 def _snapshot(rows):
-    """Long-format snapshot rows (time_ns, entity, kind, field, value_str)."""
+    """Long-format snapshot rows (t_ns, entity_name, kind, field_name, value_str)."""
     return pl.DataFrame(
         {
-            "time_ns": [r[0] for r in rows],
-            "entity": [r[1] for r in rows],
+            "t_ns": [r[0] for r in rows],
+            "entity_name": [r[1] for r in rows],
             "kind": [r[2] for r in rows],
-            "field": [r[3] for r in rows],
+            "field_name": [r[3] for r in rows],
             "field_kind": ["discrete"] * len(rows),
             "value_str": [r[4] for r in rows],
             "value_num": [None] * len(rows),
@@ -56,7 +56,7 @@ def _poses(points):
     """(time_s, x, y) -> task_pose frame."""
     return pl.DataFrame(
         {
-            "time_ns": [int(t * S) for t, _, _ in points],
+            "t_ns": [int(t * S) for t, _, _ in points],
             "pos_x": [x for _, x, _ in points],
             "pos_y": [y for _, _, y in points],
             "yaw": [0.0] * len(points),
@@ -65,9 +65,11 @@ def _poses(points):
 
 
 def _episode(phases, poses, snapshot, peds=None, fleet=None, gestures=None):
-    topics = {"task_pose": poses}
+    topics = {"robot_task_pose": poses}
     if gestures is not None:
-        topics["ped_gestures"] = gestures
+        topics["pedestrian_gestures"] = gestures
+    if peds is not None:
+        topics["pedestrian_tracks"] = peds
     return AlignedEpisodeBundle(
         episode_id=1,
         data=pl.DataFrame({"time_ns": [0]}),
@@ -86,8 +88,8 @@ def _gestures(rows):
     """(time_s, ped id, clip) -> ped_gestures frame."""
     return pl.DataFrame(
         {
-            "time_ns": [int(t * S) for t, _, _ in rows],
-            "ped_id": [pid for _, pid, _ in rows],
+            "t_ns": [int(t * S) for t, _, _ in rows],
+            "ped_id": [str(pid) for _, pid, _ in rows],
             "slot": ["body"] * len(rows),
             "clip": [clip for _, _, clip in rows],
             "hand": [""] * len(rows),
@@ -183,7 +185,15 @@ def test_replay_skips_dropped_phases_and_counts_them_as_not_met():
 def test_replay_hold_phase_with_until_on_ped_leaving(phase):
     phases = {"phases": [phase], "conditions": []}
     poses = _poses([(0.0, 1.0, 1.0), (1.0, 1.0, 1.0), (2.0, 1.0, 1.0)])
-    peds = pl.DataFrame({"time_ns": [0, 2 * S], "peds_names": [["env_0/alice"], ["env_0/alice"]], "peds_positions": [[2.0, 2.0, 0.0], [12.0, 2.0, 0.0]]})
+    peds = pl.DataFrame(
+        {
+            "t_ns": [0, S, 2 * S],
+            "ped_id": ["alice", "alice", "alice"],
+            "ped_name": ["env_0/alice", "env_0/alice", "env_0/alice"],
+            "x": [2.0, 2.0, 12.0],
+            "y": [2.0, 2.0, 2.0],
+        }
+    )
     snapshot = _snapshot(_robot_rows(0, "0") + _robot_rows(int(2.2 * S), "", met="0"))
     results = _calc().calculate(_episode(phases, poses, snapshot, peds=peds), {})
     assert results["judge_agrees"] is True
@@ -273,7 +283,15 @@ def test_replay_zones_cover_doors_and_elevator_cabins():
 def test_replay_sees_until_needs_line_of_sight_through_the_world_walls():
     phases = {"phases": [{"tolerance_radius": 0.5, "tolerance_angle": 0.0, "hold_time": 0.0, "until": "robot sees alice within 12"}], "conditions": []}
     poses = _poses([(0.0, 2.0, 1.0), (1.0, 2.0, 1.0), (2.0, 2.0, 1.0), (3.0, 2.0, 1.0)])
-    peds = pl.DataFrame({"time_ns": [0, 2 * S], "peds_names": [["env_0/alice"], ["env_0/alice"]], "peds_ids": [[1], [1]], "peds_positions": [[8.0, 9.0, 0.0], [8.0, 1.0, 0.0]]})
+    peds = pl.DataFrame(
+        {
+            "t_ns": [0, S, 2 * S, 3 * S],
+            "ped_id": ["1", "1", "1", "1"],
+            "ped_name": ["env_0/alice", "env_0/alice", "env_0/alice", "env_0/alice"],
+            "x": [8.0, 8.0, 8.0, 8.0],
+            "y": [9.0, 9.0, 1.0, 1.0],
+        }
+    )
     late = _snapshot(_robot_rows(0, "0") + _robot_rows(int(2.2 * S), "", met="0"))
     assert _calc(walls=_walled_room()).calculate(_episode(phases, poses, late, peds=peds), {})["judge_agrees"] is True
     early = _snapshot(_robot_rows(0, "0") + _robot_rows(int(1.2 * S), "", met="0"))
@@ -284,7 +302,15 @@ def test_replay_sees_until_needs_line_of_sight_through_the_world_walls():
 def test_replay_plays_until_reads_the_recorded_gestures():
     phases = {"phases": [{"tolerance_radius": 0.5, "tolerance_angle": 0.0, "hold_time": 0.0, "until": "alice plays beckon"}], "conditions": []}
     poses = _poses([(0.0, 1.0, 1.0), (1.0, 1.0, 1.0), (2.0, 1.0, 1.0), (3.0, 1.0, 1.0)])
-    peds = pl.DataFrame({"time_ns": [0, 2 * S], "peds_names": [["env_0/alice", "env_0/bob"], ["env_0/alice", "env_0/bob"]], "peds_ids": [[1, 2], [1, 2]], "peds_positions": [[2.0, 2.0, 0.0, 3.0, 3.0, 0.0], [2.0, 2.0, 0.0, 3.0, 3.0, 0.0]]})
+    peds = pl.DataFrame(
+        {
+            "t_ns": [0, 0, S, S, 2 * S, 2 * S, 3 * S, 3 * S],
+            "ped_id": ["1", "2", "1", "2", "1", "2", "1", "2"],
+            "ped_name": ["env_0/alice", "env_0/bob", "env_0/alice", "env_0/bob", "env_0/alice", "env_0/bob", "env_0/alice", "env_0/bob"],
+            "x": [2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0],
+            "y": [2.0, 3.0, 2.0, 3.0, 2.0, 3.0, 2.0, 3.0],
+        }
+    )
     gestures = _gestures([(0.0, 2, "wave"), (2.0, 1, "beckon"), (2.0, 1, "gaze")])
     late = _snapshot(_robot_rows(0, "0") + _robot_rows(int(2.2 * S), "", met="0"))
     assert _calc().calculate(_episode(phases, poses, late, peds=peds, gestures=gestures), {})["judge_agrees"] is True

@@ -13,7 +13,6 @@ from arena_simulation_setup.utils.geometry import Orientation, Pose, Position
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.compliance_metrics import _reconstruct_events
-from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.processing.metrics.ecological.condition_metrics import (
     _entity_roster,
     _EvalContext,
@@ -25,6 +24,7 @@ from arena_evaluation.processing.metrics.ecological.condition_metrics import (
     load_wall_grid,
     load_zone_geometry,
 )
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 logger = logging.getLogger(__name__)
@@ -127,13 +127,13 @@ class TaskReplayCalculator(BaseMetricCalculator):
 
         poses = episode.topics.get("robot_task_pose") if episode.topics else None
         zones = load_zone_geometry(self.world) if self.world else None
-        if poses is None or len(poses) == 0 or zones is None or not self.world:
+        if poses is None or len(poses) == 0 or not {"t_ns", "pos_x", "pos_y"} <= set(poses.columns) or zones is None or not self.world:
             return results
 
         poses = poses.sort("t_ns")
         time_ns = poses["t_ns"].to_numpy()
         gestures = episode.topics.get("pedestrian_gestures") if episode.topics else None
-        peds_df = episode.peds
+        peds_df = self.native_ped_frame(episode)
         peds_frames = frames_of(peds_df) if peds_df is not None and len(peds_df) > 0 else []
         ctx = _EvalContext(
             events=events,

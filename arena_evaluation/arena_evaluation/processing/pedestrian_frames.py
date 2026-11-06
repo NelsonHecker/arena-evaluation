@@ -10,12 +10,15 @@ ALIGN_TOLERANCE_NS = 100_000_000
 
 def pedestrians_by_time(time_ns: np.ndarray, peds: pl.DataFrame, tolerance_ns: int = ALIGN_TOLERANCE_NS) -> dict[int, pl.DataFrame]:
     """The pedestrians of the frame each robot time uses, keyed by robot time; times with no frame in tolerance are absent."""
-    joined = pedestrians_at(pl.Series("time_ns", time_ns.astype(np.int64)), peds, tolerance_ns)
+    unique_times = np.unique(time_ns.astype(np.int64))
+    joined = pedestrians_at(pl.Series("time_ns", unique_times), peds, tolerance_ns)
     return {int(key[0]): frame for key, frame in joined.partition_by("time_ns", as_dict=True).items()}
 
 
 def frames_of(peds: pl.DataFrame) -> list[pl.DataFrame]:
     """The pedestrians of each frame, frames in time order: the flat table partitioned by t_ns."""
+    if peds is None or len(peds) == 0 or "t_ns" not in peds.columns:
+        return []
     return peds.sort("t_ns").partition_by("t_ns", maintain_order=True)
 
 

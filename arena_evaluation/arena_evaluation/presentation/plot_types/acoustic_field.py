@@ -671,11 +671,16 @@ class AcousticFieldRenderer(BasePlotRenderer):
             ep_names = [str(episode_id)]
         for ep_name in ep_names:
             peds_pq = next(
-                (c for c in (root / "episodes" / ep_name / "topics" / "peds.parquet" for root in (bdir, *bdir.parents)) if c.exists()),
+                (c for root in (bdir, *bdir.parents) for name in ("pedestrian_tracks.parquet", "peds.parquet") if (c := root / "episodes" / ep_name / "topics" / name).exists()),
                 None,
             )
             if peds_pq is not None:
                 p_df = pl.read_parquet(peds_pq)
+                if {"ped_id", "x", "y"} <= set(p_df.columns):
+                    grouped = p_df.select(["ped_id", "x", "y"]).group_by("ped_id", maintain_order=True).agg(pl.concat_arr(["x", "y"]).alias("points"))
+                    tracks = dict(enumerate(grouped["points"]))
+                    if tracks:
+                        return tracks
                 p_col = "peds_positions" if "peds_positions" in p_df.columns else ("peds" if "peds" in p_df.columns else None)
                 if p_col:
                     tracks = AcousticFieldRenderer._ped_tracks_from_positions(p_df[p_col].to_list())
@@ -742,61 +747,46 @@ class AcousticFieldRenderer(BasePlotRenderer):
             logger.warning("No topics cache at %s, run 'evaluation extract' first.", topics_root)
             return None
 
-        # Determine robot namespace from the first robot subdirectory
-        robot_dirs = [d for d in topics_root.iterdir() if d.is_dir() and (d / "odom.parquet").exists()]
-        if not robot_dirs:
-            logger.warning("No robot odom data found in %s", topics_root)
-            return None
-        robot_dir = robot_dirs[0]
-
         from ...processing.parquet_store import TopicParquetStore
-        from ...processing.pipeline import _episode_window
-        from ...processing.pose_anchor import resolve_pose_source
 
         if not TopicParquetStore.is_current(topics_root):
             logger.warning("Stale topics cache at %s, run 'evaluation extract' with --force-extract first.", topics_root)
             return None
 
-        frames = []
-        # the pose stream the metrics used, odom as the last resort
         bundles = TopicParquetStore.read(topics_root)
-        assert bundles is not None
-        bundle = bundles[robot_dir.name]
-        tf_gt, _ = resolve_pose_source(bundle, _episode_window(bundle.episode_record))
-        if tf_gt is not None:
-            frames.append(tf_gt.lazy().select(["time_ns", "pos_x_gt", "pos_y_gt"]))
-        else:
-            frames.append(pl.scan_parquet(robot_dir / "odom.parquet").select(["time_ns", pl.col("pos_x").alias("pos_x_gt"), pl.col("pos_y").alias("pos_y_gt")]))
-
-        # Source level from acoustics topic
-        acoustics_path = robot_dir / "acoustics.parquet"
-        if acoustics_path.exists():
-            frames.append(pl.scan_parquet(acoustics_path).select(["time_ns", pl.col("total_level_af_dba").alias("source_dba")]))
-        else:
-            # Fallback: look for acoustics in a differently-named file
-            alt_path = robot_dir / "acoustic.parquet"
-            if alt_path.exists():
-                frames.append(pl.scan_parquet(alt_path).select(["time_ns", pl.col("total_level_af_dba").alias("source_dba")]))
-
-        peds_path = topics_root / "peds.parquet"
-        if peds_path.exists():
-            frames.append(pl.scan_parquet(peds_path).select(["time_ns", "peds_positions"]))
-
-        # Collision events (for 100 dBA impulse visualisation)
-        collision_path = robot_dir / "collision_events.parquet"
-        if collision_path.exists():
-            frames.append(pl.scan_parquet(collision_path).select(["time_ns", pl.col("collision_event").alias("has_collision")]))
-
-        if not frames:
+        if not bundles:
+            logger.warning("No robot bundles found in %s", topics_root)
             return None
 
-        # Align all topics on time_ns via nearest ASOF join
-        df = frames[0].collect().sort("time_ns")
-        for f in frames[1:]:
-            right = f.collect().sort("time_ns")
-            df = df.join_asof(right, on="time_ns", strategy="nearest")
+        bundle = next(iter(bundles.values()))
+        base_lf: pl.LazyFrame | None = None
 
-        return df
+        if bundle.robot_tracks is not None:
+            base_lf = (bundle.robot_tracks.lazy() if isinstance(bundle.robot_tracks, pl.DataFrame) else bundle.robot_tracks).select(["t_ns", pl.col("x").alias("pos_x_gt"), pl.col("y").alias("pos_y_gt")])
+        elif bundle.robot_odom is not None:
+            base_lf = (bundle.robot_odom.lazy() if isinstance(bundle.robot_odom, pl.DataFrame) else bundle.robot_odom).select(["t_ns", pl.col("odom_x").alias("pos_x_gt"), pl.col("odom_y").alias("pos_y_gt")])
+        else:
+            logger.warning("No robot position data (tracks or odom) found in %s", topics_root)
+            return None
+
+        base_lf = base_lf.sort("t_ns")
+
+        if bundle.robot_acoustics is not None:
+            ra_lf = (bundle.robot_acoustics.lazy() if isinstance(bundle.robot_acoustics, pl.DataFrame) else bundle.robot_acoustics).select(["t_ns", pl.col("total_level_af_dba").alias("source_dba")]).sort("t_ns")
+            base_lf = base_lf.join_asof(ra_lf, on="t_ns", strategy="nearest")
+
+        if bundle.pedestrian_tracks is not None:
+            pt_lf = bundle.pedestrian_tracks.lazy() if isinstance(bundle.pedestrian_tracks, pl.DataFrame) else bundle.pedestrian_tracks
+            peds_grouped = pt_lf.select(["t_ns", "x", "y"]).group_by("t_ns", maintain_order=True).agg(pl.concat_arr(["x", "y"]).alias("peds_positions")).sort("t_ns")
+            base_lf = base_lf.join_asof(peds_grouped, on="t_ns", strategy="nearest")
+
+        if bundle.collision_events is not None:
+            ce_lf = bundle.collision_events.lazy() if isinstance(bundle.collision_events, pl.DataFrame) else bundle.collision_events
+            if "event_count" in ce_lf.collect_schema().names():
+                ce_sub = ce_lf.select(["t_ns", (pl.col("event_count") > 0).alias("has_collision")]).sort("t_ns")
+                base_lf = base_lf.join_asof(ce_sub, on="t_ns", strategy="nearest")
+
+        return base_lf.with_columns(pl.col("t_ns").alias("time_ns")).collect()
 
     def compute_field_timeseries(
         self,

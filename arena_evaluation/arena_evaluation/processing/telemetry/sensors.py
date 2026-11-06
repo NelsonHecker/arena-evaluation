@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from arena_evaluation.processing.telemetry.messages import Envelope, robot_row, value_at
 from arena_evaluation.processing.telemetry.writer import TableSink
+
+if TYPE_CHECKING:
+    from arena_robots_msgs.msg import Acoustics, Energy, Power
+    from sensor_msgs.msg import JointState, LaserScan
 
 SCAN_SUMMARY_TABLE = "robot_scan_summary"
 SCAN_RAY_TABLE = "robot_scan_rays"
@@ -16,7 +22,7 @@ class ScanRecorder:
         self._sink = sink
         self._include_rays = include_rays
 
-    def record(self, envelope: Envelope) -> None:
+    def record(self, envelope: Envelope[LaserScan]) -> None:
         scan = envelope.body
         out_of_range = float(scan.range_max)
         valid = [float(distance) for distance in scan.ranges if scan.range_min <= distance < scan.range_max]
@@ -34,14 +40,14 @@ class ScanRecorder:
         if self._include_rays:
             self._record_rays(envelope)
 
-    def _record_rays(self, envelope: Envelope) -> None:
+    def _record_rays(self, envelope: Envelope[LaserScan]) -> None:
         scan = envelope.body
         for index, distance in enumerate(scan.ranges):
             angle = scan.angle_min + index * scan.angle_increment
             self._sink.append(SCAN_RAY_TABLE, robot_row(envelope, ray_idx=index, range_m=float(distance), angle_rad=float(angle)))
 
 
-def record_joint_states(sink: TableSink, envelope: Envelope) -> None:
+def record_joint_states(sink: TableSink, envelope: Envelope[JointState]) -> None:
     state = envelope.body
     for index, name in enumerate(state.name):
         sink.append(
@@ -56,7 +62,7 @@ def record_joint_states(sink: TableSink, envelope: Envelope) -> None:
         )
 
 
-def record_power(sink: TableSink, envelope: Envelope) -> None:
+def record_power(sink: TableSink, envelope: Envelope[Power]) -> None:
     power = envelope.body
     sink.append(
         "robot_power",
@@ -81,7 +87,7 @@ def record_power(sink: TableSink, envelope: Envelope) -> None:
         )
 
 
-def record_energy(sink: TableSink, envelope: Envelope) -> None:
+def record_energy(sink: TableSink, envelope: Envelope[Energy]) -> None:
     energy = envelope.body
     sink.append(
         "robot_energy",
@@ -93,7 +99,7 @@ def record_energy(sink: TableSink, envelope: Envelope) -> None:
     )
 
 
-def record_acoustics(sink: TableSink, envelope: Envelope) -> None:
+def record_acoustics(sink: TableSink, envelope: Envelope[Acoustics]) -> None:
     acoustics = envelope.body
     sink.append(
         "robot_acoustics",

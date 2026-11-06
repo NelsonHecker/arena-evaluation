@@ -12,12 +12,12 @@ from arena_simulation_setup.shared.conditions import EpisodeCondition, Node
 from arena_simulation_setup.shared.judge import NodeMonitor, Sample, WallGrid, operator_verdict, values_equal, zone_polygons
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, frames_of
 from arena_evaluation.processing.metrics.ecological.compliance_metrics import (
     _extract_zone_geometry,
     _reconstruct_events,
     _ZoneGeometry,
 )
+from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 if typing.TYPE_CHECKING:
@@ -168,15 +168,20 @@ def clips_on_axis(peds: pl.DataFrame | None, gestures: pl.DataFrame | None, time
     """Per instant, the gesture clips of every pedestrian in the frame held at it, None when the recording carries no pedestrian_gestures table."""
     if gestures is None or peds is None or len(peds) == 0:
         return None
+    if not {"t_ns", "ped_id", "clip"} <= set(gestures.columns):
+        return None
+    if not {"t_ns", "ped_id"} <= set(peds.columns):
+        return None
     playing: dict[int, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for t, ped_id, clip in zip(gestures["t_ns"].to_list(), gestures["ped_id"].to_list(), gestures["clip"].to_list(), strict=True):
         playing[int(t)][str(ped_id)].add(str(clip))
     frames = frames_of(peds)
     times = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
-    rows: list[dict[str, frozenset[str]]] = [
-        {_strip_env(name): frozenset(playing.get(int(times[k]), {}).get(ped_id, ())) for name, ped_id in zip(frame["ped_name"].to_list(), frame["ped_id"].to_list(), strict=True)}
-        for k, frame in enumerate(frames)
-    ]
+    rows: list[dict[str, frozenset[str]]] = []
+    for k, frame in enumerate(frames):
+        ped_names = frame["ped_name"].to_list() if "ped_name" in frame.columns else frame["ped_id"].to_list()
+        ped_ids = frame["ped_id"].to_list()
+        rows.append({_strip_env(name): frozenset(playing.get(int(times[k]), {}).get(ped_id, ())) for name, ped_id in zip(ped_names, ped_ids, strict=True)})
     idx = np.searchsorted(times, time_ns, side="right") - 1
     return [rows[i] if i >= 0 else {} for i in idx]
 
@@ -297,8 +302,10 @@ def _resample_fleet(fleet: dict[str, pl.DataFrame], time_ns: np.ndarray, ego: st
     for name, frame in fleet.items():
         if name == ego or frame is None or len(frame) == 0:
             continue
-        frame = frame.sort("time_ns")
-        times = frame["time_ns"].to_numpy()
+        if "t_ns" not in frame.columns:
+            continue
+        frame = frame.sort("t_ns")
+        times = frame["t_ns"].to_numpy()
         idx = np.searchsorted(times, time_ns, side="right") - 1
         if np.any(idx < 0):
             continue

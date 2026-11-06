@@ -33,6 +33,12 @@ def _start_pos(data):
 
 
 def _episode(data, semantic_snapshot=None):
+    if data is not None and "pos_x" in data.columns and "pos_x_gt" not in data.columns:
+        data = data.with_columns(
+            pl.col("pos_x").alias("pos_x_gt"),
+            pl.col("pos_y").alias("pos_y_gt"),
+            pl.col("yaw").alias("yaw_gt"),
+        )
     return AlignedEpisodeBundle(
         episode_id=1,
         data=data,

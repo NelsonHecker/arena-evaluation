@@ -6,6 +6,7 @@ import pytest
 from arena_evaluation.processing.metrics.performance.pedestrian_path_metrics import PedestrianPathMetricsCalculator
 from arena_evaluation.processing.metrics.social.mutual_accommodation import MutualAccommodationCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from flat_peds import flat_peds
 
 M = MutualAccommodationCalculator
 ALL_NONE = {"mar": None, "pfi": None, "robot_path_deviation_m": None, "relative_throughput": None, "kcsc_wh": None}
@@ -220,8 +221,14 @@ def test_reconcile_pfi_ignores_samples_before_first_pedestrian_message():
     calc = PedestrianPathMetricsCalculator(RobotParams())
 
     def ped_paths(rows: list) -> list:
-        df = pl.DataFrame({"peds_positions": rows}, schema={"peds_positions": pl.List(pl.Float64)})
-        return calc.calculate(AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[]), {})["pedestrian_path"]
+        frames = []
+        for i, row in enumerate(rows):
+            if row is not None:
+                frames.append((i * 1_000_000_000, [{"ped_id": "ped_0", "x": row[0], "y": row[1], "z": row[2] if len(row) > 2 else 0.0}]))
+        peds = flat_peds(frames)
+        data = pl.DataFrame({"time_ns": [i * 1_000_000_000 for i in range(len(rows))]})
+        ep = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], topics={"pedestrian_tracks": peds})
+        return calc.calculate(ep, {})["pedestrian_path"]
 
     dynamic = {"pedestrian_path": ped_paths([None, [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]])}
     ref_ped = {"pedestrian_path": ped_paths([None, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])}

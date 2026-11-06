@@ -123,7 +123,10 @@ class EpisodeSplitter:
         odometry = _to_df(bundle.robot_odom)
         if odometry is None or len(odometry) == 0:
             return []
-        last_odom_ns = int(odometry["t_ns"].max())
+        last_odom_val = odometry["t_ns"].max()
+        if not isinstance(last_odom_val, (int, float)):
+            return []
+        last_odom_ns = int(last_odom_val)
 
         record_df = _to_df(bundle.episode_lifecycle)
         initialpose_df = _to_df(bundle.robot_initialpose)

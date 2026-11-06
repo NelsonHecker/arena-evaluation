@@ -202,15 +202,15 @@ def _door_run(tmp_path: pathlib.Path, map_name: str) -> tuple[FolderManager, Epi
 def _semantic(rows: list[tuple[int, str, bool]]) -> pl.DataFrame:
     return pl.DataFrame(
         {
-            "time_ns": [r[0] for r in rows],
+            "t_ns": [r[0] for r in rows],
             "kind": ["door"] * len(rows),
-            "entity": [r[1] for r in rows],
-            "field": ["open"] * len(rows),
+            "entity_name": [r[1] for r in rows],
+            "field_name": ["open"] * len(rows),
             "value_bool": [r[2] for r in rows],
             "value_str": [None] * len(rows),
             "value_num": [None] * len(rows),
         },
-        schema={"time_ns": pl.Int64, "kind": pl.Utf8, "entity": pl.Utf8, "field": pl.Utf8, "value_bool": pl.Boolean, "value_str": pl.Utf8, "value_num": pl.Float64},
+        schema={"t_ns": pl.Int64, "kind": pl.Utf8, "entity_name": pl.Utf8, "field_name": pl.Utf8, "value_bool": pl.Boolean, "value_str": pl.Utf8, "value_num": pl.Float64},
     )
 
 
@@ -227,7 +227,22 @@ def _frames(robot: list[tuple[float | None, float | None]], peds: list[list[tupl
 
 
 def _episode(data: pl.DataFrame | None, map_name: str | None, **kwargs) -> AlignedEpisodeBundle:
-    return AlignedEpisodeBundle(episode_id=7, data=data, start_pos=[0.0, 0.0], goal_pos=[0.0, 0.0], map=map_name, **kwargs)
+    topics = dict(kwargs.pop("topics", {}) or {})
+    if "pedestrian_tracks" not in topics and data is not None and "peds_positions" in data.columns and "time_ns" in data.columns:
+        peds_rows = []
+        seen = set()
+        for t, frame in zip(data["time_ns"].to_list(), data["peds_positions"].to_list()):
+            if frame:
+                for idx, pt in enumerate(frame):
+                    key = (int(t), f"ped_{idx}")
+                    if key not in seen and len(pt) >= 2 and not math.isnan(pt[0]) and not math.isnan(pt[1]):
+                        seen.add(key)
+                        peds_rows.append({"t_ns": int(t), "ped_id": f"ped_{idx}", "x": float(pt[0]), "y": float(pt[1])})
+        if peds_rows:
+            topics["pedestrian_tracks"] = pl.DataFrame(peds_rows, schema={"t_ns": pl.Int64, "ped_id": pl.Utf8, "x": pl.Float64, "y": pl.Float64})
+        else:
+            topics["pedestrian_tracks"] = pl.DataFrame(schema={"t_ns": pl.Int64, "ped_id": pl.Utf8, "x": pl.Float64, "y": pl.Float64})
+    return AlignedEpisodeBundle(episode_id=7, data=data, start_pos=[0.0, 0.0], goal_pos=[0.0, 0.0], map=map_name, topics=topics, **kwargs)
 
 
 def _calc() -> AcousticExposureCalculator:

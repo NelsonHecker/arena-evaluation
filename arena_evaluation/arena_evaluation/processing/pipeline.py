@@ -165,10 +165,6 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     return start, end
 
 
-
-
-
-
 def _episode_endpoints(
     aligned_df: pl.DataFrame,
     plan: pl.DataFrame | pl.LazyFrame | None,

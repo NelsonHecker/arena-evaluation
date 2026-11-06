@@ -93,14 +93,20 @@ def test_collision_timeout_and_fail():
 
 
 def test_collision_obstacles_recorded():
-    df = pl.DataFrame(
+    df = pl.DataFrame({"collision_event": [0, 2, 1]})
+    contacts = pl.DataFrame(
         {
-            "collision_event": [0, 2, 1],
-            "collision_obstacle_ids": [[], ["<wall>", "chair_1"], ["ped_3"]],
+            "t_ns": [1_000_000_000, 1_000_000_000, 2_000_000_000],
+            "obstacle_id": ["<wall>", "chair_1", "ped_3"],
         }
     )
-
-    episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
+    episode = AlignedEpisodeBundle(
+        episode_id=1,
+        data=df,
+        start_pos=[],
+        goal_pos=[],
+        topics={"collision_contacts": contacts},
+    )
     params = RobotParams(0.2, 0.0, 10.0)
     calc = CollisionMetricsCalculator(params)
 

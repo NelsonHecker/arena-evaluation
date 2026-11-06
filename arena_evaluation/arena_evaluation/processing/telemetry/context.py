@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -13,12 +13,20 @@ from arena_evaluation.processing.telemetry.messages import Envelope, RobotRef, d
 from arena_evaluation.processing.telemetry.writer import TableSink
 from arena_evaluation.storage.legacy import legacy_modes, legacy_params
 
+if TYPE_CHECKING:
+    from arena_runtime_msgs.msg import EpisodeRecord, SemanticSnapshot
+    from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+    from nav_msgs.msg import Path
+    from rcl_interfaces.msg import ParameterValue
+    from std_msgs.msg import String as RosString
+    from tf2_msgs.msg import TFMessage
+
 _log = logging.getLogger(__name__)
 _BOOL, _INTEGER, _DOUBLE, _STRING = 1, 2, 3, 4
 _BYTE_ARRAY, _BOOL_ARRAY, _INTEGER_ARRAY, _DOUBLE_ARRAY, _STRING_ARRAY = 5, 6, 7, 8, 9
 
 
-def record_episode(sink: TableSink, envelope: Envelope) -> None:
+def record_episode(sink: TableSink, envelope: Envelope[EpisodeRecord]) -> None:
     record, schema = envelope.body, envelope.schema
     sink.append(
         "episode_lifecycle",
@@ -42,7 +50,7 @@ def record_episode(sink: TableSink, envelope: Envelope) -> None:
             sink.append("episode_integrity", env_row(envelope, flag_idx=flag_idx, flag=str(flag)))
 
 
-def record_semantics(sink: TableSink, envelope: Envelope) -> None:
+def record_semantics(sink: TableSink, envelope: Envelope[SemanticSnapshot]) -> None:
     snapshot = envelope.body
     env_id = f"env_{int(snapshot.env_id)}"
     for entity in snapshot.entities:
@@ -64,7 +72,7 @@ class PlanRecorder:
         self._sink = sink
         self._plan_counts: defaultdict[RobotRef, int] = defaultdict(int)
 
-    def record(self, envelope: Envelope) -> None:
+    def record(self, envelope: Envelope[Path]) -> None:
         plan_id = self._plan_counts[envelope.ref]
         self._plan_counts[envelope.ref] += 1
         for waypoint_idx, stamped in enumerate(envelope.body.poses):
@@ -82,7 +90,7 @@ class PlanRecorder:
             )
 
 
-def record_characterization_phase(sink: TableSink, envelope: Envelope) -> None:
+def record_characterization_phase(sink: TableSink, envelope: Envelope[RosString]) -> None:
     sink.append("robot_characterization_phase", robot_row(envelope, label=str(envelope.body.data)))
 
 
@@ -92,7 +100,7 @@ class ScheduleRecorder:
     def __init__(self) -> None:
         self._latest: dict[RobotRef, tuple[int, list[dict[str, Any]]]] = {}
 
-    def record(self, envelope: Envelope) -> None:
+    def record(self, envelope: Envelope[RosString]) -> None:
         phases = _schedule_phases(str(envelope.body.data))
         if phases is not None:
             self._latest[envelope.ref] = (envelope.t_ns, phases)
@@ -106,7 +114,7 @@ class ScheduleRecorder:
                 )
 
 
-def record_initial_pose(sink: TableSink, envelope: Envelope) -> None:
+def record_initial_pose(sink: TableSink, envelope: Envelope[PoseWithCovarianceStamped]) -> None:
     pose = envelope.body.pose.pose
     sink.append(
         "robot_initialpose",
@@ -114,7 +122,7 @@ def record_initial_pose(sink: TableSink, envelope: Envelope) -> None:
     )
 
 
-def record_task_pose(sink: TableSink, envelope: Envelope) -> None:
+def record_task_pose(sink: TableSink, envelope: Envelope[PoseStamped]) -> None:
     message = envelope.body
     sink.append(
         "robot_task_pose",
@@ -128,7 +136,7 @@ def record_task_pose(sink: TableSink, envelope: Envelope) -> None:
     )
 
 
-def record_transforms(sink: TableSink, table: str, envelope: Envelope) -> None:
+def record_transforms(sink: TableSink, table: str, envelope: Envelope[TFMessage]) -> None:
     for transform in envelope.body.transforms:
         translation, rotation = transform.transform.translation, transform.transform.rotation
         sink.append(
@@ -169,11 +177,11 @@ def _record_params(envelope: Envelope) -> dict[str, Any]:
     return legacy_params(modes, robots, obstacles)
 
 
-def _human_params_json(record: Any) -> str:
+def _human_params_json(record: EpisodeRecord) -> str:
     return json.dumps({param.name: _param_value(param.value) for param in record.human_params})
 
 
-def _param_value(value: Any) -> Any:
+def _param_value(value: ParameterValue) -> object:
     kind = value.type
     if kind == _BOOL:
         return value.bool_value

@@ -341,10 +341,7 @@ def _episode(run_dir: pathlib.Path, world: str, run: RunMetadata, peds: dict[str
         frames.append(
             (
                 t,
-                [
-                    {"ped_id": f"Pedestrian_{i}", "ped_name": f"env_0/{name}", "x": peds[name][second][0], "y": peds[name][second][1], "vx": (twists or {}).get(name, (0.0, 0.0))[0], "vy": (twists or {}).get(name, (0.0, 0.0))[1]}
-                    for i, name in enumerate(names)
-                ],
+                [{"ped_id": f"Pedestrian_{i}", "ped_name": f"env_0/{name}", "x": peds[name][second][0], "y": peds[name][second][1], "vx": (twists or {}).get(name, (0.0, 0.0))[0], "vy": (twists or {}).get(name, (0.0, 0.0))[1]} for i, name in enumerate(names)],
             )
         )
     pedestrians = flat_peds(frames)
@@ -737,17 +734,19 @@ def test_the_pipeline_scores_a_recorded_case_against_its_run_snapshot(tmp_path: 
     recorded = _episode(run_dir, world, _run(world), {"edge_0": [(6.0, 3.0 - min(t, 3) * 1.0) for t in range(11)]})
     times = recorded.topics["robot_tracks"]["t_ns"]
     n = len(times)
-    odom = pl.DataFrame({
-        "t_ns": times,
-        "env_id": ["env_0"] * n,
-        "robot_id": ["env_0_jackal_0"] * n,
-        "odom_x": recorded.topics["robot_tracks"]["x"],
-        "odom_y": [0.0] * n,
-        "odom_yaw": [0.0] * n,
-        "odom_vx": [1.0] * n,
-        "odom_wz": [0.0] * n,
-        "drift_error_m": [0.0] * n,
-    })
+    odom = pl.DataFrame(
+        {
+            "t_ns": times,
+            "env_id": ["env_0"] * n,
+            "robot_id": ["env_0_jackal_0"] * n,
+            "odom_x": recorded.topics["robot_tracks"]["x"],
+            "odom_y": [0.0] * n,
+            "odom_yaw": [0.0] * n,
+            "odom_vx": [1.0] * n,
+            "odom_wz": [0.0] * n,
+            "drift_error_m": [0.0] * n,
+        }
+    )
     robot_tracks = recorded.topics["robot_tracks"].with_columns(
         env_id=pl.lit("env_0"),
         robot_id=pl.lit("env_0_jackal_0"),
@@ -758,20 +757,22 @@ def test_the_pipeline_scores_a_recorded_case_against_its_run_snapshot(tmp_path: 
         omega_z=0.0,
         speed_mps=1.0,
     )
-    lifecycle = pl.DataFrame({
-        "t_ns": [0, 10 * SEC],
-        "env_id": ["env_0", "env_0"],
-        "episode_id": [1, 1],
-        "outcome_state": [1, 2],
-        "outcome_info": ["", "finished"],
-        "goal_uuid": ["", ""],
-        "phases_yaml": ["", ""],
-        "params_yaml": ["", ""],
-        "conditions_yaml": ["", ""],
-        "world": [world, world],
-        "seed": [0, 0],
-        "human_params": ["", ""],
-    })
+    lifecycle = pl.DataFrame(
+        {
+            "t_ns": [0, 10 * SEC],
+            "env_id": ["env_0", "env_0"],
+            "episode_id": [1, 1],
+            "outcome_state": [1, 2],
+            "outcome_info": ["", "finished"],
+            "goal_uuid": ["", ""],
+            "phases_yaml": ["", ""],
+            "params_yaml": ["", ""],
+            "conditions_yaml": ["", ""],
+            "world": [world, world],
+            "seed": [0, 0],
+            "human_params": ["", ""],
+        }
+    )
     topics_dir = episode_dir / "topics"
     topics_dir.mkdir(parents=True, exist_ok=True)
     odom.write_parquet(topics_dir / "robot_odom.parquet")

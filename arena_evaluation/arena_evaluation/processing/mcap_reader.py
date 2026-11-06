@@ -32,12 +32,13 @@ from arena_evaluation.storage.schemas import TopicBundle
 
 if typing.TYPE_CHECKING:
     from mcap.records import Schema
+    from tf2_msgs.msg import TFMessage
 
 _log = logging.getLogger(__name__)
 Anchor = tuple[int, float, float]
 Predicate = Callable[[str, "Schema"], bool]
 Handler = Callable[[str, Envelope], None]
-Decoder = Callable[[bytes], typing.Any]
+Decoder = Callable[[bytes], object]
 
 IDENTITY_ANCHOR: Anchor = (0, 0.0, 0.0)
 _AGENT_META_SCHEMA = "arena_humansim_msgs/msg/AgentMeta"
@@ -126,7 +127,7 @@ class MCAPReader:
                     ingest.route(channel.topic, schema, body, message.log_time)
 
 
-def _decode(decoder: Decoder, topic: str, data: bytes) -> typing.Any | None:
+def _decode(decoder: Decoder, topic: str, data: bytes) -> object | None:
     """The decoded body of a recorded message, or None when its bytes are corrupt, so the message is skipped."""
     try:
         return decoder(data)
@@ -169,7 +170,7 @@ class _Ingest:
             (_is_transform_topic, self._transforms),
         )
 
-    def route(self, topic: str, schema: Schema, body: typing.Any, t_ns: int) -> None:
+    def route(self, topic: str, schema: Schema, body: object, t_ns: int) -> None:
         env_id = env_id_in(topic)
         ref = RobotRef(env_id=env_id, robot_id=robot_id_of(topic_parts(topic), env_id))
         envelope = Envelope(t_ns=t_ns, ref=ref, schema=schema, body=body)
@@ -250,7 +251,7 @@ class _Ingest:
     def _initial_pose(self, _topic: str, envelope: Envelope) -> None:
         context.record_initial_pose(self._sink, envelope)
 
-    def _transforms(self, topic: str, envelope: Envelope) -> None:
+    def _transforms(self, topic: str, envelope: Envelope[TFMessage]) -> None:
         context.record_transforms(self._sink, "tf_static" if "static" in topic else "tf", envelope)
         for transform in envelope.body.transforms:
             parent, child = transform.header.frame_id, transform.child_frame_id
@@ -331,10 +332,12 @@ def _check_map_frames(env_id: str, shifts: list[Anchor], pedestrian_frames: Mapp
 
 def _shift_to_map(frames: dict[str, pl.LazyFrame | None], shifts: list[Anchor]) -> None:
     for name, columns in _POSITION_COLUMNS.items():
-        if frames[name] is not None:
-            frames[name] = _shift_positions(frames[name], shifts, columns)
-    if frames["episode_lifecycle"] is not None:
-        frames["episode_lifecycle"] = _shift_episode_phases(frames["episode_lifecycle"], shifts)
+        frame = frames[name]
+        if frame is not None:
+            frames[name] = _shift_positions(frame, shifts, columns)
+    lifecycle = frames.get("episode_lifecycle")
+    if lifecycle is not None:
+        frames["episode_lifecycle"] = _shift_episode_phases(lifecycle, shifts)
 
 
 def _shift_positions(frame: pl.LazyFrame, anchors: list[Anchor], columns: tuple[str, str]) -> pl.LazyFrame:

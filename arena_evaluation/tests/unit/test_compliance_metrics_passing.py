@@ -62,9 +62,7 @@ def _episode(peds: pl.DataFrame, robot: pl.DataFrame | None) -> AlignedEpisodeBu
     topics = {"pedestrian_tracks": peds}
     data = robot if robot is not None else pl.DataFrame()
     if robot is not None:
-        topics["robot_tracks"] = pl.DataFrame(
-            {"t_ns": robot["time_ns"], "x": robot["pos_x_gt"], "y": robot["pos_y_gt"], "yaw": robot["yaw_gt"], "pose_source": ["tf_gt"] * len(robot)}
-        )
+        topics["robot_tracks"] = pl.DataFrame({"t_ns": robot["time_ns"], "x": robot["pos_x_gt"], "y": robot["pos_y_gt"], "yaw": robot["yaw_gt"], "pose_source": ["tf_gt"] * len(robot)})
     return AlignedEpisodeBundle(1, data, [], [], peds=peds, topics=topics)
 
 
