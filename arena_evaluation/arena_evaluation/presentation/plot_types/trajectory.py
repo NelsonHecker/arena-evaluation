@@ -641,7 +641,7 @@ class TrajectoryRenderer(BasePlotRenderer):
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
         df_filtered = self._apply_filters(df)
         data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
-        if data_key not in df_filtered.columns:
+        if not data_key or df_filtered.schema.get(data_key) is None:
             return None
 
         run_dir = self.run_dir
@@ -651,7 +651,7 @@ class TrajectoryRenderer(BasePlotRenderer):
             if isinstance(group_cols, str):
                 group_cols = [group_cols]
 
-            valid_groups = [c for c in group_cols if c in df_filtered.columns]
+            valid_groups = [c for c in group_cols if df_filtered.schema.get(c) is not None]
             if not valid_groups:
                 return self._render_single_plot(df_filtered.to_pandas(), "", None, run_dir=run_dir)
 
@@ -682,7 +682,7 @@ class TrajectoryRenderer(BasePlotRenderer):
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
         data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
-        if data_key not in df_filtered.columns:
+        if not data_key or df_filtered.schema.get(data_key) is None:
             return
 
         run_dir = self.run_dir
@@ -692,7 +692,7 @@ class TrajectoryRenderer(BasePlotRenderer):
             if isinstance(group_cols, str):
                 group_cols = [group_cols]
 
-            valid_groups = [c for c in group_cols if c in df_filtered.columns]
+            valid_groups = [c for c in group_cols if df_filtered.schema.get(c) is not None]
             if not valid_groups:
                 pdf = df_filtered.to_pandas()
                 if not pdf.empty:

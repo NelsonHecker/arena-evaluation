@@ -7,6 +7,8 @@ import pandas as pd
 import plotly.express as px
 import polars as pl
 
+from arena_evaluation.presentation.color_utils import get_color_palette
+
 from .base import BasePlotRenderer
 
 __all__ = ["HistogramRenderer"]
@@ -24,8 +26,11 @@ class HistogramRenderer(BasePlotRenderer):
         if not x_col or schema.get(x_col) is None:
             return None
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        color_col = self.resolve_channel("color", fallback=diff_col)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
+
         if not color_col or df_filtered.schema.get(color_col) is None:
             return None
 
@@ -46,7 +51,7 @@ class HistogramRenderer(BasePlotRenderer):
         bins = np.linspace(global_min, global_max, num_bins + 1)
         bin_centers = (bins[:-1] + bins[1:]) / 2.0
 
-        if color_col in pdf.columns:
+        if color_col in pdf.columns and color_col != x_col:
             binned_dfs = []
             for name, group in pdf.groupby(color_col, observed=False):
                 counts, _ = np.histogram(group[x_col], bins=bins)
@@ -71,7 +76,8 @@ class HistogramRenderer(BasePlotRenderer):
         fig.update_layout(
             xaxis_title=self.format_label(x_col.replace("_", " ").title(), x_col),
             yaxis_title="Count",
-            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=40, b=40, l=50, r=30),
         )
 
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
@@ -83,8 +89,11 @@ class HistogramRenderer(BasePlotRenderer):
         if not x_col or schema.get(x_col) is None:
             return
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        color_col = self.resolve_channel("color", fallback=diff_col)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
+
         if not color_col or df_filtered.schema.get(color_col) is None:
             return
 
@@ -105,30 +114,23 @@ class HistogramRenderer(BasePlotRenderer):
         bins = np.linspace(global_min, global_max, num_bins + 1)
         bin_centers = (bins[:-1] + bins[1:]) / 2.0
 
-        if color_col in pdf.columns:
-            binned_dfs = []
-            for name, group in pdf.groupby(color_col, observed=False):
-                counts, _ = np.histogram(group[x_col], bins=bins)
-                df_group = pd.DataFrame({"bin_center": bin_centers, "count": counts, color_col: name})
-                binned_dfs.append(df_group)
-            counts_df = pd.concat(binned_dfs)
-            hue_arg = color_col
-        else:
-            counts, _ = np.histogram(pdf[x_col], bins=bins)
-            counts_df = pd.DataFrame({"bin_center": bin_centers, "count": counts})
-            hue_arg = None
-
+        palette = get_color_palette() if color_col else None
         fig, ax = plt.subplots(figsize=(10, 6))
-        if hue_arg:
-            for name, group in counts_df.groupby(hue_arg, observed=False):
-                ax.plot(group["bin_center"], group["count"], label=name, marker="o", linewidth=2)
-                ax.fill_between(group["bin_center"], group["count"], alpha=0.3)
+
+        if color_col in pdf.columns and color_col != x_col:
+            for idx, (name, group) in enumerate(pdf.groupby(color_col, observed=False)):
+                counts, _ = np.histogram(group[x_col], bins=bins)
+                color = palette[idx % len(palette)] if palette else None
+                ax.plot(bin_centers, counts, label=str(name), marker="o", linewidth=2, color=color)
+                ax.fill_between(bin_centers, counts, alpha=0.25, color=color)
             ax.legend()
         else:
-            ax.plot(counts_df["bin_center"], counts_df["count"], marker="o", linewidth=2)
-            ax.fill_between(counts_df["bin_center"], counts_df["count"], alpha=0.3)
+            counts, _ = np.histogram(pdf[x_col], bins=bins)
+            ax.plot(bin_centers, counts, marker="o", linewidth=2)
+            ax.fill_between(bin_centers, counts, alpha=0.25)
 
-        ax.set_title(self.spec.title)
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
         ax.set_xlabel(self.format_label(x_col.replace("_", " ").title(), x_col))
         ax.set_ylabel("Count")
         fig.tight_layout()

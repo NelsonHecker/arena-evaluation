@@ -15,6 +15,7 @@ import yaml
 
 from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.analytics.evidence import EvidenceStore
+from arena_evaluation.analytics.queries import QueryCatalog
 from arena_evaluation.analytics.sql_engine import PolarsSQLEngine
 from arena_evaluation.presentation.checks import DiagnosticInspector, PlotDiagnostics
 from arena_evaluation.storage.schemas import PlotSpec
@@ -90,6 +91,7 @@ class DataResolver:
         catalog: BenchmarkCatalog | None = None,
         sql_engine: PolarsSQLEngine | None = None,
         evidence_store: EvidenceStore | None = None,
+        query_catalog: QueryCatalog | None = None,
         benchmark_dir: pathlib.Path | None = None,
         recipe_dirs: Sequence[pathlib.Path] | None = None,
     ) -> None:
@@ -118,6 +120,12 @@ class DataResolver:
             self.evidence_store = EvidenceStore(self.benchmark_dir / "evidence")
         else:
             self.evidence_store = None
+
+        if query_catalog is not None:
+            self.query_catalog = query_catalog
+        else:
+            extra_query_dirs = [self.benchmark_dir / "query_declarations"] if self.benchmark_dir is not None else []
+            self.query_catalog = QueryCatalog(extra_query_dirs)
 
     def resolve_spec(self, spec: PlotSpec) -> PlotSpec:
         """Resolve `uses: <recipe>` reference and return merged PlotSpec."""
@@ -149,19 +157,25 @@ class DataResolver:
     def _fetch_frame(self, spec: PlotSpec, fallback_df: pl.DataFrame | None) -> pl.DataFrame:
         data_spec = spec.data
 
-        # 1. SQL Query execution
+        # 1. Stored Query execution
+        if data_spec is not None and data_spec.stored_query:
+            if self.sql_engine is None:
+                raise RuntimeError(f"Cannot execute stored query for plot '{spec.id}': SQL engine not initialized.")
+            return self.query_catalog.execute(data_spec.stored_query, self.sql_engine, params=data_spec.params)
+
+        # 2. SQL Query execution
         if data_spec is not None and data_spec.query:
             if self.sql_engine is None:
                 raise RuntimeError(f"Cannot execute SQL query for plot '{spec.id}': SQL engine not initialized.")
             return self.sql_engine.query(data_spec.query)
 
-        # 2. Evidence Store retrieval
+        # 3. Evidence Store retrieval
         if data_spec is not None and data_spec.evidence_id:
             if self.evidence_store is None:
                 raise RuntimeError(f"Cannot fetch evidence '{data_spec.evidence_id}' for plot '{spec.id}': EvidenceStore not initialized.")
             return self.evidence_store.read_frame(data_spec.evidence_id)
 
-        # 3. Catalog table or view
+        # 4. Catalog table or view
         table_source = data_spec.source if (data_spec is not None and data_spec.source) else spec.data_source
         if table_source:
             if self.catalog is None:
@@ -172,11 +186,11 @@ class DataResolver:
                 lf = ctx.execute(f"SELECT * FROM _source WHERE {data_spec.where}", eager=False)
             return lf.collect()
 
-        # 4. Fallback in-memory DataFrame
+        # 5. Fallback in-memory DataFrame
         if fallback_df is not None:
             return fallback_df
 
-        raise ValueError(f"Cannot resolve data for plot '{spec.id}': no data source, query, evidence_id, or fallback provided.")
+        raise ValueError(f"Cannot resolve data for plot '{spec.id}': no data source, stored_query, query, evidence_id, or fallback provided.")
 
     @staticmethod
     def _apply_slice(spec: PlotSpec, df: pl.DataFrame) -> pl.DataFrame:

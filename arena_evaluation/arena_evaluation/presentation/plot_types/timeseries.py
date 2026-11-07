@@ -7,6 +7,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
 
+from arena_evaluation.presentation.color_utils import get_color_palette
+
 from .base import BasePlotRenderer
 
 __all__ = ["TimeseriesRenderer"]
@@ -19,7 +21,11 @@ class TimeseriesRenderer(BasePlotRenderer):
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
 
         metrics = self.spec.options.get("metrics", [])
         if not metrics:
@@ -45,46 +51,55 @@ class TimeseriesRenderer(BasePlotRenderer):
         if not valid_metrics:
             return None
 
+        x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "timeseries_time_s"))
+        if not x_col or schema.get(x_col) is None:
+            # Fallback to time_s if available
+            if schema.get("time_s") is not None:
+                x_col = "time_s"
+            else:
+                return None
+
         pdf = df_filtered.to_pandas()
         if pdf.empty:
             return None
 
-        # Filter out reference runs from main planner traces
-        if "is_reference" in pdf.columns and not self.spec.options.get("include_reference", False):
+        # Filter out reference runs from main planner traces if requested
+        if schema.get("is_reference") is not None and not self.spec.options.get("include_reference", False):
             pdf = pdf[~pdf["is_reference"].fillna(False)]
             if pdf.empty:
                 return None
 
-        x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "timeseries_time_s"))
-        if not x_col or schema.get(x_col) is None:
-            return None
-
         first_val = df_filtered[x_col][0] if not df_filtered.is_empty() else None
         is_nested = isinstance(first_val, (list, tuple, np.ndarray)) or schema[x_col] == pl.List or any(schema[m] == pl.List for m in valid_metrics)
+
+        # 1NF flat timeseries rows
         if not is_nested:
             fig = px.line(
                 pdf,
                 x=x_col,
                 y=valid_metrics[0] if len(valid_metrics) == 1 else valid_metrics,
-                color=diff_col if diff_col in pdf.columns else None,
+                color=color_col if color_col and color_col in pdf.columns and color_col != x_col else None,
                 template="plotly_white",
                 labels={
                     x_col: self.format_label(x_col.replace("timeseries_", "").replace("_", " ").title(), x_col),
                 },
             )
+            fig.update_layout(
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+                margin=dict(t=40, b=40, l=50, r=30),
+            )
             return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
+        # Nested list/array columns
         fig = go.Figure()
-        planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
+        planners = pdf[color_col].unique() if color_col and color_col in pdf.columns else ["unknown"]
         colors = px.colors.qualitative.Plotly
 
-        traces_added = 0
         for planner_idx, planner in enumerate(planners):
-            planner_df = pdf[pdf[diff_col] == planner] if diff_col in pdf.columns else pdf
+            planner_df = pdf[pdf[color_col] == planner] if color_col and color_col in pdf.columns else pdf
 
             for _, row in planner_df.iterrows():
                 episode_val = row.get("episode", "unknown")
-                legend_group = f"{planner} - Ep {episode_val}"
                 base_color = colors[planner_idx % len(colors)]
 
                 x_raw = row.get(x_col)
@@ -116,7 +131,6 @@ class TimeseriesRenderer(BasePlotRenderer):
 
                     dash_styles = ["solid", "dash", "dot", "dashdot"]
                     dash = dash_styles[m_idx % len(dash_styles)]
-                    showlegend = bool(m_idx == 0)
 
                     m_label = self.format_label(metric.replace("timeseries_", "").replace("_", " ").title(), metric)
                     fig.add_trace(
@@ -124,31 +138,29 @@ class TimeseriesRenderer(BasePlotRenderer):
                             x=cur_x.tolist(),
                             y=y_data.tolist(),
                             mode="lines",
-                            name=f"{legend_group}" if m_idx == 0 else m_label,
-                            legendgroup=legend_group,
-                            line=dict(color=base_color, dash=dash, width=2),
-                            hovertemplate=f"Ep {episode_val}<br>Time: %{{x:.2f}}s<br>{m_label}: %{{y:.3f}}<extra></extra>",
-                            showlegend=showlegend,
+                            line=dict(color=base_color, dash=dash),
+                            name=f"{planner} ({m_label})" if len(valid_metrics) > 1 else str(planner),
+                            legendgroup=f"{planner}_{episode_val}",
+                            showlegend=bool(m_idx == 0),
                         )
                     )
-                    traces_added += 1
 
         fig.update_layout(
             template="plotly_white",
             xaxis_title=self.format_label(x_col.replace("timeseries_", "").replace("_", " ").title(), x_col),
             yaxis_title=self.format_label(valid_metrics[0].replace("timeseries_", "").replace("_", " ").title(), valid_metrics[0]),
-            legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
-            margin=dict(r=150),
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=40, b=40, l=50, r=30),
         )
 
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        if not self.spec.options.get("render_static", False):
-            return
-
         df_filtered = self._apply_filters(df)
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
 
         metrics = self.spec.options.get("metrics", [])
         if not metrics:
@@ -167,29 +179,33 @@ class TimeseriesRenderer(BasePlotRenderer):
 
         x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "timeseries_time_s"))
         if not x_col or schema.get(x_col) is None:
-            return
+            if schema.get("time_s") is not None:
+                x_col = "time_s"
+            else:
+                return
 
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(10, 6))
         pdf = df_filtered.to_pandas()
-        planners = pdf[diff_col].unique() if diff_col in pdf.columns else ["unknown"]
-        colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+        planners = pdf[color_col].unique() if color_col and color_col in pdf.columns else ["unknown"]
+        colors = get_color_palette()
 
         first_val = df_filtered[x_col][0] if not df_filtered.is_empty() else None
         is_nested = isinstance(first_val, (list, tuple, np.ndarray)) or schema[x_col] == pl.List or any(schema[m] == pl.List for m in valid_metrics)
+
         if not is_nested:
-            fig, ax = plt.subplots(figsize=(10, 6))
             for planner_idx, planner in enumerate(planners):
-                planner_df = pdf[pdf[diff_col] == planner].sort_values(x_col) if diff_col in pdf.columns else pdf.sort_values(x_col)
+                planner_df = pdf[pdf[color_col] == planner].sort_values(x_col) if color_col and color_col in pdf.columns else pdf.sort_values(x_col)
                 base_color = colors[planner_idx % len(colors)]
                 for metric in valid_metrics:
-                    ax.plot(planner_df[x_col], planner_df[metric], label=f"{planner}", color=base_color, alpha=0.8)
-            ax.set_title(self.spec.title)
+                    ax.plot(planner_df[x_col], planner_df[metric], label=f"{planner}", color=base_color, alpha=0.85, linewidth=2)
+            ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
             ax.set_xlabel(self.format_label(x_col.replace("timeseries_", "").replace("_", " ").title(), x_col))
             ax.set_ylabel(self.format_label(valid_metrics[0].replace("timeseries_", "").replace("_", " ").title(), valid_metrics[0]))
-            if diff_col in pdf.columns:
+            if color_col and color_col in pdf.columns:
                 ax.legend()
+            ax.grid(True, linestyle="--", alpha=0.5)
             fig.tight_layout()
             self.save_figure(fig, out_path)
             plt.close(fig)
@@ -197,7 +213,7 @@ class TimeseriesRenderer(BasePlotRenderer):
 
         lines_plotted = 0
         for planner_idx, planner in enumerate(planners):
-            planner_df = pdf[pdf[diff_col] == planner] if diff_col in pdf.columns else pdf
+            planner_df = pdf[pdf[color_col] == planner] if color_col and color_col in pdf.columns else pdf
             base_color = colors[planner_idx % len(colors)]
 
             for _, row in planner_df.iterrows():
@@ -227,16 +243,17 @@ class TimeseriesRenderer(BasePlotRenderer):
                     else:
                         cur_x = x_data
 
-                    ax.plot(cur_x, y_data, label=f"{planner}", color=base_color, alpha=0.8)
+                    ax.plot(cur_x, y_data, label=f"{planner}", color=base_color, alpha=0.85, linewidth=1.5)
                     lines_plotted += 1
 
         if lines_plotted == 0:
             plt.close(fig)
             return
 
-        ax.set_title(self.spec.title)
+        ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
         ax.set_xlabel(self.format_label(x_col.replace("timeseries_", "").replace("_", " ").title(), x_col))
         ax.set_ylabel(self.format_label(valid_metrics[0].replace("timeseries_", "").replace("_", " ").title(), valid_metrics[0]))
+        ax.grid(True, linestyle="--", alpha=0.5)
         fig.tight_layout()
         self.save_figure(fig, out_path)
         plt.close(fig)

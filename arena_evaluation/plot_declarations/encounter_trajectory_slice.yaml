@@ -1,10 +1,11 @@
 id: encounter_trajectory_slice
 title: "Encounter Trajectory Slice & Clearance Envelope"
 type: trajectory
-source: v_encounter_telemetry
+data:
+  source: v_encounter_telemetry
 slice:
   scope: encounter
-encodings:
+channels:
   x: path
   color: planner
 options:

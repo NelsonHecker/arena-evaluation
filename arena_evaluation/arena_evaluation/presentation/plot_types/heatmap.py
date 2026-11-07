@@ -75,13 +75,14 @@ class HeatmapRenderer(BasePlotRenderer):
                 height=max(600, len(labels) * 40),
                 yaxis=dict(tickmode="linear", dtick=1),
                 xaxis=dict(tickmode="linear", dtick=1),
-                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+                margin=dict(t=40, b=40, l=50, r=30),
             )
             return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
         # 2D Pivot or Matrix Heatmap
-        x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "inter_planner"))
-        y_col = self.resolve_channel("y", fallback=self.spec.options.get("y", "local_planner"))
+        x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "planner"))
+        y_col = self.resolve_channel("y", fallback=self.spec.options.get("y", "crowd_condition"))
         metric = self.resolve_channel("color", fallback=self.spec.data_key)
 
         schema = df_filtered.schema
@@ -98,7 +99,7 @@ class HeatmapRenderer(BasePlotRenderer):
             pivot_df.values,
             x=pivot_df.columns.tolist(),
             y=pivot_df.index.tolist(),
-            color_continuous_scale="Viridis",
+            color_continuous_scale=self.spec.options.get("colorscale", "Viridis"),
             labels=dict(
                 color=self.format_label(metric.replace("_", " ").title(), metric),
                 x=x_col.replace("_", " ").title(),
@@ -113,7 +114,8 @@ class HeatmapRenderer(BasePlotRenderer):
             height=max(500, len(pivot_df.index) * 40),
             yaxis=dict(tickmode="linear", dtick=1),
             xaxis=dict(tickmode="linear", dtick=1),
-            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=40, b=40, l=50, r=30),
         )
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
@@ -181,15 +183,15 @@ class HeatmapRenderer(BasePlotRenderer):
                 square=True,
                 ax=ax,
             )
-            ax.set_title(self.spec.title)
+            ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
             ax.tick_params(axis="x", rotation=45)
             ax.tick_params(axis="y", rotation=0)
             fig.tight_layout()
             self.save_figure(fig, out_path)
             plt.close(fig)
         else:
-            x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "inter_planner"))
-            y_col = self.resolve_channel("y", fallback=self.spec.options.get("y", "local_planner"))
+            x_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "planner"))
+            y_col = self.resolve_channel("y", fallback=self.spec.options.get("y", "crowd_condition"))
             metric = self.resolve_channel("color", fallback=self.spec.data_key)
 
             schema = df_filtered.schema
@@ -204,7 +206,8 @@ class HeatmapRenderer(BasePlotRenderer):
 
             pivot_df = grouped.pivot(index=y_col, columns=x_col, values="val")
 
-            cmap = mpl.colormaps["viridis"].with_extremes(bad=(0, 0, 0, 0))
+            cmap_name = str(self.spec.options.get("colorscale", "viridis")).lower()
+            cmap = mpl.colormaps.get(cmap_name, mpl.colormaps["viridis"]).with_extremes(bad=(0, 0, 0, 0))
             sns.heatmap(
                 pivot_df,
                 annot=True,
@@ -213,7 +216,7 @@ class HeatmapRenderer(BasePlotRenderer):
                 cbar_kws={"label": self.format_label(metric.replace("_", " ").title(), metric)},
                 ax=ax,
             )
-            ax.set_title(self.spec.title)
+            ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
             ax.set_xlabel(x_col.replace("_", " ").title())
             ax.set_ylabel(y_col.replace("_", " ").title())
             fig.tight_layout()

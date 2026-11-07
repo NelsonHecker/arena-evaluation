@@ -59,14 +59,20 @@ def _normalize(grouped: pd.DataFrame, metrics: list[str], *, use_log_scale: bool
 
 
 class RadarRenderer(BasePlotRenderer):
+    """Radar and capability tradeoff profile renderer."""
+
     PLOT_TYPE = "radar"
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        color_col = self.resolve_channel("color", fallback=diff_col)
-        if not color_col or color_col not in df_filtered.columns:
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
+
+        schema = df_filtered.schema
+        if not color_col or schema.get(color_col) is None:
             return None
 
         metrics = self.spec.options.get("metrics", [])
@@ -75,12 +81,11 @@ class RadarRenderer(BasePlotRenderer):
         if not metrics:
             metrics = ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"]
 
-        valid_metrics = [m for m in metrics if m in df_filtered.columns and not df_filtered[m].is_null().all()]
-
+        valid_metrics = [m for m in metrics if schema.get(m) is not None and not df_filtered[m].is_null().all()]
         if len(valid_metrics) < 3:
             return None
 
-        grouped = df_filtered.group_by(diff_col).agg([pl.col(m).mean().alias(m) for m in valid_metrics]).to_pandas()
+        grouped = df_filtered.group_by(color_col).agg([pl.col(m).mean().alias(m) for m in valid_metrics]).to_pandas()
         grouped = grouped.fillna(0.0)
 
         if grouped.empty:
@@ -100,23 +105,32 @@ class RadarRenderer(BasePlotRenderer):
                 go.Scatterpolar(
                     r=values,
                     theta=labels,
-                    fill=None,
-                    line=dict(width=3),
-                    name=row[diff_col],
-                    opacity=1.0,
+                    fill="toself" if self.spec.options.get("fill", False) else None,
+                    line=dict(width=2.5),
+                    name=str(row[color_col]),
+                    opacity=0.85,
                 )
             )
 
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=True, template="plotly_white", legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            showlegend=True,
+            template="plotly_white",
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=40, b=40, l=50, r=50),
+        )
 
-        return fig.to_html(full_html=False, include_plotlyjs=False, config={'responsive': True})
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-
         df_filtered = self._apply_filters(df)
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        color_col = self.resolve_channel("color", fallback=diff_col)
-        if not color_col or color_col not in df_filtered.columns:
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
+
+        schema = df_filtered.schema
+        if not color_col or schema.get(color_col) is None:
             return
 
         metrics = self.spec.options.get("metrics", [])
@@ -124,11 +138,11 @@ class RadarRenderer(BasePlotRenderer):
             metrics = self.spec.channels.y if isinstance(self.spec.channels.y, list) else [self.spec.channels.y]
         if not metrics:
             metrics = ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"]
-        valid_metrics = [m for m in metrics if m in df_filtered.columns and not df_filtered[m].is_null().all()]
+        valid_metrics = [m for m in metrics if schema.get(m) is not None and not df_filtered[m].is_null().all()]
         if len(valid_metrics) < 3:
             return
 
-        grouped = df_filtered.group_by(diff_col).agg([pl.col(m).mean().alias(m) for m in valid_metrics]).to_pandas()
+        grouped = df_filtered.group_by(color_col).agg([pl.col(m).mean().alias(m) for m in valid_metrics]).to_pandas()
         grouped = grouped.fillna(0.0)
         if grouped.empty:
             return
@@ -148,7 +162,7 @@ class RadarRenderer(BasePlotRenderer):
             values = [row[m] for m in valid_metrics]
             values += values[:1]
             color = palette[idx % len(palette)]
-            ax.plot(angles, values, linewidth=2, label=row[diff_col], color=color)
+            ax.plot(angles, values, linewidth=2, label=str(row[color_col]), color=color)
             ax.fill(angles, values, alpha=0.15, color=color)
 
         ax.set_xticks(angles[:-1])
@@ -157,9 +171,9 @@ class RadarRenderer(BasePlotRenderer):
         ax.set_yticks([0.25, 0.5, 0.75, 1.0])
         ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], size=7, color="grey")
 
-        ax.set_title(self.spec.title, size=14, pad=20)
-        ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=9)
+        ax.set_title(self.spec.title, size=13, pad=20, fontweight="bold")
+        ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1), fontsize=9)
 
-        plt.tight_layout()
+        fig.tight_layout()
         self.save_figure(fig, out_path)
         plt.close(fig)

@@ -1,8 +1,9 @@
 id: planner_ranking_stability
 title: "Planner Ranking Concordance Across Environments"
 type: heatmap
-source: v_planner_scorecard
-encodings:
+data:
+  source: v_planner_scorecard
+channels:
   x: planner
   y: crowd_condition
   color: composite_rank

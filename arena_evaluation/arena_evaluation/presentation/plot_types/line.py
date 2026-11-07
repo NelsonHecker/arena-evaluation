@@ -46,10 +46,10 @@ class LineRenderer(BasePlotRenderer):
                     group_cols = [diff_col]
 
         error_col = opts.get("error_y")
-        if error_col and error_col not in df_filtered.columns:
+        if error_col and df_filtered.schema.get(error_col) is None:
             error_col = None
 
-        filter_keys = [k for k in (self.spec.filter or {}) if k in df_filtered.columns]
+        filter_keys = [k for k in (self.spec.filter or {}) if df_filtered.schema.get(k) is not None]
         keep = list(dict.fromkeys([c for c in [x_col, y_col, *group_cols, error_col, *filter_keys] if c]))
         list_cols = [c for c in keep if df_filtered.schema[c] == pl.List]
         if list_cols:
@@ -57,13 +57,13 @@ class LineRenderer(BasePlotRenderer):
         df_filtered = self._apply_row_filters(df_filtered)
 
         bin_x = opts.get("bin_x")
-        if bin_x is not None and float(bin_x) > 0 and x_col in df_filtered.columns:
+        if bin_x is not None and float(bin_x) > 0 and df_filtered.schema.get(x_col) is not None:
             bx = float(bin_x)
             df_filtered = df_filtered.with_columns(((pl.col(x_col) / bx).round() * bx).round(4).alias(x_col))
 
         trim_p = float(opts.get("trim_percentile", 0.0) or (1.0 - float(opts.get("inliers", 1.0))))
-        if 0.0 < trim_p < 0.5 and len(df_filtered) > 0 and y_col in df_filtered.columns:
-            group_keys = [c for c in [x_col, *group_cols] if c in df_filtered.columns]
+        if 0.0 < trim_p < 0.5 and len(df_filtered) > 0 and df_filtered.schema.get(y_col) is not None:
+            group_keys = [c for c in [x_col, *group_cols] if df_filtered.schema.get(c) is not None]
             p_low = trim_p / 2.0
             p_high = 1.0 - (trim_p / 2.0)
             if group_keys:

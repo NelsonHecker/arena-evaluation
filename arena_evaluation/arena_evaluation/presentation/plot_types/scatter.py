@@ -5,6 +5,8 @@ import pathlib
 import plotly.express as px
 import polars as pl
 
+from arena_evaluation.presentation.color_utils import get_color_palette
+
 from .base import BasePlotRenderer
 
 __all__ = ["ScatterRenderer"]
@@ -25,10 +27,10 @@ class ScatterRenderer(BasePlotRenderer):
         if not y_col or not x_col or schema.get(x_col) is None or schema.get(y_col) is None:
             return None
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        if diff_col not in df_filtered.columns:
-            return None
-        color_col = self.resolve_channel("color", fallback=diff_col)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
 
         size_col = self.resolve_channel("size", fallback=self.spec.options.get("size"))
         if size_col and df_filtered.schema.get(size_col) is None:
@@ -76,17 +78,20 @@ class ScatterRenderer(BasePlotRenderer):
             pdf,
             x=x_col,
             y=y_col,
-            color=color_col,
+            color=color_col if color_col in pdf.columns else None,
             size=size_col,
             symbol=symbol_col,
             facet_col=facet_col,
             facet_row=facet_row,
             labels=labels,
             template="plotly_white",
-            opacity=0.7,
+            opacity=0.75,
         )
 
-        fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+        fig.update_layout(
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=40, b=40, l=50, r=30),
+        )
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
@@ -99,10 +104,10 @@ class ScatterRenderer(BasePlotRenderer):
         if not y_col or not x_col or schema.get(x_col) is None or schema.get(y_col) is None:
             return
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        if diff_col not in df_filtered.columns:
-            return
-        color_col = self.resolve_channel("color", fallback=diff_col)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
 
         size_col = self.resolve_channel("size", fallback=self.spec.options.get("size"))
         if size_col and df_filtered.schema.get(size_col) is None:
@@ -129,17 +134,21 @@ class ScatterRenderer(BasePlotRenderer):
         import seaborn as sns
 
         fig, ax = plt.subplots(figsize=(10, 6))
+        palette = get_color_palette() if color_col else None
         sns.scatterplot(
             data=pdf,
             x=x_col,
             y=y_col,
-            hue=color_col,
+            hue=color_col if color_col in pdf.columns and color_col != x_col else None,
             size=size_col,
             style=symbol_col,
-            alpha=0.7,
+            palette=palette,
+            alpha=0.75,
             ax=ax,
         )
-        ax.set_title(self.spec.title)
+        sns.despine(fig=fig, top=True, right=True)
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
         ax.set_xlabel(self.format_label(x_col.replace("_", " ").title(), x_col))
         ax.set_ylabel(self.format_label(y_col.replace("_", " ").title(), y_col))
         fig.tight_layout()

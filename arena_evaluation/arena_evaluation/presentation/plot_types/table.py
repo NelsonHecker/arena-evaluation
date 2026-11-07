@@ -76,14 +76,14 @@ def _render_notes_callout(notes_rows: list[dict[str, str]]) -> str:
     if not notes_rows:
         return ""
     parts = [
-        "<div class='notes-callout'>",
-        "<div class='notes-callout-title'>Analysis Notes</div>",
+        "<div class='notes-callout' style='margin: 12px 0; padding: 12px; background: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 4px;'>",
+        "<div class='notes-callout-title' style='font-weight: 600; margin-bottom: 6px;'>Analysis Notes</div>",
     ]
     for note in notes_rows:
         label = html_escape.escape(note.get("label", ""), quote=True)
         value = html_escape.escape(note.get("value", ""), quote=True).replace("\n", "<br>")
         if label:
-            parts.append(f"<div class='notes-callout-row'><span class='notes-callout-label'>{label}</span><span class='notes-callout-value'>{value}</span></div>")
+            parts.append(f"<div class='notes-callout-row'><span class='notes-callout-label' style='font-weight: 600;'>{label}: </span><span class='notes-callout-value'>{value}</span></div>")
         else:
             parts.append(f"<div class='notes-callout-row notes-callout-row-plain'><span class='notes-callout-value'>{value}</span></div>")
     parts.append("</div>")
@@ -95,7 +95,7 @@ class TableRenderer(BasePlotRenderer):
 
     PLOT_TYPE = "table"
 
-    def _columns(self) -> list[dict[str, str]]:
+    def _columns(self, df: pl.DataFrame | None = None) -> list[dict[str, str]]:
         opts = self.spec.options or {}
         declared_cols = opts.get("columns") or []
         if declared_cols:
@@ -122,6 +122,24 @@ class TableRenderer(BasePlotRenderer):
                 for m in metric_list
                 if m
             ]
+
+        # Auto-infer columns from DataFrame schema if not specified
+        if df is not None:
+            group_cols = set(self._resolve_group_cols(df))
+            inferred = []
+            for col, dtype in df.schema.items():
+                if col in group_cols:
+                    continue
+                fmt = "{:.2f}" if dtype in (pl.Float64, pl.Float32) else "{}"
+                inferred.append(
+                    {
+                        "metric": col,
+                        "label": col.replace("_", " ").title(),
+                        "format": fmt,
+                    }
+                )
+            return inferred
+
         return []
 
     def _agent_rows(self) -> list[dict[str, str]]:
@@ -145,11 +163,11 @@ class TableRenderer(BasePlotRenderer):
         schema = df.schema
         return [g for g in group_by if schema.get(g) is not None]
 
-    def _data_rows(self, df: pl.DataFrame) -> list[list[str]]:
+    def _data_rows(self, df: pl.DataFrame) -> tuple[list[str], list[list[str]]]:
         group_cols = self._resolve_group_cols(df)
-        cols = self._columns()
-        if not group_cols or not cols:
-            return []
+        cols = self._columns(df)
+        if not cols:
+            return [], []
 
         schema = df.schema
         all_target_cols = [*group_cols, *(c["metric"] for c in cols)]
@@ -159,40 +177,67 @@ class TableRenderer(BasePlotRenderer):
             df = df.select(need).explode(list_cols)
         df = self._apply_row_filters(df)
 
-        agg = [pl.col(c["metric"]).mean().alias(f"__m{i}__") for i, c in enumerate(cols) if schema.get(c["metric"]) is not None]
-        if not agg:
-            return []
-        grouped = df.group_by(group_cols).agg(agg).sort(group_cols)
+        header = [g.replace("_", " ").title() for g in group_cols] + [c["label"] for c in cols]
 
-        rows: list[list[str]] = []
-        for row in grouped.to_dicts():
+        # Case 1: Grouped data (aggregate mean if multiple observations per group)
+        if group_cols:
+            max_cnt = df.group_by(group_cols).agg(pl.len().alias("cnt"))["cnt"].max() if not df.is_empty() else 0
+            if max_cnt == 1:
+                # Already pre-aggregated
+                rows: list[list[str]] = []
+                for row in df.to_dicts():
+                    vals = []
+                    for c in cols:
+                        raw = row.get(c["metric"])
+                        try:
+                            vals.append(c["format"].format(float(raw)) if raw is not None else "N/A")
+                        except (TypeError, ValueError):
+                            vals.append(str(raw) if raw is not None else "N/A")
+                    rows.append([str(row.get(g, "")) for g in group_cols] + vals)
+                return header, rows
+
+            agg = [pl.col(c["metric"]).mean().alias(f"__m{i}__") for i, c in enumerate(cols) if schema.get(c["metric"]) is not None]
+            if not agg:
+                return header, []
+            grouped = df.group_by(group_cols).agg(agg).sort(group_cols)
+
+            rows = []
+            for row in grouped.to_dicts():
+                values = []
+                for i, c in enumerate(cols):
+                    val = row.get(f"__m{i}__")
+                    try:
+                        values.append(c["format"].format(float(val)) if val is not None else "N/A")
+                    except (TypeError, ValueError):
+                        values.append("N/A")
+                rows.append([str(row.get(g, "")) for g in group_cols] + values)
+            return header, rows
+
+        # Case 2: Flat table without grouping
+        rows = []
+        for row in df.to_dicts():
             values = []
-            for i, c in enumerate(cols):
-                val = row.get(f"__m{i}__")
+            for c in cols:
+                raw = row.get(c["metric"])
                 try:
-                    values.append(c["format"].format(float(val)) if val is not None else "N/A")
+                    values.append(c["format"].format(float(raw)) if raw is not None else "N/A")
                 except (TypeError, ValueError):
-                    values.append("N/A")
-            rows.append([str(row.get(g, "")) for g in group_cols] + values)
-        return rows
+                    values.append(str(raw) if raw is not None else "N/A")
+            rows.append(values)
+        return header, rows
 
     def _render_data_table(self, df: pl.DataFrame) -> str | None:
-        cols = self._columns()
-        group_cols = self._resolve_group_cols(df)
-
-        header = [g.replace("_", " ").title() for g in group_cols] + [c["label"] for c in cols]
-        if not header:
-            return None
-        rows = self._data_rows(df)
-        if not rows:
+        header, rows = self._data_rows(df)
+        if not header or not rows:
             return None
 
-        html = ["<table class='dataframe' style='border-collapse: collapse; margin: 8px 0;'>"]
-        html.append("<thead><tr>" + "".join(f"<th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>{h}</th>" for h in header) + "</tr></thead>")
+        html = ["<table class='dataframe' style='border-collapse: collapse; margin: 8px 0; width: 100%; font-family: sans-serif; font-size: 0.9em;'>"]
+        html.append("<thead><tr>" + "".join(f"<th style='border: 1px solid #e2e8f0; padding: 6px 12px; background: #f1f5f9; text-align: left;'>{h}</th>" for h in header) + "</tr></thead>")
         html.append("<tbody>")
-        for row in rows:
+        for idx, row in enumerate(rows):
+            bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
             cells = row + [""] * (len(header) - len(row))
-            html.append("<tr>" + "".join(f"<td style='border:1px solid #ccc; padding:4px 10px;'>{c}</td>" for c in cells) + "</tr>")
+            html.append(f"<tr style='background: {bg};'>" + "".join(f"<td style='border: 1px solid #e2e8f0; padding: 6px 12px;'>{c}</td>" for c in cells) + "</tr>")
         html.append("</tbody></table>")
         return "".join(html)
 
@@ -201,14 +246,15 @@ class TableRenderer(BasePlotRenderer):
         if not rows:
             return None
         parts = [
-            "<table class='dataframe' style='border-collapse: collapse; margin: 8px 0;'>",
-            "<thead><tr><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Label</th><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Value</th></tr></thead>",
+            "<table class='dataframe' style='border-collapse: collapse; margin: 8px 0; width: 100%; font-family: sans-serif; font-size: 0.9em;'>",
+            "<thead><tr><th style='border: 1px solid #e2e8f0; padding: 6px 12px; background: #f1f5f9; text-align: left;'>Label</th><th style='border: 1px solid #e2e8f0; padding: 6px 12px; background: #f1f5f9; text-align: left;'>Value</th></tr></thead>",
             "<tbody>",
         ]
-        for row in rows:
+        for idx, row in enumerate(rows):
+            bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
             label = html_escape.escape(row.get("label", ""), quote=True)
             value = html_escape.escape(row.get("value", ""), quote=True).replace("\n", "<br>")
-            parts.append(f"<tr><td style='border:1px solid #ccc; padding:4px 10px;'>{label}</td><td style='border:1px solid #ccc; padding:4px 10px;'>{value}</td></tr>")
+            parts.append(f"<tr style='background: {bg};'><td style='border: 1px solid #e2e8f0; padding: 6px 12px; font-weight: 600;'>{label}</td><td style='border: 1px solid #e2e8f0; padding: 6px 12px;'>{value}</td></tr>")
         parts.append("</tbody></table>")
         return "".join(parts)
 
@@ -231,9 +277,7 @@ class TableRenderer(BasePlotRenderer):
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
-        cols = self._columns()
-        group_cols = self._resolve_group_cols(df_filtered)
-        rows = self._data_rows(df_filtered)
+        header, rows = self._data_rows(df_filtered)
 
         if not rows:
             agent_rows = self._agent_rows()
@@ -241,8 +285,6 @@ class TableRenderer(BasePlotRenderer):
                 return
             header = ["Label", "Value"]
             rows = [[r.get("label", ""), r.get("value", "")] for r in agent_rows]
-        else:
-            header = [g.replace("_", " ").title() for g in group_cols] + [c["label"] for c in cols]
 
         import matplotlib.pyplot as plt
 

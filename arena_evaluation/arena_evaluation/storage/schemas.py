@@ -235,10 +235,12 @@ class AlignedEpisodeBundle:
 
 
 class PlotDataSpec(BaseModel):
-    """Specification for data binding: catalog source, SQL query, or evidence artifact."""
+    """Specification for data binding: catalog source, SQL query, stored query, or evidence artifact."""
 
     source: str | None = None
     query: str | None = None
+    stored_query: str | None = None
+    params: dict[str, typing.Any] | None = None
     evidence_id: str | None = None
     where: str | None = None
 
@@ -307,6 +309,17 @@ class PlotSpec(BaseModel):
                 d["channels"] = d.pop("encodings")
             if "source" in d and "data" not in d:
                 d["data"] = {"source": d.pop("source")}
+            if "stored_query" in d:
+                sq = d.pop("stored_query")
+                sp = d.pop("params", None)
+                if "data" not in d or d["data"] is None:
+                    d["data"] = {"stored_query": sq, "params": sp}
+                elif isinstance(d["data"], dict):
+                    d["data"]["stored_query"] = sq
+                    if sp is not None and "params" not in d["data"]:
+                        d["data"]["params"] = sp
+            if "params" in d and isinstance(d.get("data"), dict) and "params" not in d["data"]:
+                d["data"]["params"] = d.pop("params")
 
             # 1. Normalize 'data'
             if "data" in d and isinstance(d["data"], str):

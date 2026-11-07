@@ -5,6 +5,8 @@ import pathlib
 import plotly.express as px
 import polars as pl
 
+from arena_evaluation.presentation.color_utils import get_color_palette
+
 from .base import BasePlotRenderer
 
 __all__ = ["BoxRenderer"]
@@ -21,8 +23,11 @@ class BoxRenderer(BasePlotRenderer):
         if not y_col or df_filtered.schema.get(y_col) is None:
             return None
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        color_col = self.resolve_channel("color", fallback=diff_col)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
+
         if not color_col or df_filtered.schema.get(color_col) is None:
             return None
 
@@ -60,7 +65,10 @@ class BoxRenderer(BasePlotRenderer):
             labels=labels,
             template="plotly_white",
         )
-        fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+        fig.update_layout(
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+            margin=dict(t=40, b=40, l=50, r=30),
+        )
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
@@ -69,8 +77,11 @@ class BoxRenderer(BasePlotRenderer):
         if not y_col or df_filtered.schema.get(y_col) is None:
             return
 
-        diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        color_col = self.resolve_channel("color", fallback=diff_col)
+        color_col = self.resolve_channel("color")
+        if not color_col:
+            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            color_col = diff_col
+
         if not color_col or df_filtered.schema.get(color_col) is None:
             return
 
@@ -87,14 +98,18 @@ class BoxRenderer(BasePlotRenderer):
         import seaborn as sns
 
         fig, ax = plt.subplots(figsize=(10, 6))
+        palette = get_color_palette() if color_col else None
         sns.boxplot(
             data=pdf,
             x=x_col,
             y=y_col,
-            hue=color_col,
+            hue=color_col if color_col != x_col else None,
+            palette=palette,
             ax=ax,
         )
-        ax.set_title(self.spec.title)
+        sns.despine(fig=fig, top=True, right=True)
+        ax.grid(True, linestyle="--", alpha=0.5, axis="y")
+        ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
         ax.set_ylabel(self.format_label(y_col.replace("_", " ").title(), y_col))
         if x_col:
             ax.set_xlabel(self.format_label(x_col.replace("_", " ").title(), x_col))

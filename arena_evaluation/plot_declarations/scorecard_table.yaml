@@ -1,20 +1,19 @@
 id: scorecard_table
 title: "Planner Performance Scorecard"
 type: table
-source: v_planner_scorecard
-encodings:
+data:
+  stored_query: planner_scorecard_overview
+channels:
   x: planner
   y:
     - success_rate
-    - collision_rate
-    - time_to_goal_s
-    - path_length_m
-    - path_efficiency
-    - energy_wh
+    - success_no_robot_fault_rate
+    - mean_time_to_goal_s
+    - mean_path_efficiency
+    - mean_energy_wh
 options:
   format: "{:.2f}"
 checks:
   require_columns:
     - planner
     - success_rate
-    - collision_rate
