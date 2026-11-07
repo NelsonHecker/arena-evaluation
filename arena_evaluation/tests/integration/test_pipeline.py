@@ -21,5 +21,5 @@ def test_process_benchmark_writes_the_metrics_of_a_recorded_episode(tmp_path: pa
     row = metrics.row(0, named=True)
     assert row["planner"] == "dwb"
     assert row["map"] == "barn_0"
-    assert row["status"] == "no_trajectory"
-    assert row["status_reason"] == "no tf ground-truth rows"
+    assert row["status"] == "evaluated"
+    assert row["path_length"] > 0.0
