@@ -265,7 +265,32 @@ def detect_contact_windows_lf(collision_contacts: pl.DataFrame | pl.LazyFrame, e
     normalized_kind = pl.col("kind").fill_null("static").str.to_lowercase()
     collider_kind = pl.when(normalized_kind.str.contains(PEDESTRIAN_KIND_PATTERN)).then(pl.lit(ACTOR_PEDESTRIAN)).when(normalized_kind.str.contains(ROBOT_KIND_PATTERN)).then(pl.lit(ACTOR_ROBOT)).when(normalized_kind.str.contains(WALL_KIND_PATTERN)).then(pl.lit("wall")).otherwise(pl.lit("static"))
     raw_obstacle_id = pl.col("obstacle_id").fill_null("")
-    entity_obstacle_id = pl.col("raw_obstacle_id").str.replace(r"^env_[0-9]+/", "").str.split("/").list.first()
+    entity_obstacle_id = pl.col("raw_obstacle_id").str.replace(r"^env_[0-9]+/", "").str.split("/").list.first().fill_null("")
+
+    enc_lf = encounters.lazy()
+    by_id = enc_lf.select(
+        pl.col("actor_id").alias("entity_id"),
+        pl.col("actor_id").alias("resolved_by_id"),
+    ).unique(subset=["entity_id"], keep="first")
+    by_name = (
+        enc_lf.filter(pl.col("actor_name").is_not_null() & (pl.col("actor_name") != ""))
+        .select(
+            pl.col("actor_name").alias("entity_id"),
+            pl.col("actor_id").alias("resolved_by_name"),
+        )
+        .unique(subset=["entity_id"], keep="first")
+    )
+    by_suffix = (
+        enc_lf.filter(pl.col("actor_kind") == ACTOR_PEDESTRIAN)
+        .with_columns(suffix_id=pl.col("actor_id").str.extract(r"(\d+)$", 1))
+        .filter(pl.col("suffix_id").is_not_null())
+        .select(
+            pl.col("suffix_id"),
+            pl.col("actor_id").alias("resolved_by_suffix"),
+        )
+        .unique(subset=["suffix_id"], keep="first")
+    )
+
     contacts = (
         collision_contacts.lazy()
         .select(
@@ -276,8 +301,28 @@ def detect_contact_windows_lf(collision_contacts: pl.DataFrame | pl.LazyFrame, e
             pl.col("obstacle_y").cast(pl.Float64),
             pl.col("obstacle_z").cast(pl.Float64),
         )
-        .with_columns(collider_kind=collider_kind)
-        .with_columns(obstacle_id=pl.when(pl.col("collider_kind").is_in([ACTOR_PEDESTRIAN, ACTOR_ROBOT])).then(entity_obstacle_id).otherwise(pl.col("raw_obstacle_id")))
+        .with_columns(
+            collider_kind=collider_kind,
+            entity_id=entity_obstacle_id,
+            suffix_id=entity_obstacle_id.str.extract(r"(\d+)$", 1),
+        )
+        .join(by_id, on="entity_id", how="left")
+        .join(by_name, on="entity_id", how="left")
+        .join(by_suffix, on="suffix_id", how="left")
+        .with_columns(
+            obstacle_id=pl.when(pl.col("collider_kind") == ACTOR_PEDESTRIAN)
+            .then(
+                pl.coalesce(
+                    pl.col("resolved_by_id"),
+                    pl.col("resolved_by_name"),
+                    pl.col("resolved_by_suffix"),
+                    pl.col("entity_id"),
+                )
+            )
+            .when(pl.col("collider_kind") == ACTOR_ROBOT)
+            .then(pl.coalesce(pl.col("resolved_by_id"), pl.col("entity_id")))
+            .otherwise(pl.col("raw_obstacle_id"))
+        )
         .sort(["collider_kind", "obstacle_id", "t_ns"])
         .with_columns(
             same_target=(pl.col("collider_kind") == pl.col("collider_kind").shift(1)) & (pl.col("obstacle_id") == pl.col("obstacle_id").shift(1)),
@@ -296,7 +341,7 @@ def detect_contact_windows_lf(collision_contacts: pl.DataFrame | pl.LazyFrame, e
     )
     grouped = grouped.sort(["t_onset_ns", "collider_kind", "obstacle_id"]).with_row_index("contact_idx").with_columns(pl.col("contact_idx").cast(pl.UInt32))
 
-    enclosing_windows = encounters.lazy().select(
+    enclosing_windows = enc_lf.select(
         pl.col("actor_id").alias("obstacle_id"),
         pl.col("t_start_ns").alias("encounter_start_ns"),
         pl.col("t_end_ns").alias("encounter_end_ns"),

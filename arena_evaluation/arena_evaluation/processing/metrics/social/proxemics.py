@@ -5,7 +5,7 @@ import typing
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.pedestrian_frames import distances_to_pedestrians
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, pedestrian_pairs_lf
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
@@ -120,6 +120,7 @@ class PedestrianIntrusionCalculator(BaseMetricCalculator):
     NAME = "pedestrian_intrusions"
     CATEGORY = "social"
     SCOPE = MetricScope.PEDESTRIAN
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.PEDESTRIAN})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
@@ -138,7 +139,12 @@ class PedestrianIntrusionCalculator(BaseMetricCalculator):
     def output_keys(cls) -> list[str]:
         return ["total_intrusions_intimate", "total_intrusions_personal"]
 
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+    def _calculate_for_target(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        target_id: str | None = None,
+    ) -> dict[str, typing.Any]:
         prior_intimate = prior_results.get("total_intrusions_intimate")
         prior_personal = prior_results.get("total_intrusions_personal")
         if prior_intimate is not None and prior_personal is not None:
@@ -159,9 +165,9 @@ class PedestrianIntrusionCalculator(BaseMetricCalculator):
         if robot_tracks is None or len(robot_tracks) == 0 or ped_tracks is None or len(ped_tracks) == 0:
             return {"total_intrusions_intimate": 0, "total_intrusions_personal": 0}
 
-        target_id = self.metrics_config.get("target_agent_id")
-        if target_id is not None:
-            ped_tracks = ped_tracks.filter(pl.col("ped_id") == str(target_id))
+        resolved_target = target_id if target_id is not None else self.metrics_config.get("target_agent_id")
+        if resolved_target is not None:
+            ped_tracks = ped_tracks.filter(pl.col("ped_id") == str(resolved_target))
 
         if len(ped_tracks) == 0:
             return {"total_intrusions_intimate": 0, "total_intrusions_personal": 0}
@@ -182,3 +188,15 @@ class PedestrianIntrusionCalculator(BaseMetricCalculator):
             "total_intrusions_intimate": int(entries.get_column("intimate_entry").sum()),
             "total_intrusions_personal": int(entries.get_column("personal_entry").sum()),
         }
+
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        return self._calculate_for_target(episode, prior_results)
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        target_id = scope_slice.slice_id if scope_slice is not None and scope_slice.scope == MetricScope.PEDESTRIAN else None
+        return self._calculate_for_target(episode, prior_results, target_id=target_id)

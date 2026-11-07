@@ -6,10 +6,27 @@ import pkgutil
 import types
 import typing
 from collections import defaultdict, deque
+from collections.abc import Mapping
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+import polars as pl
+
+from arena_evaluation.processing.metrics.base import (
+    BaseMetricCalculator,
+    MetricScope,
+    ScopeExecutionOutcome,
+    ScopeSlice,
+)
 from arena_evaluation.storage.exceptions import CircularDependencyError
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+
+
+def _topic_row_count(table: pl.DataFrame | pl.LazyFrame | None) -> int:
+    """Row count of a materialized or lazy topic table, 0 when None."""
+    if table is None:
+        return 0
+    if isinstance(table, pl.LazyFrame):
+        return int(table.select(pl.len()).collect().item())
+    return len(table)
 
 
 class MetricRegistry:
@@ -21,14 +38,16 @@ class MetricRegistry:
         self.metrics_config = dict(metrics_config or {})
         self.calculators: dict[str, BaseMetricCalculator] = {}
         self.calculators_by_scope: dict[MetricScope, dict[str, BaseMetricCalculator]] = {scope: {} for scope in MetricScope}
+        self.execution_stages_by_scope: dict[MetricScope, list[list[str]]] = {scope: [] for scope in MetricScope}
+        self.execution_stages: list[list[str]] = []
         self.discover_calculators_cls()
         self._register_calculators()
         for name, calc in self.calculators.items():
-            scope = calc.SCOPE
-            if name not in self.calculators_by_scope[scope]:
-                self.calculators_by_scope[scope][name] = calc
+            for scope in calc.effective_scopes():
+                if name not in self.calculators_by_scope[scope]:
+                    self.calculators_by_scope[scope][name] = calc
 
-        self.execution_stages_by_scope: dict[MetricScope, list[list[str]]] = {scope: self._compute_execution_order(scope) for scope in MetricScope}
+        self.execution_stages_by_scope = {scope: self._compute_execution_order(scope) for scope in MetricScope}
         self.execution_stages = self.execution_stages_by_scope[MetricScope.EPISODE]
 
     @classmethod
@@ -63,17 +82,23 @@ class MetricRegistry:
             return leaves
 
         for calc_cls in set(_get_leaf_subclasses(BaseMetricCalculator)):
-            if not inspect.isabstract(calc_cls):
+            if not inspect.isabstract(calc_cls) and "<locals>" not in calc_cls.__qualname__:
                 if not calc_cls.NAME:
                     raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
                 if calc_cls.NAME in self.calculators:
                     raise ValueError(f"Duplicate calculator NAME: {calc_cls.NAME}")
-                calc = calc_cls(self.robot_params)
-                calc.world = self.world
-                calc.metrics_config = self.metrics_config
-                self.calculators[calc_cls.NAME] = calc
-                scope = calc.SCOPE
-                self.calculators_by_scope[scope][calc_cls.NAME] = calc
+                self.register(calc_cls)
+
+    def register(self, calculator: type[BaseMetricCalculator] | BaseMetricCalculator) -> None:
+        """Register a calculator class or instance across all of its effective scopes."""
+        calc = calculator(self.robot_params) if isinstance(calculator, type) else calculator
+        calc.world = self.world
+        calc.metrics_config = self.metrics_config
+        self.calculators[calc.NAME] = calc
+        for scope in calc.effective_scopes():
+            self.calculators_by_scope[scope][calc.NAME] = calc
+            self.execution_stages_by_scope[scope] = self._compute_execution_order(scope)
+        self.execution_stages = self.execution_stages_by_scope[MetricScope.EPISODE]
 
     @classmethod
     def get_all_units(cls) -> dict[str, str]:
@@ -122,6 +147,10 @@ class MetricRegistry:
 
         return stages
 
+    def get_execution_order_for_scope(self, scope: MetricScope) -> list[list[str]]:
+        """Return topological execution stages of calculators registered for `scope`."""
+        return self.execution_stages_by_scope[scope]
+
     def list_metrics(self) -> list[dict[str, typing.Any]]:
         """Returns metadata about all registered metrics."""
         return [
@@ -129,6 +158,7 @@ class MetricRegistry:
                 "name": name,
                 "category": calc.CATEGORY,
                 "scope": calc.SCOPE,
+                "scopes": sorted(s.value for s in calc.effective_scopes()),
                 "requires_pedsim": calc.REQUIRES_PEDSIM,
                 "depends_on": calc.DEPENDS_ON,
                 "required_topics": calc.REQUIRED_TOPICS,
@@ -148,13 +178,25 @@ class MetricRegistry:
         scope: MetricScope,
         episode: AlignedEpisodeBundle,
         *,
-        available_topics: set[str],
+        available_topics: set[str] | None = None,
         prior_results: dict[str, typing.Any] | None = None,
         pedsim_available: bool = True,
         progress_callback: typing.Callable[[str, int, int], None] | None = None,
-    ) -> dict[str, typing.Any]:
+        scope_slice: ScopeSlice | None = None,
+    ) -> ScopeExecutionOutcome:
         """Executes all calculators registered for `scope` in topological order."""
+        slice_episode = scope_slice.window_bundle if scope_slice is not None else episode
+        full_episode = scope_slice.full_episode if scope_slice is not None else episode
+        full_topics = full_episode.topics if isinstance(full_episode.topics, Mapping) else {}
+        slice_topics = slice_episode.topics if isinstance(slice_episode.topics, Mapping) else {}
+
+        if available_topics is not None:
+            present_topics = {topic for topic in available_topics if full_topics.get(topic, True) is not None}
+        else:
+            present_topics = {name for name, table in full_topics.items() if table is not None}
+
         results = dict(prior_results or {})
+        provenance: dict[str, str] = {}
         stages = self.execution_stages_by_scope[scope]
         total_calcs = sum(len(stage) for stage in stages)
         calc_idx = 0
@@ -163,29 +205,46 @@ class MetricRegistry:
             for calc_name in stage:
                 calc_idx += 1
                 calc = self.calculators_by_scope[scope][calc_name]
+                scope_keys = calc.output_keys_for_scope(scope)
 
-                # Check topic dependencies
-                skip_due_to_topics = False
-                for req in calc.REQUIRED_TOPICS:
+                missing_topic: str | None = None
+                empty_slice_topic = False
+                for req in calc.required_topics_for_scope(scope):
                     if isinstance(req, str):
-                        if req not in available_topics:
-                            skip_due_to_topics = True
+                        if req not in present_topics:
+                            missing_topic = req
                             break
-                    elif isinstance(req, (list, tuple, set)):
-                        if not any(t in available_topics for t in req):
-                            skip_due_to_topics = True
+                        if req in slice_topics and _topic_row_count(slice_topics[req]) == 0:
+                            empty_slice_topic = True
+                    else:
+                        if not any(t in present_topics for t in req):
+                            missing_topic = req[0] if req else "unknown"
                             break
+                        if all(t in slice_topics for t in req) and all(_topic_row_count(slice_topics[t]) == 0 for t in req):
+                            empty_slice_topic = True
 
-                if skip_due_to_topics:
-                    for key in calc.output_keys():
+                if missing_topic is not None:
+                    for key in scope_keys:
                         if key not in results:
                             results[key] = None
+                        if results.get(key) is None:
+                            provenance[key] = f"{key}:topic_missing:{missing_topic}"
+                    continue
+
+                if empty_slice_topic:
+                    for key in scope_keys:
+                        if key not in results:
+                            results[key] = None
+                        if results.get(key) is None:
+                            provenance[key] = f"{key}:no_samples"
                     continue
 
                 if calc.REQUIRES_PEDSIM and not pedsim_available:
-                    for key in calc.output_keys():
+                    for key in scope_keys:
                         if key not in results:
                             results[key] = None
+                        if results.get(key) is None:
+                            provenance[key] = f"{key}:pedsim_unavailable"
                     continue
 
                 if progress_callback is not None:
@@ -195,38 +254,46 @@ class MetricRegistry:
                         pass
 
                 try:
-                    calc_out = calc.calculate(episode, dict(results))
-                    expected_keys = set(calc.output_keys())
+                    calc_out = calc.calculate_for_scope(slice_episode, dict(results), scope_slice)
+                    expected_keys = set(scope_keys)
                     actual_keys = set(calc_out.keys())
                     if not expected_keys.issubset(actual_keys):
                         missing = expected_keys - actual_keys
                         raise ValueError(f"Calculator {calc_name} missing output keys: {missing}")
 
                     results.update(calc_out)
+                    for key in scope_keys:
+                        if calc_out.get(key) is not None:
+                            provenance.pop(key, None)
+                        elif key not in provenance:
+                            provenance[key] = f"{key}:no_samples"
 
-                except Exception as e:
+                except Exception as exc:
                     import logging
 
-                    logging.getLogger(__name__).warning(f"Calculator {calc_name} failed on episode {episode.episode_id}: {e}")
-                    for key in calc.output_keys():
+                    logging.getLogger(__name__).warning(f"Calculator {calc_name} failed on episode {slice_episode.episode_id}: {exc}")
+                    exc_name = type(exc).__name__
+                    for key in scope_keys:
                         if key not in results:
                             results[key] = None
+                        provenance[key] = f"{key}:exception:{exc_name}"
 
-        return results
+        return ScopeExecutionOutcome(scope=scope, results=results, provenance=provenance)
 
     def run(
         self,
         episode: AlignedEpisodeBundle,
         *,
-        available_topics: set[str],
+        available_topics: set[str] | None = None,
         pedsim_available: bool = True,
         progress_callback: typing.Callable[[str, int, int], None] | None = None,
     ) -> dict[str, typing.Any]:
         """Executes EPISODE scope calculators in topological order."""
-        return self.run_scope(
+        outcome = self.run_scope(
             MetricScope.EPISODE,
             episode,
             available_topics=available_topics,
             pedsim_available=pedsim_available,
             progress_callback=progress_callback,
         )
+        return outcome.results

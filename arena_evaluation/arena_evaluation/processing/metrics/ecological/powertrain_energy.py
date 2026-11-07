@@ -5,7 +5,7 @@ import typing
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 METRES_PER_WH_J: typing.Final[float] = 3600.0
@@ -17,6 +17,7 @@ class RobotPowertrainCalculator(BaseMetricCalculator):
     NAME = "robot_powertrain"
     CATEGORY = "ecological"
     SCOPE = MetricScope.ROBOT
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.ROBOT})
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
     REQUIRED_TOPICS = []
@@ -93,70 +94,115 @@ class RobotPowertrainCalculator(BaseMetricCalculator):
         }
 
 
-class EncounterEnergyCalculator(BaseMetricCalculator):
-    """Encounter-level electrical energy demand and power surge ratio."""
+class SurgeEnergyCalculator(BaseMetricCalculator):
+    """Multi-scope electrical energy demand and power surge ratio across episode, robot, and encounter scopes."""
 
-    NAME = "encounter_energy"
+    NAME = "surge_energy"
     CATEGORY = "ecological"
-    SCOPE = MetricScope.ENCOUNTER
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset(
+        {
+            MetricScope.EPISODE,
+            MetricScope.ROBOT,
+            MetricScope.ENCOUNTER,
+        }
+    )
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["robot_power"]
 
     UNITS = {
-        "encounter_energy_j": "J",
-        "energy_surge_ratio": "",
+        "surge_energy_j": "J",
+        "surge_power_ratio": "",
     }
-    PRIMARY_OUTPUTS = ["encounter_energy_j", "energy_surge_ratio"]
+    PRIMARY_OUTPUTS = ["surge_energy_j", "surge_power_ratio"]
     OUTPUT_DIRECTIONS = {
-        "encounter_energy_j": "lower",
-        "energy_surge_ratio": "lower",
+        "surge_energy_j": "lower",
+        "surge_power_ratio": "lower",
     }
 
     @classmethod
     def output_keys(cls) -> list[str]:
-        return ["encounter_energy_j", "energy_surge_ratio"]
+        return ["surge_energy_j", "surge_power_ratio"]
 
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        # If encounter costs already calculated cost_energy_j, prioritize it
-        prior_energy = prior_results.get("cost_energy_j")
-        prior_surge = prior_results.get("energy_surge_ratio")
+    @classmethod
+    def output_keys_for_scope(cls, scope: MetricScope) -> tuple[str, ...]:
+        if scope == MetricScope.ENCOUNTER:
+            return ("encounter_energy_j", "energy_surge_ratio")
+        return ("surge_energy_j", "surge_power_ratio")
+
+    def _compute_window_energy_and_surge(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+    ) -> tuple[float | None, float | None]:
+        prior_energy = prior_results.get("cost_energy_j", prior_results.get("encounter_energy_j"))
+        prior_surge = prior_results.get("energy_surge_ratio", prior_results.get("surge_power_ratio"))
 
         power_table = self.native_topics(episode).get("robot_power")
         if power_table is not None and isinstance(power_table, pl.LazyFrame):
             power_table = power_table.collect()
 
         if power_table is None or len(power_table) < 2:
-            return {
-                "encounter_energy_j": float(prior_energy) if prior_energy is not None else None,
-                "energy_surge_ratio": float(prior_surge) if prior_surge is not None else None,
-            }
+            return (
+                float(prior_energy) if prior_energy is not None else None,
+                float(prior_surge) if prior_surge is not None else None,
+            )
 
         clean_power = power_table.select("t_ns", "total_power_w").drop_nulls().sort("t_ns")
         if len(clean_power) < 2:
-            return {
-                "encounter_energy_j": float(prior_energy) if prior_energy is not None else None,
-                "energy_surge_ratio": float(prior_surge) if prior_surge is not None else None,
-            }
+            return (
+                float(prior_energy) if prior_energy is not None else None,
+                float(prior_surge) if prior_surge is not None else None,
+            )
 
         t_ns = clean_power.get_column("t_ns").to_numpy().astype(np.int64)
         p_w = clean_power.get_column("total_power_w").to_numpy().astype(np.float64)
         dt_s = np.diff(t_ns).astype(np.float64) / 1e9
 
-        encounter_energy_j = float(np.sum(0.5 * (p_w[:-1] + p_w[1:]) * dt_s)) if prior_energy is None else float(prior_energy)
+        energy_j = float(np.sum(0.5 * (p_w[:-1] + p_w[1:]) * dt_s)) if prior_energy is None else float(prior_energy)
         window_mean_power_w = float(clean_power.get_column("total_power_w").mean())
 
         episode_mean_power_w = prior_results.get("episode_mean_power_w")
         if episode_mean_power_w is None:
             episode_mean_power_w = prior_results.get("mean_power_w")
+        if episode_mean_power_w is None:
+            episode_mean_power_w = window_mean_power_w
 
-        energy_surge_ratio = None
+        surge_ratio = None
         if prior_surge is not None:
-            energy_surge_ratio = float(prior_surge)
+            surge_ratio = float(prior_surge)
         elif window_mean_power_w is not None and episode_mean_power_w is not None and float(episode_mean_power_w) > 0.0:
-            energy_surge_ratio = window_mean_power_w / float(episode_mean_power_w)
+            surge_ratio = window_mean_power_w / float(episode_mean_power_w)
 
+        return energy_j, surge_ratio
+
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        energy_j, surge_ratio = self._compute_window_energy_and_surge(episode, prior_results)
         return {
-            "encounter_energy_j": encounter_energy_j,
-            "energy_surge_ratio": energy_surge_ratio,
+            "surge_energy_j": energy_j,
+            "surge_power_ratio": surge_ratio,
+            "encounter_energy_j": energy_j,
+            "energy_surge_ratio": surge_ratio,
         }
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        energy_j, surge_ratio = self._compute_window_energy_and_surge(episode, prior_results)
+        if scope_slice is not None and scope_slice.scope == MetricScope.ENCOUNTER:
+            return {
+                "encounter_energy_j": energy_j,
+                "energy_surge_ratio": surge_ratio,
+            }
+        return {
+            "surge_energy_j": energy_j,
+            "surge_power_ratio": surge_ratio,
+        }
+
+
+EncounterEnergyCalculator = SurgeEnergyCalculator
+EpisodeSurgeEnergyCalculator = SurgeEnergyCalculator

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import typing
 from abc import ABC, abstractmethod
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 
 import numpy as np
@@ -21,6 +23,49 @@ class MetricScope(StrEnum):
     CONTACT = "contacts"
     PEDESTRIAN = "pedestrians"
     ROBOT = "robots"
+
+
+def _coerce_scope(value: MetricScope | str) -> MetricScope:
+    """Normalize a MetricScope enum or scope token string into a MetricScope."""
+    if isinstance(value, MetricScope):
+        return value
+    token = str(value).strip().lower()
+    for member in MetricScope:
+        if token in (member.value, member.name.lower()):
+            return member
+    raise ValueError(f"Unknown MetricScope: {value!r}")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ScopeSlice:
+    """Immutable spatiotemporal slice for one evaluation scope entity or window."""
+
+    scope: MetricScope
+    slice_id: str
+    parent_id: str | None = None
+    t_start_ns: int
+    t_end_ns: int
+    identity: Mapping[str, typing.Any]
+    window_bundle: AlignedEpisodeBundle
+    full_episode: AlignedEpisodeBundle
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ScopeExecutionOutcome(Mapping[str, typing.Any]):
+    """Output dictionary and per-key missingness provenance of a single scope execution."""
+
+    scope: MetricScope
+    results: dict[str, typing.Any]
+    provenance: dict[str, str]
+
+    def __getitem__(self, key: str) -> object:
+        return self.results[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.results)
+
+    def __len__(self) -> int:
+        return len(self.results)
 
 
 def _anchored_odometry(
@@ -51,6 +96,7 @@ class BaseMetricCalculator(ABC):
     NAME: str = ""
     CATEGORY: str = "general"
     SCOPE: MetricScope = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope] | set[MetricScope | str]] = frozenset()
     REQUIRES_PEDSIM: bool = False
     DEPENDS_ON: list[str] = []
     REQUIRED_TOPICS: list[str | list[str] | tuple[str, ...] | set[str]] = []
@@ -63,6 +109,31 @@ class BaseMetricCalculator(ABC):
         """Initializes the calculator with robot parameters."""
         self.robot_params = robot_params
         self.metrics_config: dict[str, typing.Any] = {}
+
+    @classmethod
+    def effective_scopes(cls) -> frozenset[MetricScope]:
+        """All evaluation scopes in which this calculator is registered."""
+        if cls.SCOPES:
+            return frozenset(_coerce_scope(s) for s in cls.SCOPES)
+        return frozenset({_coerce_scope(cls.SCOPE)})
+
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        """Required topic names (or topic alternatives) for executing in `scope`."""
+        del scope
+        normalized: list[str | tuple[str, ...]] = []
+        for req in cls.REQUIRED_TOPICS:
+            if isinstance(req, str):
+                normalized.append(req)
+            else:
+                normalized.append(tuple(req))
+        return tuple(normalized)
+
+    @classmethod
+    def output_keys_for_scope(cls, scope: MetricScope) -> tuple[str, ...]:
+        """Output keys produced when executing in `scope`."""
+        del scope
+        return tuple(cls.output_keys())
 
     def resolve_robot_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Map-frame ground-truth pose (pos_x, pos_y, yaw) of the longest teleport-free piece of the track.
@@ -236,3 +307,13 @@ class BaseMetricCalculator(ABC):
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         """Calculate metrics for a single episode."""
         pass
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """Calculate metrics for a specific scope slice, defaulting to `calculate`."""
+        del scope_slice
+        return self.calculate(episode, prior_results)

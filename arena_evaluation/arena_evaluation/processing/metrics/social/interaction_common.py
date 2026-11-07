@@ -10,12 +10,13 @@ import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name
+from arena_evaluation.processing.windows import ENCOUNTER_DISTANCE_M
 
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 DEFAULT_PED_RADIUS_M: Final[float] = 0.3
-DEFAULT_ENCOUNTER_DIST_M: Final[float] = 4.0
+DEFAULT_ENCOUNTER_DIST_M: Final[float] = ENCOUNTER_DISTANCE_M
 DEFAULT_MERGE_GAP_S: Final[float] = 1.0
 NS_PER_S: Final[float] = 1e9
 ROBOT_TRACKS_TOPIC: Final[str] = "robot_tracks"

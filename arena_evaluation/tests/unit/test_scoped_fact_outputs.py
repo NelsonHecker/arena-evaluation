@@ -22,10 +22,21 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
+from arena_evaluation.processing.metrics import MetricRegistry, MetricScope, ScopeExecutionOutcome, ScopeSlice
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.ecological import AcousticDoseCalculator, SurgeEnergyCalculator
+from arena_evaluation.processing.metrics.safety import ContactAttributionCalculator
+from arena_evaluation.processing.metrics.social import (
+    EncounterCostsCalculator,
+    PedestrianActivityCalculator,
+    PedestrianIntrusionCalculator,
+    ProbstResponsibilityCalculator,
+)
 from arena_evaluation.processing.scoped_evaluator import (
     EVALUATOR_VERSION,
     FACT_SCHEMAS,
     FACT_TABLE_NAMES,
+    EpisodeScopeHierarchy,
     ScopedEvaluator,
     ScopedFactTables,
     write_fact_tables,
@@ -831,9 +842,198 @@ def test_missing_power_and_acoustics_mark_nulls(episode: AlignedEpisodeBundle) -
     episode_row = tables.episodes.row(0, named=True)
     assert episode_row["total_acoustic_dose_pa2s"] is None
     assert "total_acoustic_dose_pa2s:no_samples" in typing.cast(str, episode_row["null_reason"])
+    assert "total_acoustic_dose_pa2s:topic_missing:robot_acoustics" in typing.cast(str, episode_row["null_reason"])
     encounter = _encounter_row(tables, "Pedestrian_1")
     assert encounter["energy_surge_ratio"] is None
     assert "energy_surge_ratio:no_samples" in typing.cast(str, encounter["null_reason"])
+    assert "energy_surge_ratio:topic_missing:robot_power" in typing.cast(str, encounter["null_reason"])
     robot = tables.robots.row(0, named=True)
     assert robot["acoustic_emission_pa2s"] is None
     assert "acoustic_emission_pa2s:no_samples" in typing.cast(str, robot["null_reason"])
+    assert "acoustic_emission_pa2s:topic_missing:robot_acoustics" in typing.cast(str, robot["null_reason"])
+
+
+def test_decompose_hierarchy_materializes_topics_once_and_builds_five_scopes(episode: AlignedEpisodeBundle) -> None:
+    lazy_episode = dataclasses.replace(episode, topics={name: table.lazy() for name, table in (episode.topics or {}).items()})
+    evaluator = ScopedEvaluator(_ROBOT_PARAMS, metrics_config=_referenced_config())
+    hierarchy = evaluator.decompose_hierarchy(lazy_episode, run_id=RUN_ID, episode_id=EPISODE_ID)
+
+    assert isinstance(hierarchy, EpisodeScopeHierarchy)
+    assert len(hierarchy.episodes) == 1
+    assert len(hierarchy.robots) == 1
+    assert len(hierarchy.pedestrians) == 3
+    assert len(hierarchy.encounters) == 2
+    assert len(hierarchy.contacts) == 2
+
+    ep_slice = hierarchy.episodes[0]
+    assert ep_slice.scope == MetricScope.EPISODE
+    assert ep_slice.slice_id == f"{RUN_ID}:{EPISODE_ID}:{ROBOT_ID}"
+    assert ep_slice.parent_id is None
+    for table in (ep_slice.full_episode.topics or {}).values():
+        assert isinstance(table, pl.DataFrame)
+
+    ped_contact_slice = next(s for s in hierarchy.contacts if s.identity["obstacle_id"] == "Pedestrian_1")
+    assert ped_contact_slice.scope == MetricScope.CONTACT
+    assert ped_contact_slice.parent_id == ALICE_ENCOUNTER_ID
+    assert ped_contact_slice.t_start_ns == PED_CONTACT_NS
+
+
+def test_multi_scope_calculators_register_and_execute_across_all_scopes(episode: AlignedEpisodeBundle) -> None:
+    assert ProbstResponsibilityCalculator.effective_scopes() == frozenset({MetricScope.ENCOUNTER, MetricScope.CONTACT, MetricScope.EPISODE})
+    assert EncounterCostsCalculator.effective_scopes() == frozenset({MetricScope.ENCOUNTER, MetricScope.EPISODE})
+    assert ContactAttributionCalculator.effective_scopes() == frozenset({MetricScope.CONTACT, MetricScope.EPISODE})
+    assert AcousticDoseCalculator.effective_scopes() == frozenset({MetricScope.EPISODE, MetricScope.ROBOT, MetricScope.ENCOUNTER, MetricScope.PEDESTRIAN})
+    assert SurgeEnergyCalculator.effective_scopes() == frozenset({MetricScope.EPISODE, MetricScope.ROBOT, MetricScope.ENCOUNTER})
+    assert PedestrianActivityCalculator.effective_scopes() == frozenset({MetricScope.PEDESTRIAN})
+    assert PedestrianIntrusionCalculator.effective_scopes() == frozenset({MetricScope.PEDESTRIAN})
+
+    evaluator = ScopedEvaluator(_ROBOT_PARAMS, metrics_config=_referenced_config())
+    hierarchy = evaluator.decompose_hierarchy(episode, run_id=RUN_ID, episode_id=EPISODE_ID)
+    registry = MetricRegistry(evaluator.robot_params, evaluator.metrics_config)
+
+    for scope in (MetricScope.CONTACT, MetricScope.ENCOUNTER, MetricScope.PEDESTRIAN, MetricScope.ROBOT, MetricScope.EPISODE):
+        order = registry.get_execution_order_for_scope(scope)
+        assert len(order) > 0
+
+    ped_contact_slice = next(s for s in hierarchy.contacts if s.identity["obstacle_id"] == "Pedestrian_1")
+    contact_outcome = registry.run_scope(
+        MetricScope.CONTACT,
+        ped_contact_slice.window_bundle,
+        available_topics=set(ped_contact_slice.window_bundle.topics or {}),
+        pedsim_available=True,
+        scope_slice=ped_contact_slice,
+    )
+    assert isinstance(contact_outcome, ScopeExecutionOutcome)
+    assert contact_outcome["probst_R_robot"] is not None
+    assert contact_outcome["probst_R_actor2"] is not None
+    assert contact_outcome["probst_R_time"] is not None
+    assert (float(contact_outcome["probst_R_robot"]) + float(contact_outcome["probst_R_actor2"]) + float(contact_outcome["probst_R_time"])) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_numeric_gazebo_obstacle_id_and_clearance_fallback_link_encounter(episode: AlignedEpisodeBundle) -> None:
+    numeric_contacts = pl.DataFrame(
+        [
+            {
+                "t_ns": WALL_CONTACT_NS,
+                "obstacle_id": "wall_north",
+                "kind": "wall",
+                "obstacle_x": 1.0,
+                "obstacle_y": 0.3,
+                "obstacle_z": 0.0,
+                "distance": 0.0,
+            },
+            {
+                "t_ns": PED_CONTACT_NS,
+                "obstacle_id": f"{ENV_ID}/1",
+                "kind": "pedestrian",
+                "obstacle_x": ALICE_CROSSING_X_M,
+                "obstacle_y": 0.0,
+                "obstacle_z": 0.0,
+                "distance": 0.0,
+            },
+        ],
+        schema=_COLLISION_CONTACTS_SCHEMA,
+    )
+    numeric_topics = dict(episode.topics or {})
+    numeric_topics["collision_contacts"] = numeric_contacts
+    numeric_tables = _evaluate_referenced(dataclasses.replace(episode, topics=numeric_topics))
+    contact = _single_row(numeric_tables.contacts, "obstacle_id", "Pedestrian_1")
+    alice = _encounter_row(numeric_tables, "Pedestrian_1")
+    assert contact["encounter_id"] == ALICE_ENCOUNTER_ID
+    assert alice["had_contact"] is True
+    assert alice["contact_id"] == contact["contact_id"]
+
+    empty_topics = dict(episode.topics or {})
+    empty_topics["collision_contacts"] = pl.DataFrame(schema=_COLLISION_CONTACTS_SCHEMA)
+    fallback_tables = _evaluate_referenced(dataclasses.replace(episode, topics=empty_topics))
+    fallback_contact = _single_row(fallback_tables.contacts, "obstacle_id", "Pedestrian_1")
+    fallback_alice = _encounter_row(fallback_tables, "Pedestrian_1")
+    assert fallback_contact["encounter_id"] == ALICE_ENCOUNTER_ID
+    assert fallback_alice["had_contact"] is True
+    assert fallback_alice["contact_id"] == fallback_contact["contact_id"]
+
+
+def test_encounter_acoustics_attenuates_recorded_dba_and_fleet_encounter_has_chord_detour(episode: AlignedEpisodeBundle) -> None:
+    louder_topics = dict(episode.topics or {})
+    t_ns, _ = _time_axis()
+    louder_topics["robot_acoustics"] = pl.DataFrame(
+        {"t_ns": t_ns, "total_level_af_dba": np.full(SAMPLE_COUNT, 70.0, dtype=np.float64)},
+        schema={"t_ns": pl.Int64, "total_level_af_dba": pl.Float64},
+    )
+    base_tables = _evaluate_referenced(episode)
+    louder_tables = _evaluate_referenced(dataclasses.replace(episode, topics=louder_topics))
+    base_dose = typing.cast(float, _encounter_row(base_tables, "Pedestrian_1")["sound_exposure_dose_pa2s"])
+    louder_dose = typing.cast(float, _encounter_row(louder_tables, "Pedestrian_1")["sound_exposure_dose_pa2s"])
+    assert louder_dose == pytest.approx(base_dose * 10.0, rel=1e-9)
+
+    fleet_poses = pl.DataFrame(
+        {"t_ns": t_ns, "pos_x": np.full(SAMPLE_COUNT, 3.0, dtype=np.float64), "pos_y": np.zeros(SAMPLE_COUNT, dtype=np.float64)},
+        schema={"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64},
+    )
+    fleet_episode = dataclasses.replace(_without_topics(episode, "pedestrian_tracks", "collision_contacts"), fleet={"robot_peer": fleet_poses})
+    fleet_tables = _evaluate(fleet_episode)
+    peer_row = _encounter_row(fleet_tables, "robot_peer")
+    assert peer_row["actor_2_kind"] == "robot"
+    assert peer_row["path_deviation_m"] == pytest.approx(0.0, abs=1e-9)
+    assert peer_row["detour_time_s"] is not None
+    assert float(typing.cast(float, peer_row["detour_time_s"])) >= 0.0
+
+
+def test_registry_provenance_records_topic_missing_no_samples_and_exception(episode: AlignedEpisodeBundle) -> None:
+    class _BrokenCalculator(BaseMetricCalculator):
+        NAME = "broken_calc"
+        SCOPE = MetricScope.ENCOUNTER
+        SCOPES = frozenset({MetricScope.ENCOUNTER})
+
+        @classmethod
+        def output_keys(cls) -> list[str]:
+            return ["broken_metric"]
+
+        def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+            raise RuntimeError("synthetic failure")
+
+    registry = MetricRegistry(_ROBOT_PARAMS, {})
+    registry.register(_BrokenCalculator)
+    evaluator = ScopedEvaluator(_ROBOT_PARAMS)
+    hierarchy = evaluator.decompose_hierarchy(episode, run_id=RUN_ID, episode_id=EPISODE_ID)
+    enc_slice = hierarchy.encounters[0]
+
+    outcome = registry.run_scope(
+        MetricScope.ENCOUNTER,
+        enc_slice.window_bundle,
+        available_topics=set(enc_slice.window_bundle.topics or {}),
+        pedsim_available=True,
+        scope_slice=enc_slice,
+    )
+    assert outcome["broken_metric"] is None
+    assert outcome.provenance.get("broken_metric") == "broken_metric:exception:RuntimeError"
+
+    empty_power_topics = dict(enc_slice.window_bundle.topics or {})
+    empty_power_topics["robot_power"] = pl.DataFrame(schema={"t_ns": pl.Int64, "total_power_w": pl.Float64})
+    empty_window_slice = dataclasses.replace(
+        enc_slice,
+        window_bundle=dataclasses.replace(enc_slice.window_bundle, topics=empty_power_topics),
+    )
+    empty_outcome = registry.run_scope(
+        MetricScope.ENCOUNTER,
+        empty_window_slice.window_bundle,
+        available_topics=set(empty_window_slice.window_bundle.topics or {}),
+        pedsim_available=True,
+        scope_slice=empty_window_slice,
+    )
+    assert empty_outcome.provenance.get("energy_surge_ratio") == "energy_surge_ratio:no_samples"
+
+    missing_power_bundle = _without_topics(enc_slice.window_bundle, "robot_power")
+    missing_power_slice = dataclasses.replace(
+        enc_slice,
+        window_bundle=missing_power_bundle,
+        full_episode=_without_topics(enc_slice.full_episode, "robot_power"),
+    )
+    missing_outcome = registry.run_scope(
+        MetricScope.ENCOUNTER,
+        missing_power_slice.window_bundle,
+        available_topics=set(missing_power_slice.window_bundle.topics or {}),
+        pedsim_available=True,
+        scope_slice=missing_power_slice,
+    )
+    assert missing_outcome.provenance.get("energy_surge_ratio") == "energy_surge_ratio:topic_missing:robot_power"

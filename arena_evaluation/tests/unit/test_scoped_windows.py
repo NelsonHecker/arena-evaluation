@@ -15,10 +15,12 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal, assert_series_equal
 
+from arena_evaluation.processing.metrics.social.interaction_common import DEFAULT_ENCOUNTER_DIST_M
 from arena_evaluation.processing.windows import (
     CONTACT_WINDOW_SCHEMA,
     DEFAULT_DETECTOR_PARAMS,
     DETECTOR_VERSION,
+    ENCOUNTER_DISTANCE_M,
     ENCOUNTER_WINDOW_SCHEMA,
     PAIR_SCHEMA,
     DetectorParams,
@@ -705,3 +707,53 @@ def test_contact_empty_contacts_returns_canonical_empty_frame() -> None:
     windows = detect_contact_windows_lf(pl.DataFrame(schema=_CONTACT_SCHEMA), empty_encounter_windows()).collect()
 
     assert_frame_equal(windows, empty_contact_windows())
+
+
+def test_canonical_encounter_distance_constant_is_shared() -> None:
+    assert ENCOUNTER_DISTANCE_M == 3.0
+    assert DEFAULT_ENCOUNTER_DIST_M == ENCOUNTER_DISTANCE_M
+
+
+def test_contact_resolves_numeric_gazebo_id_and_actor_name_before_merging_and_joining() -> None:
+    encounters = _encounter_table(
+        [
+            {
+                "actor_id": "Pedestrian_7",
+                "actor_name": "alice",
+                "encounter_idx": 4,
+                "t_start_ns": 0,
+                "t_end_ns": 1_000_000_000,
+            }
+        ]
+    )
+    contacts = _contacts(
+        [
+            {"t_ns": 200_000_000, "kind": "pedestrian", "obstacle_id": "env_0/7"},
+            {"t_ns": 300_000_000, "kind": "pedestrian", "obstacle_id": "env_0/alice"},
+        ]
+    )
+
+    windows = detect_contact_windows_lf(contacts, encounters).collect()
+
+    expected = pl.DataFrame(
+        {
+            "contact_idx": pl.Series([0], dtype=pl.UInt32),
+            "collider_kind": ["pedestrian"],
+            "obstacle_id": ["Pedestrian_7"],
+            "t_onset_ns": [200_000_000],
+            "t_end_ns": [300_000_000],
+            "encounter_idx": pl.Series([4], dtype=pl.Int64),
+        },
+        schema={
+            "contact_idx": pl.UInt32,
+            "collider_kind": pl.String,
+            "obstacle_id": pl.String,
+            "t_onset_ns": pl.Int64,
+            "t_end_ns": pl.Int64,
+            "encounter_idx": pl.Int64,
+        },
+    )
+    assert_frame_equal(
+        windows.select("contact_idx", "collider_kind", "obstacle_id", "t_onset_ns", "t_end_ns", "encounter_idx"),
+        expected,
+    )

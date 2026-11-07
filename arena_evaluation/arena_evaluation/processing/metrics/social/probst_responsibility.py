@@ -7,7 +7,7 @@ from typing import Final
 
 import numpy as np
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
@@ -290,8 +290,14 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
     NAME = "probst_responsibility"
     CATEGORY = "social"
     SCOPE = MetricScope.ENCOUNTER
-    SCOPES = {"encounter", "contact"}
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.ENCOUNTER, MetricScope.CONTACT, MetricScope.EPISODE})
     REQUIRED_TOPICS = [ROBOT_TRACKS_TOPIC, PEDESTRIAN_TRACKS_TOPIC]
+
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        if scope == MetricScope.CONTACT:
+            return (ROBOT_TRACKS_TOPIC,)
+        return (ROBOT_TRACKS_TOPIC, PEDESTRIAN_TRACKS_TOPIC)
 
     UNITS = {
         "probst_c_total": "conflict",
@@ -521,3 +527,40 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
         coll_results = [coll for coll, _ in evaluated]
         ps_results = [ps for _, ps in evaluated]
         return self._format_output(rollup_probst_results(coll_results), rollup_probst_results(ps_results))
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """Compute Probst responsibility for the given scope slice without mutating calculator state."""
+        if scope_slice is None:
+            return self.calculate(episode, prior_results)
+
+        if scope_slice.scope == MetricScope.CONTACT:
+            collider_kind = str(scope_slice.identity.get("collider_kind", "pedestrian")).lower()
+            obstacle_id = str(scope_slice.identity.get("obstacle_id", ""))
+            if collider_kind != "pedestrian" or not obstacle_id:
+                return self._empty_output()
+            full_tracks = extract_episode_ped_tracks(scope_slice.full_episode)
+            target = resolve_ped_track(full_tracks, obstacle_id)
+            if target is None:
+                return self._empty_output()
+            return self.calculate_pre_contact(scope_slice.full_episode, int(scope_slice.t_start_ns), target.ped_id)
+
+        if scope_slice.scope == MetricScope.ENCOUNTER:
+            robot, _ = resolve_robot_trajectory(self, episode)
+            tracks = extract_episode_ped_tracks(episode)
+            if len(robot.time_ns) < 2 or not tracks:
+                return self._empty_output()
+            actor_2 = scope_slice.identity.get("actor_2")
+            target = resolve_ped_track(tracks, actor_2) if actor_2 is not None else None
+            if target is None and len(tracks) == 1:
+                target = next(iter(tracks.values()))
+            if target is None:
+                return self._empty_output()
+            coll, ps = self.evaluate_encounter_track(robot, target, (scope_slice.t_start_ns, scope_slice.t_end_ns))
+            return self._format_output(coll, ps)
+
+        return self.calculate(episode, prior_results)

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
@@ -45,6 +45,7 @@ MIN_ACOUSTIC_DIST_M: Final[float] = 0.2
 SPHERICAL_SPREADING_OFFSET_DB: Final[float] = 8.0
 
 ROBOT_POWER_TOPIC: Final[str] = "robot_power"
+ROBOT_ACOUSTICS_TOPIC: Final[str] = "robot_acoustics"
 REFERENCE_CONFIG_KEYS: Final[tuple[str, ...]] = ("reference_peds", "reference_episode")
 
 ReferenceSource = AlignedEpisodeBundle | pl.DataFrame | Mapping[str, PedTrack]
@@ -60,6 +61,7 @@ class RobotCostContext:
     robot_params: RobotParams
     reference_tracks_by_name: Mapping[str, PedTrack] = field(default_factory=dict)
     default_ped_radius_m: float = DEFAULT_PED_RADIUS_M
+    acoustics_dba: np.ndarray | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +85,7 @@ class EncounterCostRecord:
 
 def _recorded_power_series(robot_time_ns: np.ndarray, episode: AlignedEpisodeBundle | None) -> np.ndarray | None:
     """Interpolate recorded total_power_w onto robot_time_ns when the episode carries a robot_power table."""
-    if episode is None:
+    if episode is None or len(robot_time_ns) == 0:
         return None
     power = episode_table(episode, ROBOT_POWER_TOPIC)
     if power is None or len(power) == 0:
@@ -94,6 +96,21 @@ def _recorded_power_series(robot_time_ns: np.ndarray, episode: AlignedEpisodeBun
     recorded_time_ns = series.get_column("t_ns").to_numpy().astype(np.float64)
     recorded_power_w = series.get_column("total_power_w").to_numpy().astype(np.float64)
     return np.interp(robot_time_ns.astype(np.float64), recorded_time_ns, recorded_power_w)
+
+
+def _recorded_acoustics_series(robot_time_ns: np.ndarray, episode: AlignedEpisodeBundle | None) -> np.ndarray | None:
+    """Interpolate recorded total_level_af_dba onto robot_time_ns when the episode carries a robot_acoustics table."""
+    if episode is None or len(robot_time_ns) == 0:
+        return None
+    acoustics = episode_table(episode, ROBOT_ACOUSTICS_TOPIC)
+    if acoustics is None or len(acoustics) == 0:
+        return None
+    series = acoustics.select("t_ns", "total_level_af_dba").drop_nulls(["t_ns", "total_level_af_dba"]).sort("t_ns")
+    if len(series) == 0:
+        return None
+    recorded_time_ns = series.get_column("t_ns").to_numpy().astype(np.float64)
+    recorded_level_dba = series.get_column("total_level_af_dba").to_numpy().astype(np.float64)
+    return np.interp(robot_time_ns.astype(np.float64), recorded_time_ns, recorded_level_dba)
 
 
 def _kinematic_rates(robot: Trajectory2D, yaw: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -272,7 +289,12 @@ def evaluate_single_encounter_costs(
     cost_energy_j = float(np.sum(0.5 * (power_window[:-1] + power_window[1:]) * dt_s)) if len(dt_s) > 0 else 0.0
 
     ped_window = track.trajectory.resample_onto(window_time_ns)
-    spl_dba = compute_ped_sound_spl_dba(robot_window, yaw_window, ped_window.xy)
+    if context.acoustics_dba is not None and len(context.acoustics_dba) == len(context.robot.time_ns):
+        acoustics_window = context.acoustics_dba[mask]
+        dist = np.maximum(np.hypot(ped_window.x - robot_window.x, ped_window.y - robot_window.y), MIN_ACOUSTIC_DIST_M)
+        spl_dba = np.maximum(0.0, acoustics_window - 20.0 * np.log10(dist))
+    else:
+        spl_dba = compute_ped_sound_spl_dba(robot_window, yaw_window, ped_window.xy)
     p_sq_pa2 = P0_SQ_PA2 * np.power(10.0, spl_dba / 10.0)
     cost_sound_pa2s = float(np.sum(0.5 * (p_sq_pa2[:-1] + p_sq_pa2[1:]) * dt_s)) if len(dt_s) > 0 else 0.0
 
@@ -325,6 +347,12 @@ def rollup_encounter_cost_records(
             "cost_ped_deflection_m": None,
             "cost_ped_delay_s": None,
             "encounter_count": 0,
+            "detour_time_s": None,
+            "path_deviation_m": None,
+            "encounter_energy_j": 0.0,
+            "sound_exposure_dose_pa2s": 0.0,
+            "intimate_space_violation_s": 0.0,
+            "personal_space_violation_s": 0.0,
         }
 
     merged_spans = merge_intervals_ns([(record.t_start_ns, record.t_end_ns) for record in records])
@@ -358,7 +386,10 @@ def rollup_encounter_cost_records(
         "encounter_count": len(records),
         "detour_time_s": float(sum(delays)) if delays else None,
         "path_deviation_m": float(sum(deflections)) if deflections else None,
+        "encounter_energy_j": float(union_energy_j),
         "sound_exposure_dose_pa2s": float(sum(record.cost_sound_pa2s for record in records)),
+        "intimate_space_violation_s": float(sum(record.cost_intimate_viol_s for record in records)),
+        "personal_space_violation_s": float(sum(record.cost_personal_viol_s for record in records)),
     }
 
 
@@ -377,7 +408,10 @@ def _single_record_outputs(record: EncounterCostRecord) -> dict[str, Any]:
         "encounter_count": 1,
         "detour_time_s": record.cost_ped_delay_s,
         "path_deviation_m": record.cost_ped_deflection_m,
+        "encounter_energy_j": record.cost_energy_j,
         "sound_exposure_dose_pa2s": record.cost_sound_pa2s,
+        "intimate_space_violation_s": record.cost_intimate_viol_s,
+        "personal_space_violation_s": record.cost_personal_viol_s,
     }
 
 
@@ -387,7 +421,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
     NAME = "encounter_costs"
     CATEGORY = "social"
     SCOPE = MetricScope.ENCOUNTER
-    SCOPES = {"encounter"}
+    SCOPES: ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.ENCOUNTER, MetricScope.EPISODE})
     REQUIRED_TOPICS = [ROBOT_TRACKS_TOPIC, PEDESTRIAN_TRACKS_TOPIC]
 
     UNITS = {
@@ -401,6 +435,12 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         "cost_ped_deflection_m": "m",
         "cost_ped_delay_s": "s",
         "encounter_count": "count",
+        "detour_time_s": "s",
+        "path_deviation_m": "m",
+        "encounter_energy_j": "J",
+        "sound_exposure_dose_pa2s": "Pa^2*s",
+        "intimate_space_violation_s": "s",
+        "personal_space_violation_s": "s",
     }
 
     PRIMARY_OUTPUTS = [
@@ -420,6 +460,12 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         "cost_ped_detour_m": "lower",
         "cost_ped_deflection_m": "lower",
         "cost_ped_delay_s": "lower",
+        "detour_time_s": "lower",
+        "path_deviation_m": "lower",
+        "encounter_energy_j": "lower",
+        "sound_exposure_dose_pa2s": "lower",
+        "intimate_space_violation_s": "lower",
+        "personal_space_violation_s": "lower",
     }
 
     ROLLUP = {
@@ -451,7 +497,10 @@ class EncounterCostsCalculator(BaseMetricCalculator):
             "encounter_count",
             "detour_time_s",
             "path_deviation_m",
+            "encounter_energy_j",
             "sound_exposure_dose_pa2s",
+            "intimate_space_violation_s",
+            "personal_space_violation_s",
         ]
 
     def _build_context(
@@ -472,6 +521,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
             robot_params=self.robot_params,
             reference_tracks_by_name=extract_reference_tracks_by_name(episode, metrics_config),
             default_ped_radius_m=float(metrics_config.get("default_ped_radius_m", DEFAULT_PED_RADIUS_M)),
+            acoustics_dba=_recorded_acoustics_series(robot.time_ns, episode),
         )
         return context, tracks
 
@@ -515,3 +565,46 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         if len(records) == 1:
             return _single_record_outputs(records[0])
         return rollup_encounter_cost_records(records, context)
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, Any]:
+        """Compute encounter costs for a scope slice without mutating calculator state."""
+        if scope_slice is None or scope_slice.scope != MetricScope.ENCOUNTER:
+            return self.calculate(episode, prior_results)
+
+        context, tracks = self._build_context(episode)
+        if len(context.robot.time_ns) < 2 or not tracks:
+            return {key: None for key in self.output_keys()}
+
+        actor_2 = scope_slice.identity.get("actor_2")
+        actor_2_kind = str(scope_slice.identity.get("actor_2_kind", "pedestrian")).lower()
+        target_track = resolve_ped_track(tracks, actor_2) if actor_2 is not None else None
+        if target_track is None and len(tracks) == 1:
+            target_track = next(iter(tracks.values()))
+        if target_track is None:
+            return {key: None for key in self.output_keys()}
+
+        record = evaluate_single_encounter_costs(
+            target_track,
+            (int(scope_slice.t_start_ns), int(scope_slice.t_end_ns)),
+            context,
+        )
+        out = _single_record_outputs(record)
+
+        if actor_2_kind == "robot" and out["path_deviation_m"] is None and out["detour_time_s"] is None:
+            robot_window = context.robot.slice_ns(int(scope_slice.t_start_ns), int(scope_slice.t_end_ns))
+            chord_m = float(np.hypot(robot_window.x[-1] - robot_window.x[0], robot_window.y[-1] - robot_window.y[0])) if len(robot_window.x) >= 2 else 0.0
+            full_robot, _ = resolve_robot_trajectory(self, scope_slice.full_episode)
+            v_nominal_mps = float(self.robot_params.max_linear_velocity) if self.robot_params.max_linear_velocity > 0.0 else (float(np.max(np.hypot(full_robot.vx, full_robot.vy))) if len(full_robot.time_ns) >= 2 else 1.0)
+            if v_nominal_mps <= 1e-3:
+                v_nominal_mps = 1.0
+            out["path_deviation_m"] = float(max(0.0, record.cost_path_m - chord_m))
+            out["detour_time_s"] = float(max(0.0, record.cost_time_s - (chord_m / v_nominal_mps)))
+            out["cost_ped_deflection_m"] = out["path_deviation_m"]
+            out["cost_ped_delay_s"] = out["detour_time_s"]
+
+        return out

@@ -5,7 +5,7 @@ import typing
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 ROUND_TRIP_REACH_SHARE: typing.Final[float] = 0.75
@@ -34,6 +34,7 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
     NAME = "pedestrian_activity"
     CATEGORY = "social"
     SCOPE = MetricScope.PEDESTRIAN
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.PEDESTRIAN})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["pedestrian_tracks"]
@@ -61,7 +62,12 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
             "round_trips_completed",
         ]
 
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+    def _calculate_for_target(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        target_id: str | None = None,
+    ) -> dict[str, typing.Any]:
         ped_tracks = self.native_topics(episode).get("pedestrian_tracks")
         if ped_tracks is not None and isinstance(ped_tracks, pl.LazyFrame):
             ped_tracks = ped_tracks.collect()
@@ -74,9 +80,9 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
                 "round_trips_completed": 0,
             }
 
-        target_id = self.metrics_config.get("target_agent_id")
-        if target_id is not None:
-            ped_tracks = ped_tracks.filter(pl.col("ped_id") == str(target_id))
+        resolved_target = target_id if target_id is not None else self.metrics_config.get("target_agent_id")
+        if resolved_target is not None:
+            ped_tracks = ped_tracks.filter(pl.col("ped_id") == str(resolved_target))
 
         if len(ped_tracks) == 0:
             return {
@@ -86,14 +92,14 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
                 "round_trips_completed": 0,
             }
 
-        tracks = ped_tracks.sort("t_ns")
+        tracks = ped_tracks.sort("t_ns").with_columns(derived_speed_mps=pl.col("speed_mps").fill_null((pl.col("vx").pow(2) + pl.col("vy").pow(2)).sqrt()))
         dx = tracks.get_column("x").diff().drop_nulls()
         dy = tracks.get_column("y").diff().drop_nulls()
         step_dist = np.hypot(dx.to_numpy(), dy.to_numpy())
         total_distance_m = float(np.sum(step_dist)) if len(step_dist) > 0 else 0.0
 
-        speeds = tracks.get_column("speed_mps").drop_nulls()
-        mean_speed_mps = float(speeds.mean()) if len(speeds) > 0 else 0.0
+        speeds = tracks.get_column("derived_speed_mps").drop_nulls()
+        mean_speed_mps = float(speeds.mean()) if len(speeds) > 0 else None
 
         spawn_x = float(tracks.get_column("x")[0])
         spawn_y = float(tracks.get_column("y")[0])
@@ -120,3 +126,15 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
             "ped_path_deflection_m": float(deflection) if deflection is not None else None,
             "round_trips_completed": round_trips,
         }
+
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        return self._calculate_for_target(episode, prior_results)
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        target_id = scope_slice.slice_id if scope_slice is not None and scope_slice.scope == MetricScope.PEDESTRIAN else None
+        return self._calculate_for_target(episode, prior_results, target_id=target_id)

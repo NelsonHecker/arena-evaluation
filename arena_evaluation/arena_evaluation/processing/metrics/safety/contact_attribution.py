@@ -9,7 +9,7 @@ from typing import Final
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_PED_RADIUS_M,
@@ -416,7 +416,7 @@ def _contacts_from_clearance(
                 t0_ns=int(robot_window.time_ns[start]),
                 t_end_ns=int(robot_window.time_ns[end]),
                 obstacle_kind=PEDESTRIAN_KIND,
-                obstacle_id=track.ped_name,
+                obstacle_id=track.ped_id,
                 track=track,
             )
             for start, end in spans
@@ -477,7 +477,7 @@ class ContactAttributionCalculator(BaseMetricCalculator):
     NAME = "contact_attribution"
     CATEGORY = "safety"
     SCOPE = MetricScope.CONTACT
-    SCOPES = {"contact"}
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.CONTACT, MetricScope.EPISODE})
     REQUIRED_TOPICS = [ROBOT_TRACKS_TOPIC]
 
     UNITS = {
@@ -707,6 +707,82 @@ class ContactAttributionCalculator(BaseMetricCalculator):
                 "robot_speed_at_impact_mps": rec.get("v_robot_impact_mps"),
                 "obstacle_speed_at_impact_mps": rec.get("v_target_impact_mps"),
                 "robot_closing_share": rec.get("s_robot"),
+                "fault_attributed_to": fault,
+            }
+        )
+        return res
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """Compute contact attribution for a scope slice without mutating calculator state."""
+        if scope_slice is None or scope_slice.scope != MetricScope.CONTACT:
+            return self.calculate(episode, prior_results)
+
+        t0_ns = int(scope_slice.t_start_ns)
+        t_end_ns = int(scope_slice.t_end_ns)
+        raw_collider_kind = str(scope_slice.identity.get("collider_kind", PEDESTRIAN_KIND)).lower()
+        obstacle_kind = PEDESTRIAN_KIND if raw_collider_kind in (PEDESTRIAN_KIND, "robot") else raw_collider_kind
+        obstacle_id = str(scope_slice.identity.get("obstacle_id", ""))
+        static_point = _configured_static_point(scope_slice.identity.get("static_point"), obstacle_kind)
+        configured_crowd = scope_slice.identity.get("crowd_condition")
+        crowd_condition: CrowdCondition = "blind" if configured_crowd == "blind" else ("visible" if configured_crowd == "visible" else resolve_crowd_condition(episode, self.metrics_config))
+
+        robot, _yaw = resolve_robot_trajectory(self, episode)
+        if len(robot.time_ns) == 0:
+            empty_res = self.summarize_records([])
+            empty_res.update(
+                {
+                    "impact_speed_mps": None,
+                    "robot_speed_at_impact_mps": None,
+                    "obstacle_speed_at_impact_mps": None,
+                    "robot_closing_share": None,
+                    "fault_attributed_to": "robot" if raw_collider_kind in ("wall", "static") else "unavoidable",
+                }
+            )
+            return empty_res
+
+        tracks = extract_episode_ped_tracks(episode)
+        track = resolve_ped_track(tracks, obstacle_id) if obstacle_kind == PEDESTRIAN_KIND else None
+        if track is None and obstacle_kind == PEDESTRIAN_KIND:
+            robot_at_t0 = robot.resample_onto(np.asarray([t0_ns], dtype=np.int64))
+            track = _match_track(obstacle_id, tracks, robot_at_t0)
+
+        resolved_id = obstacle_id or (track.ped_id if track is not None else obstacle_kind)
+        event = ContactEvent(
+            t0_ns=t0_ns,
+            t_end_ns=t_end_ns,
+            obstacle_kind=obstacle_kind,
+            obstacle_id=resolved_id,
+            track=track,
+            static_point=static_point,
+        )
+        context = ContactContext(
+            robot=robot,
+            crowd_condition=crowd_condition,
+            default_ped_radius_m=float(self.metrics_config.get("default_ped_radius_m", DEFAULT_PED_RADIUS_M)),
+            pre_window_s=float(scope_slice.identity.get("pre_contact_window_s", self.metrics_config.get("pre_contact_window_s", PRE_CONTACT_WINDOW_S))),
+            post_window_s=float(scope_slice.identity.get("post_contact_window_s", self.metrics_config.get("post_contact_window_s", POST_CONTACT_WINDOW_S))),
+        )
+        record = attribute_single_contact(0, event, context)
+        res = self.summarize_records([record])
+        fault = "unavoidable"
+        if raw_collider_kind in ("wall", "static"):
+            fault = "robot"
+        elif record.is_robot_fault is True or record.is_robot_fault_lower_bound is True:
+            fault = "robot"
+        elif record.is_robot_fault is False:
+            fault = "pedestrian"
+
+        res.update(
+            {
+                "impact_speed_mps": record.relative_impact_speed_mps,
+                "robot_speed_at_impact_mps": record.v_robot_impact_mps,
+                "obstacle_speed_at_impact_mps": record.v_target_impact_mps,
+                "robot_closing_share": record.s_robot,
                 "fault_attributed_to": fault,
             }
         )
