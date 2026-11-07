@@ -18,13 +18,13 @@ def test_calculator_names_are_unique():
 
 
 def test_output_keys_are_globally_unique():
-    """The registry merges every calculator into one dict, so a shared key silently
+    """The registry merges calculators of the same scope into one dict, so a shared key silently
     overwrites, and a skipped calculator nulls the other one's value."""
-    owners = collections.defaultdict(list)
+    owners = collections.defaultdict(lambda: collections.defaultdict(list))
     for cls in _shipped_calculators():
         for key in cls.output_keys():
-            owners[key].append(cls.NAME)
-    duplicated = {k: sorted(v) for k, v in owners.items() if len(v) > 1}
+            owners[cls.SCOPE][key].append(cls.NAME)
+    duplicated = {scope.value: {k: sorted(v) for k, v in scope_owners.items() if len(v) > 1} for scope, scope_owners in owners.items() if any(len(v) > 1 for v in scope_owners.values())}
     assert duplicated == {}
 
 

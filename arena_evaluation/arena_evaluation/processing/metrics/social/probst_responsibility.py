@@ -7,7 +7,7 @@ from typing import Final
 
 import numpy as np
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
@@ -289,6 +289,7 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
 
     NAME = "probst_responsibility"
     CATEGORY = "social"
+    SCOPE = MetricScope.ENCOUNTER
     SCOPES = {"encounter", "contact"}
     REQUIRED_TOPICS = [ROBOT_TRACKS_TOPIC, PEDESTRIAN_TRACKS_TOPIC]
 
@@ -375,6 +376,12 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
             "probst_ps_e_robot",
             "probst_ps_e_target",
             "probst_ps_e_time",
+            # Fact table schema canonical aliases
+            "probst_R_robot",
+            "probst_R_actor2",
+            "probst_R_time",
+            "probst_E_robot",
+            "probst_E_actor2",
         ]
 
     @classmethod
@@ -409,6 +416,11 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
             "probst_ps_e_robot": ps.e_robot,
             "probst_ps_e_target": ps.e_target,
             "probst_ps_e_time": ps.e_time,
+            "probst_R_robot": coll.r_robot,
+            "probst_R_actor2": coll.r_target,
+            "probst_R_time": coll.r_time,
+            "probst_E_robot": coll.e_robot,
+            "probst_E_actor2": coll.e_target,
         }
 
     def _build_pair(

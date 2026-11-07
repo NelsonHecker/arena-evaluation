@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import typing
 from abc import ABC, abstractmethod
+from enum import StrEnum
 
 import numpy as np
 import polars as pl
@@ -10,6 +11,16 @@ from ..pose_segments import consistent_segment, ride_arrival_times
 
 if typing.TYPE_CHECKING:
     from ...storage.schemas import AlignedEpisodeBundle, RobotParams
+
+
+class MetricScope(StrEnum):
+    """The five first-class fact table evaluation scopes."""
+
+    EPISODE = "episodes"
+    ENCOUNTER = "encounters"
+    CONTACT = "contacts"
+    PEDESTRIAN = "pedestrians"
+    ROBOT = "robots"
 
 
 def _anchored_odometry(
@@ -39,6 +50,7 @@ class BaseMetricCalculator(ABC):
 
     NAME: str = ""
     CATEGORY: str = "general"
+    SCOPE: MetricScope = MetricScope.EPISODE
     REQUIRES_PEDSIM: bool = False
     DEPENDS_ON: list[str] = []
     REQUIRED_TOPICS: list[str | list[str] | tuple[str, ...] | set[str]] = []

@@ -7,7 +7,7 @@ from typing import Any, Final
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
@@ -356,6 +356,9 @@ def rollup_encounter_cost_records(
         "cost_ped_deflection_m": float(sum(deflections)) if deflections else None,
         "cost_ped_delay_s": float(sum(delays)) if delays else None,
         "encounter_count": len(records),
+        "detour_time_s": float(sum(delays)) if delays else None,
+        "path_deviation_m": float(sum(deflections)) if deflections else None,
+        "sound_exposure_dose_pa2s": float(sum(record.cost_sound_pa2s for record in records)),
     }
 
 
@@ -372,6 +375,9 @@ def _single_record_outputs(record: EncounterCostRecord) -> dict[str, Any]:
         "cost_ped_deflection_m": record.cost_ped_deflection_m,
         "cost_ped_delay_s": record.cost_ped_delay_s,
         "encounter_count": 1,
+        "detour_time_s": record.cost_ped_delay_s,
+        "path_deviation_m": record.cost_ped_deflection_m,
+        "sound_exposure_dose_pa2s": record.cost_sound_pa2s,
     }
 
 
@@ -380,6 +386,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
 
     NAME = "encounter_costs"
     CATEGORY = "social"
+    SCOPE = MetricScope.ENCOUNTER
     SCOPES = {"encounter"}
     REQUIRED_TOPICS = [ROBOT_TRACKS_TOPIC, PEDESTRIAN_TRACKS_TOPIC]
 
@@ -442,6 +449,9 @@ class EncounterCostsCalculator(BaseMetricCalculator):
             "cost_ped_deflection_m",
             "cost_ped_delay_s",
             "encounter_count",
+            "detour_time_s",
+            "path_deviation_m",
+            "sound_exposure_dose_pa2s",
         ]
 
     def _build_context(
