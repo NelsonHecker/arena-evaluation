@@ -545,6 +545,13 @@ class ProcessingPipeline:
         status_dict: typing.MutableMapping[int, tuple[str, str, str, int, int, float]] | None = None,
     ) -> list[dict]:
         """Extract and evaluate one episode: one row per robot, a status row where metrics are impossible."""
+        from arena_evaluation.processing.scoped_evaluator import ScopedEvaluator
+        from arena_evaluation.storage.star_schema import (
+            StarSchemaBuilder,
+            StarSchemaTables,
+            write_episode_star_tables,
+        )
+
         episode_dir = pathlib.Path(ep.episode_dir)
 
         # Load episode metadata
@@ -559,11 +566,26 @@ class ProcessingPipeline:
             except Exception as e:
                 _log.warning(f"episode_{ep.episode_id:03d}: could not read metadata: {e}")
 
-        def finish(rows: list[dict]) -> list[dict]:
+        def finish(rows: list[dict], star_tables: list[StarSchemaTables] | None = None) -> list[dict]:
             try:
                 ParquetStore.write_rows(rows, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES)
             except Exception as e:
                 _log.warning(f"episode_{ep.episode_id:03d}: metrics.parquet not written, the combined frame is the only copy: {e!r}")
+            try:
+                if star_tables:
+                    merged_star = StarSchemaBuilder.concat_tables(star_tables)
+                else:
+                    robot_token = str(rows[0].get("robot") or "") if rows else ""
+                    merged_star = StarSchemaBuilder().build_status_episode_tables(
+                        run_id=ep.benchmark_id,
+                        episode_id=ep.episode_id,
+                        descriptor=ep,
+                        metadata=metadata,
+                        robot_id=robot_token,
+                    )
+                write_episode_star_tables(merged_star, episode_dir / "metrics")
+            except Exception as e:
+                _log.warning(f"episode_{ep.episode_id:03d}: scoped star tables not written: {e!r}")
             return rows
 
         bundles = self.extract_episode(ep, force_extract=force_extract)
@@ -579,9 +601,13 @@ class ProcessingPipeline:
                 pedsim_avail = metadata.pedsim_available or False
 
             robot_params = RobotParams.load(robot_model)
-            registry = MetricRegistry(robot_params, world=_metric_world(metadata, ep), metrics_config=_suite_metrics(episode_dir, self.folder_manager.data_root))
+            suite_metrics_cfg = _suite_metrics(episode_dir, self.folder_manager.data_root)
+            registry = MetricRegistry(robot_params, world=_metric_world(metadata, ep), metrics_config=suite_metrics_cfg)
+            scoped_evaluator = ScopedEvaluator(robot_params, metrics_config=suite_metrics_cfg)
+            star_builder = StarSchemaBuilder(robot_params=robot_params, metrics_config=suite_metrics_cfg)
 
             all_results: list[dict] = []
+            episode_star_tables: list[StarSchemaTables] = []
             robots = {name: bundle for name, bundle in bundles.items() if bundle.robot_tracks is not None}
             if not robots:
                 any_record = next((b.episode_lifecycle for b in bundles.values() if b.episode_lifecycle is not None), None)
@@ -723,7 +749,26 @@ class ProcessingPipeline:
                     ep_metrics["status_reason"] = None
                     all_results.append(ep_metrics)
 
-            return finish(all_results)
+                    scoped_facts = scoped_evaluator.evaluate(
+                        aligned_ep,
+                        run_id=ep.benchmark_id,
+                        episode_id=ep.episode_id,
+                        episode_metrics=ep_metrics,
+                    )
+                    episode_star_tables.append(
+                        star_builder.build_episode_tables(
+                            aligned_ep,
+                            scoped_facts,
+                            run_id=ep.benchmark_id,
+                            episode_id=ep.episode_id,
+                            robot_params=robot_params,
+                            descriptor=ep,
+                            metadata=metadata,
+                            metrics_config=suite_metrics_cfg,
+                        )
+                    )
+
+            return finish(all_results, episode_star_tables)
 
     def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """Extract all episodes in a benchmark."""
@@ -734,9 +779,28 @@ class ProcessingPipeline:
 
         from .progress_display import PipelineProgressDisplay
 
-        manager = multiprocessing.Manager()
-        status_dict = manager.dict()
         data_root_str = str(self.folder_manager.data_root)
+        if self.workers <= 1:
+            local_status: dict[int, tuple[str, str, str, int, int, float]] = {}
+            with PipelineProgressDisplay(
+                f"Phase 1: Extracting MCAP topics for {benchmark_id}",
+                len(episodes),
+                1,
+                status_dict=local_status,
+            ) as display:
+                for ep in episodes:
+                    t_start = time.perf_counter()
+                    try:
+                        ep_id = _extract_worker(data_root_str, ep, force_extract, local_status)
+                        elapsed = time.perf_counter() - t_start
+                        display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
+                    except Exception as e:
+                        display.log_error(ep.episode_id, str(e))
+            return
+
+        mp_ctx = multiprocessing.get_context("spawn")
+        manager = mp_ctx.Manager()
+        status_dict = manager.dict()
 
         with PipelineProgressDisplay(
             f"Phase 1: Extracting MCAP topics for {benchmark_id}",
@@ -744,7 +808,11 @@ class ProcessingPipeline:
             self.workers,
             status_dict=status_dict,
         ) as display:
-            executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
+            executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.workers,
+                mp_context=mp_ctx,
+                initializer=_worker_init,
+            )
             try:
                 futures = {executor.submit(_extract_worker, data_root_str, ep, force_extract, status_dict): (ep, time.perf_counter()) for ep in episodes}
                 for future in concurrent.futures.as_completed(futures):
@@ -778,37 +846,60 @@ class ProcessingPipeline:
 
         from .progress_display import PipelineProgressDisplay
 
-        manager = multiprocessing.Manager()
-        status_dict = manager.dict()
-
         _ctx_process = self.profiler.phase("process") if self.profiler else contextlib.nullcontext()
         with _ctx_process:
-            with PipelineProgressDisplay(
-                f"Phase 2: Calculating metrics across {len(episodes)} episodes",
-                len(episodes),
-                self.workers,
-                status_dict=status_dict,
-            ) as display:
-                executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
-                try:
-                    futures = {executor.submit(_process_worker, data_root_str, ep, False, status_dict): (ep, time.perf_counter()) for ep in episodes}
-
-                    for future in concurrent.futures.as_completed(futures):
-                        ep, t_start = futures[future]
+            if self.workers <= 1:
+                local_status: dict[int, tuple[str, str, str, int, int, float]] = {}
+                with PipelineProgressDisplay(
+                    f"Phase 2: Calculating metrics across {len(episodes)} episodes",
+                    len(episodes),
+                    1,
+                    status_dict=local_status,
+                ) as display:
+                    for ep in episodes:
+                        t_start = time.perf_counter()
                         try:
-                            ep_id, result = future.result()
+                            ep_id, result = _process_worker(data_root_str, ep, False, local_status)
                             elapsed = time.perf_counter() - t_start
                             all_metrics.extend(result)
                             display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
                         except Exception as e:
                             display.log_error(ep.episode_id, str(e))
                             all_metrics.append(_status_row(ep, None, "", "error", repr(e)))
-                except KeyboardInterrupt:
-                    print("\n[KeyboardInterrupt] Metrics calculation interrupted by user. Terminating workers...", flush=True)
-                    _shutdown_executor_cleanly(executor)
-                    raise
-                finally:
-                    _shutdown_executor_cleanly(executor)
+            else:
+                mp_ctx = multiprocessing.get_context("spawn")
+                manager = mp_ctx.Manager()
+                status_dict = manager.dict()
+                with PipelineProgressDisplay(
+                    f"Phase 2: Calculating metrics across {len(episodes)} episodes",
+                    len(episodes),
+                    self.workers,
+                    status_dict=status_dict,
+                ) as display:
+                    executor = concurrent.futures.ProcessPoolExecutor(
+                        max_workers=self.workers,
+                        mp_context=mp_ctx,
+                        initializer=_worker_init,
+                    )
+                    try:
+                        futures = {executor.submit(_process_worker, data_root_str, ep, False, status_dict): (ep, time.perf_counter()) for ep in episodes}
+
+                        for future in concurrent.futures.as_completed(futures):
+                            ep, t_start = futures[future]
+                            try:
+                                ep_id, result = future.result()
+                                elapsed = time.perf_counter() - t_start
+                                all_metrics.extend(result)
+                                display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
+                            except Exception as e:
+                                display.log_error(ep.episode_id, str(e))
+                                all_metrics.append(_status_row(ep, None, "", "error", repr(e)))
+                    except KeyboardInterrupt:
+                        print("\n[KeyboardInterrupt] Metrics calculation interrupted by user. Terminating workers...", flush=True)
+                        _shutdown_executor_cleanly(executor)
+                        raise
+                    finally:
+                        _shutdown_executor_cleanly(executor)
 
         _print_status_summary(all_metrics)
         if not all_metrics:
@@ -859,5 +950,29 @@ class ProcessingPipeline:
 
         combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
         ParquetStore.write_rows(all_metrics, combined_path, schema_overrides=_METRIC_DTYPES)
+
+        from arena_evaluation.storage.star_schema import (
+            StarSchemaBuilder,
+            StarSchemaTables,
+            read_episode_star_tables,
+            write_star_schema,
+        )
+
+        collected_star: list[StarSchemaTables] = []
+        fallback_builder = StarSchemaBuilder()
+        for ep in episodes:
+            ep_metrics_dir = pathlib.Path(ep.episode_dir) / "metrics"
+            ep_star = read_episode_star_tables(ep_metrics_dir)
+            if ep_star is None:
+                ep_star = fallback_builder.build_status_episode_tables(
+                    run_id=ep.benchmark_id or benchmark_id,
+                    episode_id=ep.episode_id,
+                    descriptor=ep,
+                )
+            collected_star.append(ep_star)
+
+        benchmark_star = StarSchemaBuilder.concat_tables(collected_star)
+        write_star_schema(benchmark_star, combined_path.parent)
+
         print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")
         return combined_path
