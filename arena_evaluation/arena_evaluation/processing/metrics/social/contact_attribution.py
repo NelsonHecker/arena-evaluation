@@ -23,6 +23,7 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     extract_episode_ped_tracks,
     merge_intervals_ns,
     resolve_crowd_condition,
+    resolve_ped_track,
     resolve_robot_trajectory,
 )
 
@@ -232,10 +233,11 @@ def attribute_single_contact(
 
 
 def _static_point(obstacle_x: float | None, obstacle_y: float | None) -> tuple[float, float] | None:
-    """Static obstacle position of a collision row, None when the recording carries none."""
+    """Static obstacle position of a collision row, None when the recording carries none or only the (0, 0) sentinel."""
     if obstacle_x is None or obstacle_y is None:
         return None
-    return (float(obstacle_x), float(obstacle_y))
+    point = (float(obstacle_x), float(obstacle_y))
+    return None if point == (0.0, 0.0) else point
 
 
 def _numeric_suffix(name: str) -> str | None:
@@ -299,20 +301,8 @@ def _match_track(obstacle_id: str, tracks: Mapping[str, PedTrack], robot_at_t0: 
 
 
 def _group_contact_rows(cc_df: pl.DataFrame, merge_gap_ns: int) -> pl.DataFrame:
-    """One row per contiguous contact run of the same normalized target, within the merge gap."""
-    obstacle_kind = pl.when(pl.col("kind").fill_null("static").str.to_lowercase().str.contains(PEDESTRIAN_KIND_PATTERN)).then(pl.lit(PEDESTRIAN_KIND)).otherwise(pl.col("kind").fill_null("static").str.to_lowercase()).alias("obstacle_kind")
-    contacts = (
-        cc_df.with_columns(obstacle_kind)
-        .select(
-            pl.col("t_ns").cast(pl.Int64),
-            pl.col("obstacle_id").fill_null("").alias("obstacle_id"),
-            pl.col("obstacle_kind"),
-            pl.col("obstacle_x"),
-            pl.col("obstacle_y"),
-        )
-        .with_columns((pl.col("obstacle_kind") + pl.lit("|") + pl.col("obstacle_id")).alias("target_key"))
-        .sort("target_key", "t_ns")
-    )
+    """One row per contiguous contact run of the same resolved target, within the merge gap."""
+    contacts = cc_df.select(pl.col("t_ns").cast(pl.Int64), pl.col("obstacle_id"), pl.col("obstacle_kind"), pl.col("obstacle_x"), pl.col("obstacle_y")).with_columns((pl.col("obstacle_kind") + pl.lit("|") + pl.col("obstacle_id")).alias("target_key")).sort("target_key", "t_ns")
 
     same_target = pl.col("target_key").shift(1) == pl.col("target_key")
     beyond_gap = pl.col("t_ns").diff() > merge_gap_ns
@@ -333,6 +323,40 @@ def _group_contact_rows(cc_df: pl.DataFrame, merge_gap_ns: int) -> pl.DataFrame:
     )
 
 
+def _resolve_contact_targets(cc_df: pl.DataFrame, robot: Trajectory2D, tracks: Mapping[str, PedTrack]) -> pl.DataFrame:
+    """Raw contact rows whose pedestrian obstacle ids are canonical ``ped_id`` values, so later grouping never splits one track."""
+    frame = _groupable_contacts_frame(cc_df)
+    if frame.is_empty() or not tracks:
+        return frame
+    times_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
+    kinds = frame.get_column("obstacle_kind").to_numpy()
+    raw_ids = frame.get_column("obstacle_id").to_numpy()
+    pose_by_time = {int(stamp): robot.resample_onto(np.asarray([stamp], dtype=np.int64)) for stamp in np.unique(times_ns)}
+    resolved: list[str] = []
+    for stamp, kind, raw_id in zip(times_ns, kinds, raw_ids, strict=True):
+        if kind != PEDESTRIAN_KIND:
+            resolved.append(str(raw_id))
+            continue
+        track = _track_by_name_or_id(str(raw_id), tracks) or _track_by_numeric_suffix(entity_name(str(raw_id).strip()), tracks)
+        if track is None:
+            track = _nearest_track(tracks, pose_by_time[int(stamp)])
+        resolved.append(track.ped_id if track is not None else str(raw_id))
+    return frame.with_columns(pl.Series("obstacle_id", resolved, dtype=pl.String)).select("t_ns", "obstacle_id", "obstacle_kind", "obstacle_x", "obstacle_y")
+
+
+def _groupable_contacts_frame(cc_df: pl.DataFrame) -> pl.DataFrame:
+    """Contact rows with the normalized obstacle kind and their grouping columns."""
+    raw_kind = pl.col("kind").fill_null("").str.to_lowercase()
+    obstacle_kind = pl.when(raw_kind == "").then(pl.lit("static")).when(raw_kind.str.contains(PEDESTRIAN_KIND_PATTERN)).then(pl.lit(PEDESTRIAN_KIND)).otherwise(raw_kind).alias("obstacle_kind")
+    return cc_df.with_columns(obstacle_kind).select(
+        pl.col("t_ns").cast(pl.Int64),
+        pl.col("obstacle_id").fill_null("").alias("obstacle_id"),
+        pl.col("obstacle_kind"),
+        pl.col("obstacle_x").cast(pl.Float64),
+        pl.col("obstacle_y").cast(pl.Float64),
+    )
+
+
 def _contacts_from_table(
     *,
     cc_df: pl.DataFrame,
@@ -340,25 +364,27 @@ def _contacts_from_table(
     tracks: Mapping[str, PedTrack],
     merge_gap_ns: int,
 ) -> list[ContactEvent]:
-    """ContactEvent rows grouped per target from a flat collision_contacts table."""
+    """ContactEvent rows grouped per resolved target from a flat collision_contacts table."""
+    grouped = _group_contact_rows(_resolve_contact_targets(cc_df, robot, tracks), merge_gap_ns)
+    t0_values = grouped.get_column("t0_ns").to_numpy()
+    end_values = grouped.get_column("t_end_ns").to_numpy()
+    kind_values = grouped.get_column("obstacle_kind").to_numpy()
+    id_values = grouped.get_column("obstacle_id").to_numpy()
+    x_values = grouped.get_column("obstacle_x").to_numpy()
+    y_values = grouped.get_column("obstacle_y").to_numpy()
     events: list[ContactEvent] = []
-    for contact in _group_contact_rows(cc_df, merge_gap_ns).to_dicts():
-        t0_ns = int(contact["t0_ns"])
-        obstacle_kind = str(contact["obstacle_kind"])
-        obstacle_id = str(contact["obstacle_id"])
-        robot_at_t0 = robot.resample_onto(np.asarray([t0_ns], dtype=np.int64))
-        track = _match_track(obstacle_id, tracks, robot_at_t0) if obstacle_kind == PEDESTRIAN_KIND else None
-        if obstacle_kind == PEDESTRIAN_KIND and track is not None and not obstacle_id:
-            obstacle_id = track.ped_name
-        static_point = _static_point(contact["obstacle_x"], contact["obstacle_y"]) if obstacle_kind != PEDESTRIAN_KIND else None
+    for t0_ns, t_end_ns, obstacle_kind, obstacle_id, obstacle_x, obstacle_y in zip(t0_values, end_values, kind_values, id_values, x_values, y_values, strict=True):
+        robot_at_t0 = robot.resample_onto(np.asarray([int(t0_ns)], dtype=np.int64))
+        track = _match_track(str(obstacle_id), tracks, robot_at_t0) if obstacle_kind == PEDESTRIAN_KIND else None
+        resolved_id = str(obstacle_id) or (track.ped_id if track is not None else PEDESTRIAN_KIND)
         events.append(
             ContactEvent(
-                t0_ns=t0_ns,
-                t_end_ns=int(contact["t_end_ns"]),
-                obstacle_kind=obstacle_kind,
-                obstacle_id=obstacle_id,
+                t0_ns=int(t0_ns),
+                t_end_ns=int(t_end_ns),
+                obstacle_kind=str(obstacle_kind),
+                obstacle_id=resolved_id,
                 track=track,
-                static_point=static_point,
+                static_point=_static_point(obstacle_x, obstacle_y),
             )
         )
     return events
@@ -436,18 +462,6 @@ def _merge_contact_events(events: Sequence[ContactEvent]) -> list[ContactEvent]:
             )
     merged.sort(key=lambda event: (event.t0_ns, event.obstacle_kind, event.obstacle_id))
     return merged
-
-
-def _configured_track(target_agent_id: int | str | None, tracks: Mapping[str, PedTrack]) -> PedTrack | None:
-    """Track addressed by a configured agent id, either as ped_id or as ``Pedestrian_<id>``."""
-    if target_agent_id is None:
-        return None
-    token = str(target_agent_id)
-    candidates = (token, f"Pedestrian_{token}")
-    for track in tracks.values():
-        if track.ped_id in candidates or track.ped_name in candidates:
-            return track
-    return None
 
 
 def _configured_static_point(static_point: Sequence[float] | None, obstacle_kind: str) -> tuple[float, float] | None:
@@ -554,7 +568,7 @@ class ContactAttributionCalculator(BaseMetricCalculator):
         obstacle_kind = str(self.metrics_config.get("obstacle_kind", PEDESTRIAN_KIND)).lower()
         obstacle_id = str(self.metrics_config.get("obstacle_id", ""))
 
-        track = _configured_track(self.metrics_config.get("target_agent_id"), tracks) if obstacle_kind == PEDESTRIAN_KIND else None
+        track = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id")) if obstacle_kind == PEDESTRIAN_KIND else None
         if track is None and obstacle_kind == PEDESTRIAN_KIND:
             robot_at_t0 = robot.resample_onto(np.asarray([t0_ns], dtype=np.int64))
             track = _match_track(obstacle_id, tracks, robot_at_t0)

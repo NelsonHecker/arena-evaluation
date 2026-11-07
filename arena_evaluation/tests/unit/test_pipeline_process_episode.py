@@ -72,6 +72,7 @@ def _episode(tmp_path: pathlib.Path) -> tuple[FolderManager, EpisodeDescriptor]:
             "phases_yaml": [json.dumps(PHASES), json.dumps(PHASES)],
             "params_yaml": ["", ""],
             "conditions_yaml": ["", ""],
+            "human_params": ["", ""],
         }
     ).write_parquet(topics / "episode_lifecycle.parquet")
     _snapshot(_robot_rows(0, "0", "") + _robot_rows(int(1.5 * S), "", "0")).write_parquet(topics / "world_semantics.parquet")

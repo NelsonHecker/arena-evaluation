@@ -316,21 +316,23 @@ def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
 
 
 def _record_human_params(record: pl.DataFrame | pl.LazyFrame | None) -> dict[str, typing.Any] | None:
-    """Recorded EpisodeRecord.human_params as parameter name -> value, None when no record carried any."""
+    """Human parameters of the episode's own records, merged into one name -> value mapping (None when no record carried any)."""
     import json
 
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
-    # agent-contracts: ignore MCAP schema evolution
-    if df is None or len(df) == 0 or df.schema.get("human_params") is None:
+    if df is None or len(df) == 0:
         return None
-    candidates = df.select(pl.col("human_params")).filter(pl.col("human_params").is_not_null() & (pl.col("human_params") != "")).tail(1)
-    if len(candidates) == 0:
-        return None
-    try:
-        parsed = json.loads(str(candidates.item(0, "human_params")))
-    except ValueError:
-        return None
-    return parsed if isinstance(parsed, dict) and parsed else None
+    blobs = _episode_rows(df).select(pl.col("human_params").fill_null("")).filter(pl.col("human_params") != "").get_column("human_params")
+    merged: dict[str, typing.Any] = {}
+    for raw in reversed(blobs.to_numpy()):
+        try:
+            parsed = json.loads(str(raw))
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            for name, value in parsed.items():
+                merged.setdefault(str(name), value)
+    return merged or None
 
 
 def _record_conditions(record: pl.DataFrame) -> list[dict] | None:

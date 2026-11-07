@@ -9,6 +9,7 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name
 
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import AlignedEpisodeBundle
@@ -170,11 +171,11 @@ def resolve_robot_trajectory(calc: BaseMetricCalculator, episode: AlignedEpisode
             time_ns=rows["t_ns"].to_numpy().astype(np.int64),
             x=rows["x"].to_numpy().astype(np.float64),
             y=rows["y"].to_numpy().astype(np.float64),
-            vx=rows["vx"].to_numpy().astype(np.float64),
-            vy=rows["vy"].to_numpy().astype(np.float64),
+            vx=_finite_velocity(rows["vx"].to_numpy().astype(np.float64)),
+            vy=_finite_velocity(rows["vy"].to_numpy().astype(np.float64)),
             radius_m=radius_m,
         ),
-        rows["yaw"].to_numpy().astype(np.float64),
+        np.nan_to_num(rows["yaw"].to_numpy().astype(np.float64), nan=0.0, posinf=0.0, neginf=0.0),
     )
 
 
@@ -188,11 +189,36 @@ def extract_ped_tracks(peds: pl.DataFrame | None) -> dict[str, PedTrack]:
     if peds is None or len(peds) == 0:
         return {}
 
-    rows = peds.select("t_ns", "ped_id", "ped_name", "x", "y", "vx", "vy", "radius_m", "desired_speed").filter(pl.col("x").is_finite() & pl.col("y").is_finite()).sort("t_ns")
+    rows = peds.select("t_ns", "ped_id", "ped_name", "x", "y", "vx", "vy", "radius_m", "desired_speed").drop_nulls(["t_ns", "ped_id"]).filter(pl.col("x").is_finite() & pl.col("y").is_finite()).sort("t_ns")
     if len(rows) == 0:
         return {}
 
     return {str(frame["ped_id"][0]): _track_from_frame(frame) for frame in rows.partition_by("ped_id", maintain_order=True)}
+
+
+def resolve_ped_track(tracks: Mapping[str, PedTrack], target_agent_id: int | str | None, target_agent_name: str | None = None) -> PedTrack | None:
+    """Track addressed by a configured agent id (canonical ped_id, name, numeric or ``ped_<n>`` alias), then by name."""
+    if target_agent_id is not None:
+        wanted = _identity_aliases(str(target_agent_id))
+        for track in tracks.values():
+            if wanted & _identity_aliases(track.ped_id) or wanted & _identity_aliases(track.ped_name):
+                return track
+    if target_agent_name is not None:
+        wanted_name = target_agent_name.strip().lower()
+        for track in tracks.values():
+            if track.ped_name.strip().lower() == wanted_name or track.ped_id.strip().lower() == wanted_name:
+                return track
+    return None
+
+
+def _identity_aliases(value: str) -> set[str]:
+    """Case-insensitive identity tokens of a ped id/name, accepting the bare numeric suffix and its ``ped_<n>`` form."""
+    normalized = value.strip().lower()
+    aliases = {normalized}
+    suffix = normalized.rsplit("_", maxsplit=1)[-1]
+    if suffix.isdigit():
+        aliases |= {suffix, f"ped_{suffix}", f"pedestrian_{suffix}"}
+    return aliases
 
 
 def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
@@ -201,8 +227,8 @@ def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
     time_ns = frame["t_ns"].to_numpy().astype(np.int64)
     x = frame["x"].to_numpy().astype(np.float64)
     y = frame["y"].to_numpy().astype(np.float64)
-    vx = frame["vx"].fill_null(0.0).to_numpy().astype(np.float64)
-    vy = frame["vy"].fill_null(0.0).to_numpy().astype(np.float64)
+    vx = _finite_velocity(frame["vx"].fill_null(0.0).to_numpy().astype(np.float64))
+    vy = _finite_velocity(frame["vy"].fill_null(0.0).to_numpy().astype(np.float64))
 
     twist_is_zero = not bool(np.any(np.hypot(vx, vy) > 1e-9))
     position_moved = len(x) >= 2 and bool(np.any(np.hypot(np.diff(x), np.diff(y)) > 1e-6))
@@ -211,6 +237,8 @@ def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
         vx[0], vy[0] = vx[1], vy[1]
 
     radius_m = _first_float(frame["radius_m"])
+    if radius_m is None or not np.isfinite(radius_m) or radius_m <= 0.0:
+        radius_m = None
     effective_radius_m = radius_m if radius_m is not None else DEFAULT_PED_RADIUS_M
     trajectory = Trajectory2D(time_ns=time_ns, x=x, y=y, vx=vx, vy=vy, radius_m=effective_radius_m)
     return PedTrack(
@@ -223,9 +251,17 @@ def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
 
 
 def _first_text(series: pl.Series, default: str) -> str:
-    """First non-null value of a text series, ``default`` when every value is null."""
-    present = series.drop_nulls()
-    return str(present[0]) if len(present) > 0 else default
+    """First non-empty authored name of a text series, the entity-stripped default when every value is blank."""
+    for value in series.drop_nulls().to_numpy():
+        text = entity_name(str(value).strip())
+        if text:
+            return text
+    return entity_name(default.strip()) or default
+
+
+def _finite_velocity(values: np.ndarray) -> np.ndarray:
+    """Velocity samples with non-finite entries treated as no measurement (zero)."""
+    return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def _first_float(series: pl.Series) -> float | None:

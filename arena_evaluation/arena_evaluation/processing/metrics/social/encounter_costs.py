@@ -11,6 +11,8 @@ from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
+    PEDESTRIAN_TRACKS_TOPIC,
+    ROBOT_TRACKS_TOPIC,
     EncounterSpec,
     PedTrack,
     Trajectory2D,
@@ -19,6 +21,7 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     extract_episode_ped_tracks,
     extract_ped_tracks,
     merge_intervals_ns,
+    resolve_ped_track,
     resolve_robot_trajectory,
 )
 from arena_evaluation.processing.metrics.social.pedestrian_disturbance import PedestrianDisturbanceCalculator
@@ -42,8 +45,7 @@ MIN_ACOUSTIC_DIST_M: Final[float] = 0.2
 SPHERICAL_SPREADING_OFFSET_DB: Final[float] = 8.0
 
 ROBOT_POWER_TOPIC: Final[str] = "robot_power"
-REFERENCE_CONFIG_KEYS: Final[tuple[str, ...]] = ("reference_episode", "reference_peds")
-REFERENCE_TOPIC_NAMES: Final[tuple[str, ...]] = ("reference_peds", "unhindered_peds")
+REFERENCE_CONFIG_KEYS: Final[tuple[str, ...]] = ("reference_peds", "reference_episode")
 
 ReferenceSource = AlignedEpisodeBundle | pl.DataFrame | Mapping[str, PedTrack]
 
@@ -209,27 +211,34 @@ def extract_reference_tracks_by_name(
     metrics_config: Mapping[str, Any] | None = None,
 ) -> dict[str, PedTrack]:
     """Resolve robot-free reference pedestrian tracks keyed by pedestrian name."""
-    raw_reference = _reference_source(episode, metrics_config)
+    raw_reference = _reference_source(metrics_config)
     if raw_reference is None:
         return {}
     if isinstance(raw_reference, Mapping):
-        return {track.ped_name: track for track in raw_reference.values() if isinstance(track, PedTrack)}
+        keyed: dict[str, PedTrack] = {}
+        for key, track in raw_reference.items():
+            if isinstance(track, PedTrack):
+                keyed[str(key)] = track
+                keyed[track.ped_name] = track
+        return keyed
+    if isinstance(raw_reference, pl.LazyFrame):
+        raw_reference = raw_reference.collect()
     if isinstance(raw_reference, pl.DataFrame):
         return _keyed_by_name(extract_ped_tracks(raw_reference))
     return _keyed_by_name(extract_episode_ped_tracks(raw_reference))
 
 
-def _reference_source(episode: AlignedEpisodeBundle, metrics_config: Mapping[str, Any] | None) -> ReferenceSource | None:
-    """Reference pedestrian source of the metrics config first, else of the episode topics."""
+def _reference_source(metrics_config: Mapping[str, Any] | None) -> ReferenceSource | None:
+    """Reference pedestrian source of the metrics config: a robot-free twin episode, its flat pedestrian rows, or tracks.
+
+    There is no topic fallback: a robot-free twin recording is a separate episode, matched upstream by
+    stage and seed and injected through ``metrics_config``.
+    """
     config = metrics_config or {}
     for key in REFERENCE_CONFIG_KEYS:
         configured = config.get(key)
         if configured is not None:
             return configured
-    for topic in REFERENCE_TOPIC_NAMES:
-        recorded = episode_table(episode, topic)
-        if recorded is not None:
-            return recorded
     return None
 
 
@@ -350,35 +359,6 @@ def rollup_encounter_cost_records(
     }
 
 
-def _identity_keys(value: str) -> set[str]:
-    """Lower-case identity tokens of an agent id or name, with the bare numeric suffix accepted."""
-    normalized = value.strip().lower()
-    keys = {normalized}
-    suffix = normalized.rsplit("_", maxsplit=1)[-1]
-    if suffix != normalized:
-        keys.add(suffix)
-    return keys
-
-
-def _resolve_target_track(
-    tracks: Mapping[str, PedTrack],
-    target_agent_id: int | str | None,
-    target_agent_name: str | None,
-) -> PedTrack | None:
-    """Explicitly scoped pedestrian track: name match first, then an id matching ped_id or ped_name."""
-    if target_agent_name is not None:
-        for track in tracks.values():
-            if track.ped_name == str(target_agent_name):
-                return track
-    if target_agent_id is None:
-        return None
-    target_keys = _identity_keys(str(target_agent_id))
-    for track in tracks.values():
-        if _identity_keys(track.ped_id) & target_keys or _identity_keys(track.ped_name) & target_keys:
-            return track
-    return None
-
-
 def _single_record_outputs(record: EncounterCostRecord) -> dict[str, Any]:
     """Outputs of an episode holding exactly one encounter."""
     return {
@@ -401,7 +381,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
     NAME = "encounter_costs"
     CATEGORY = "social"
     SCOPES = {"encounter"}
-    REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
+    REQUIRED_TOPICS = [ROBOT_TRACKS_TOPIC, PEDESTRIAN_TRACKS_TOPIC]
 
     UNITS = {
         "cost_time_s": "s",
@@ -487,11 +467,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
 
     def _records(self, context: RobotCostContext, tracks: Mapping[str, PedTrack]) -> list[EncounterCostRecord]:
         """Encounter cost records of the explicitly scoped pedestrian, else of every detected encounter."""
-        target_track = _resolve_target_track(
-            tracks,
-            self.metrics_config.get("target_agent_id"),
-            self.metrics_config.get("target_agent_name"),
-        )
+        target_track = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id"), self.metrics_config.get("target_agent_name"))
         if target_track is not None:
             window_start_ns = int(self.metrics_config.get("window_start_ns", max(int(context.robot.time_ns[0]), int(target_track.time_ns[0]))))
             window_end_ns = int(self.metrics_config.get("window_end_ns", min(int(context.robot.time_ns[-1]), int(target_track.time_ns[-1]))))
@@ -511,7 +487,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
     ) -> list[EncounterCostRecord]:
         """Compute an EncounterCostRecord for every encounter in the episode."""
         context, tracks = self._build_context(episode, reference_episode)
-        if len(context.robot.time_ns) == 0 or not tracks:
+        if len(context.robot.time_ns) < 2 or not tracks:
             return []
         return self._records(context, tracks)
 
@@ -523,7 +499,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         """Compute encounter costs for a scoped encounter or rolled up across episode encounters."""
         del prior_results
         context, tracks = self._build_context(episode)
-        if len(context.robot.time_ns) == 0 or not tracks:
+        if len(context.robot.time_ns) < 2 or not tracks:
             return {key: None for key in self.output_keys()}
         records = self._records(context, tracks)
         if len(records) == 1:

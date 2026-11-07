@@ -19,6 +19,7 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     Trajectory2D,
     detect_encounters,
     extract_episode_ped_tracks,
+    resolve_ped_track,
     resolve_robot_trajectory,
 )
 
@@ -28,7 +29,7 @@ if typing.TYPE_CHECKING:
 NORMALIZATION_WINDOW_S: Final[float] = 12.0
 PRE_CONTACT_PROBST_WINDOW_S: Final[float] = 3.0
 PERSONAL_SPACE_RADIUS_M: Final[float] = 1.0
-CONTACT_T0_CONFIG_KEYS: Final[tuple[str, ...]] = ("contact_t0_ns", "target_t0_ns")
+CONTACT_T0_CONFIG_KEYS: Final[tuple[str, ...]] = ("contact_t0_ns",)
 SHARE_KEYS: Final[tuple[str, ...]] = ("r_robot", "r_target", "r_time", "e_robot", "e_target", "e_time")
 
 
@@ -274,25 +275,8 @@ def rollup_probst_results(results: Sequence[ProbstResult]) -> ProbstResult:
     )
 
 
-def _track_aliases(track: PedTrack) -> set[str]:
-    """Identifiers addressing a pedestrian: canonical id, name and numeric aliases."""
-    aliases = {track.ped_id, track.ped_name}
-    numeric_suffix = track.ped_id.rpartition("_")[2]
-    if numeric_suffix.isdigit():
-        aliases |= {numeric_suffix, f"ped_{numeric_suffix}"}
-    return aliases
-
-
-def _resolve_target_track(tracks: Mapping[str, PedTrack], target_agent_id: object) -> PedTrack | None:
-    """Track addressed by the configured target id, canonical ped_id, pedestrian name or numeric alias."""
-    if target_agent_id is None:
-        return None
-    wanted = str(target_agent_id)
-    return next((track for track in tracks.values() if wanted in _track_aliases(track)), None)
-
-
 def _contact_t0_ns(metrics_config: Mapping[str, typing.Any]) -> int | None:
-    """Configured contact timestamp in nanoseconds; either scoped config key is accepted."""
+    """Configured contact timestamp in nanoseconds."""
     for key in CONTACT_T0_CONFIG_KEYS:
         value = metrics_config.get(key)
         if value is not None:
@@ -502,7 +486,7 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
         if len(robot.time_ns) < 2 or not tracks:
             return self._empty_output()
 
-        target = _resolve_target_track(tracks, self.metrics_config.get("target_agent_id"))
+        target = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id"))
         contact_t0_ns = _contact_t0_ns(self.metrics_config)
         if target is not None and contact_t0_ns is not None:
             return self.calculate_pre_contact(episode, contact_t0_ns, target.ped_id)

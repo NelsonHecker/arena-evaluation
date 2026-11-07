@@ -8,6 +8,7 @@ from flat_peds import flat_peds
 from arena_evaluation.processing.metrics.social.encounter_costs import (
     EncounterCostsCalculator,
 )
+from arena_evaluation.processing.telemetry.writer import TABLE_SCHEMAS
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 SECOND_NS = 1_000_000_000
@@ -21,6 +22,18 @@ def _time_ns(duration_s: float) -> np.ndarray:
     return np.round(seconds * SECOND_NS).astype(np.int64)
 
 
+def _schema(topic: str) -> pl.Schema:
+    """Recorded flat schema of a telemetry table."""
+    return pl.from_arrow(TABLE_SCHEMAS[topic].empty_table()).schema
+
+
+def _table(topic: str, rows: list[dict[str, object]]) -> pl.DataFrame:
+    """Flat table of rows carrying the recorded schema of topic."""
+    schema = _schema(topic)
+    defaults = dict.fromkeys(schema)
+    return pl.DataFrame([{**defaults, **row} for row in rows], schema=schema)
+
+
 def _robot_tracks(
     time_ns: np.ndarray,
     x: np.ndarray,
@@ -30,42 +43,51 @@ def _robot_tracks(
     vy: np.ndarray | None = None,
     yaw: np.ndarray | None = None,
 ) -> pl.DataFrame:
-    """Flat robot_tracks table of a robot whose pose is sampled on time_ns."""
+    """Flat robot_tracks rows of a robot whose pose is sampled on time_ns, in the recorded schema."""
     count = len(time_ns)
     vx_arr = np.zeros(count) if vx is None else np.asarray(vx, dtype=np.float64)
     vy_arr = np.zeros(count) if vy is None else np.asarray(vy, dtype=np.float64)
     yaw_arr = np.zeros(count) if yaw is None else np.asarray(yaw, dtype=np.float64)
-    return pl.DataFrame(
-        {
-            "t_ns": time_ns,
-            "env_id": ["env_0"] * count,
-            "robot_id": ["env_0_jackal"] * count,
-            "x": np.asarray(x, dtype=np.float64),
-            "y": np.asarray(y, dtype=np.float64),
-            "z": np.zeros(count),
-            "yaw": yaw_arr,
-            "vx": vx_arr,
-            "vy": vy_arr,
-            "vz": np.zeros(count),
-            "omega_z": np.zeros(count),
-            "speed_mps": np.hypot(vx_arr, vy_arr),
-            "pose_source": ["tf_gt"] * count,
-        }
+    return _table(
+        "robot_tracks",
+        [
+            {
+                "t_ns": int(time_ns[index]),
+                "env_id": "env_0",
+                "robot_id": "env_0_jackal",
+                "x": float(np.asarray(x, dtype=np.float64)[index]),
+                "y": float(np.asarray(y, dtype=np.float64)[index]),
+                "z": 0.0,
+                "yaw": float(yaw_arr[index]),
+                "vx": float(vx_arr[index]),
+                "vy": float(vy_arr[index]),
+                "vz": 0.0,
+                "omega_z": 0.0,
+                "speed_mps": float(np.hypot(vx_arr[index], vy_arr[index])),
+                "pose_source": "tf_gt",
+            }
+            for index in range(count)
+        ],
     )
 
 
 def _robot_power(time_ns: np.ndarray, total_power_w: np.ndarray) -> pl.DataFrame:
-    """Flat robot_power table sampled on time_ns."""
-    return pl.DataFrame(
-        {
-            "t_ns": time_ns,
-            "env_id": ["env_0"] * len(time_ns),
-            "robot_id": ["env_0_jackal"] * len(time_ns),
-            "total_power_w": np.asarray(total_power_w, dtype=np.float64),
-            "static_power_w": np.full(len(time_ns), 15.0),
-            "total_mech_power_w": np.asarray(total_power_w, dtype=np.float64) - 15.0,
-            "total_thermal_power_w": np.zeros(len(time_ns)),
-        }
+    """Flat robot_power rows sampled on time_ns, in the recorded schema."""
+    power_w = np.asarray(total_power_w, dtype=np.float64)
+    return _table(
+        "robot_power",
+        [
+            {
+                "t_ns": int(time_ns[index]),
+                "env_id": "env_0",
+                "robot_id": "env_0_jackal",
+                "total_power_w": float(power_w[index]),
+                "static_power_w": 15.0,
+                "total_mech_power_w": float(power_w[index] - 15.0),
+                "total_thermal_power_w": 0.0,
+            }
+            for index in range(len(time_ns))
+        ],
     )
 
 
@@ -223,7 +245,7 @@ def test_missing_robot_tracks_yields_none_for_every_output() -> None:
     assert all(value is None for value in outputs.values())
 
 
-def test_single_sample_trajectories_report_zero_costs() -> None:
+def test_single_sample_robot_track_reports_missing_metrics() -> None:
     time_ns = np.array([0], dtype=np.int64)
     pedestrians = flat_peds([(0, [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 1.0, "y": 0.0}])])
     episode = _bundle(
@@ -235,12 +257,8 @@ def test_single_sample_trajectories_report_zero_costs() -> None:
 
     outputs = _calculator().calculate(episode, {})
 
-    assert outputs["encounter_count"] == 1
-    assert outputs["cost_time_s"] == 0.0
-    assert outputs["cost_path_m"] == 0.0
-    assert outputs["cost_energy_j"] == 0.0
-    assert outputs["cost_sound_pa2s"] == 0.0
-    assert outputs["cost_intimate_viol_s"] == 0.0
+    assert set(outputs) == set(EncounterCostsCalculator.output_keys())
+    assert all(value is None for value in outputs.values())
 
 
 def test_recorded_robot_power_is_interpolated_onto_robot_clock() -> None:
@@ -391,10 +409,9 @@ def test_target_agent_id_selects_the_scoped_pedestrian(target_agent_id: int | st
     assert records[0].cost_time_s == pytest.approx(3.0, abs=1e-6)
 
 
-def test_target_agent_name_takes_precedence_over_target_agent_id() -> None:
-    calculator = _calculator({"target_agent_id": "Pedestrian_9", "target_agent_name": "alice"})
+def test_target_agent_id_takes_precedence_and_name_is_the_fallback() -> None:
+    by_id = _calculator({"target_agent_id": "Pedestrian_7", "target_agent_name": "Pedestrian_9"})
+    by_name = _calculator({"target_agent_id": "Pedestrian_99", "target_agent_name": "alice"})
 
-    records = calculator.calculate_encounters(_scoping_episode())
-
-    assert len(records) == 1
-    assert records[0].ped_id == "Pedestrian_7"
+    assert by_id.calculate_encounters(_scoping_episode())[0].ped_id == "Pedestrian_7"
+    assert by_name.calculate_encounters(_scoping_episode())[0].ped_id == "Pedestrian_7"
