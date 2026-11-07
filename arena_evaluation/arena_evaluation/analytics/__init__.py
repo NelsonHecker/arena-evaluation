@@ -10,15 +10,22 @@ from __future__ import annotations
 from .catalog import (
     CANONICAL_VIEW_NAMES,
     TELEMETRY_TABLE_NAMES,
+    TELEMETRY_TABLE_SCHEMAS,
     BenchmarkCatalog,
     StarCatalog,
 )
 from .evidence import (
+    EVIDENCE_INDEX_SCHEMA,
     VALID_EVIDENCE_KINDS,
     EvidenceRecord,
     EvidenceStore,
     compute_frame_hash,
     compute_schema_signature,
+)
+from .queries import (
+    QueryCatalog,
+    QueryDeclaration,
+    format_sql_literal,
 )
 from .sql_engine import (
     FORBIDDEN_SQL_KEYWORDS,
@@ -45,6 +52,7 @@ __all__ = [
     "BenchmarkCatalog",
     "CANONICAL_VIEW_NAMES",
     "CLUSTER_BOOTSTRAP_SCHEMA",
+    "EVIDENCE_INDEX_SCHEMA",
     "EvidenceRecord",
     "EvidenceStore",
     "FORBIDDEN_SQL_KEYWORDS",
@@ -54,14 +62,18 @@ __all__ = [
     "PAIRED_DIFF_SUMMARY_SCHEMA",
     "PairedDiffResult",
     "PolarsSQLEngine",
+    "QueryCatalog",
+    "QueryDeclaration",
     "RANK_SWAP_MATRIX_SCHEMA",
     "SQLGuardError",
     "StarCatalog",
     "TELEMETRY_TABLE_NAMES",
+    "TELEMETRY_TABLE_SCHEMAS",
     "VALID_EVIDENCE_KINDS",
     "cluster_bootstrap_ci",
     "compute_frame_hash",
     "compute_schema_signature",
+    "format_sql_literal",
     "kendalls_w",
     "paired_treatment_diff",
     "rank_swap_matrix",

@@ -1,0 +1,24 @@
+name: blind_vs_aware_standoff_delta
+title: "Blind vs. Aware Pedestrian Standoff Delta"
+description: "Compares clearance standoff distances, detour times, and Probst responsibility metrics between blind pedestrians and aware pedestrians across planners"
+parameters:
+  planner:
+    type: string
+    default: "all"
+    description: "Filter by planner name or 'all'"
+sql: |
+  SELECT
+      d.planner,
+      d.crowd_condition,
+      COUNT(*) AS total_encounters,
+      AVG(e.min_clearance_m) AS mean_min_clearance_m,
+      AVG(e.detour_time_s) AS mean_detour_time_s,
+      AVG(e.path_deviation_m) AS mean_path_deviation_m,
+      AVG(e.probst_R_robot) AS mean_probst_R_robot,
+      AVG(e.probst_R_actor2) AS mean_probst_R_actor2,
+      AVG(e.probst_E_robot) AS mean_probst_E_robot
+  FROM fact_encounters e
+  JOIN dim_episodes d USING (run_id, episode_id, robot_id)
+  WHERE (:planner = 'all' OR d.planner = :planner)
+  GROUP BY d.planner, d.crowd_condition
+  ORDER BY d.planner, d.crowd_condition

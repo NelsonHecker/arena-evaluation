@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from flat_peds import flat_peds
 
-from arena_evaluation.processing.metrics.social.contact_attribution import (
+from arena_evaluation.processing.metrics.safety.contact_attribution import (
     ContactAttributionCalculator,
     classify_closer_label,
 )

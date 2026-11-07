@@ -1,0 +1,31 @@
+name: telemetry_slice
+title: "Spatiotemporal Telemetry Slice"
+description: "Spatiotemporal slice over robot trajectory and velocity telemetry for a specified episode and timestamp interval"
+parameters:
+  episode_id:
+    type: integer
+    default: 0
+    description: "Episode identifier"
+  start_time_ns:
+    type: integer
+    default: 0
+    description: "Start timestamp in nanoseconds"
+  end_time_ns:
+    type: integer
+    default: 9223372036854775807
+    description: "End timestamp in nanoseconds"
+sql: |
+  SELECT
+      t.episode_id,
+      t.timestamp_ns,
+      t.x,
+      t.y,
+      t.yaw,
+      t.vx,
+      t.vy,
+      t.speed_mps
+  FROM robot_tracks t
+  WHERE t.episode_id = :episode_id
+    AND t.timestamp_ns >= :start_time_ns
+    AND t.timestamp_ns <= :end_time_ns
+  ORDER BY t.timestamp_ns

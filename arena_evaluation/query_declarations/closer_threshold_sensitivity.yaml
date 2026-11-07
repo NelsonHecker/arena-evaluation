@@ -1,0 +1,24 @@
+name: closer_threshold_sensitivity
+title: "Closer Threshold Fault Sensitivity Sweep"
+description: "Sensitivity sweep over robot closing share thresholds to analyze how contact blame shifts between strict and lenient blame models"
+parameters:
+  strict_threshold:
+    type: float
+    default: 0.70
+    description: "Strict robot closing share threshold"
+  lenient_threshold:
+    type: float
+    default: 0.60
+    description: "Lenient robot closing share threshold"
+sql: |
+  SELECT
+      d.planner,
+      COUNT(*) AS total_contacts,
+      SUM(CASE WHEN c.robot_closing_share >= :strict_threshold THEN 1 ELSE 0 END) AS count_strict_robot,
+      SUM(CASE WHEN c.robot_closing_share >= :lenient_threshold THEN 1 ELSE 0 END) AS count_lenient_robot,
+      SUM(CASE WHEN c.counterfactual_freeze_persists THEN 1 ELSE 0 END) AS count_unavoidable,
+      AVG(c.robot_closing_share) AS mean_robot_closing_share
+  FROM fact_contacts c
+  JOIN dim_episodes d USING (run_id, episode_id, robot_id)
+  GROUP BY d.planner
+  ORDER BY d.planner

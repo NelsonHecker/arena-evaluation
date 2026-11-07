@@ -212,6 +212,9 @@ def check_manifest(data: object) -> dict[str, Any]:
         manifest = VizManifest.model_validate(data)
     except pydantic.ValidationError as exc:
         return {"valid": False, "problems": [str(exc)]}
+    for plot in manifest.plots:
+        if not plot.data_key and not plot.uses and plot.data is None:
+            return {"valid": False, "problems": [f"plot {plot.id!r} has no data_key, uses, or data specification"]}
     return {"valid": True, "n_plots": len(manifest.plots), "n_groups": len(manifest.groups), "problems": []}
 
 

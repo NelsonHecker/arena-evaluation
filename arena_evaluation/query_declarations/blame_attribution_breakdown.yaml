@@ -1,0 +1,28 @@
+name: blame_attribution_breakdown
+title: "Collision Blame Attribution Breakdown"
+description: "Collision blame attribution breakdown across planners and crowd conditions"
+parameters:
+  crowd_condition:
+    type: string
+    default: "all"
+    description: "Filter by crowd condition ('all', 'visible', 'blind')"
+  planner:
+    type: string
+    default: "all"
+    description: "Filter by planner name or 'all'"
+sql: |
+  SELECT
+      d.crowd_condition,
+      d.planner,
+      c.closer_label,
+      c.fault_attributed_to,
+      COUNT(*) AS total_contacts,
+      AVG(c.impact_speed_mps) AS mean_impact_speed_mps,
+      AVG(c.robot_closing_share) AS mean_robot_closing_share,
+      SUM(CASE WHEN c.counterfactual_freeze_persists THEN 1 ELSE 0 END) AS unavoidable_contacts
+  FROM fact_contacts c
+  JOIN dim_episodes d USING (run_id, episode_id, robot_id)
+  WHERE (:crowd_condition = 'all' OR d.crowd_condition = :crowd_condition)
+    AND (:planner = 'all' OR d.planner = :planner)
+  GROUP BY d.crowd_condition, d.planner, c.closer_label, c.fault_attributed_to
+  ORDER BY d.crowd_condition, d.planner, c.closer_label, c.fault_attributed_to

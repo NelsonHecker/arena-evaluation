@@ -13,6 +13,7 @@ from typing import Final
 
 import polars as pl
 
+from arena_evaluation.analytics.evidence import EVIDENCE_INDEX_SCHEMA
 from arena_evaluation.storage.star_schema import (
     STAR_SCHEMA_SCHEMAS,
     STAR_TABLE_NAMES,
@@ -23,6 +24,7 @@ from arena_evaluation.storage.star_schema import (
 __all__ = [
     "CANONICAL_VIEW_NAMES",
     "TELEMETRY_TABLE_NAMES",
+    "TELEMETRY_TABLE_SCHEMAS",
     "BenchmarkCatalog",
     "StarCatalog",
 ]
@@ -42,6 +44,54 @@ TELEMETRY_TABLE_NAMES: Final[tuple[str, ...]] = (
     "robot_acoustics",
 )
 
+TELEMETRY_TABLE_SCHEMAS: Final[dict[str, dict[str, pl.DataType]]] = {
+    "robot_tracks": {
+        "episode_id": pl.Int64,
+        "timestamp_ns": pl.Int64,
+        "x": pl.Float64,
+        "y": pl.Float64,
+        "yaw": pl.Float64,
+        "vx": pl.Float64,
+        "vy": pl.Float64,
+        "omega": pl.Float64,
+        "speed_mps": pl.Float64,
+    },
+    "pedestrian_tracks": {
+        "episode_id": pl.Int64,
+        "timestamp_ns": pl.Int64,
+        "ped_id": pl.String,
+        "x": pl.Float64,
+        "y": pl.Float64,
+        "yaw": pl.Float64,
+        "vx": pl.Float64,
+        "vy": pl.Float64,
+        "speed_mps": pl.Float64,
+    },
+    "robot_power": {
+        "episode_id": pl.Int64,
+        "timestamp_ns": pl.Int64,
+        "mechanical_power_w": pl.Float64,
+        "electrical_power_w": pl.Float64,
+        "static_power_w": pl.Float64,
+        "total_power_w": pl.Float64,
+    },
+    "robot_acoustics": {
+        "episode_id": pl.Int64,
+        "timestamp_ns": pl.Int64,
+        "sound_pressure_pa": pl.Float64,
+        "sound_exposure_dose_pa2s": pl.Float64,
+    },
+    "collision_contacts": {
+        "episode_id": pl.Int64,
+        "timestamp_ns": pl.Int64,
+        "contact_id": pl.String,
+        "other_id": pl.String,
+        "impact_speed_mps": pl.Float64,
+        "robot_closing_share": pl.Float64,
+        "closer_label": pl.String,
+    },
+}
+
 _EPISODE_DIR_RE: Final[re.Pattern[str]] = re.compile(r"^episode_(\d+)$")
 
 
@@ -57,6 +107,7 @@ class BenchmarkCatalog:
         if isinstance(source, pathlib.Path):
             self._tables.update(scan_star_schema(source))
             self._register_telemetry_views(source)
+            self._register_evidence_index(source)
         elif isinstance(source, StarSchemaTables):
             self._tables.update(source.lazy_by_name())
         elif isinstance(source, Mapping):
@@ -74,6 +125,15 @@ class BenchmarkCatalog:
         else:
             for name, schema in STAR_SCHEMA_SCHEMAS.items():
                 self._tables[name] = pl.LazyFrame(schema=schema)
+
+        if "evidence_index" not in self._tables:
+            self._tables["evidence_index"] = pl.LazyFrame(schema=EVIDENCE_INDEX_SCHEMA)
+
+        for tname, tschema in TELEMETRY_TABLE_SCHEMAS.items():
+            if tname not in self._tables:
+                lf = pl.LazyFrame(schema=tschema)
+                self._tables[tname] = lf
+                self._tables[f"telemetry_{tname}"] = lf
 
         self._register_canonical_views()
 
@@ -145,6 +205,14 @@ class BenchmarkCatalog:
             combined = frames[0] if len(frames) == 1 else pl.concat(frames, how="vertical_relaxed")
             self._tables[table_name] = combined
             self._tables[f"telemetry_{table_name}"] = combined
+
+    def _register_evidence_index(self, benchmark_dir: pathlib.Path) -> None:
+        """Register evidence_index from benchmark_dir / 'evidence' / 'evidence_index.parquet'."""
+        evidence_index_path = benchmark_dir / "evidence" / "evidence_index.parquet"
+        if evidence_index_path.is_file():
+            self._tables["evidence_index"] = pl.scan_parquet(evidence_index_path)
+        else:
+            self._tables["evidence_index"] = pl.LazyFrame(schema=EVIDENCE_INDEX_SCHEMA)
 
     def _register_canonical_views(self) -> None:
         dim_ep = self._tables["dim_episodes"]
