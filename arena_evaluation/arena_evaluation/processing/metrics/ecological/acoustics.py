@@ -5,8 +5,37 @@ import typing
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+ACOUSTIC_REFERENCE_PRESSURE_PA: typing.Final[float] = 20e-6
+ACOUSTIC_REFERENCE_PRESSURE_SQ_PA2: typing.Final[float] = ACOUSTIC_REFERENCE_PRESSURE_PA * ACOUSTIC_REFERENCE_PRESSURE_PA
+
+
+def compute_acoustic_dose_pa2s(
+    acoustics_df: pl.DataFrame | pl.LazyFrame | None,
+    t_start_ns: int | None = None,
+    t_end_ns: int | None = None,
+) -> float | None:
+    """Integral of linearized emitted sound pressure squared over time in Pa^2*s."""
+    if acoustics_df is None:
+        return None
+    if isinstance(acoustics_df, pl.LazyFrame):
+        acoustics_df = acoustics_df.collect()
+    if len(acoustics_df) < 2:
+        return None
+    frame = acoustics_df.select("t_ns", "total_level_af_dba").drop_nulls().sort("t_ns")
+    if t_start_ns is not None:
+        frame = frame.filter(pl.col("t_ns") >= t_start_ns)
+    if t_end_ns is not None:
+        frame = frame.filter(pl.col("t_ns") <= t_end_ns)
+    if len(frame) < 2:
+        return None
+    time_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
+    level_dba = frame.get_column("total_level_af_dba").to_numpy().astype(np.float64)
+    dt_s = np.diff(time_ns).astype(np.float64) / 1e9
+    linear_pressure_sq = ACOUSTIC_REFERENCE_PRESSURE_SQ_PA2 * np.power(10.0, level_dba / 10.0)
+    return float(np.sum(0.5 * (linear_pressure_sq[:-1] + linear_pressure_sq[1:]) * dt_s))
 
 
 class AcousticsCalculator(BaseMetricCalculator):
@@ -169,3 +198,113 @@ class AcousticsCalculator(BaseMetricCalculator):
             else:
                 result[i] = np.median([signal[i - 1], signal[i], signal[i + 1]])
         return result
+
+
+class AcousticDoseCalculator(BaseMetricCalculator):
+    """Multi-scope acoustic emission and exposure dose calculator across episode, robot, encounter, and pedestrian scopes."""
+
+    NAME = "acoustic_dose"
+    CATEGORY = "ecological"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset(
+        {
+            MetricScope.EPISODE,
+            MetricScope.ROBOT,
+            MetricScope.ENCOUNTER,
+            MetricScope.PEDESTRIAN,
+        }
+    )
+    REQUIRES_PEDSIM = False
+    DEPENDS_ON = []
+    REQUIRED_TOPICS = ["robot_acoustics"]
+
+    UNITS = {
+        "total_acoustic_dose_pa2s": "Pa²·s",
+        "acoustic_emission_pa2s": "Pa²·s",
+        "sound_exposure_dose_pa2s": "Pa²·s",
+        "cumulative_sound_dose_pa2s": "Pa²·s",
+    }
+    PRIMARY_OUTPUTS = ["total_acoustic_dose_pa2s"]
+    OUTPUT_DIRECTIONS = {
+        "total_acoustic_dose_pa2s": "lower",
+        "acoustic_emission_pa2s": "lower",
+        "sound_exposure_dose_pa2s": "lower",
+        "cumulative_sound_dose_pa2s": "lower",
+    }
+
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        if scope in (MetricScope.ENCOUNTER, MetricScope.PEDESTRIAN):
+            return ()
+        return ("robot_acoustics",)
+
+    @classmethod
+    def output_keys(cls) -> list[str]:
+        return [
+            "total_acoustic_dose_pa2s",
+            "acoustic_emission_pa2s",
+            "sound_exposure_dose_pa2s",
+            "cumulative_sound_dose_pa2s",
+        ]
+
+    @classmethod
+    def output_keys_for_scope(cls, scope: MetricScope) -> tuple[str, ...]:
+        if scope == MetricScope.ROBOT:
+            return ("acoustic_emission_pa2s",)
+        if scope == MetricScope.ENCOUNTER:
+            return ("sound_exposure_dose_pa2s",)
+        if scope == MetricScope.PEDESTRIAN:
+            return ("cumulative_sound_dose_pa2s",)
+        return ("total_acoustic_dose_pa2s",)
+
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        topics = self.native_topics(episode)
+        acoustics = topics.get("robot_acoustics")
+        dose = compute_acoustic_dose_pa2s(acoustics)
+        prior_total = prior_results.get("total_acoustic_dose_pa2s")
+        emission = float(prior_total) if prior_total is not None else dose
+        exposure = prior_results.get("sound_exposure_dose_pa2s", dose)
+        cumulative = prior_results.get("cumulative_sound_dose_pa2s", prior_results.get("sound_exposure_dose_pa2s"))
+        return {
+            "total_acoustic_dose_pa2s": dose,
+            "acoustic_emission_pa2s": emission,
+            "sound_exposure_dose_pa2s": float(exposure) if exposure is not None else None,
+            "cumulative_sound_dose_pa2s": float(cumulative) if cumulative is not None else None,
+        }
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        if scope_slice is None:
+            return self.calculate(episode, prior_results)
+
+        if scope_slice.scope == MetricScope.PEDESTRIAN:
+            dose = prior_results.get("cumulative_sound_dose_pa2s")
+            if dose is None:
+                dose = prior_results.get("sound_exposure_dose_pa2s")
+            return {"cumulative_sound_dose_pa2s": float(dose) if dose is not None else None}
+
+        if scope_slice.scope == MetricScope.ENCOUNTER:
+            prior_exposure = prior_results.get("sound_exposure_dose_pa2s")
+            if prior_exposure is not None:
+                return {"sound_exposure_dose_pa2s": float(prior_exposure)}
+            acoustics = self.native_topics(episode).get("robot_acoustics")
+            return {"sound_exposure_dose_pa2s": compute_acoustic_dose_pa2s(acoustics)}
+
+        if scope_slice.scope == MetricScope.ROBOT:
+            prior_dose = prior_results.get("total_acoustic_dose_pa2s")
+            if prior_dose is not None:
+                return {"acoustic_emission_pa2s": float(prior_dose)}
+            acoustics = self.native_topics(episode).get("robot_acoustics")
+            return {"acoustic_emission_pa2s": compute_acoustic_dose_pa2s(acoustics)}
+
+        acoustics = self.native_topics(episode).get("robot_acoustics")
+        return {"total_acoustic_dose_pa2s": compute_acoustic_dose_pa2s(acoustics)}
+
+
+EpisodeAcousticDoseCalculator = AcousticDoseCalculator
+RobotAcousticEmissionCalculator = AcousticDoseCalculator
+PedestrianAcousticDoseCalculator = AcousticDoseCalculator

@@ -216,6 +216,8 @@ class AlignedEpisodeBundle:
     robot_name: str | None = None
     semantic_snapshot: pl.DataFrame | None = None
     conditions: list[dict] | None = None
+    # Recorded EpisodeRecord.human_params as parameter name -> value, None when no record carried any.
+    human_params: dict[str, typing.Any] | None = None
     # This robot's entry of EpisodeRecord.phases ({phases, conditions, map_poses, goal_inputs, instructions}), None when the record has none.
     phases: dict | None = None
     # Judge poses of every robot in the env by bare name, this robot included.

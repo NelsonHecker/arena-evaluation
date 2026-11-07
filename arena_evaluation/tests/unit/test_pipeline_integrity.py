@@ -58,6 +58,7 @@ def _records(*integrity: list[str]) -> pl.DataFrame:
             "outcome_info": [""] * (n - 1) + ["finished"],
             "phases_yaml": [json.dumps(PHASES)] * n,
             "conditions_yaml": [""] * n,
+            "human_params": [""] * n,
         }
     )
 
