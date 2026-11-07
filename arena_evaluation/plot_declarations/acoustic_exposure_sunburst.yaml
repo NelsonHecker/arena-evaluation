@@ -1,0 +1,16 @@
+id: acoustic_exposure_sunburst
+title: "Acoustic Noise Dose Exposure Across Zones and Planners"
+type: bar
+source: v_zone_acoustic_summary
+encodings:
+  x: zone_name
+  y: acoustic_dose_db
+  color: planner
+  facet: crowd_density
+options:
+  barmode: group
+checks:
+  require_columns:
+    - zone_name
+    - acoustic_dose_db
+    - planner

@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import pathlib
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import polars as pl
 
 from arena_evaluation.presentation.dimension_detector import resolve_differentiate
 from arena_evaluation.storage.schemas import PlotSpec
+
+if TYPE_CHECKING:
+    import matplotlib.figure
+
+    from arena_evaluation.presentation.checks import PlotDiagnostics
+
+__all__ = ["BasePlotRenderer"]
 
 
 class BasePlotRenderer(ABC):
@@ -18,6 +26,7 @@ class BasePlotRenderer(ABC):
         self.spec = spec
         self.units = units or {}
         self.run_dir: pathlib.Path | None = None
+        self.diagnostics: PlotDiagnostics | None = None
 
     def format_label(self, label: str, data_key: str) -> str:
         """Format the label with the unit associated with data_key."""
@@ -26,6 +35,64 @@ class BasePlotRenderer(ABC):
             return f"{label} [{unit}]"
         return label
 
+    def resolve_channel(self, channel: str, fallback: str | None = None) -> str | None:
+        """Resolve a channel string name (e.g. 'x', 'y', 'color', 'facet_col', 'size', 'symbol')."""
+        ch = self.spec.channels
+        val: str | list[str] | None = None
+        match channel:
+            case "x":
+                val = ch.x
+            case "y":
+                val = ch.y
+            case "color" | "hue":
+                val = ch.color
+            case "facet_col":
+                val = ch.facet_col
+            case "facet_row":
+                val = ch.facet_row
+            case "size":
+                val = ch.size
+            case "symbol":
+                val = ch.symbol
+            case _:
+                val = None
+
+        if val is not None:
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], str) and val[0].strip():
+                return val[0].strip()
+        return fallback
+
+    def resolve_channel_list(self, channel: str, fallback: list[str] | str | None = None) -> list[str]:
+        """Resolve a channel that can be a list of columns (e.g. multi-metric y)."""
+        ch = self.spec.channels
+        val: str | list[str] | None = None
+        match channel:
+            case "x":
+                val = ch.x
+            case "y":
+                val = ch.y
+            case "color" | "hue":
+                val = ch.color
+            case _:
+                val = None
+
+        if isinstance(val, list):
+            return [str(v).strip() for v in val if v]
+        if isinstance(val, str) and val.strip():
+            return [val.strip()]
+        if fallback is not None:
+            return [fallback.strip()] if isinstance(fallback, str) else [str(f).strip() for f in fallback if f]
+        return []
+
+    @staticmethod
+    def save_figure(fig: matplotlib.figure.Figure, out_path: pathlib.Path, dpi: int = 300) -> None:
+        """Save matplotlib figure to vector (PDF/SVG) or high-res image (PNG)."""
+        out_path = pathlib.Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+
     @abstractmethod
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
         """Render an interactive Plotly plot as an HTML string, or a list of them."""
@@ -33,7 +100,7 @@ class BasePlotRenderer(ABC):
 
     @abstractmethod
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        """Render a static Seaborn/Matplotlib plot, saving the PNG to out_path."""
+        """Render a static Seaborn/Matplotlib plot, saving the PNG/SVG/PDF to out_path."""
         pass
 
     def resolve_diff_col(self, df: pl.DataFrame) -> tuple[str, pl.DataFrame]:
@@ -45,10 +112,11 @@ class BasePlotRenderer(ABC):
             return df
 
         res_df = df
+        schema = res_df.schema
         for k, v in self.spec.filter.items():
-            if k not in res_df.columns:
+            if schema.get(k) is None:
                 continue
-            if res_df.schema[k] == pl.List:
+            if schema[k] == pl.List:
                 if isinstance(v, (list, tuple, set)):
                     v_list = list(v)
                     if v_list:
@@ -69,8 +137,9 @@ class BasePlotRenderer(ABC):
             return df
 
         res_df = df
+        schema = res_df.schema
         for k, v in self.spec.filter.items():
-            if k in res_df.columns and res_df.schema[k] != pl.List:
+            if schema.get(k) is not None and schema[k] != pl.List:
                 if isinstance(v, (list, tuple, set)):
                     res_df = res_df.filter(pl.col(k).is_in(list(v)))
                 else:

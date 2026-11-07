@@ -1,17 +1,15 @@
-"""HTML table plot renderer for aggregated metric columns and notes."""
+"""HTML and static image table renderer for aggregated metric columns and notes."""
 
 from __future__ import annotations
 
 import html as html_escape
 import pathlib
-import typing
 
 import polars as pl
 
 from arena_evaluation.presentation.plot_types.base import BasePlotRenderer
 
-if typing.TYPE_CHECKING:
-    from arena_evaluation.presentation.report_builder import ReportBuilder  # noqa: F401
+__all__ = ["TableRenderer"]
 
 
 def _load_notes(notes: object | None, benchmark_dir: pathlib.Path | None) -> list[dict[str, str]]:
@@ -46,9 +44,9 @@ def _load_notes(notes: object | None, benchmark_dir: pathlib.Path | None) -> lis
                 path = None
 
         if path is not None:
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
         else:
-            text = notes  # inline YAML or text
+            text = notes
 
         try:
             import yaml
@@ -61,7 +59,6 @@ def _load_notes(notes: object | None, benchmark_dir: pathlib.Path | None) -> lis
         except Exception:
             pass
 
-        # Fallback: "key: value" text lines (agent-friendly free text).
         for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
@@ -75,7 +72,7 @@ def _load_notes(notes: object | None, benchmark_dir: pathlib.Path | None) -> lis
 
 
 def _render_notes_callout(notes_rows: list[dict[str, str]]) -> str:
-    """Render agent notes as a standalone callout section (never table rows)."""
+    """Render agent notes as a standalone callout section."""
     if not notes_rows:
         return ""
     parts = [
@@ -94,15 +91,40 @@ def _render_notes_callout(notes_rows: list[dict[str, str]]) -> str:
 
 
 class TableRenderer(BasePlotRenderer):
+    """HTML and image table renderer for scorecard tables and agent findings."""
+
     PLOT_TYPE = "table"
-    run_dir: pathlib.Path | None = None  # set by the renderer dispatcher (notes resolution)
 
     def _columns(self) -> list[dict[str, str]]:
-        cols = (self.spec.options or {}).get("columns") or []
-        return [{"metric": str(c.get("metric", "")), "label": str(c.get("label", c.get("metric", ""))), "format": str(c.get("format", "{:.2f}"))} for c in cols if isinstance(c, dict) and c.get("metric")]
+        opts = self.spec.options or {}
+        declared_cols = opts.get("columns") or []
+        if declared_cols:
+            return [
+                {
+                    "metric": str(c.get("metric", "")),
+                    "label": str(c.get("label", c.get("metric", ""))),
+                    "format": str(c.get("format", "{:.2f}")),
+                }
+                for c in declared_cols
+                if isinstance(c, dict) and c.get("metric")
+            ]
+
+        # Grammar of graphics fallback: channels.y
+        y_ch = self.spec.channels.y
+        if y_ch:
+            metric_list = y_ch if isinstance(y_ch, list) else [y_ch]
+            return [
+                {
+                    "metric": str(m),
+                    "label": str(m).replace("_", " ").title(),
+                    "format": "{:.2f}",
+                }
+                for m in metric_list
+                if m
+            ]
+        return []
 
     def _agent_rows(self) -> list[dict[str, str]]:
-        """Agent-authored rows: exactly as given, no predefined layout."""
         rows = (self.spec.options or {}).get("rows") or []
         out: list[dict[str, str]] = []
         for item in rows:
@@ -115,29 +137,35 @@ class TableRenderer(BasePlotRenderer):
                 )
         return out
 
-    def _data_rows(self, df: pl.DataFrame) -> list[list[str]]:
-        """Aggregate the metrics frame per group_by into label/value rows."""
-        group_by = self.spec.options.get("group_by") or []
+    def _resolve_group_cols(self, df: pl.DataFrame) -> list[str]:
+        opts = self.spec.options or {}
+        group_by = opts.get("group_by") or self.spec.channels.x or self.spec.group_by or []
         if isinstance(group_by, str):
             group_by = [group_by]
-        group_cols = [g for g in group_by if g in df.columns]
+        schema = df.schema
+        return [g for g in group_by if schema.get(g) is not None]
+
+    def _data_rows(self, df: pl.DataFrame) -> list[list[str]]:
+        group_cols = self._resolve_group_cols(df)
         cols = self._columns()
         if not group_cols or not cols:
             return []
 
-        list_cols = [c for c in [*group_cols, *(c["metric"] for c in cols)] if c in df.columns and df.schema[c] == pl.List]
+        schema = df.schema
+        all_target_cols = [*group_cols, *(c["metric"] for c in cols)]
+        list_cols = [c for c in all_target_cols if schema.get(c) is not None and schema[c] == pl.List]
         if list_cols:
-            need = [c for c in [*group_cols, *(c["metric"] for c in cols)] if c in df.columns]
+            need = [c for c in all_target_cols if schema.get(c) is not None]
             df = df.select(need).explode(list_cols)
         df = self._apply_row_filters(df)
 
-        agg = [pl.col(c["metric"]).mean().alias(f"__m{i}__") for i, c in enumerate(cols) if c["metric"] in df.columns]
+        agg = [pl.col(c["metric"]).mean().alias(f"__m{i}__") for i, c in enumerate(cols) if schema.get(c["metric"]) is not None]
         if not agg:
             return []
         grouped = df.group_by(group_cols).agg(agg).sort(group_cols)
 
         rows: list[list[str]] = []
-        for row in grouped.iter_rows(named=True):
+        for row in grouped.to_dicts():
             values = []
             for i, c in enumerate(cols):
                 val = row.get(f"__m{i}__")
@@ -145,18 +173,14 @@ class TableRenderer(BasePlotRenderer):
                     values.append(c["format"].format(float(val)) if val is not None else "N/A")
                 except (TypeError, ValueError):
                     values.append("N/A")
-            rows.append([*(str(row.get(g, "")) for g in group_cols), *values])
+            rows.append([str(row.get(g, "")) for g in group_cols] + values)
         return rows
 
     def _render_data_table(self, df: pl.DataFrame) -> str | None:
-        opts = self.spec.options or {}
         cols = self._columns()
-        group_cols = opts.get("group_by") or []
-        if isinstance(group_cols, str):
-            group_cols = [group_cols]
-        group_cols = [g for g in group_cols if g in df.columns]
+        group_cols = self._resolve_group_cols(df)
 
-        header = [*[g.replace("_", " ").title() for g in group_cols], *[c["label"] for c in cols]]
+        header = [g.replace("_", " ").title() for g in group_cols] + [c["label"] for c in cols]
         if not header:
             return None
         rows = self._data_rows(df)
@@ -173,11 +197,14 @@ class TableRenderer(BasePlotRenderer):
         return "".join(html)
 
     def _render_agent_table(self) -> str | None:
-        """Agent-authored rows as a clean two-column table."""
         rows = self._agent_rows()
         if not rows:
             return None
-        parts = ["<table class='dataframe' style='border-collapse: collapse; margin: 8px 0;'>", "<thead><tr><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Label</th><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Value</th></tr></thead>", "<tbody>"]
+        parts = [
+            "<table class='dataframe' style='border-collapse: collapse; margin: 8px 0;'>",
+            "<thead><tr><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Label</th><th style='border:1px solid #ccc; padding:4px 10px; background:#f5f5f5;'>Value</th></tr></thead>",
+            "<tbody>",
+        ]
         for row in rows:
             label = html_escape.escape(row.get("label", ""), quote=True)
             value = html_escape.escape(row.get("value", ""), quote=True).replace("\n", "<br>")
@@ -195,11 +222,56 @@ class TableRenderer(BasePlotRenderer):
         pieces = [p for p in (data_table, agent_table, notes_callout) if p]
         if not pieces:
             return None
-        return "".join(pieces)
+        title_html = f"<h4 class='table-title' style='margin: 12px 0 6px 0; font-weight: 600;'>{html_escape.escape(self.spec.title)}</h4>" if self.spec.title else ""
+        return title_html + "".join(pieces)
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         df_filtered = self._apply_filters(df)
         return self._render_html(df_filtered, self.run_dir)
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        pass  # Tables render as HTML only (like timeseries).
+        df_filtered = self._apply_filters(df)
+        cols = self._columns()
+        group_cols = self._resolve_group_cols(df_filtered)
+        rows = self._data_rows(df_filtered)
+
+        if not rows:
+            agent_rows = self._agent_rows()
+            if not agent_rows:
+                return
+            header = ["Label", "Value"]
+            rows = [[r.get("label", ""), r.get("value", "")] for r in agent_rows]
+        else:
+            header = [g.replace("_", " ").title() for g in group_cols] + [c["label"] for c in cols]
+
+        import matplotlib.pyplot as plt
+
+        n_rows = len(rows)
+        n_cols = len(header)
+        fig_w = max(6.0, n_cols * 2.0)
+        fig_h = max(2.5, n_rows * 0.4 + 1.2)
+
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+        ax.axis("off")
+        ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
+
+        table = ax.table(
+            cellText=rows,
+            colLabels=header,
+            loc="center",
+            cellLoc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.0, 1.4)
+
+        for (r, _), cell in table.get_celld().items():
+            if r == 0:
+                cell.set_facecolor("#e2e8f0")
+                cell.set_text_props(weight="bold")
+            else:
+                cell.set_facecolor("#ffffff" if r % 2 == 1 else "#f8fafc")
+
+        fig.tight_layout()
+        self.save_figure(fig, out_path)
+        plt.close(fig)

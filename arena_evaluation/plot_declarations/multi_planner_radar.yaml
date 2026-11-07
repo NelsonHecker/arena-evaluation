@@ -1,0 +1,20 @@
+id: multi_planner_radar
+title: "Multi-Planner Capability Tradeoff Profile"
+type: radar
+source: v_planner_scorecard
+encodings:
+  color: planner
+  y:
+    - path_efficiency
+    - time_to_goal
+    - collision_amount
+    - velocity_mean
+    - success
+options:
+  use_log_scale: false
+checks:
+  require_columns:
+    - planner
+    - path_efficiency
+    - time_to_goal
+    - collision_amount

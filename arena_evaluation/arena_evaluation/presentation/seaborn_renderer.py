@@ -23,6 +23,8 @@ class SeabornRenderer:
             LineRenderer,
             RadarRenderer,
             ScatterRenderer,
+            TableRenderer,
+            TimeseriesRenderer,
             TrajectoryRenderer,
             ViolinRenderer,
         )
@@ -36,7 +38,9 @@ class SeabornRenderer:
             "scatter": ScatterRenderer,
             "histogram": HistogramRenderer,
             "heatmap": HeatmapRenderer,
+            "timeseries": TimeseriesRenderer,
             "line": LineRenderer,
+            "table": TableRenderer,
             "acoustic_field": AcousticFieldRenderer,
             "acoustic_field_animation": AcousticFieldAnimationRenderer,
         }

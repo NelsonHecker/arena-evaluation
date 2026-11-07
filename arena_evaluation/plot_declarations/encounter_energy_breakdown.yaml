@@ -1,0 +1,16 @@
+id: encounter_energy_breakdown
+title: "Energy Expenditure Surge Across Encounter Approach Types"
+type: bar
+source: fact_encounters
+encodings:
+  x: encounter_type
+  y: energy_wh
+  color: planner
+  facet: crowd_density
+options:
+  barmode: group
+checks:
+  require_columns:
+    - encounter_type
+    - energy_wh
+    - planner

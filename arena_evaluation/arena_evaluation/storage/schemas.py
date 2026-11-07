@@ -234,17 +234,108 @@ class AlignedEpisodeBundle:
     run_dir: pathlib.Path | None = None
 
 
-class PlotSpec(BaseModel):
-    """Specification for a single plot in a report manifest."""
+class PlotDataSpec(BaseModel):
+    """Specification for data binding: catalog source, SQL query, or evidence artifact."""
 
-    id: str
-    type: str
-    title: str
-    data_key: str
+    source: str | None = None
+    query: str | None = None
+    evidence_id: str | None = None
+    where: str | None = None
+
+
+class PlotChannels(BaseModel):
+    """Multi-dimensional visual channel mappings for grammar of graphics."""
+
+    x: str | list[str] | None = None
+    y: str | list[str] | None = None
+    color: str | None = None
+    facet_col: str | None = None
+    facet_row: str | None = None
+    size: str | None = None
+    symbol: str | None = None
+    split: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_hue(cls, data: object) -> object:
+        if isinstance(data, dict):
+            d = dict(data)
+            if "hue" in d and "color" not in d:
+                d["color"] = d.pop("hue")
+            return d
+        return data
+
+
+class PlotSliceSpec(BaseModel):
+    """Spatiotemporal or hierarchical slice for targeted telemetry and encounter evaluation."""
+
+    scope: str | None = None
+    episode_id: int | None = None
+    encounter_id: str | None = None
+    contact_id: str | None = None
+
+
+class PlotSpec(BaseModel):
+    """Specification for a single plot in a report manifest or OLAP presentation."""
+
+    id: str = ""
+    type: str = ""
+    title: str = ""
+    uses: str | None = None
+    data: PlotDataSpec | None = None
+    channels: PlotChannels = Field(default_factory=PlotChannels)
+    slice: PlotSliceSpec | None = None
+    options: dict[str, typing.Any] = Field(default_factory=dict)
+    checks: dict[str, typing.Any] = Field(default_factory=dict)
+
+    # Legacy fields retained with sensible defaults for full backward compatibility
+    data_key: str = ""
     group_by: list[str] | str | None = None
     differentiate: str | None = "planner"
     auto_differentiate: bool = True
     filter: dict[str, typing.Any] | None = None
-    options: dict[str, typing.Any] = Field(default_factory=dict)
     layout_group: str | None = None
     data_source: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_spec(cls, data: object) -> object:
+        if isinstance(data, dict):
+            d = dict(data)
+            # Normalize recipe aliases
+            if "encodings" in d and "channels" not in d:
+                d["channels"] = d.pop("encodings")
+            if "source" in d and "data" not in d:
+                d["data"] = {"source": d.pop("source")}
+
+            # 1. Normalize 'data'
+            if "data" in d and isinstance(d["data"], str):
+                s = d["data"].strip()
+                if s.upper().startswith(("SELECT", "WITH")):
+                    d["data"] = {"query": s}
+                elif s.startswith("ev-"):
+                    d["data"] = {"evidence_id": s}
+                else:
+                    d["data"] = {"source": s}
+            elif "data_source" in d and "data" not in d and d["data_source"] is not None:
+                d["data"] = {"source": d["data_source"]}
+            elif "data" in d and isinstance(d["data"], dict) and "source" in d["data"] and "data_source" not in d:
+                d["data_source"] = d["data"]["source"]
+
+            # 2. Normalize 'channels'
+            if "channels" in d and isinstance(d["channels"], dict):
+                ch = dict(d["channels"])
+                if "facet" in ch and "facet_col" not in ch:
+                    ch["facet_col"] = ch.pop("facet")
+                if "y" in ch and isinstance(ch["y"], str) and not d.get("data_key"):
+                    d["data_key"] = ch["y"]
+                elif "x" in ch and isinstance(ch["x"], str) and not d.get("data_key"):
+                    d["data_key"] = ch["x"]
+                if "color" in ch and "differentiate" not in d:
+                    d["differentiate"] = ch["color"]
+                elif "hue" in ch and "differentiate" not in d:
+                    d["differentiate"] = ch["hue"]
+                d["channels"] = ch
+
+            return d
+        return data

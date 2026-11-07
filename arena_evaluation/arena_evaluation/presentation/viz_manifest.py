@@ -3,9 +3,24 @@ from __future__ import annotations
 import pathlib
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from arena_evaluation.storage.schemas import PlotSpec
+from arena_evaluation.storage.schemas import (
+    PlotChannels,
+    PlotDataSpec,
+    PlotSliceSpec,
+    PlotSpec,
+)
+
+__all__ = [
+    "ManifestGroup",
+    "PlotChannels",
+    "PlotDataSpec",
+    "PlotSliceSpec",
+    "PlotSpec",
+    "SummarySpec",
+    "VizManifest",
+]
 
 
 class ManifestGroup(BaseModel):
@@ -37,6 +52,33 @@ class VizManifest(BaseModel):
     summary_group_by: list[str] | str | None = None
     units: dict[str, str] = Field(default_factory=dict)
     plots: list[PlotSpec] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_manifest(cls, data: object) -> object:
+        if isinstance(data, dict):
+            d = dict(data)
+            if "sections" in d and isinstance(d["sections"], list):
+                sections = d.pop("sections")
+                groups = list(d.get("groups", []))
+                plots = list(d.get("plots", []))
+                for sec in sections:
+                    if isinstance(sec, dict):
+                        sec_id = str(sec.get("id", ""))
+                        sec_title = str(sec.get("title", sec_id.replace("_", " ").title()))
+                        groups.append({"id": sec_id, "title": sec_title})
+                        sec_plots = sec.get("plots", [])
+                        if isinstance(sec_plots, list):
+                            for p in sec_plots:
+                                if isinstance(p, dict):
+                                    p_copy = dict(p)
+                                    if "layout_group" not in p_copy:
+                                        p_copy["layout_group"] = sec_id
+                                    plots.append(p_copy)
+                d["groups"] = groups
+                d["plots"] = plots
+            return d
+        return data
 
     @classmethod
     def load(cls, path: pathlib.Path | None) -> VizManifest:

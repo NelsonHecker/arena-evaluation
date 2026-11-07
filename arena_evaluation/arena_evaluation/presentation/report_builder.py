@@ -9,8 +9,10 @@ import jinja2
 import pandas as pd
 import polars as pl
 
+from arena_evaluation.presentation.checks import PlotDiagnostics
 from arena_evaluation.presentation.manifest_registry import resolve_manifest
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
+from arena_evaluation.presentation.resolver import DataResolver
 from arena_evaluation.presentation.seaborn_renderer import SeabornRenderer
 from arena_evaluation.presentation.viz_manifest import VizManifest
 from arena_evaluation.processing.metrics.registry import MetricRegistry
@@ -134,6 +136,16 @@ class ReportBuilder:
         self.plots_dir = self.output_dir / "plots"
         self.report_path = self.output_dir / "report.html"
         self.manifest_path = self.benchmark_dir / "viz_manifest.yaml"
+        if isinstance(manifest, (str, pathlib.Path)):
+            p = pathlib.Path(manifest)
+            if p.exists():
+                self.manifest_path = p
+        elif not self.manifest_path.exists():
+            for alt in ("manifest.yaml", "viz_manifest.yml", "manifest.yml"):
+                p = self.benchmark_dir / alt
+                if p.exists():
+                    self.manifest_path = p
+                    break
         self.generate_gifs = generate_gifs
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
         self._source_frames: dict[str, pl.DataFrame] = {}
@@ -268,7 +280,7 @@ class ReportBuilder:
             self._source_frames[src] = ParquetStore.read(p)[0]
         return self._source_frames[src]
 
-    def build(self) -> None:
+    def build(self) -> pathlib.Path | None:
         """Execute the report building process."""
         manifest = self._manifest_obj if self._manifest_obj is not None else VizManifest.load(self.manifest_path)
 
@@ -311,36 +323,45 @@ class ReportBuilder:
 
         html_plots = []
 
+        resolver = DataResolver(benchmark_dir=self.benchmark_dir)
+
         for spec in manifest.plots:
-            plot_df = self._frame_for_spec(spec, manifest, df, df_contestants)
-            if plot_df is None:
+            resolved_spec = resolver.resolve_spec(spec)
+            fallback_df = self._frame_for_spec(resolved_spec, manifest, df, df_contestants)
+
+            try:
+                plot_df, diagnostics = resolver.resolve(resolved_spec, fallback_df=fallback_df)
+            except Exception as e:
+                print(f"Skipping plot '{resolved_spec.id}': {e}")
                 continue
 
-            if spec.data_key != "*":
-                if spec.data_key not in plot_df.columns:
-                    print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' not found in metrics.")
-                    continue
-                if plot_df[spec.data_key].null_count() == len(plot_df):
-                    print(f"Skipping plot '{spec.id}': data key '{spec.data_key}' has no calculated data (all values null).")
-                    continue
+            diag_html = self._diagnostics_html(diagnostics)
 
-            png_path = self.plots_dir / f"{spec.id}.png"
+            png_path = self.plots_dir / f"{resolved_spec.id}.png"
             try:
-                seaborn_renderer.render(spec, plot_df, png_path, run_dir=self.output_dir)
+                seaborn_renderer.render(resolved_spec, plot_df, png_path, run_dir=self.output_dir)
             except Exception as e:
-                print(f"Warning: Failed to render static plot {spec.id}: {e}")
+                print(f"Warning: Failed to render static plot {resolved_spec.id}: {e}")
+
+            if resolved_spec.options.get("vector_svg", False):
+                svg_path = self.plots_dir / f"{resolved_spec.id}.svg"
+                try:
+                    seaborn_renderer.render(resolved_spec, plot_df, svg_path, run_dir=self.output_dir)
+                except Exception as e:
+                    pass
 
             try:
-                html_chunk = plotly_renderer.render(spec, plot_df, run_dir=self.output_dir)
-                note_html = self._plot_note_html(spec)
+                html_chunk = plotly_renderer.render(resolved_spec, plot_df, run_dir=self.output_dir)
+                note_html = self._plot_note_html(resolved_spec)
+                full_note = diag_html + note_html
                 if html_chunk:
                     if isinstance(html_chunk, list):
                         for chunk in html_chunk:
-                            html_plots.append((spec.layout_group, chunk + note_html, spec.title))
+                            html_plots.append((resolved_spec.layout_group, chunk + full_note, resolved_spec.title))
                     else:
-                        html_plots.append((spec.layout_group, html_chunk + note_html, spec.title))
+                        html_plots.append((resolved_spec.layout_group, html_chunk + full_note, resolved_spec.title))
             except Exception as e:
-                print(f"Warning: Failed to render interactive plot {spec.id}: {e}")
+                print(f"Warning: Failed to render interactive plot {resolved_spec.id}: {e}")
 
         if manifest.summary:
             summary_html = self._generate_summary_table_manifest(df, manifest)
@@ -364,6 +385,7 @@ class ReportBuilder:
 
         print(f"Report generated successfully: {self.report_path}")
         print(f"Static plots saved to: {self.plots_dir}")
+        return self.report_path
 
     def _plot_note_html(self, spec: PlotSpec) -> str:
         """Per-plot agent note, rendered under the plot.
@@ -396,6 +418,20 @@ class ReportBuilder:
         if not note:
             return ""
         return f"<div class='plot-note'>{_render_markdown_light(str(note))}</div>"
+
+    @staticmethod
+    def _diagnostics_html(diagnostics: PlotDiagnostics) -> str:
+        """Render non-blocking diagnostic warnings as informative note banner."""
+        if not diagnostics.has_warnings:
+            return ""
+        items = "".join(f"<li>{html_escape.escape(w)}</li>" for w in diagnostics.warnings)
+        return (
+            f"<div class='plot-diagnostics' style='font-size: 0.85em; color: #856404; "
+            f"background-color: #fff3cd; border: 1px solid #ffeeba; border-radius: 4px; "
+            f"padding: 6px 12px; margin-top: 4px;'>"
+            f"<strong style='text-transform: uppercase;'>Diagnostic Notes (N={diagnostics.row_count}):</strong>"
+            f"<ul style='margin: 4px 0 0 16px; padding: 0;'>{items}</ul></div>"
+        )
 
     def _write_note_file(self, manifest: VizManifest) -> None:
         """Best-effort note recording which manifest produced this report."""

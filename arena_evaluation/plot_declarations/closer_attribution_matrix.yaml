@@ -1,0 +1,17 @@
+id: closer_attribution_matrix
+title: "Collision Fault Attribution by Crowd Condition"
+type: bar
+source: fact_contacts
+encodings:
+  x: planner
+  y: closer_label
+  color: closer_label
+  facet: crowd_condition
+options:
+  barmode: stack
+  palette: blame_palette
+checks:
+  require_columns:
+    - planner
+    - closer_label
+    - crowd_condition

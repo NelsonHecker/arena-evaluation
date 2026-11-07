@@ -187,7 +187,7 @@ class TrajectoryRenderer(BasePlotRenderer):
 
     def _render_single_plot(self, pdf: pd.DataFrame, title_suffix: str, map_name: str | None, run_dir: pathlib.Path | None = None) -> str:
         fig = go.Figure()
-        diff_col = self.spec.differentiate or "planner"
+        diff_col = self.resolve_channel("color", fallback=self.spec.differentiate or "planner")
 
         map_meta = None
         if self.spec.options.get("show_map", True) and map_name:
@@ -228,7 +228,7 @@ class TrajectoryRenderer(BasePlotRenderer):
             col_y_by_agent = []
             col_idx_by_agent = []
 
-            data_key = self.spec.data_key or "path"
+            data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
             for _, row in planner_df.iterrows():  # pyright: ignore[reportAttributeAccessIssue]
                 path = row.get(data_key)
                 if path is None or isinstance(path, float) or len(path) == 0:
@@ -640,7 +640,7 @@ class TrajectoryRenderer(BasePlotRenderer):
 
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
         df_filtered = self._apply_filters(df)
-        data_key = self.spec.data_key or "path"
+        data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
         if data_key not in df_filtered.columns:
             return None
 
@@ -681,7 +681,7 @@ class TrajectoryRenderer(BasePlotRenderer):
 
     def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
-        data_key = self.spec.data_key or "path"
+        data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
         if data_key not in df_filtered.columns:
             return
 
@@ -726,12 +726,12 @@ class TrajectoryRenderer(BasePlotRenderer):
     def render_seaborn_single(self, pdf: pd.DataFrame, out_path: pathlib.Path, title_suffix: str, map_name: str | None, run_dir: pathlib.Path | None) -> None:
         import matplotlib.pyplot as plt
 
-        diff_col = self.spec.differentiate or "planner"
+        diff_col = self.resolve_channel("color", fallback=self.spec.differentiate or "planner")
         facet_col = self.spec.options.get("facet")
         if facet_col not in pdf.columns:
             facet_col = None
         crop = bool(self.spec.options.get("crop", facet_col is not None))
-        data_key = self.spec.data_key or "path"
+        data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
         if map_name is None and "map" in pdf.columns and not pdf.empty:
             map_name = pdf["map"].iloc[0]
 

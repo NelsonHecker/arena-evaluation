@@ -1,0 +1,15 @@
+id: planner_ranking_stability
+title: "Planner Ranking Concordance Across Environments"
+type: heatmap
+source: v_planner_scorecard
+encodings:
+  x: planner
+  y: crowd_condition
+  color: composite_rank
+options:
+  colorscale: Viridis
+  show_annotations: true
+checks:
+  require_columns:
+    - planner
+    - crowd_condition

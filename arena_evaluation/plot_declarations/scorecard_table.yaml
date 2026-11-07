@@ -1,0 +1,20 @@
+id: scorecard_table
+title: "Planner Performance Scorecard"
+type: table
+source: v_planner_scorecard
+encodings:
+  x: planner
+  y:
+    - success_rate
+    - collision_rate
+    - time_to_goal_s
+    - path_length_m
+    - path_efficiency
+    - energy_wh
+options:
+  format: "{:.2f}"
+checks:
+  require_columns:
+    - planner
+    - success_rate
+    - collision_rate

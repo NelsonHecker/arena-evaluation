@@ -20,20 +20,30 @@ class LineRenderer(BasePlotRenderer):
     def _prepare(self, df: pl.DataFrame) -> tuple[pd.DataFrame, str, str, list[str], str | None, dict] | None:
         """Validate and return (pdf, x_col, y_col, group_cols, error_col, opts) or None."""
         df_filtered = self._apply_filters(df)
-        x_col = self.spec.data_key
-        y_col = self.spec.options.get("y")
-        if not y_col or x_col not in df_filtered.columns or y_col not in df_filtered.columns:
+        opts = self.spec.options or {}
+        y_col = self.resolve_channel("y") or opts.get("y")
+        x_col = self.resolve_channel("x") or self.spec.data_key
+        if opts.get("y") and y_col == x_col:
+            y_col = opts.get("y")
+        if not y_col or not x_col:
+            return None
+        schema = df_filtered.schema
+        if schema.get(x_col) is None or schema.get(y_col) is None:
             return None
 
         opts = self.spec.options or {}
+        color_col = self.resolve_channel("color")
         group_by = self.spec.group_by
         if isinstance(group_by, str):
             group_by = [group_by]
-        group_cols = [g for g in (group_by or []) if g in df_filtered.columns]
+        group_cols = [g for g in (group_by or []) if schema.get(g) is not None]
         if not group_cols:
-            diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-            if diff_col in df_filtered.columns:
-                group_cols = [diff_col]
+            if color_col and schema.get(color_col) is not None:
+                group_cols = [color_col]
+            else:
+                diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+                if df_filtered.schema.get(diff_col) is not None:
+                    group_cols = [diff_col]
 
         error_col = opts.get("error_y")
         if error_col and error_col not in df_filtered.columns:
@@ -269,7 +279,7 @@ class LineRenderer(BasePlotRenderer):
         plt.ylabel(self.format_label(y_col.replace("_", " ").title(), y_col))
         plt.legend()
         plt.tight_layout()
-        plt.savefig(out_path, dpi=300)
+        self.save_figure(plt.gcf(), out_path)
         plt.close()
 
 

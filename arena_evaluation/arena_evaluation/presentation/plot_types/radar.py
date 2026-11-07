@@ -65,13 +65,15 @@ class RadarRenderer(BasePlotRenderer):
         df_filtered = self._apply_filters(df)
 
         diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        if diff_col not in df_filtered.columns:
+        color_col = self.resolve_channel("color", fallback=diff_col)
+        if not color_col or color_col not in df_filtered.columns:
             return None
 
-        metrics = self.spec.options.get(
-            "metrics",
-            ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"],
-        )
+        metrics = self.spec.options.get("metrics", [])
+        if not metrics and self.spec.channels.y:
+            metrics = self.spec.channels.y if isinstance(self.spec.channels.y, list) else [self.spec.channels.y]
+        if not metrics:
+            metrics = ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"]
 
         valid_metrics = [m for m in metrics if m in df_filtered.columns and not df_filtered[m].is_null().all()]
 
@@ -113,13 +115,15 @@ class RadarRenderer(BasePlotRenderer):
 
         df_filtered = self._apply_filters(df)
         diff_col, df_filtered = self.resolve_diff_col(df_filtered)
-        if diff_col not in df_filtered.columns:
+        color_col = self.resolve_channel("color", fallback=diff_col)
+        if not color_col or color_col not in df_filtered.columns:
             return
 
-        metrics = self.spec.options.get(
-            "metrics",
-            ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"],
-        )
+        metrics = self.spec.options.get("metrics", [])
+        if not metrics and self.spec.channels.y:
+            metrics = self.spec.channels.y if isinstance(self.spec.channels.y, list) else [self.spec.channels.y]
+        if not metrics:
+            metrics = ["path_efficiency", "time_to_goal", "collision_amount", "roughness_mean", "jerk_mean"]
         valid_metrics = [m for m in metrics if m in df_filtered.columns and not df_filtered[m].is_null().all()]
         if len(valid_metrics) < 3:
             return
@@ -157,5 +161,5 @@ class RadarRenderer(BasePlotRenderer):
         ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=9)
 
         plt.tight_layout()
-        plt.savefig(out_path, dpi=300)
-        plt.close()
+        self.save_figure(fig, out_path)
+        plt.close(fig)

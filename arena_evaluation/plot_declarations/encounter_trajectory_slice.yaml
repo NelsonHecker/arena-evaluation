@@ -1,0 +1,16 @@
+id: encounter_trajectory_slice
+title: "Encounter Trajectory Slice & Clearance Envelope"
+type: trajectory
+source: v_encounter_telemetry
+slice:
+  scope: encounter
+encodings:
+  x: path
+  color: planner
+options:
+  overlay_markers: true
+  overlay_mechanisms: true
+checks:
+  require_columns:
+    - path
+    - planner
