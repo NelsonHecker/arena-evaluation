@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from arena_evaluation.processing.telemetry.messages import Envelope, declares, env_row, pedestrian_id, robot_row
+from arena_evaluation.processing.telemetry.messages import Envelope, env_row, pedestrian_id, robot_row
 from arena_evaluation.processing.telemetry.writer import TableSink
 
 if TYPE_CHECKING:
@@ -22,33 +22,29 @@ INTERACTION_EVENT_NAMES = {0: "ACTIVATED", 1: "HOLD_ONSET", 2: "RELEASED", 3: "I
 
 
 def record_collision_events(sink: TableSink, envelope: Envelope[CollisionEvents]) -> None:
-    message, schema = envelope.body, envelope.schema
-    events = message.events
-    has_kind = declares(schema, message, "kind")
-    has_position = declares(schema, message, "obstacle_position")
-    has_distance = declares(schema, message, "distance")
+    events = envelope.body.events
     sink.append(
         "collision_events",
         robot_row(
             envelope,
             event_count=len(events),
-            wall_count=_count_kind(events, WALL_KIND) if has_kind else None,
-            static_count=_count_kind(events, STATIC_KIND) if has_kind else None,
-            ped_count=_count_kind(events, PEDESTRIAN_KIND) if has_kind else None,
+            wall_count=_count_kind(events, WALL_KIND),
+            static_count=_count_kind(events, STATIC_KIND),
+            ped_count=_count_kind(events, PEDESTRIAN_KIND),
         ),
     )
     for event in events:
-        x, y, z = _position(event) if has_position else (None, None, None)
+        x, y, z = _position(event)
         sink.append(
             "collision_contacts",
             robot_row(
                 envelope,
                 obstacle_id=str(event.obstacle_id),
-                kind=str(event.kind) if has_kind else None,
+                kind=str(event.kind),
                 obstacle_x=x,
                 obstacle_y=y,
                 obstacle_z=z,
-                distance=float(event.distance) if has_distance else None,
+                distance=float(event.distance),
             ),
         )
 

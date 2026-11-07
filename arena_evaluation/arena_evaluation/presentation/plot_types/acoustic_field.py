@@ -671,21 +671,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
             ep_names = [str(episode_id)]
         for ep_name in ep_names:
             peds_pq = next(
-                (c for root in (bdir, *bdir.parents) for name in ("pedestrian_tracks.parquet", "peds.parquet") if (c := root / "episodes" / ep_name / "topics" / name).exists()),
+                (c for root in (bdir, *bdir.parents) if (c := root / "episodes" / ep_name / "topics" / "pedestrian_tracks.parquet").exists()),
                 None,
             )
             if peds_pq is not None:
                 p_df = pl.read_parquet(peds_pq)
-                if {"ped_id", "x", "y"} <= set(p_df.columns):
-                    grouped = p_df.select(["ped_id", "x", "y"]).group_by("ped_id", maintain_order=True).agg(pl.concat_arr(["x", "y"]).alias("points"))
-                    tracks = dict(enumerate(grouped["points"]))
-                    if tracks:
-                        return tracks
-                p_col = "peds_positions" if "peds_positions" in p_df.columns else ("peds" if "peds" in p_df.columns else None)
-                if p_col:
-                    tracks = AcousticFieldRenderer._ped_tracks_from_positions(p_df[p_col].to_list())
-                    if tracks:
-                        return tracks
+                grouped = p_df.select(["ped_id", "x", "y"]).group_by("ped_id", maintain_order=True).agg(pl.concat_arr(["x", "y"]).alias("points"))
+                tracks = {idx: [(float(x), float(y)) for x, y in pts] for idx, pts in enumerate(grouped["points"])}
+                if tracks:
+                    return tracks
             ep_m_path = bdir / "episodes" / ep_name / "metrics.parquet"
             if ep_m_path.exists():
                 ep_m = pl.read_parquet(ep_m_path)
@@ -782,9 +776,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
         if bundle.collision_events is not None:
             ce_lf = bundle.collision_events.lazy() if isinstance(bundle.collision_events, pl.DataFrame) else bundle.collision_events
-            if "event_count" in ce_lf.collect_schema().names():
-                ce_sub = ce_lf.select(["t_ns", (pl.col("event_count") > 0).alias("has_collision")]).sort("t_ns")
-                base_lf = base_lf.join_asof(ce_sub, on="t_ns", strategy="nearest")
+            ce_sub = ce_lf.select(["t_ns", (pl.col("event_count") > 0).alias("has_collision")]).sort("t_ns")
+            base_lf = base_lf.join_asof(ce_sub, on="t_ns", strategy="nearest")
 
         return base_lf.with_columns(pl.col("t_ns").alias("time_ns")).collect()
 

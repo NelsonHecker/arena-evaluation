@@ -17,7 +17,7 @@ from arena_evaluation.processing.telemetry.writer import TableSink
 POSE_SOURCE = "tf_gt"
 TWIST_STAMPED_SCHEMA = "geometry_msgs/msg/TwistStamped"
 _WORLD_FRAMES = ("map", "world", "odom")
-_GROUND_TRUTH_FRAMES = ("map", "world", "odom")
+_GROUND_TRUTH_FRAMES = ("map", "world")
 _BASE_FRAME_MARKERS = ("base_link", "base_footprint")
 
 

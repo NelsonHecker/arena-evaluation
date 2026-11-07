@@ -36,7 +36,7 @@ PARAM = "MSG: rcl_interfaces/Parameter\nstring name\nParameterValue value"
 TRANSFORM_STAMPED = "MSG: geometry_msgs/TransformStamped\nstd_msgs/Header header\nstring child_frame_id\nTransform transform"
 TRANSFORM = "MSG: geometry_msgs/Transform\nVector3 translation\nQuaternion rotation"
 ENTITY = "MSG: arena_runtime_msgs/SemanticEntityState\nstring entity\nstring kind\nstring[] discrete_names\nstring[] discrete_values\nstring[] continuous_names\nfloat64[] continuous_values\nstring[] predicate_names\nbool[] predicate_values\nstring[] members"
-PEDESTRIAN = "MSG: arena_people_msgs/Pedestrian\nstring name\nuint32 id\ngeometry_msgs/Pose pose\ngeometry_msgs/Twist twist"
+PEDESTRIAN = "MSG: arena_people_msgs/Pedestrian\nstring name\nuint32 id\ngeometry_msgs/Pose pose\ngeometry_msgs/Twist twist\nuint8 animation_state\nint32 interaction_id\nuint8 interaction_type\nstring agent_type\nfloat32 gait_phase\nfloat32 gait_cadence"
 
 
 def _msgdef(body: str, *deps: str) -> str:
@@ -53,11 +53,11 @@ AGENT_STATES = (
     "arena_humansim_msgs/msg/AgentStates",
     _msgdef("std_msgs/Header header\nAgentState[] agents", HEADER, TIME, "MSG: arena_humansim_msgs/AgentState\nuint32 agent_id\nuint8 kind\ngeometry_msgs/Pose2D pose\ngeometry_msgs/Vector3 velocity", "MSG: geometry_msgs/Pose2D\nfloat64 x\nfloat64 y\nfloat64 theta", VEC3),
 )
-ACOUSTICS = ("arena_robots_msgs/msg/Acoustics", _msgdef("uint32 FLAG_NO_EFFORT=2\nstd_msgs/Header header\nfloat32 total_level_af_dba\nfloat32 total_level_zf_db\nfloat32 baseline_level_dba\nfloat32 drivetrain_level_dba\nfloat32 uncertainty_1sigma_dba\nuint32 validity_flags", HEADER, TIME))
+ACOUSTICS = ("arena_robots_msgs/msg/Acoustics", _msgdef("uint32 FLAG_NO_EFFORT=2\nstd_msgs/Header header\nfloat32 total_level_af_dba\nfloat32 total_level_zf_db\nfloat32 baseline_level_dba\nfloat32 drivetrain_level_dba\nfloat32 uncertainty_1sigma_dba\nuint32 validity_flags\nstring operating_state\nstring calibration_status", HEADER, TIME))
 STRING = ("std_msgs/msg/String", "string data")
 EPISODE_RECORD = (
     "arena_runtime_msgs/msg/EpisodeRecord",
-    _msgdef("uint32 episode_id\nuint8 RUNNING = 1\nuint8 outcome_state\nstring outcome_info\nstring goal_uuid\ndiagnostic_msgs/KeyValue[] modes\nrcl_interfaces/Parameter[] params\nstring phases", KEY_VALUE, PARAM, PARAM_VALUE),
+    _msgdef("uint32 episode_id\nstring world\nint64 seed\nstring task_layer\ndiagnostic_msgs/KeyValue[] modes\nstring[] robots\nuint8 RUNNING = 1\nuint8 outcome_state\nstring outcome_info\nstring goal_uuid\nfloat32 goal_dist_start\nfloat32 goal_dist_min\nfloat32 path_length\nbuiltin_interfaces/Time start_time\nstring[] integrity\nrcl_interfaces/Parameter[] params\nrcl_interfaces/Parameter[] human_params\nstring conditions\nstring phases", KEY_VALUE, PARAM, PARAM_VALUE, TIME),
 )
 EPISODE_RECORD_BEFORE_MODES = (
     "task_generator_msgs/msg/EpisodeRecord",
@@ -67,9 +67,8 @@ EPISODE_RECORD_V1 = ("task_generator_msgs/msg/EpisodeRecord", "uint32 episode_id
 SEMANTIC_SNAPSHOT = ("arena_runtime_msgs/msg/SemanticSnapshot", _msgdef("builtin_interfaces/Time stamp\nuint32 env_id\nstring world\nSemanticEntityState[] entities", TIME, ENTITY))
 COLLISION_EVENTS = (
     "arena_robots_msgs/msg/CollisionEvents",
-    _msgdef("std_msgs/Header header\narena_robots_msgs/CollisionEvent[] events", HEADER, TIME, 'MSG: arena_robots_msgs/CollisionEvent\nstring KIND_WALL="wall"\nstring kind\nstring obstacle_id\nfloat32 distance'),
+    _msgdef("std_msgs/Header header\narena_robots_msgs/CollisionEvent[] events", HEADER, TIME, 'MSG: arena_robots_msgs/CollisionEvent\nstring KIND_WALL="wall"\nstring kind\nstring obstacle_id\nfloat32 distance\ngeometry_msgs/Point obstacle_position', POINT),
 )
-COLLISION_EVENTS_V1 = ("arena_robots_msgs/msg/CollisionEvents", _msgdef("std_msgs/Header header\narena_robots_msgs/CollisionEvent[] events", HEADER, TIME, "MSG: arena_robots_msgs/CollisionEvent\nstring obstacle_id\nfloat32 distance"))
 COLLISION_MONITOR_STATE = ("nav2_msgs/msg/CollisionMonitorState", "uint8 DO_NOTHING=0\nuint8 action_type\nstring polygon_name")
 POWER = (
     "arena_robots_msgs/msg/Power",
@@ -115,7 +114,7 @@ def _schedule(*phases: tuple[str, float]) -> dict:
 def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
     odom = {"header": _header(1, 5, "odom"), "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": YAW_HALF_PI}}, "twist": {"twist": {"linear": {"x": 0.5}, "angular": {"z": 0.1}}}}
     controller_odom = {"header": _header(1, 0, "odom"), "pose": {"pose": {"position": {"x": 7.0, "y": 8.0}, "orientation": {"w": 1.0}}}, "twist": {"twist": {}}}
-    pedestrian = {"name": "alice", "pose": {"position": {"x": 3.0, "y": 4.0, "z": 0.0}, "orientation": YAW_HALF_PI}, "twist": {"linear": {"x": 0.3, "y": -0.1}}}
+    pedestrian = {"name": "alice", "id": 0, "pose": {"position": {"x": 3.0, "y": 4.0, "z": 0.0}, "orientation": YAW_HALF_PI}, "twist": {"linear": {"x": 0.3, "y": -0.1, "z": 0.0}}, "animation_state": 1, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0}
     params = [
         _param("jackal.enabled", 1, bool_value=True),
         _param("jackal.count", 2, integer_value=3),
@@ -128,7 +127,12 @@ def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
         _param("names", 9, string_array_value=["a", "b"]),
         _param("unset", 0),
     ]
-    events = [{"kind": "wall", "obstacle_id": "w1"}, {"kind": "static", "obstacle_id": "s1"}, {"kind": "pedestrian", "obstacle_id": "p1"}, {"kind": "robot", "obstacle_id": "w1"}]
+    events = [
+        {"kind": "wall", "obstacle_id": "w1", "distance": 0.1, "obstacle_position": {"x": 1.0, "y": 2.0, "z": 0.0}},
+        {"kind": "static", "obstacle_id": "s1", "distance": 0.2, "obstacle_position": {"x": 2.0, "y": 3.0, "z": 0.0}},
+        {"kind": "pedestrian", "obstacle_id": "p1", "distance": 0.3, "obstacle_position": {"x": 3.0, "y": 4.0, "z": 0.0}},
+        {"kind": "robot", "obstacle_id": "w1", "distance": 0.4, "obstacle_position": {"x": 4.0, "y": 5.0, "z": 0.0}},
+    ]
     records = [
         ("/env_0/jackal/odom", ODOMETRY, odom, 1 * SEC),
         ("/env_0/jackal/diff_drive_controller/odom", ODOMETRY, controller_odom, 1 * SEC),
@@ -142,13 +146,13 @@ def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
         ("/env_0/jackal/joint_states", JOINT_STATE, {"header": _header(), "name": ["left", "right"], "position": [0.1, 0.2], "velocity": [1.0, 1.1], "effort": [0.0, 0.5]}, 2 * SEC),
         ("/env_0/peds", PEDESTRIANS, {"header": _header(frame_id="map"), "pedestrians": [pedestrian]}, 2 * SEC),
         ("/env_0/agent_states", AGENT_STATES, {"header": _header(frame_id="map"), "agents": [{"agent_id": 4, "kind": 0, "pose": {"x": 9.0, "y": 9.0, "theta": 0.0}, "velocity": {}}]}, 2 * SEC),
-        ("/env_0/jackal/acoustics", ACOUSTICS, {"header": _header(), "total_level_af_dba": 55.5, "total_level_zf_db": 60.0, "baseline_level_dba": 40.0, "drivetrain_level_dba": 50.0, "uncertainty_1sigma_dba": 2.0, "validity_flags": 2}, 2 * SEC),
+        ("/env_0/jackal/acoustics", ACOUSTICS, {"header": _header(), "total_level_af_dba": 55.5, "total_level_zf_db": 60.0, "baseline_level_dba": 40.0, "drivetrain_level_dba": 50.0, "uncertainty_1sigma_dba": 2.0, "validity_flags": 2, "operating_state": "driving", "calibration_status": "nominal"}, 2 * SEC),
         ("/env_0/jackal/characterization_phase", STRING, {"data": "ramp_up"}, 2 * SEC),
         ("/env_0/jackal/characterization_schedule", STRING, _schedule(("a", 0.2), ("b", 0.4)), 2 * SEC),
         ("/env_0/jackal/characterization_schedule", STRING, {"data": "not json"}, 3 * SEC),
         ("/env_0/jackal/characterization_schedule", STRING, _schedule(("c", 0.6)), 4 * SEC),
-        ("/env_0/state/episode", EPISODE_RECORD, {"episode_id": 7, "outcome_state": 2, "outcome_info": "done", "goal_uuid": "g", "modes": [], "params": params, "phases": '{"jackal": {"map_poses": []}}'}, 5 * SEC),
-        ("/env_0/state/episode", EPISODE_RECORD, {"episode_id": 7, "outcome_state": 3, "modes": [], "params": [], "phases": ""}, 6 * SEC),
+        ("/env_0/state/episode", EPISODE_RECORD, {"episode_id": 7, "world": "test_world", "seed": 42, "task_layer": "standard", "modes": [], "robots": ["jackal"], "outcome_state": 2, "outcome_info": "done", "goal_uuid": "g", "goal_dist_start": 5.0, "goal_dist_min": 0.1, "path_length": 6.2, "start_time": {"sec": 1, "nanosec": 0}, "integrity": [], "params": params, "human_params": [], "conditions": "", "phases": '{"jackal": {"map_poses": []}}'}, 5 * SEC),
+        ("/env_0/state/episode", EPISODE_RECORD, {"episode_id": 7, "world": "test_world", "seed": 42, "task_layer": "standard", "modes": [], "robots": ["jackal"], "outcome_state": 3, "outcome_info": "failed", "goal_uuid": "g", "goal_dist_start": 5.0, "goal_dist_min": 0.1, "path_length": 6.2, "start_time": {"sec": 1, "nanosec": 0}, "integrity": [], "params": [], "human_params": [], "conditions": "", "phases": ""}, 6 * SEC),
         ("/env_1/agent_states", AGENT_STATES, {"header": _header(frame_id="map"), "agents": [{"agent_id": 5, "kind": 0, "pose": {"x": 1.0, "y": 2.0, "theta": 0.5}, "velocity": {"x": 0.1}}]}, 2 * SEC),
         (
             "/env_2/state/episode",
@@ -165,7 +169,7 @@ def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
         ),
         ("/env_0/jackal/collision_events", COLLISION_EVENTS, {"header": _header(), "events": events}, 3 * SEC),
         ("/env_0/jackal/collision_events", COLLISION_EVENTS, {"header": _header(), "events": []}, 4 * SEC),
-        ("/env_0/burger/collision_events", COLLISION_EVENTS_V1, {"header": _header(), "events": [{"obstacle_id": "x"}]}, 3 * SEC),
+        ("/env_0/burger/collision_events", COLLISION_EVENTS, {"header": _header(), "events": [{"kind": "wall", "obstacle_id": "x", "distance": 0.5, "obstacle_position": {"x": 0.0, "y": 0.0, "z": 0.0}}]}, 3 * SEC),
         ("/env_0/jackal/collision_monitor_state", COLLISION_MONITOR_STATE, {"action_type": 2, "polygon_name": "stop_zone"}, 3 * SEC),
         ("/env_0/jackal/power_publisher/power", POWER, {"header": _header(), "total_power_w": 12.0, "static_power_w": 5.0, "total_mechanical_power_w": 6.0, "total_thermal_power_w": 1.0, "joint_names": ["left"], "joint_mechanical_power_w": [6.0], "joint_thermal_power_w": [1.0], "joint_total_power_w": [7.0]}, 3 * SEC),
         ("/env_0/jackal/power_publisher/energy", ENERGY, {"header": _header(), "total_energy_consumed_wh": 0.5, "battery_soc_percent": 99.0}, 3 * SEC),
@@ -393,13 +397,13 @@ def test_semantic_snapshot_flattens_each_entity_field_into_a_row(every_topic: tu
     ]
 
 
-def test_collision_events_count_kinds_only_when_the_schema_has_them(every_topic: tuple[pathlib.Path, dict]):
+def test_collision_events_count_kinds(every_topic: tuple[pathlib.Path, dict]):
     _, bundles = every_topic
 
     events = bundles["env_0_jackal"].collision_events.collect()
     assert events.select("event_count", "wall_count", "static_count", "ped_count").rows() == [(4, 1, 1, 1), (0, 0, 0, 0)]
     burger = bundles["env_0_burger"].collision_events.collect().row(0, named=True)
-    assert (burger["event_count"], burger["wall_count"], burger["static_count"], burger["ped_count"]) == (1, None, None, None)
+    assert (burger["event_count"], burger["wall_count"], burger["static_count"], burger["ped_count"]) == (1, 1, 0, 0)
     assert sorted(set(bundles["env_0_jackal"].collision_contacts.collect()["obstacle_id"].to_list())) == ["p1", "s1", "w1"]
 
 
@@ -497,7 +501,7 @@ def test_directory_of_bags_skips_undecodable_and_corrupt_messages(tmp_path: path
 
 def test_global_and_env_writers_append_across_buffer_flushes(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(telemetry_writer, "FLUSH_ROW_LIMIT", 1_000)
-    peds = {"header": _header(frame_id="map"), "pedestrians": [{"name": "p", "pose": {"position": {"x": 1.0}, "orientation": {"w": 1.0}}, "twist": {}}]}
+    peds = {"header": _header(frame_id="map"), "pedestrians": [{"name": "p", "id": 1, "pose": {"position": {"x": 1.0}, "orientation": {"w": 1.0}}, "twist": {}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0}]}
     tf = {"transforms": [_transform("map", "env_0/map", 0.0, 0.0)]}
     odom = {"header": _header(), "pose": {"pose": {"position": {}, "orientation": {"w": 1.0}}}, "twist": {"twist": {}}}
     records = [("/env_0/jackal/odom", ODOMETRY, odom, 0)]

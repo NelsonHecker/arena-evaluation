@@ -48,7 +48,7 @@ def test_spl_and_path_efficiency():
 
     episode = AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"collision_event": [0, 0, 0]}),
+        data=pl.DataFrame({"event_count": [0, 0, 0]}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[10.0, 0.0, 0.0],
     )
@@ -70,7 +70,7 @@ def test_spl_and_path_efficiency():
     # 3. Collision failure (SPL must be 0.0)
     episode_fail = AlignedEpisodeBundle(
         episode_id=2,
-        data=pl.DataFrame({"collision_event": [0, 1, 0, 1, 0, 1, 0, 1]}),
+        data=pl.DataFrame({"event_count": [0, 1, 0, 1, 0, 1, 0, 1]}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[10.0, 0.0, 0.0],
     )

@@ -82,8 +82,10 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     @classmethod
     def _column_rising_edges(cls, episode: AlignedEpisodeBundle, column: str) -> int | None:
         frame = cls._collision_frame(episode)
-        name = cls._NATIVE_COUNT_COLUMNS[column] if frame is not None and "event_count" in frame.columns else column
-        if frame is None or name not in frame.columns:
+        if frame is None:
+            return None
+        name = cls._NATIVE_COUNT_COLUMNS[column]
+        if name not in frame.columns:
             return None
         counts = frame[name].to_numpy().astype(float)
         if np.isnan(counts).all():

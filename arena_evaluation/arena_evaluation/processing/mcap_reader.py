@@ -349,9 +349,14 @@ def _shift_positions(frame: pl.LazyFrame, anchors: list[Anchor], columns: tuple[
 
 
 def _shift_episode_phases(frame: pl.LazyFrame, anchors: list[Anchor]) -> pl.LazyFrame:
-    records = frame.collect()
-    phases = [_shift_map_poses(payload, *anchor_at(anchors, stamp)) for stamp, payload in zip(records["t_ns"].to_list(), records["phases_yaml"].to_list(), strict=True)]
-    return records.with_columns(pl.Series("phases_yaml", phases)).lazy()
+    return frame.with_columns(
+        pl.struct(["t_ns", "phases_yaml"])
+        .map_elements(
+            lambda row: _shift_map_poses(row["phases_yaml"], *anchor_at(anchors, int(row["t_ns"]))),
+            return_dtype=pl.String,
+        )
+        .alias("phases_yaml")
+    )
 
 
 def _shift_map_poses(payload: str, ox: float, oy: float) -> str:

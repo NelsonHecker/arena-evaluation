@@ -942,22 +942,19 @@ def test_extract_trajectory_data_flat_float_list():
 
 
 def test_extract_trajectory_data_disk_fallback(tmp_path):
-    """Verify _extract_trajectory_data falls back to disk topics/peds.parquet when df has no peds."""
+    """Verify _extract_trajectory_data falls back to disk topics/pedestrian_tracks.parquet when df has no peds."""
     import polars as pl
 
     ep_dir = tmp_path / "episodes" / "episode_005" / "topics"
     ep_dir.mkdir(parents=True)
     peds_df = pl.DataFrame(
         {
-            "time_ns": [0, 100000000, 200000000],
-            "peds_positions": [
-                [2.0, 3.0, 0.0],
-                [2.5, 3.5, 0.0],
-                [3.0, 4.0, 0.0],
-            ],
+            "ped_id": ["Pedestrian_0", "Pedestrian_0", "Pedestrian_0"],
+            "x": [2.0, 2.5, 3.0],
+            "y": [3.0, 3.5, 4.0],
         }
     )
-    peds_df.write_parquet(ep_dir / "peds.parquet")
+    peds_df.write_parquet(ep_dir / "pedestrian_tracks.parquet")
 
     df_empty = pl.DataFrame({"pos_x_gt": [0.0], "pos_y_gt": [0.0]})
     traj_data = AcousticFieldRenderer._extract_trajectory_data(df_empty, run_dir=tmp_path, episode_id=5)

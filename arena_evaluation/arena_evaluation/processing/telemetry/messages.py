@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import functools
 import math
 import re
 import typing
@@ -17,15 +16,8 @@ if typing.TYPE_CHECKING:
 NS_PER_SECOND = 1_000_000_000
 DEFAULT_ENV_ID = "env_0"
 _ENV_TOKEN = re.compile(r"(env_\d+)")
-_FIELD_DECLARATION = re.compile(r"^\s*[A-Za-z_][\w/]*(?:\[\d*\])?\s+([A-Za-z_]\w*)", re.MULTILINE)
 _CONTROLLER_SUFFIX = "_controller"
 _POWER_PUBLISHER = "power_publisher"
-
-
-class HasSlots(typing.Protocol):
-    """An object declaring __slots__."""
-
-    __slots__: tuple[str, ...] | list[str]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -55,18 +47,6 @@ def yaw_from_orientation(orientation: Quaternion) -> float:
     """Heading angle of a geometry_msgs quaternion."""
     x, y, z, w = orientation.x, orientation.y, orientation.z, orientation.w
     return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
-
-
-def declares(schema: Schema, body: HasSlots, field: str) -> bool:
-    """Whether the recorded schema declares a field; without schema text the message class decides."""
-    if schema.data:
-        return field in _declared_fields(schema.data.decode())
-    return field in {slot.lstrip("_") for slot in body.__slots__}
-
-
-@functools.lru_cache(maxsize=256)
-def _declared_fields(text: str) -> frozenset[str]:
-    return frozenset(_FIELD_DECLARATION.findall(text))
 
 
 def env_id_in(text: str, default: str = DEFAULT_ENV_ID) -> str:

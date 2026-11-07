@@ -13,6 +13,14 @@ from arena_evaluation.processing.pipeline import _robot_phases
 
 _PARAMETER_DEFS = """
 ================================================================================
+MSG: diagnostic_msgs/KeyValue
+string key
+string value
+================================================================================
+MSG: builtin_interfaces/Time
+int32 sec
+uint32 nanosec
+================================================================================
 MSG: rcl_interfaces/Parameter
 string name
 rcl_interfaces/ParameterValue value
@@ -31,12 +39,22 @@ string[] string_array_value
 """
 
 _RECORD_FIELDS = """uint32 episode_id
+string world
+int64 seed
+string task_layer
+diagnostic_msgs/KeyValue[] modes
+string[] robots
 uint8 outcome_state
 string outcome_info
 string goal_uuid
 float32 goal_dist_start
 float32 goal_dist_min
+float32 path_length
+builtin_interfaces/Time start_time
+string[] integrity
+string conditions
 {extra}rcl_interfaces/Parameter[] params
+rcl_interfaces/Parameter[] human_params
 """
 
 _PHASES = {
@@ -58,12 +76,22 @@ def _records(tmp_path: pathlib.Path, payloads: list[str | None]) -> pl.DataFrame
         for i, payload in enumerate(payloads):
             msg = {
                 "episode_id": 7,
+                "world": "test_world",
+                "seed": 42,
+                "task_layer": "standard",
+                "modes": [],
+                "robots": ["jackal"],
                 "outcome_state": 1 + i,
                 "outcome_info": "",
                 "goal_uuid": "",
                 "goal_dist_start": 5.0,
                 "goal_dist_min": 1.0,
+                "path_length": 6.2,
+                "start_time": {"sec": 1, "nanosec": 0},
+                "integrity": [],
+                "conditions": "",
                 "params": [],
+                "human_params": [],
             }
             if with_phases:
                 msg["phases"] = payload

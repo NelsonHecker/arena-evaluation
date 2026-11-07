@@ -6,7 +6,7 @@ from arena_evaluation.processing.metrics.performance.collision_metrics import Co
 def test_collision_amount():
     df = pl.DataFrame(
         {
-            "collision_event": [
+            "event_count": [
                 0,  # no collision
                 2,  # collision 1
                 2,  # still collision 1
@@ -31,10 +31,10 @@ def test_collision_amount():
 def test_collision_amount_split_by_kind():
     df = pl.DataFrame(
         {
-            "collision_event": [0, 2, 2, 0, 1, 1],
-            "collision_wall": [0, 1, 1, 0, 0, 0],
-            "collision_static": [0, 1, 1, 0, 0, 0],
-            "collision_pedestrian": [0, 0, 0, 0, 1, 1],
+            "event_count": [0, 2, 2, 0, 1, 1],
+            "wall_count": [0, 1, 1, 0, 0, 0],
+            "static_count": [0, 1, 1, 0, 0, 0],
+            "ped_count": [0, 0, 0, 0, 1, 1],
         }
     )
 
@@ -53,10 +53,10 @@ def test_collision_amount_split_by_kind():
 def test_collision_amount_split_by_kind_unknown():
     df = pl.DataFrame(
         {
-            "collision_event": [0, 2, 0],
-            "collision_wall": [None, None, None],
-            "collision_static": [None, None, None],
-            "collision_pedestrian": [None, None, None],
+            "event_count": [0, 2, 0],
+            "wall_count": [None, None, None],
+            "static_count": [None, None, None],
+            "ped_count": [None, None, None],
         }
     )
 
@@ -75,7 +75,7 @@ def test_collision_amount_split_by_kind_unknown():
 def test_collision_timeout_and_fail():
     df = pl.DataFrame(
         {
-            "collision_event": [0, 1, 0, 1, 0, 1, 0, 1]  # 4 collisions, > MAX_COLLISIONS
+            "event_count": [0, 1, 0, 1, 0, 1, 0, 1]  # 4 collisions, > MAX_COLLISIONS
         }
     )
 
@@ -93,7 +93,7 @@ def test_collision_timeout_and_fail():
 
 
 def test_collision_obstacles_recorded():
-    df = pl.DataFrame({"collision_event": [0, 2, 1]})
+    df = pl.DataFrame({"event_count": [0, 2, 1]})
     contacts = pl.DataFrame(
         {
             "t_ns": [1_000_000_000, 1_000_000_000, 2_000_000_000],
@@ -116,7 +116,7 @@ def test_collision_obstacles_recorded():
 
 
 def test_collision_obstacles_absent():
-    df = pl.DataFrame({"collision_event": [0, 1]})
+    df = pl.DataFrame({"event_count": [0, 1]})
 
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
     params = RobotParams(0.2, 0.0, 10.0)
@@ -129,7 +129,7 @@ def test_collision_obstacles_absent():
 
 def test_recorded_outcome_overrides_derived_success():
     # A cancelled episode can still show a short time_to_goal, the runtime's verdict wins.
-    df = pl.DataFrame({"collision_event": [0, 0, 0]})
+    df = pl.DataFrame({"event_count": [0, 0, 0]})
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[], outcome_state=4)
     calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
 
@@ -140,7 +140,7 @@ def test_recorded_outcome_overrides_derived_success():
 
 
 def test_recorded_success_keeps_the_derived_result():
-    df = pl.DataFrame({"collision_event": [0, 0, 0]})
+    df = pl.DataFrame({"event_count": [0, 0, 0]})
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[], outcome_state=2)
     calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
 
@@ -153,7 +153,7 @@ def test_recorded_success_keeps_the_derived_result():
 def test_action_type_stop_zones_no_longer_count_as_collisions():
     df = pl.DataFrame(
         {
-            "collision_event": [0, 0, 0, 0, 0],
+            "event_count": [0, 0, 0, 0, 0],
             "action_type": [0, 1, 1, 0, 1],
         }
     )
@@ -169,7 +169,7 @@ def test_action_type_stop_zones_no_longer_count_as_collisions():
 
 
 def test_outcome_info_collision_overrides_result():
-    df = pl.DataFrame({"collision_event": [0, 0, 0]})
+    df = pl.DataFrame({"event_count": [0, 0, 0]})
     episode = AlignedEpisodeBundle(
         episode_id=1,
         data=df,
@@ -187,7 +187,7 @@ def test_outcome_info_collision_overrides_result():
 
 
 def _episode_with_outcome(outcome_state: int | None) -> AlignedEpisodeBundle:
-    df = pl.DataFrame({"collision_event": [0, 0, 0]})
+    df = pl.DataFrame({"event_count": [0, 0, 0]})
     return AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[], outcome_state=outcome_state)
 
 
@@ -207,7 +207,7 @@ def test_missing_record_keeps_trace_verdict() -> None:
 
 
 def test_max_collisions_override() -> None:
-    df = pl.DataFrame({"collision_event": [0, 2, 0]})
+    df = pl.DataFrame({"event_count": [0, 2, 0]})
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
     calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
     calc.metrics_config = {"max_collisions": 1}
@@ -220,7 +220,7 @@ def test_max_collisions_override() -> None:
 
 
 def test_max_collisions_default_unchanged() -> None:
-    df = pl.DataFrame({"collision_event": [0, 2, 0, 1]})
+    df = pl.DataFrame({"event_count": [0, 2, 0, 1]})
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
     calc = CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
 

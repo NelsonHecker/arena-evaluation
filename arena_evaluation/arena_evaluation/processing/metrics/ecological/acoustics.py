@@ -79,7 +79,7 @@ class AcousticsCalculator(BaseMetricCalculator):
         acous = acous.sort("t_ns")
         try:
             dba = acous["total_level_af_dba"].cast(pl.Float64).fill_null(strategy="forward").fill_null(self._DEFAULT_DBA).to_numpy()
-        except Exception:
+        except (pl.ComputeError, TypeError):
             return {k: None for k in self.output_keys()}
 
         if len(dba) == 0 or np.all(np.isnan(dba)):

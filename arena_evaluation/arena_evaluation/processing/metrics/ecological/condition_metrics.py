@@ -179,9 +179,7 @@ def clips_on_axis(peds: pl.DataFrame | None, gestures: pl.DataFrame | None, time
     times = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
     rows: list[dict[str, frozenset[str]]] = []
     for k, frame in enumerate(frames):
-        ped_names = frame["ped_name"].to_list() if "ped_name" in frame.columns else frame["ped_id"].to_list()
-        ped_ids = frame["ped_id"].to_list()
-        rows.append({_strip_env(name): frozenset(playing.get(int(times[k]), {}).get(ped_id, ())) for name, ped_id in zip(ped_names, ped_ids, strict=True)})
+        rows.append({_strip_env(str(name)): frozenset(playing.get(int(times[k]), {}).get(str(ped_id), ())) for name, ped_id in zip(frame["ped_name"], frame["ped_id"], strict=True)})
     idx = np.searchsorted(times, time_ns, side="right") - 1
     return [rows[i] if i >= 0 else {} for i in idx]
 
