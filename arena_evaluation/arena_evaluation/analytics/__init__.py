@@ -1,13 +1,18 @@
 """Polars OLAP Analytics Core (Layer 4).
 
-Exposes :class:`BenchmarkCatalog`, :class:`PolarsSQLEngine`, statistical
-procedures (:mod:`arena_evaluation.analytics.stats`), sensitivity sweeps
-(:mod:`arena_evaluation.analytics.what_if`), and :class:`EvidenceStore`.
+Exposes :class:`BenchmarkCatalog` (:class:`StarCatalog`), :class:`PolarsSQLEngine`,
+statistical procedures (:mod:`arena_evaluation.analytics.stats`), and
+:class:`EvidenceStore`.
 """
 
 from __future__ import annotations
 
-from .catalog import CANONICAL_VIEW_NAMES, BenchmarkCatalog
+from .catalog import (
+    CANONICAL_VIEW_NAMES,
+    TELEMETRY_TABLE_NAMES,
+    BenchmarkCatalog,
+    StarCatalog,
+)
 from .evidence import (
     VALID_EVIDENCE_KINDS,
     EvidenceRecord,
@@ -35,23 +40,11 @@ from .stats import (
     rank_swap_matrix,
     split_discovery_verification_seeds,
 )
-from .what_if import (
-    CLOSER_SWEEP_METRIC_SCHEMA,
-    DEFAULT_CLEARANCE_THRESHOLDS_M,
-    DEFAULT_DOMINANT_SHARE_THRESHOLDS,
-    ENCOUNTER_SWEEP_METRIC_SCHEMA,
-    sweep_closer_share_thresholds,
-    sweep_encounter_clearance_thresholds,
-)
 
 __all__ = [
     "BenchmarkCatalog",
     "CANONICAL_VIEW_NAMES",
-    "CLOSER_SWEEP_METRIC_SCHEMA",
     "CLUSTER_BOOTSTRAP_SCHEMA",
-    "DEFAULT_CLEARANCE_THRESHOLDS_M",
-    "DEFAULT_DOMINANT_SHARE_THRESHOLDS",
-    "ENCOUNTER_SWEEP_METRIC_SCHEMA",
     "EvidenceRecord",
     "EvidenceStore",
     "FORBIDDEN_SQL_KEYWORDS",
@@ -63,6 +56,8 @@ __all__ = [
     "PolarsSQLEngine",
     "RANK_SWAP_MATRIX_SCHEMA",
     "SQLGuardError",
+    "StarCatalog",
+    "TELEMETRY_TABLE_NAMES",
     "VALID_EVIDENCE_KINDS",
     "cluster_bootstrap_ci",
     "compute_frame_hash",
@@ -71,7 +66,5 @@ __all__ = [
     "paired_treatment_diff",
     "rank_swap_matrix",
     "split_discovery_verification_seeds",
-    "sweep_closer_share_thresholds",
-    "sweep_encounter_clearance_thresholds",
     "validate_readonly_sql",
 ]

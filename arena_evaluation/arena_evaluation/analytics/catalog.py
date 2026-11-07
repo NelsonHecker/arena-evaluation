@@ -7,6 +7,7 @@ exposes canonical analytical views as pure Polars ``LazyFrame`` query plans.
 from __future__ import annotations
 
 import pathlib
+import re
 from collections.abc import Mapping
 from typing import Final
 
@@ -21,7 +22,9 @@ from arena_evaluation.storage.star_schema import (
 
 __all__ = [
     "CANONICAL_VIEW_NAMES",
+    "TELEMETRY_TABLE_NAMES",
     "BenchmarkCatalog",
+    "StarCatalog",
 ]
 
 CANONICAL_VIEW_NAMES: Final[tuple[str, ...]] = (
@@ -31,9 +34,19 @@ CANONICAL_VIEW_NAMES: Final[tuple[str, ...]] = (
     "v_encounter_summary",
 )
 
+TELEMETRY_TABLE_NAMES: Final[tuple[str, ...]] = (
+    "robot_tracks",
+    "pedestrian_tracks",
+    "collision_contacts",
+    "robot_power",
+    "robot_acoustics",
+)
+
+_EPISODE_DIR_RE: Final[re.Pattern[str]] = re.compile(r"^episode_(\d+)$")
+
 
 class BenchmarkCatalog:
-    """Lazy Polars catalog of Star Schema tables, analytical views, and derived tables."""
+    """Lazy Polars catalog of Star Schema tables, analytical views, and telemetry tables."""
 
     def __init__(
         self,
@@ -43,6 +56,7 @@ class BenchmarkCatalog:
 
         if isinstance(source, pathlib.Path):
             self._tables.update(scan_star_schema(source))
+            self._register_telemetry_views(source)
         elif isinstance(source, StarSchemaTables):
             self._tables.update(source.lazy_by_name())
         elif isinstance(source, Mapping):
@@ -95,6 +109,43 @@ class BenchmarkCatalog:
         """Return a shallow copy of all registered ``LazyFrame`` tables."""
         return dict(self._tables)
 
+    def _register_telemetry_views(self, benchmark_dir: pathlib.Path) -> None:
+        """Lazily scan episode telemetry Parquet tables across ``benchmark_dir / 'episodes'``."""
+        episodes_root = benchmark_dir / "episodes"
+        if not episodes_root.is_dir():
+            return
+
+        ep_dirs = sorted(
+            {path for pattern in ("episode_*", "*/episode_*") for path in episodes_root.glob(pattern) if path.is_dir() and _EPISODE_DIR_RE.match(path.name) is not None},
+            key=lambda p: int(p.name.split("_")[-1]),
+        )
+        if not ep_dirs:
+            return
+
+        frames_by_table: dict[str, list[pl.LazyFrame]] = {}
+        for ep_dir in ep_dirs:
+            match = _EPISODE_DIR_RE.match(ep_dir.name)
+            if match is None:
+                continue
+            ep_id = int(match.group(1))
+            telemetry_dir = ep_dir / "telemetry"
+            source_dir = telemetry_dir if telemetry_dir.is_dir() else (ep_dir / "topics")
+            if not source_dir.is_dir():
+                continue
+            for parquet_path in sorted(source_dir.glob("*.parquet")):
+                stem = parquet_path.stem
+                if stem in STAR_TABLE_NAMES:
+                    continue
+                lf = pl.scan_parquet(parquet_path).with_columns(
+                    episode_id=pl.lit(ep_id, dtype=pl.Int64),
+                )
+                frames_by_table.setdefault(stem, []).append(lf)
+
+        for table_name, frames in frames_by_table.items():
+            combined = frames[0] if len(frames) == 1 else pl.concat(frames, how="vertical_relaxed")
+            self._tables[table_name] = combined
+            self._tables[f"telemetry_{table_name}"] = combined
+
     def _register_canonical_views(self) -> None:
         dim_ep = self._tables["dim_episodes"]
         dim_rob = self._tables["dim_robots"]
@@ -106,7 +157,6 @@ class BenchmarkCatalog:
             "run_id",
             "episode_id",
             "robot_id",
-            "env_id",
             "benchmark_id",
             "suite_name",
             "contest_name",
@@ -233,3 +283,6 @@ class BenchmarkCatalog:
             .sort("crowd_condition", "planner", "approach_type")
         )
         self._tables["v_encounter_summary"] = v_encounter_summary
+
+
+StarCatalog = BenchmarkCatalog

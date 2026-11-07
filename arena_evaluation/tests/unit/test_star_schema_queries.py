@@ -42,8 +42,6 @@ from arena_evaluation.analytics import (
     paired_treatment_diff,
     rank_swap_matrix,
     split_discovery_verification_seeds,
-    sweep_closer_share_thresholds,
-    sweep_encounter_clearance_thresholds,
 )
 from arena_evaluation.processing.metrics.ecological.compliance_metrics import _ZoneGeometry
 from arena_evaluation.processing.metrics.ecological.condition_metrics import _world_cache
@@ -723,25 +721,56 @@ def test_split_discovery_verification_seeds_partitions_deterministically() -> No
     assert discovery_seeds.max() < verification_seeds.min()
 
 
-def test_what_if_threshold_sweeps(star_tables: StarSchemaTables) -> None:
-    closer_sweep = sweep_closer_share_thresholds(
-        star_tables.fact_contacts.lazy(),
-        star_tables.dim_episodes.lazy(),
-        dominant_share_thresholds=(0.60, 0.70, 0.80),
-    ).collect()
-    assert closer_sweep.height > 0
-    assert set(closer_sweep.get_column("dominant_share_threshold").unique().to_numpy()) == {0.60, 0.70, 0.80}
+def test_sql_what_if_analysis_sweeps(star_tables: StarSchemaTables) -> None:
+    engine = PolarsSQLEngine(star_tables)
 
-    enc_sweep = sweep_encounter_clearance_thresholds(
-        star_tables.fact_encounters.lazy(),
-        star_tables.dim_episodes.lazy(),
-        max_min_clearance_m=(-1.0, 0.0, 2.0),
-    ).collect()
-    assert enc_sweep.height > 0
-    # Monotonic non-decreasing encounter counts with increasing clearance threshold
-    by_group = enc_sweep.sort("crowd_condition", "planner", "max_min_clearance_m")
-    diffs = by_group.with_columns(cnt_diff=pl.col("encounter_count").diff().over("crowd_condition", "planner").fill_null(0))
-    assert (diffs.get_column("cnt_diff") >= 0).all()
+    # 1. What if closer fault threshold is s_robot >= 0.60 vs 0.70?
+    sql_closer = """
+    SELECT
+        planner,
+        SUM(CASE WHEN robot_closing_share >= 0.70 THEN 1 ELSE 0 END) AS count_strict_robot,
+        SUM(CASE WHEN robot_closing_share >= 0.60 THEN 1 ELSE 0 END) AS count_lenient_robot,
+        SUM(CASE WHEN counterfactual_freeze_persists THEN 1 ELSE 0 END) AS count_unavoidable
+    FROM fact_contacts
+    JOIN dim_episodes USING (run_id, episode_id, robot_id)
+    GROUP BY planner
+    ORDER BY planner
+    """
+    df_closer = engine.query(sql_closer)
+    assert df_closer.height > 0
+    assert (df_closer.get_column("count_lenient_robot") >= df_closer.get_column("count_strict_robot")).all()
+
+    # 2. What if success allows < 5 collisions instead of 0?
+    sql_success_whatif = """
+    SELECT
+        planner,
+        AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END) AS strict_success_rate,
+        AVG(CASE WHEN (total_collisions_ped + total_collisions_static) < 5 THEN 1.0 ELSE 0.0 END) AS relaxed_success_rate
+    FROM fact_episodes
+    JOIN dim_episodes USING (run_id, episode_id, robot_id)
+    GROUP BY planner
+    ORDER BY planner
+    """
+    df_success = engine.query(sql_success_whatif)
+    assert df_success.height > 0
+    assert (df_success.get_column("relaxed_success_rate") >= df_success.get_column("strict_success_rate")).all()
+
+    # 3. What if encounter distance filter is <= 1.5m vs <= 3.0m?
+    sql_encounter_whatif = """
+    SELECT
+        crowd_condition,
+        SUM(CASE WHEN min_clearance_m <= 1.5 THEN 1 ELSE 0 END) AS encounters_close,
+        COUNT(*) AS encounters_total,
+        AVG(CASE WHEN min_clearance_m <= 1.5 THEN energy_surge_ratio ELSE NULL END) AS surge_close,
+        AVG(energy_surge_ratio) AS surge_total
+    FROM fact_encounters
+    JOIN dim_episodes USING (run_id, episode_id, robot_id)
+    GROUP BY crowd_condition
+    ORDER BY crowd_condition
+    """
+    df_encounter = engine.query(sql_encounter_whatif)
+    assert df_encounter.height > 0
+    assert (df_encounter.get_column("encounters_total") >= df_encounter.get_column("encounters_close")).all()
 
 
 def test_evidence_store_content_addressed_determinism_and_persistence(
