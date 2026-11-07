@@ -41,22 +41,14 @@ def test_native_topics_absent_is_empty_dict(probe):
     assert probe.native_topics(_bundle(topics={"odom": pl.DataFrame()})).keys() == {"odom"}
 
 
-def test_resolve_native_pose_prefers_tf_gt(probe):
+def test_resolve_native_pose_from_robot_tracks(probe):
     topics = {
-        "odom": pl.DataFrame(
+        "robot_tracks": pl.DataFrame(
             {
-                "time_ns": [0, SEC],
-                "pos_x": [0.0, 1.0],
-                "pos_y": [0.0, 0.0],
-                "yaw": [0.0, 0.0],
-            }
-        ),
-        "tf_gt": pl.DataFrame(
-            {
-                "time_ns": [0, SEC],
-                "pos_x_gt": [5.0, 6.0],
-                "pos_y_gt": [7.0, 7.0],
-                "yaw_gt": [0.1, 0.1],
+                "t_ns": [0, SEC],
+                "x": [5.0, 6.0],
+                "y": [7.0, 7.0],
+                "yaw": [0.1, 0.1],
             }
         ),
     }
@@ -67,37 +59,19 @@ def test_resolve_native_pose_prefers_tf_gt(probe):
     assert t.tolist() == [0, SEC]
 
 
-def test_resolve_native_pose_odom_fallback_is_world_framed(probe):
-    """Odom starts at its own origin; the start pose maps it into the world."""
+def test_resolve_native_pose_never_falls_back_to_odometry(probe):
     topics = {
-        "odom": pl.DataFrame(
+        "robot_odom": pl.DataFrame(
             {
-                "time_ns": [0, SEC, 2 * SEC],
-                "pos_x": [0.0, 1.0, 2.0],
-                "pos_y": [0.0, 0.0, 0.0],
-                "yaw": [0.0, 0.0, 0.0],
+                "t_ns": [0, SEC],
+                "odom_x": [0.0, 1.0],
+                "odom_y": [0.0, 0.0],
+                "odom_yaw": [0.0, 0.0],
             }
         ),
     }
-    x, y, _yaw, _t = probe.resolve_native_pose(_bundle(topics=topics, start_pos=[10.0, 20.0, 0.0]))
-    assert np.allclose(x, [10.0, 11.0, 12.0])
-    assert np.allclose(y, [20.0, 20.0, 20.0])
-
-
-def test_resolve_native_pose_odom_fallback_rotates_by_start_yaw(probe):
-    topics = {
-        "odom": pl.DataFrame(
-            {
-                "time_ns": [0, SEC],
-                "pos_x": [0.0, 1.0],
-                "pos_y": [0.0, 0.0],
-                "yaw": [0.0, 0.0],
-            }
-        ),
-    }
-    x, y, _yaw, _t = probe.resolve_native_pose(_bundle(topics=topics, start_pos=[0.0, 0.0, np.pi / 2]))
-    assert np.allclose(x, [0.0, 0.0], atol=1e-9)
-    assert np.allclose(y, [0.0, 1.0], atol=1e-9)
+    x, y, yaw, t = probe.resolve_native_pose(_bundle(topics=topics))
+    assert len(x) == len(y) == len(yaw) == len(t) == 0
 
 
 def test_resolve_native_pose_without_topics_is_empty(probe):
@@ -163,46 +137,10 @@ def test_speed_from_pose_single_sample_is_zero(probe):
     assert out.tolist() == [0.0]
 
 
-def test_parse_peds_reads_flat_triples_and_pairs(probe):
-    """The pedestrian count disambiguates a flat list."""
-    triples = probe._parse_peds([1.0, 2.0, 0.5, 3.0, 4.0, 1.5], 2)
-    assert triples.shape == (2, 3)
-    assert triples[1].tolist() == [3.0, 4.0, 1.5]
-
-    pairs = probe._parse_peds([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3)
-    assert pairs.shape == (3, 2)
-    assert pairs[2].tolist() == [5.0, 6.0]
-
-
-def test_parse_peds_without_a_count_prefers_triples(probe):
-    assert probe._parse_peds([1.0, 2.0, 0.5, 3.0, 4.0, 1.5]).shape == (2, 3)
-    assert probe._parse_peds([1.0, 2.0, 3.0, 4.0]).shape == (2, 2)
-
-
-def test_parse_peds_accepts_already_shaped_input(probe):
-    out = probe._parse_peds([[1.0, 2.0], [3.0, 4.0]])
-    assert out.shape == (2, 2)
-
-
-def test_parse_peds_parses_a_stringified_list(probe):
-    out = probe._parse_peds("[[1.0, 2.0], [3.0, 4.0]]")
-    assert out.shape == (2, 2)
-    assert out[0].tolist() == [1.0, 2.0]
-
-
-@pytest.mark.parametrize("bad", [None, [], "", "not a list", [1.0], [1.0, 2.0, 3.0, 4.0, 5.0]])
-def test_parse_peds_returns_empty_for_unusable_input(probe, bad):
-    out = probe._parse_peds(bad)
-    assert out.shape == (0, 2)
-
-
-def test_parse_peds_ignores_a_count_that_fits_neither_layout(probe):
-    assert probe._parse_peds([1.0, 2.0, 3.0, 4.0], 7).shape == (0, 2)
-
-
 def test_native_ped_frame_sorted_by_time(probe):
-    peds = pl.DataFrame({"time_ns": [2 * SEC, 0, SEC], "peds_positions": [[], [], []]})
-    out = probe.native_ped_frame(_bundle(topics={"peds": peds}))
-    assert out["time_ns"].to_list() == [0, SEC, 2 * SEC]
+    peds = pl.DataFrame({"t_ns": [2 * SEC, 0, SEC], "ped_id": ["p1", "p2", "p3"], "x": [1.0, 2.0, 3.0], "y": [0.0, 0.0, 0.0]})
+    out = probe.native_ped_frame(_bundle(topics={"pedestrian_tracks": peds}))
+    assert out is not None
+    assert out["t_ns"].to_list() == [0, SEC, 2 * SEC]
     assert probe.native_ped_frame(_bundle()) is None
-    assert probe.native_ped_frame(_bundle(topics={"peds": pl.DataFrame({"x": [1]})})) is None
+    assert probe.native_ped_frame(_bundle(topics={"pedestrian_tracks": pl.DataFrame({"x": [1]})})) is None

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import ast
 import typing
 
 import numpy as np
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -16,7 +16,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
         "sfm_cumulative_force": "N·s",
@@ -88,16 +88,14 @@ class SocialForcesCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
         peds_df = self.native_ped_frame(episode)
-        if peds_df is None or "peds_positions" not in peds_df.columns:
+        if peds_df is None or "yaw" not in peds_df.columns:
             return {k: None for k in self.output_keys()}
         pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
         if len(pos_x) == 0:
             return {k: None for k in self.output_keys()}
 
-        peds_time_ns = peds_df["time_ns"].to_numpy()
-        peds_positions = peds_df["peds_positions"].to_list()
-        num_peds_col = peds_df["num_pedestrians"].to_numpy() if "num_pedestrians" in peds_df.columns else None
-        peds_headings_list = peds_df["peds_headings"].to_list() if "peds_headings" in peds_df.columns else None
+        frames = frames_of(peds_df)
+        peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
 
         N = len(peds_time_ns)
         if N == 0:
@@ -119,13 +117,9 @@ class SocialForcesCalculator(BaseMetricCalculator):
         esfm_ped_forces = []
         ci_values = []
 
-        for i in range(N):
+        for i, frame in enumerate(frames):
             rx, ry = float(rpx[i]), float(rpy[i])
-            peds_raw = peds_positions[i]
-            peds_arr = self._parse_peds(
-                peds_raw,
-                num_peds_col[i] if num_peds_col is not None else None,
-            )
+            peds_arr = frame.select("x", "y").to_numpy()
 
             if peds_arr.shape[0] == 0:
                 sfm_forces.append(0.0)
@@ -134,17 +128,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
                 ci_values.append(0.0)
                 continue
 
-            # Missing headings fall back to isotropic
-            headings = None
-            if peds_headings_list is not None and i < len(peds_headings_list):
-                h_raw = peds_headings_list[i]
-                if h_raw and len(h_raw) > 0:
-                    if isinstance(h_raw, str):
-                        try:
-                            h_raw = ast.literal_eval(h_raw)
-                        except Exception:
-                            h_raw = []
-                    headings = np.array(h_raw, dtype=np.float64) if len(h_raw) > 0 else None
+            headings = frame["yaw"].to_numpy()
 
             robot_yaw_i = float(ryaw[i])
             total_sfm = 0.0
@@ -158,7 +142,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
                 dy = py - ry
                 d_ij = np.sqrt(dx**2 + dy**2)
 
-                if headings is not None and j < len(headings):
+                if j < len(headings) and not np.isnan(headings[j]):
                     ped_heading = float(headings[j])
                     cos_h = np.cos(ped_heading)
                     sin_h = np.sin(ped_heading)
@@ -188,7 +172,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
 
                 # Ped-heading anisotropy: the force the robot exerts
                 w_ped = 1.0
-                if headings is not None and j < len(headings):
+                if j < len(headings) and not np.isnan(headings[j]):
                     ped_heading = float(headings[j])
                     phi_ped = ped_heading - np.arctan2(ry - py, rx - px)
                     w_ped = self._LAMBDA_ESFM + (1.0 - self._LAMBDA_ESFM) * (1.0 + np.cos(phi_ped)) / 2.0

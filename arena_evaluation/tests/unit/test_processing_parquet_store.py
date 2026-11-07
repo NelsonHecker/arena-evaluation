@@ -1,8 +1,8 @@
-"""Unit tests for the Parquet topic cache layer (processing/parquet_store.py).
+"""Unit tests for the Parquet layer (processing/parquet_store.py and the telemetry sink it reads).
 
 Covers ParquetStore (metric frames with Pydantic metadata in the schema footer)
-and TopicParquetStore (per-topic parquet caches for a dict of TopicBundles,
-global-vs-robot file layout, zstd compression, overwrite semantics, sorting).
+and TopicParquetStore (the flat telemetry cache: completion stamp, one bundle per
+robot over shared global tables, unreadable caches read as misses).
 """
 
 from __future__ import annotations
@@ -17,9 +17,10 @@ import yaml
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquetStore
+from arena_evaluation.processing.telemetry.writer import TableSink
 from arena_evaluation.storage.exceptions import SchemaViolationError
 from arena_evaluation.storage.manifest import MetadataWriter
-from arena_evaluation.storage.schemas import RunMetadata, TopicBundle
+from arena_evaluation.storage.schemas import RunMetadata
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -269,279 +270,144 @@ def test_roundtrip_hypothesis(tmp_path, n, with_str, with_bool):
     ParquetStore.write(df, dest, metadata=None)
     back, metadata = ParquetStore.read(dest)
     assert metadata is None
-    assert back.schema == df.schema
     assert back.equals(df)
+    assert back.schema == df.schema
 
 
 # ---------------------------------------------------------------------------
-# TopicParquetStore.write / read
+# TopicParquetStore: the flat telemetry cache
 # ---------------------------------------------------------------------------
 
 
-def _topics(tmp_path: pathlib.Path) -> tuple[dict[str, TopicBundle], pathlib.Path]:
-    """Two-robot bundle set: shared globals + per-robot odom/plan."""
-    odom_1 = _df(4, 1_000)
-    odom_2 = _df(3, 5_000)
-    plan_1 = _df(2, 1_000)
-    plan_2 = _df(2, 5_000)
-    peds = _df(3)
-    episode_record = _df(2)
-    tf_static = pl.DataFrame(
-        {"time_ns": [1000], "frame_id": ["map"], "child_frame_id": ["env_0/map"]},
-        schema=pl.Schema({"time_ns": pl.Int64, "frame_id": pl.String, "child_frame_id": pl.String}),
+def _odometry(robot: str, stamps: list[int]) -> pl.DataFrame:
+    n = len(stamps)
+    return pl.DataFrame(
+        {
+            "t_ns": stamps,
+            "env_id": ["env_0"] * n,
+            "robot_id": [robot] * n,
+            "odom_x": [float(i) for i in range(n)],
+            "odom_y": [0.0] * n,
+            "odom_yaw": [0.0] * n,
+            "odom_vx": [0.0] * n,
+            "odom_wz": [0.0] * n,
+            "drift_error_m": [0.0] * n,
+        }
     )
-    semantic_snapshot = pl.DataFrame(
-        {"time_ns": [1000], "kind": ["door"], "entity": ["env_0/d1"]},
-        schema=pl.Schema({"time_ns": pl.Int64, "kind": pl.String, "entity": pl.String}),
+
+
+def _static_transform() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "t_ns": [0],
+            "parent_frame": ["map"],
+            "child_frame": ["env_0/map"],
+            "tx": [0.0],
+            "ty": [0.0],
+            "tz": [0.0],
+            "qx": [0.0],
+            "qy": [0.0],
+            "qz": [0.0],
+            "qw": [1.0],
+        }
     )
-    bundles = {
-        "robot_1": TopicBundle(odom=odom_1, plan=plan_1, peds=peds, episode_record=episode_record),
-        "robot_2": TopicBundle(
-            odom=odom_2,
-            plan=plan_2,
-            peds=peds,
-            episode_record=episode_record,
-            tf_static=tf_static,
-            semantic_snapshot=semantic_snapshot,
-        ),
-    }
-    return bundles, tmp_path / "cache"
 
 
-def test_topic_write_read_roundtrip(tmp_path):
-    bundles, dest = _topics(tmp_path)
-    TopicParquetStore.write(bundles, dest)
-
-    # layout: globals at root, robot topics under robot dirs
-    assert (dest / "peds.parquet").exists()
-    assert (dest / "episode_record.parquet").exists()
-    assert (dest / "tf_static.parquet").exists()
-    assert (dest / "semantic_snapshot.parquet").exists()
-    assert not (dest / "odom.parquet").exists()
-    assert not (dest / "plan.parquet").exists()
-    assert (dest / "robot_1" / "odom.parquet").exists()
-    assert (dest / "robot_1" / "plan.parquet").exists()
-    assert not (dest / "robot_1" / "peds.parquet").exists()
-    assert (dest / "robot_2" / "odom.parquet").exists()
+def test_each_robot_gets_its_own_rows_and_the_globals_are_shared(tmp_path):
+    dest = tmp_path / "cache"
+    dest.mkdir()
+    pl.concat([_odometry("env_0_r1", [1000, 2000]), _odometry("env_0_r2", [3000])]).write_parquet(dest / "robot_odom.parquet")
+    _static_transform().write_parquet(dest / "tf_static.parquet")
 
     restored = TopicParquetStore.read(dest)
-    assert restored is not None
-    assert set(restored) == {"robot_1", "robot_2"}
 
-    r1 = restored["robot_1"]
-    assert r1.odom is not None and r1.plan is not None
-    assert r1.odom.collect().equals(pl.DataFrame(bundles["robot_1"].odom).sort("time_ns"))
-    assert r1.odom.collect().schema == _DF_SCHEMA
-    # globals are shared by reference between robots
-    assert restored["robot_1"].peds is restored["robot_2"].peds
-    assert restored["robot_1"].peds.collect().schema == _DF_SCHEMA
-    assert restored["robot_2"].tf_static is not None
-    assert restored["robot_2"].semantic_snapshot is not None
+    assert set(restored) == {"env_0_r1", "env_0_r2"}
+    assert restored["env_0_r1"].robot_odom.collect()["t_ns"].to_list() == [1000, 2000]
+    assert restored["env_0_r2"].robot_odom.collect()["t_ns"].to_list() == [3000]
+    assert restored["env_0_r1"].tf_static is restored["env_0_r2"].tf_static
+    assert restored["env_0_r1"].robot_tracks is None
 
 
-def test_topic_globals_written_once_for_multiple_robots(tmp_path):
-    bundles, dest = _topics(tmp_path)
-    TopicParquetStore.write(bundles, dest)
-    # peds appears exactly once, at the root
-    assert list(dest.glob("peds.parquet")) == [dest / "peds.parquet"]
-    assert list(dest.glob("*/peds.parquet")) == []
+def test_tables_read_back_with_their_declared_types(tmp_path):
+    dest = tmp_path / "telemetry"
+    sink = TableSink(dest)
+    sink.append("robot_odom", {"t_ns": 1000, "env_id": "env_0", "robot_id": "env_0_r1", "odom_x": 1.0, "odom_y": 2.0, "odom_yaw": 0.0, "odom_vx": 0.5, "odom_wz": 0.1, "drift_error_m": None})
+    sink.close()
+
+    frame = TopicParquetStore.read(dest)["env_0_r1"].robot_odom.collect()
+
+    assert frame.schema["t_ns"] == pl.Int64
+    assert frame.schema["robot_id"] == pl.String
+    assert frame.schema["odom_x"] == pl.Float64
 
 
-def test_topic_empty_frames_not_written(tmp_path):
-    empty = pl.DataFrame({"time_ns": pl.Series([], dtype=pl.Int64)}, schema={"time_ns": pl.Int64})
+def test_the_sink_sorts_a_table_written_out_of_order(tmp_path):
+    dest = tmp_path / "telemetry"
+    sink = TableSink(dest)
+    for stamp in (3000, 1000, 2000):
+        sink.append("robot_odom", {"t_ns": stamp, "env_id": "env_0", "robot_id": "env_0_r1", "odom_x": float(stamp), "odom_y": 0.0, "odom_yaw": 0.0, "odom_vx": 0.0, "odom_wz": 0.0, "drift_error_m": None})
+    sink.close()
+
+    assert pl.read_parquet(dest / "robot_odom.parquet")["t_ns"].to_list() == [1000, 2000, 3000]
+
+
+def test_a_table_without_rows_is_absent_from_its_bundle(tmp_path):
     dest = tmp_path / "cache"
-    TopicParquetStore.write({"r1": TopicBundle(odom=empty)}, dest)
-    assert not (dest / "r1" / "odom.parquet").exists()
-    restored = TopicParquetStore.read(dest)
-    assert restored is not None
-    assert restored["r1"].odom is None
+    dest.mkdir()
+    _odometry("env_0_r1", [1000]).write_parquet(dest / "robot_odom.parquet")
+
+    bundle = TopicParquetStore.read(dest)["env_0_r1"]
+
+    assert bundle.robot_odom is not None
+    assert bundle.robot_plans is None
+    assert bundle.episode_lifecycle is None
 
 
-def test_topic_empty_gesture_table_survives_the_round_trip(tmp_path):
-    gestures = pl.DataFrame(schema={"time_ns": pl.Int64, "ped_id": pl.Int64, "slot": pl.String, "clip": pl.String})
-    dest = tmp_path / "cache"
-    TopicParquetStore.write({"r1": TopicBundle(odom=_df(2), ped_gestures=gestures)}, dest)
-    assert (dest / "ped_gestures.parquet").exists()
-    restored = TopicParquetStore.read(dest)
-    assert restored["r1"].ped_gestures.collect().equals(gestures)
-
-
-def test_topic_lazy_frames_collected(tmp_path):
-    dest = tmp_path / "cache"
-    lf = _df(3).lazy()
-    TopicParquetStore.write({"r1": TopicBundle(odom=lf)}, dest)
-    assert (dest / "r1" / "odom.parquet").exists()
-    restored = TopicParquetStore.read(dest)
-    assert isinstance(restored["r1"].odom, pl.LazyFrame)
-    assert restored["r1"].odom.collect().equals(_df(3).sort("time_ns"))
-
-
-def test_topic_overwrite_semantics_lazyframe(tmp_path):
-    dest = tmp_path / "cache"
-    original = _df(2, 1_000)
-    replacement = _df(2, 9_000)
-    TopicParquetStore.write({"r1": TopicBundle(odom=original)}, dest)
-    assert (dest / "r1" / "odom.parquet").exists()
-
-    # overwrite=False keeps the existing file
-    TopicParquetStore.write({"r1": TopicBundle(odom=replacement.lazy())}, dest, overwrite=False)
-    r1 = TopicParquetStore.read(dest)["r1"]
-    assert r1.odom.collect().equals(original.sort("time_ns"))
-
-    # overwrite=True replaces it
-    TopicParquetStore.write({"r1": TopicBundle(odom=replacement.lazy())}, dest, overwrite=True)
-    r1 = TopicParquetStore.read(dest)["r1"]
-    assert r1.odom.collect().equals(replacement.sort("time_ns"))
-
-
-def test_topic_dataframe_always_writes_regardless_of_overwrite_flag(tmp_path):
-    dest = tmp_path / "cache"
-    TopicParquetStore.write({"r1": TopicBundle(odom=_df(2, 1_000))}, dest)
-    TopicParquetStore.write({"r1": TopicBundle(odom=_df(2, 9_000))}, dest, overwrite=False)
-    r1 = TopicParquetStore.read(dest)["r1"]
-    assert r1.odom.collect().equals(_df(2, 9_000).sort("time_ns"))
-
-
-def test_topic_cache_skipped_by_overwrite_false_is_not_stamped(tmp_path):
-    bundles, dest = _topics(tmp_path)
-    TopicParquetStore.write(bundles, dest)
-    (dest / TopicParquetStore.VERSION_FILE).unlink()
-
-    lazy = {name: TopicBundle(odom=bundle.odom.lazy()) for name, bundle in bundles.items()}
-    TopicParquetStore.write(lazy, dest, overwrite=False)
-
-    assert not (dest / TopicParquetStore.VERSION_FILE).exists()
-
-
-def test_topic_cache_of_this_layout_is_current(tmp_path):
-    bundles, dest = _topics(tmp_path)
-    TopicParquetStore.write(bundles, dest)
-
-    assert (dest / TopicParquetStore.VERSION_FILE).read_text().strip() == str(TopicParquetStore.VERSION)
-    assert TopicParquetStore.is_current(dest)
-
-
-def test_topic_cache_without_a_version_stamp_is_not_current(tmp_path):
-    bundles, dest = _topics(tmp_path)
-    TopicParquetStore.write(bundles, dest)
-    (dest / TopicParquetStore.VERSION_FILE).unlink()
-
-    assert not TopicParquetStore.is_current(dest)
-
-
-def test_topic_cache_stamped_by_another_layout_is_not_current(tmp_path):
-    bundles, dest = _topics(tmp_path)
-    TopicParquetStore.write(bundles, dest)
-    (dest / TopicParquetStore.VERSION_FILE).write_text(f"{TopicParquetStore.VERSION + 1}\n")
-
-    assert not TopicParquetStore.is_current(dest)
-
-
-def test_topic_read_missing_or_file_dir(tmp_path):
+def test_read_missing_or_file_dir(tmp_path):
     assert TopicParquetStore.read(tmp_path / "nope") is None
     f = tmp_path / "afile"
     f.write_text("x")
     assert TopicParquetStore.read(f) is None
 
 
-def test_topic_read_empty_dir(tmp_path):
+def test_read_empty_dir(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     assert TopicParquetStore.read(empty) is None
 
 
-def test_topic_read_globals_only_returns_none(tmp_path):
-    """Root-only topics with no robot dirs produce no bundles -> None."""
+def test_read_globals_only_returns_none(tmp_path):
+    """Global tables with no robot rows produce no bundles -> None."""
     dest = tmp_path / "cache"
     dest.mkdir()
-    _df(2).write_parquet(dest / "peds.parquet")
+    _static_transform().write_parquet(dest / "tf_static.parquet")
     assert TopicParquetStore.read(dest) is None
 
 
-def test_topic_read_peds_fallback(tmp_path):
+def test_a_corrupt_table_reads_as_a_cache_miss(tmp_path):
     dest = tmp_path / "cache"
-    peds = _df(2)
-    # fallback-only layout: robot dir plus peds_fallback.parquet at root
-    (dest / "robot_1").mkdir(parents=True)
-    _df(3).write_parquet(dest / "robot_1" / "odom.parquet")
-    peds.write_parquet(dest / "peds_fallback.parquet")
-    restored = TopicParquetStore.read(dest)
-    assert restored is not None
-    assert restored["robot_1"].peds.collect().equals(peds.sort("time_ns"))
-
-
-def test_topic_read_prefers_real_peds_over_fallback(tmp_path):
-    dest = tmp_path / "cache"
-    (dest / "robot_1").mkdir(parents=True)
-    _df(2).write_parquet(dest / "robot_1" / "odom.parquet")
-    _df(2, 1_000).write_parquet(dest / "peds.parquet")
-    _df(2, 8_000).write_parquet(dest / "peds_fallback.parquet")
-    restored = TopicParquetStore.read(dest)
-    assert restored["robot_1"].peds.collect()["time_ns"].max() == 1_100
-
-
-def test_topic_read_sorts_by_time_ns(tmp_path):
-    dest = tmp_path / "cache"
-    unsorted = pl.DataFrame(
-        {"time_ns": [3000, 1000, 2000], "value": [3.0, 1.0, 2.0]},
-        schema=pl.Schema({"time_ns": pl.Int64, "value": pl.Float64}),
-    )
-    TopicParquetStore.write({"r1": TopicBundle(odom=unsorted)}, dest)
-    restored = TopicParquetStore.read(dest)
-    assert restored["r1"].odom.collect()["time_ns"].to_list() == [1000, 2000, 3000]
-
-
-def test_topic_read_keeps_frame_without_time_ns(tmp_path):
-    dest = tmp_path / "cache"
-    no_time = pl.DataFrame({"value": [1.0, 2.0]}, schema=pl.Schema({"value": pl.Float64}))
-    TopicParquetStore.write({"r1": TopicBundle(plan=no_time)}, dest)
-    restored = TopicParquetStore.read(dest)
-    assert restored["r1"].plan is not None
-    assert restored["r1"].plan.collect().equals(no_time)
-
-
-def test_topic_read_corrupt_parquet_skipped(tmp_path):
-    # NOTE: the module logger is hijacked by the `launch` LaunchLogger
-    # (propagate=False), so the warning cannot be observed via caplog; assert
-    # the behavioural contract instead: corrupt files leave the field None.
-    dest = tmp_path / "cache"
-    (dest / "robot_1").mkdir(parents=True)
-    (dest / "robot_1" / "odom.parquet").write_bytes(b"not parquet data")
-    restored = TopicParquetStore.read(dest)
-    assert restored["robot_1"].odom is None
-
-
-def test_topic_strict_schema_preserved(tmp_path):
-    df = pl.DataFrame(
-        {
-            "time_ns": [1, 2],
-            "v": [1.5, 2.5],
-            "s": ["a", "b"],
-            "b": [True, False],
-            "l": [[1, 2], [3]],
-        },
-        schema=pl.Schema(
-            {
-                "time_ns": pl.Int64,
-                "v": pl.Float64,
-                "s": pl.String,
-                "b": pl.Boolean,
-                "l": pl.List(pl.Int64),
-            }
-        ),
-    )
-    dest = tmp_path / "cache"
-    TopicParquetStore.write({"r1": TopicBundle(odom=df)}, dest)
-    restored = TopicParquetStore.read(dest)
-    assert restored["r1"].odom.collect().schema == df.schema
-    assert restored["r1"].odom.collect().equals(df.sort("time_ns"))
-
-
-def test_topic_write_empty_bundle_dict(tmp_path):
-    dest = tmp_path / "cache"
-    TopicParquetStore.write({}, dest)
-    assert dest.is_dir()
+    dest.mkdir()
+    (dest / "robot_odom.parquet").write_bytes(b"not parquet data")
     assert TopicParquetStore.read(dest) is None
+
+
+def test_cache_is_current_only_once_marked_complete(tmp_path):
+    dest = tmp_path / "cache"
+    dest.mkdir()
+    assert not TopicParquetStore.is_current(dest)
+
+    TopicParquetStore.mark_complete(dest)
+
+    assert (dest / TopicParquetStore.VERSION_FILE).read_text().strip() == str(TopicParquetStore.VERSION)
+    assert TopicParquetStore.is_current(dest)
+
+
+def test_cache_stamped_by_another_layout_is_not_current(tmp_path):
+    dest = tmp_path / "cache"
+    dest.mkdir()
+    (dest / TopicParquetStore.VERSION_FILE).write_text(f"{TopicParquetStore.VERSION + 1}\n")
+
+    assert not TopicParquetStore.is_current(dest)
 
 
 def test_write_rows_status_rows_first_keep_metric_columns(tmp_path: pathlib.Path) -> None:

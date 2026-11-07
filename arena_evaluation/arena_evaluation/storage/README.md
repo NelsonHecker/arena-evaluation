@@ -57,23 +57,31 @@ class RunDescriptor:
 
 ### `TopicBundle`
 
-Dataclass holding one Polars DataFrame per recorded topic.
+Dataclass holding one Polars DataFrame or LazyFrame per flat telemetry table.
 
 ```python
 @dataclass
 class TopicBundle:
-    odom: pl.DataFrame | None
-    scan: pl.DataFrame | None
-    cmd_vel: pl.DataFrame | None
-    joint_states: pl.DataFrame | None
-    peds: pl.DataFrame | None
-    peds_physics: pl.DataFrame | None
-    ped_gestures: pl.DataFrame | None
-    interactions: pl.DataFrame | None
-    interaction_events: pl.DataFrame | None
-    animation_states: pl.DataFrame | None
-    episode_record: pl.DataFrame | None
-    collision_events: pl.DataFrame | None
+    tf: pl.DataFrame | pl.LazyFrame | None = None
+    tf_static: pl.DataFrame | pl.LazyFrame | None = None
+    world_semantics: pl.DataFrame | pl.LazyFrame | None = None
+    robot_tracks: pl.DataFrame | pl.LazyFrame | None = None
+    robot_odom: pl.DataFrame | pl.LazyFrame | None = None
+    robot_cmd_vel: pl.DataFrame | pl.LazyFrame | None = None
+    robot_scan_summary: pl.DataFrame | pl.LazyFrame | None = None
+    robot_scan_rays: pl.DataFrame | pl.LazyFrame | None = None
+    robot_joint_states: pl.DataFrame | pl.LazyFrame | None = None
+    robot_power: pl.DataFrame | pl.LazyFrame | None = None
+    robot_energy: pl.DataFrame | pl.LazyFrame | None = None
+    robot_acoustics: pl.DataFrame | pl.LazyFrame | None = None
+    robot_task_pose: pl.DataFrame | pl.LazyFrame | None = None
+    robot_characterization_schedule: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_tracks: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_gestures: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_interaction_events: pl.DataFrame | pl.LazyFrame | None = None
+    collision_contacts: pl.DataFrame | pl.LazyFrame | None = None
+    collision_events: pl.DataFrame | pl.LazyFrame | None = None
+    collision_monitor_state: pl.DataFrame | pl.LazyFrame | None = None
 ```
 
 ### `AlignedEpisodeBundle`

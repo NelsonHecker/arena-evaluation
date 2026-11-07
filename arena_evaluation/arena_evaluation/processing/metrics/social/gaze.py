@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import ast
 import typing
 
 import numpy as np
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import pedestrians_by_time
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -16,7 +16,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["odom", "peds"]
+    REQUIRED_TOPICS = ["robot_odom", "pedestrian_tracks"]
 
     UNITS = {
         "time_looking_at_pedestrians": "",
@@ -43,18 +43,13 @@ class GazeMetricsCalculator(BaseMetricCalculator):
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
 
-        if episode.data is None or "pos_x" not in episode.data.columns or "peds_positions" not in episode.data.columns:
+        peds_df = self.native_ped_frame(episode)
+        if episode.data is None or "pos_x" not in episode.data.columns or peds_df is None:
             return {k: None for k in self.output_keys()}
 
         pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
         time_ns = episode.data["time_ns"].to_numpy()
-
-        peds_positions = episode.data["peds_positions"].to_list()
-        num_pedestrians_col = episode.data["num_pedestrians"].to_numpy() if "num_pedestrians" in episode.data.columns else None
-        if "peds_headings" in episode.data.columns:
-            peds_headings = episode.data["peds_headings"].to_list()
-        else:
-            peds_headings = [None] * len(pos_x)
+        peds_at_time = pedestrians_by_time(time_ns, peds_df)
 
         N = len(pos_x)
 
@@ -73,28 +68,18 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             return np.pi - np.abs(np.abs(a1 - a2) - np.pi)
 
         for i in range(N):
-            peds = peds_positions[i]
-            headings = peds_headings[i]
+            frame = peds_at_time.get(int(time_ns[i]))
 
-            if not peds or len(peds) == 0:
+            if frame is None or len(frame) == 0:
                 looking_at.append(0)
                 looked_at.append(0)
                 continue
 
             rx, ry, ryaw = pos_x[i], pos_y[i], yaw[i]
 
-            n_peds = num_pedestrians_col[i] if num_pedestrians_col is not None else None
-
-            peds_arr = self._parse_peds(peds, n_peds)
+            peds_arr = frame.select("x", "y").to_numpy()
             n_resolved_peds = peds_arr.shape[0]
-
-            if isinstance(peds, str):
-                try:
-                    head_arr = np.array(ast.literal_eval(headings)) if headings else np.zeros(n_resolved_peds)
-                except (ValueError, SyntaxError):
-                    head_arr = np.zeros(n_resolved_peds)
-            else:
-                head_arr = np.array(headings) if headings is not None else np.zeros(n_resolved_peds)
+            head_arr = frame["yaw"].to_numpy()
 
             if peds_arr.ndim != 2 or peds_arr.shape[1] < 2:
                 looking_at.append(0)

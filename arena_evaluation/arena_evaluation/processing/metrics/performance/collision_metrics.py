@@ -21,7 +21,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     NAME = "collision_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics", "path_metrics", "trajectory_naturalness"]
-    REQUIRED_TOPICS = ["collision_events", ("tf_gt", "odom")]
+    REQUIRED_TOPICS = ["collision_events", ("robot_tracks", "robot_odom")]
 
     UNITS = {
         "collision_amount": "",
@@ -65,33 +65,39 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
                 count += 1
         return count
 
+    _NATIVE_COUNT_COLUMNS = {
+        "collision_event": "event_count",
+        "collision_wall": "wall_count",
+        "collision_static": "static_count",
+        "collision_pedestrian": "ped_count",
+    }
+
     @staticmethod
     def _collision_frame(episode: AlignedEpisodeBundle) -> pl.DataFrame | None:
         """The native collision_events stream when present, else the aligned data."""
         if episode.topics is not None and "collision_events" in episode.topics:
-            return episode.topics["collision_events"].sort("time_ns")
+            return episode.topics["collision_events"].sort("t_ns")
         return episode.data
 
     @classmethod
     def _column_rising_edges(cls, episode: AlignedEpisodeBundle, column: str) -> int | None:
         frame = cls._collision_frame(episode)
-        if frame is None or column not in frame.columns:
+        if frame is None:
             return None
-        counts = frame[column].to_numpy().astype(float)
+        name = cls._NATIVE_COUNT_COLUMNS[column]
+        if name not in frame.columns:
+            return None
+        counts = frame[name].to_numpy().astype(float)
         if np.isnan(counts).all():
             return None
         return cls._count_rising_edges(np.nan_to_num(counts, nan=0.0) > 0)
 
-    @classmethod
-    def _hit_obstacles(cls, episode: AlignedEpisodeBundle) -> list[str]:
-        frame = cls._collision_frame(episode)
-        if frame is None or "collision_obstacle_ids" not in frame.columns:
+    @staticmethod
+    def _hit_obstacles(episode: AlignedEpisodeBundle) -> list[str]:
+        contacts = episode.topics.get("collision_contacts") if episode.topics else None
+        if contacts is None or "obstacle_id" not in contacts.columns:
             return []
-        hit: set[str] = set()
-        for ids in frame["collision_obstacle_ids"].to_list():
-            if ids is not None:
-                hit.update(i for i in ids if i)
-        return sorted(hit)
+        return sorted({obstacle for obstacle in contacts["obstacle_id"].drop_nulls().to_list() if obstacle})
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
 

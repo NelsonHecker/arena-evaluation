@@ -3,6 +3,7 @@ import polars as pl
 import pytest
 
 from arena_evaluation.storage.schemas import RobotParams, AlignedEpisodeBundle
+from flat_peds import flat_peds
 from arena_evaluation.processing.path.theta_star import GeometricThetaStar, compute_theta_star_path
 from arena_evaluation.processing.metrics.performance.collision_metrics import CollisionMetricsCalculator
 from arena_evaluation.processing.metrics.performance.efficiency_metrics import PathEfficiencyCalculator
@@ -47,7 +48,7 @@ def test_spl_and_path_efficiency():
 
     episode = AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"collision_event": [0, 0, 0]}),
+        data=pl.DataFrame({"event_count": [0, 0, 0]}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[10.0, 0.0, 0.0],
     )
@@ -69,7 +70,7 @@ def test_spl_and_path_efficiency():
     # 3. Collision failure (SPL must be 0.0)
     episode_fail = AlignedEpisodeBundle(
         episode_id=2,
-        data=pl.DataFrame({"collision_event": [0, 1, 0, 1, 0, 1, 0, 1]}),
+        data=pl.DataFrame({"event_count": [0, 1, 0, 1, 0, 1, 0, 1]}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[10.0, 0.0, 0.0],
     )
@@ -87,40 +88,31 @@ def test_psii_penetration_depth_monotonicity():
     # Ped 1: Deep penetration at (0.4, 0.0) -> d_center = 0.4, d_eff = 0.4 - (0.3 + 0.3) = -0.2 -> penetration depth = 1.2 - 0 = 1.2
     # Ped 2: Shallow skimming at (1.5, 0.0) -> d_center = 1.5, d_eff = 1.5 - 0.6 = 0.9 -> penetration depth = 1.2 - 0.9 = 0.3
 
+    t_ns = [0, 1_000_000_000]
+    tf_df = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    robot_tracks = pl.DataFrame({"t_ns": t_ns, "x": [0.0, 0.0], "y": [0.0, 0.0], "yaw": [0.0, 0.0], "pose_source": ["tf_gt", "tf_gt"]})
+
     # Case A: Deep
-    df_deep = pl.DataFrame(
-        {
-            "time_ns": [0, 1_000_000_000],
-            "peds_positions": ["[ [0.4, 0.0] ]", "[ [0.4, 0.0] ]"],
-            "num_pedestrians": [1, 1],
-        }
-    )
-    tf_df = pl.DataFrame({"time_ns": [0, 1_000_000_000], "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    df_deep = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 0.4, "y": 0.0}]) for t in t_ns])
     ep_deep = AlignedEpisodeBundle(
         episode_id=1,
         data=tf_df,
         topics={
-            "tf_gt": tf_df,
-            "peds": df_deep,
+            "robot_tracks": robot_tracks,
+            "pedestrian_tracks": df_deep,
         },
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[5.0, 0.0, 0.0],
     )
 
     # Case B: Shallow
-    df_shallow = pl.DataFrame(
-        {
-            "time_ns": [0, 1_000_000_000],
-            "peds_positions": ["[ [1.5, 0.0] ]", "[ [1.5, 0.0] ]"],
-            "num_pedestrians": [1, 1],
-        }
-    )
+    df_shallow = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 1.5, "y": 0.0}]) for t in t_ns])
     ep_shallow = AlignedEpisodeBundle(
         episode_id=2,
         data=tf_df,
         topics={
-            "tf_gt": tf_df,
-            "peds": df_shallow,
+            "robot_tracks": robot_tracks,
+            "pedestrian_tracks": df_shallow,
         },
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[5.0, 0.0, 0.0],

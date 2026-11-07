@@ -106,24 +106,11 @@ def test_empty_semantic_snapshot_returns_zero_defaults():
 
 def _members(rows):
     """Members rows: (time_ns, entity, kind, [names])."""
-    return pl.DataFrame(
-        {
-            "time_ns": [r[0] for r in rows],
-            "entity": [r[1] for r in rows],
-            "kind": [r[2] for r in rows],
-            "field": ["members"] * len(rows),
-            "field_kind": ["members"] * len(rows),
-            "value_str": [None] * len(rows),
-            "value_num": [None] * len(rows),
-            "value_bool": [None] * len(rows),
-            "value_list": [r[3] for r in rows],
-        },
-        schema_overrides={"value_str": pl.Utf8, "value_num": pl.Float64, "value_bool": pl.Boolean, "value_list": pl.List(pl.Utf8)},
-    )
+    return snapshot_frame([(r[0], r[1], r[2], "members", "members", r[3]) for r in rows])
 
 
 def _with_members(snapshot, members):
-    return pl.concat([snapshot.with_columns(pl.lit(None, dtype=pl.List(pl.Utf8)).alias("value_list")), members], how="vertical_relaxed")
+    return pl.concat([snapshot, members], how="vertical")
 
 
 def _robot_episode(snapshot, robot_name="env_0_jackal"):

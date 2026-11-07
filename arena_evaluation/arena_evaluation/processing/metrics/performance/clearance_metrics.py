@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import nearest_pedestrian_distance
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -16,7 +17,7 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "performance"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = [("scan", "peds")]  # at least one of the two
+    REQUIRED_TOPICS = [("robot_scan_summary", "pedestrian_tracks")]  # at least one of the two
 
     UNITS = {
         "min_obstacle_clearance": "m",
@@ -55,10 +56,10 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
             return {k: None for k in self.output_keys()}
 
         topics = self.native_topics(episode)
-        scan_df = topics.get("scan")
-        peds_df = topics.get("peds")
-        has_scan = scan_df is not None and "scan_min" in scan_df.columns
-        has_peds = peds_df is not None and "peds_positions" in peds_df.columns
+        scan_df = topics.get("robot_scan_summary")
+        peds_df = self.native_ped_frame(episode)
+        has_scan = scan_df is not None and "scan_min_m" in scan_df.columns
+        has_peds = peds_df is not None and len(peds_df) > 0
 
         if not has_scan and not has_peds:
             return {k: None for k in self.output_keys()}
@@ -75,40 +76,21 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
         scan_min_arr = None
         scan_max_arr = None
         if has_scan and scan_df is not None:
-            s_df = scan_df.sort("time_ns")
+            s_df = scan_df.sort("t_ns")
             joined = (
                 pl.DataFrame({"time_ns": odom_times_ns})
                 .join_asof(
-                    s_df.select(["time_ns", "scan_min", "scan_range_max"]),
+                    s_df.select(pl.col("t_ns").alias("time_ns"), "scan_min_m", "range_max_m"),
                     on="time_ns",
                     strategy="backward",
                     tolerance=tol,
                 )
                 .sort("time_ns")
             )
-            scan_min_arr = joined["scan_min"].to_numpy()
-            scan_max_arr = joined["scan_range_max"].to_numpy() if "scan_range_max" in joined.columns else None
+            scan_min_arr = joined["scan_min_m"].to_numpy()
+            scan_max_arr = joined["range_max_m"].to_numpy()
 
-        peds_positions_list = None
-        num_peds_col = None
-        if has_peds and peds_df is not None:
-            p_df = peds_df.sort("time_ns")
-            cols = ["time_ns", "peds_positions"]
-            if "num_pedestrians" in p_df.columns:
-                cols.append("num_pedestrians")
-            joined = (
-                pl.DataFrame({"time_ns": odom_times_ns})
-                .join_asof(
-                    p_df.select(cols),
-                    on="time_ns",
-                    strategy="backward",
-                    tolerance=tol,
-                )
-                .sort("time_ns")
-            )
-            peds_positions_list = joined["peds_positions"].to_list()
-            if "num_pedestrians" in joined.columns:
-                num_peds_col = joined["num_pedestrians"].to_numpy()
+        ped_distance = nearest_pedestrian_distance(odom_times_ns, pos_x, pos_y, peds_df, tol) if has_peds and peds_df is not None else np.full(N, np.nan)
 
         obstacle_clearances: list[float | None] = []
         ped_clearances: list[float | None] = []
@@ -126,19 +108,8 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
             obstacle_clearances.append(obs_clear)
 
             ped_clear = None
-            if peds_positions_list is not None and i < len(peds_positions_list):
-                peds_raw = peds_positions_list[i]
-                peds_arr = self._parse_peds(
-                    peds_raw,
-                    num_peds_col[i] if num_peds_col is not None else None,
-                )
-                if peds_arr.shape[0] > 0:
-                    rx, ry = pos_x[i], pos_y[i]
-                    dx = peds_arr[:, 0] - rx
-                    dy = peds_arr[:, 1] - ry
-                    dists = np.sqrt(dx**2 + dy**2)
-                    min_dist = float(np.min(dists))
-                    ped_clear = max(0.0, min_dist - robot_radius - self._PED_RADIUS)
+            if not np.isnan(ped_distance[i]):
+                ped_clear = max(0.0, float(ped_distance[i]) - robot_radius - self._PED_RADIUS)
             ped_clearances.append(ped_clear)
 
             if obs_clear is not None and ped_clear is not None:

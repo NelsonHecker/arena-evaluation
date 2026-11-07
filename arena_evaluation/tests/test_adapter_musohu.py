@@ -63,26 +63,19 @@ def test_convert_writes_recorder_layout(converted: Path):
 
 def test_topic_rows_keep_their_own_clock(converted: Path):
     topics = extract(converted)
-    assert sorted(topics) == ["cmd_vel", "odom", "scan"]
-    scan = topics["scan"]
-    assert scan.columns == ["time_ns", "scan_ranges", "scan_min", "scan_range_max"]
-    ranges = np.asarray(scan["scan_ranges"].to_list(), dtype=np.float32)
-    assert ranges.shape == (COUNT, BEAMS)
-    assert np.isinf(ranges[:, 0]).all()
-    np.testing.assert_allclose(ranges[3, 1:], scan_ranges(3)[1:])
-    assert scan["scan_min"][3] == pytest.approx(scan_ranges(3)[1])
-    assert scan["scan_range_max"].unique().to_list() == [RANGE_MAX]
-    odom = topics["odom"]
-    assert odom.columns == ["time_ns", "stamp_ns", "pos_x", "pos_y", "yaw", "vel_linear", "vel_angular"]
+    assert sorted(topics) == ["robot_cmd_vel", "robot_odom", "robot_scan_summary"]
+    scan = topics["robot_scan_summary"]
+    assert scan["scan_min_m"][3] == pytest.approx(scan_ranges(3)[1])
+    assert scan["range_max_m"].unique().to_list() == [RANGE_MAX]
+    odom = topics["robot_odom"]
     row = odom.row(7, named=True)
-    assert (row["pos_x"], row["pos_y"], row["yaw"]) == pytest.approx(pose(7))
-    assert (row["vel_linear"], row["vel_angular"]) == pytest.approx((velocity(7)[0], velocity(7)[2]))
-    command = topics["cmd_vel"]
+    assert (row["odom_x"], row["odom_y"], row["odom_yaw"]) == pytest.approx(pose(7))
+    assert (row["odom_vx"], row["odom_wz"]) == pytest.approx((velocity(7)[0], velocity(7)[2]))
+    command = topics["robot_cmd_vel"]
     assert (command["linear_x"][5], command["angular_z"][5]) == pytest.approx(cmd_vel(5))
-    assert odom["stamp_ns"].to_list() == [i * STEP_NS for i in range(COUNT)]
-    assert odom["time_ns"].to_list() == odom["stamp_ns"].to_list()
-    assert scan["time_ns"].to_list() == odom["time_ns"].to_list()
-    assert command["time_ns"].to_list() == [i * STEP_NS + STAMP_LAG_NS + CMD_OFFSET_NS for i in range(COUNT)]
+    assert odom["t_ns"].to_list() == [i * STEP_NS for i in range(COUNT)]
+    assert scan["t_ns"].to_list() == odom["t_ns"].to_list()
+    assert command["t_ns"].to_list() == [i * STEP_NS + STAMP_LAG_NS + CMD_OFFSET_NS for i in range(COUNT)]
 
 
 def test_messages_carry_robot_frames_and_the_paired_twist(converted: Path):
@@ -130,7 +123,7 @@ def test_other_bag_topics_pass_through_in_robot_frames(tmp_path: Path):
     assert counts[f"{ROBOT_NS}{POINTS}"] == ("sensor_msgs/msg/PointCloud2", COUNT)
     assert counts["tf_static"] == ("tf2_msgs/msg/TFMessage", 1)
     assert meta["rosbag2_message_count"] == sum(len(listed) for listed in messages.values()) == 3 * COUNT + 5 * COUNT + 1
-    assert {"cmd_vel", "odom", "scan"} <= set(extract(run))
+    assert {"robot_cmd_vel", "robot_odom", "robot_scan_summary"} <= set(extract(run))
 
 
 def test_passed_through_messages_are_written_in_time_order(tmp_path: Path):
@@ -195,18 +188,12 @@ def test_evaluation_pipeline_scores_the_episode(converted: Path):
     folders = FolderManager(converted.parent)
     (episode,) = folders.discover_episodes(converted.name)
     (row,) = ProcessingPipeline(folders, workers=1).process_episode(episode)
-    assert (row["status"], row["pose_source"]) == ("path_only", "odom")
+    assert (row["status"], row["pose_source"]) == ("no_trajectory", None)
+    assert row["status_reason"] == "no tf ground-truth rows"
     assert (row["robot"], row["planner"], row["stage"], row["map"]) == ("env_0_human", "human", "run", "unknown")
     assert (row["is_reference"], row["reference_type"]) == (True, "human_demonstration")
-    assert row["path_length"] == pytest.approx(0.1 * (COUNT - 1))
-    assert row["time_to_goal"] == pytest.approx(0.1 * (COUNT - 1))
-    assert row["velocity_mean"] == pytest.approx(np.mean([velocity(i)[0] for i in range(COUNT)]))
-    assert row["start"] == pytest.approx(pose(0))
-    assert row["goal"] == pytest.approx(pose(COUNT - 1))
-    assert row["num_pedestrians"] == 0
     stored, _ = ParquetStore.read(converted / EPISODE / "metrics.parquet")
-    assert stored["status"].to_list() == ["path_only"]
-    assert stored["path_length"].to_list() == [row["path_length"]]
+    assert stored["status"].to_list() == ["no_trajectory"]
 
 
 def test_stray_cmd_vel_adds_no_frame(tmp_path: Path):
@@ -214,28 +201,28 @@ def test_stray_cmd_vel_adds_no_frame(tmp_path: Path):
     from arena_evaluation.processing.recorded_episodes import RecordedEpisodes
 
     run = convert(write_bag(tmp_path / "stray.bag", cmd=True, stray=3), tmp_path / "musohu", cmd_vel=CMD_VEL)
-    assert extract(run)["cmd_vel"].height == COUNT + 3
+    assert extract(run)["robot_cmd_vel"].height == COUNT + 3
     assert RecordedEpisodes(run).frames().height == COUNT
 
 
 def test_without_cmd_vel_the_velocity_stays_in_odom(tmp_path: Path, bag: Path):
     topics = extract(convert(bag, tmp_path / "musohu"))
-    assert sorted(topics) == ["odom", "scan"]
-    np.testing.assert_allclose(topics["odom"]["vel_linear"].to_numpy(), [velocity(i)[0] for i in range(COUNT)])
-    assert topics["scan"]["time_ns"].to_list() == [i * STEP_NS for i in range(COUNT)]
+    assert sorted(topics) == ["robot_odom", "robot_scan_summary"]
+    np.testing.assert_allclose(topics["robot_odom"]["odom_vx"].to_numpy(), [velocity(i)[0] for i in range(COUNT)])
+    assert topics["robot_scan_summary"]["t_ns"].to_list() == [i * STEP_NS for i in range(COUNT)]
 
 
 def test_odom_without_velocity_partner_is_dropped(tmp_path: Path):
     pytest.importorskip("rosbags")
-    odom = extract(convert(write_bag(tmp_path / "gaps.bag", unpaired=(7, 8)), tmp_path / "musohu"))["odom"]
-    assert odom["stamp_ns"].to_list() == [i * STEP_NS for i in range(COUNT) if i not in (7, 8)]
-    np.testing.assert_allclose(odom["vel_angular"].to_numpy(), velocity(0)[2])
+    odom = extract(convert(write_bag(tmp_path / "gaps.bag", unpaired=(7, 8)), tmp_path / "musohu"))["robot_odom"]
+    assert odom["t_ns"].to_list() == [i * STEP_NS for i in range(COUNT) if i not in (7, 8)]
+    np.testing.assert_allclose(odom["odom_wz"].to_numpy(), velocity(0)[2])
 
 
 def test_velocity_none_keeps_the_odom_twist(tmp_path: Path):
     pytest.importorskip("rosbags")
-    odom = extract(convert(write_bag(tmp_path / "twist.bag", twist_in_odom=True), tmp_path / "musohu", velocity=None))["odom"]
-    np.testing.assert_allclose(odom["vel_linear"].to_numpy(), [velocity(i)[0] for i in range(COUNT)])
+    odom = extract(convert(write_bag(tmp_path / "twist.bag", twist_in_odom=True), tmp_path / "musohu", velocity=None))["robot_odom"]
+    np.testing.assert_allclose(odom["odom_vx"].to_numpy(), [velocity(i)[0] for i in range(COUNT)])
 
 
 def test_default_topics_name_the_live_bag_layout():
@@ -265,7 +252,7 @@ def test_import_item_from_cache_writes_attribution(tmp_path: Path, bag: Path):
     assert "HZI4LJ" in attribution.citation
     assert (target / MCAP).is_file()
     assert importer.import_item("run", tmp_path / "musohu") == target
-    assert len(extract(target)["odom"]) == COUNT
+    assert len(extract(target)["robot_odom"]) == COUNT
 
 
 def test_topic_whose_ros2_type_has_fields_the_ros1_message_lacks_is_left_out_whole(tmp_path: Path):

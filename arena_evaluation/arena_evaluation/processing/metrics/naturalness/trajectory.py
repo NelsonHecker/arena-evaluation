@@ -9,6 +9,7 @@ from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.path.theta_star import (
     compute_theta_star_for_episode,
 )
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -46,7 +47,7 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "naturalness"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = [("tf_gt", "odom")]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
 
     UNITS = {
         "ade": "m",
@@ -121,23 +122,17 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         # 2. Topological Complexity (Signed net winding loop W = 1/(2*pi) * sum_j |sum Delta theta_rel_j|)
         total_winding = 0.0
         peds_df = self.native_ped_frame(episode)
-        if peds_df is not None and "peds_positions" in peds_df.columns and len(pos_x) > 1:
+        if peds_df is not None and "x" in peds_df.columns and len(pos_x) > 1:
             try:
-                peds_time_ns = peds_df["time_ns"].to_numpy()
-                peds_positions = peds_df["peds_positions"].to_list()
+                frames = frames_of(peds_df)
+                peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
                 _, _, _, t_odom_base = self.resolve_native_pose(episode)
                 rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom_base)
 
-                ped_series: dict[int, list[tuple[float, float, float, float]]] = {}
-                for i in range(len(peds_time_ns)):
-                    raw_p = peds_positions[i]
-                    if raw_p is None:
-                        continue
-                    parsed = self._parse_peds(raw_p)
-                    for p_idx in range(parsed.shape[0]):
-                        if p_idx not in ped_series:
-                            ped_series[p_idx] = []
-                        ped_series[p_idx].append((float(rpx[i]), float(rpy[i]), float(parsed[p_idx, 0]), float(parsed[p_idx, 1])))
+                ped_series: dict[str, list[tuple[float, float, float, float]]] = {}
+                for i, frame in enumerate(frames):
+                    for ped_id, x, y in frame.select("ped_id", "x", "y").iter_rows():
+                        ped_series.setdefault(ped_id, []).append((float(rpx[i]), float(rpy[i]), float(x), float(y)))
 
                 for samples in ped_series.values():
                     if len(samples) > 1:

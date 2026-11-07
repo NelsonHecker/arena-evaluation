@@ -33,7 +33,7 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["energy", "path_metrics", "motion_metrics"]
-    REQUIRED_TOPICS = [("power", "energy", "odom")]
+    REQUIRED_TOPICS = [("robot_power", "robot_energy", "robot_odom")]
 
     UNITS = {
         "specific_cost_of_transport": "",

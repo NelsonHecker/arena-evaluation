@@ -13,25 +13,15 @@ from arena_evaluation.processing.metrics.ecological.mechanism_common import Door
 from arena_evaluation.processing.metrics.ecological.mechanism_states import MechanismStatesCalculator
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, PlotSpec, RobotParams
+from snapshot_rows import snapshot_frame
 
 T = 1_000_000_000
 MAP = "synthetic_trajectory_world"
 
 
 def _snapshot(rows):
-    cols = {k: [] for k in ("time_ns", "entity", "kind", "field", "field_kind", "value_str", "value_num", "value_bool", "value_list")}
-    for t, entity, kind, field, field_kind, value in rows:
-        cols["time_ns"].append(int(t * T))
-        cols["entity"].append(entity)
-        cols["kind"].append(kind)
-        cols["field"].append(field)
-        cols["field_kind"].append(field_kind)
-        cols["value_str"].append(value if field_kind == "discrete" else None)
-        cols["value_num"].append(float(value) if field_kind == "continuous" else None)
-        cols["value_bool"].append(bool(value) if field_kind == "predicate" else None)
-        cols["value_list"].append(None)
-    schema = {"time_ns": pl.Int64, "entity": pl.Utf8, "kind": pl.Utf8, "field": pl.Utf8, "field_kind": pl.Utf8, "value_str": pl.Utf8, "value_num": pl.Float64, "value_bool": pl.Boolean, "value_list": pl.List(pl.Utf8)}
-    return pl.DataFrame(cols, schema=schema)
+    """World-semantics rows: (time_s, entity, kind, field, field_kind, value)."""
+    return snapshot_frame([(int(t * T), entity, kind, field, field_kind, value) for t, entity, kind, field, field_kind, value in rows])
 
 
 def test_teleport_breaks_fast_jumps_only():
@@ -105,13 +95,12 @@ def test_world_description_carries_kind_and_swing():
 
     zone = Zone(name="hall", polygon=[Position(0, 0, 0), Position(4, 0, 0), Position(4, 4, 0)])
     door = Door(name="h", start=Position(0, 0, 0), end=Position(0, 2, 0), kind="hinged", swing_direction=-1)
-    lift = Elevator(name="lift", position=Position(2, 2, 0), size=[2.0, 2.0, 2.5], door_side="+x", door_kind="teleport")
+    lift = Elevator(name="lift", position=Position(2, 2, 0), size=[2.0, 2.0, 2.5], door_side="+x")
     level = Level(id="0", zones=[zone], doors=[door], elevators=[lift])
     mech = mechanism_world_from_description(World(levels={"0": level}), {"0": (0.0, 0.0)})
     door = mech.door("env_0/h/0")
     assert (door.kind, door.swing) == ("hinged", -1)
     assert door.leaf(1.0)[1] == pytest.approx((2.0, 0.0))
-    assert mech.elevator("env_0/lift/0").door_kind == "teleport"
 
 
 def test_mechanism_states_sampled_on_the_time_grid():

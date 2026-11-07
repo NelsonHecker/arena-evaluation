@@ -24,6 +24,7 @@ from arena_evaluation.processing.metrics.ecological.condition_metrics import (
     load_wall_grid,
     load_zone_geometry,
 )
+from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class TaskReplayCalculator(BaseMetricCalculator):
 
     NAME = "task_replay"
     CATEGORY = "performance"
-    REQUIRED_TOPICS = ["task_pose"]
+    REQUIRED_TOPICS = ["robot_task_pose"]
 
     UNITS = {
         "phases_total": "",
@@ -124,29 +125,32 @@ class TaskReplayCalculator(BaseMetricCalculator):
         results["phase_outcomes"] = ["met" if i in met else "failed" if i in failed else "dropped" if i in dropped else "pending" for i in range(len(phases))]
         results["unsafe"] = len(violated)
 
-        poses = episode.topics.get("task_pose") if episode.topics else None
+        poses = episode.topics.get("robot_task_pose") if episode.topics else None
         zones = load_zone_geometry(self.world) if self.world else None
-        if poses is None or len(poses) == 0 or zones is None or not self.world:
+        if poses is None or len(poses) == 0 or not {"t_ns", "pos_x", "pos_y"} <= set(poses.columns) or zones is None or not self.world:
             return results
 
-        poses = poses.sort("time_ns")
-        time_ns = poses["time_ns"].to_numpy()
-        gestures = episode.topics.get("ped_gestures") if episode.topics else None
+        poses = poses.sort("t_ns")
+        time_ns = poses["t_ns"].to_numpy()
+        gestures = episode.topics.get("pedestrian_gestures") if episode.topics else None
+        peds_df = self.native_ped_frame(episode)
+        peds_frames = frames_of(peds_df) if peds_df is not None and len(peds_df) > 0 else []
         ctx = _EvalContext(
             events=events,
             time_ns=time_ns,
             pos_x=poses["pos_x"].to_numpy(),
             pos_y=poses["pos_y"].to_numpy(),
-            data=_peds_on_axis(episode.peds, time_ns),
+            data=poses,
             zones_by_name={zone.name: zone for zone in zones},
             entity_roster=_entity_roster(snapshot),
-            ped_roster={},
+            ped_roster=_ped_roster(peds_df),
             yaw=poses["yaw"].to_numpy(),
             fleet=_resample_fleet(episode.fleet, time_ns, robot),
             walls=load_wall_grid(self.world),
-            clips=clips_on_axis(episode.peds, gestures, time_ns),
+            clips=clips_on_axis(peds_df, gestures, time_ns),
+            peds_frames=peds_frames,
+            peds_times=np.array([int(frame["t_ns"][0]) for frame in peds_frames], dtype=np.int64),
         )
-        ctx.ped_roster = _ped_roster(ctx.data)
         polygons = ctx.polygons
         spans = _active_phase_spans(robot_series, int(time_ns[-1]) + 1)
 
@@ -203,24 +207,6 @@ def _covers(cond: dict, index: int) -> bool:
     first = cond.get("from", 0) or 0
     last = cond.get("to")
     return index >= first and (last is None or index <= last)
-
-
-def _peds_on_axis(peds: pl.DataFrame | None, time_ns: np.ndarray) -> pl.DataFrame:
-    """Recorded ped names and positions held onto the judge pose axis."""
-    if peds is None or len(peds) == 0 or "peds_names" not in peds.columns:
-        return pl.DataFrame({"time_ns": time_ns})
-    peds = peds.sort("time_ns")
-    times = peds["time_ns"].to_numpy()
-    idx = np.searchsorted(times, time_ns, side="right") - 1
-    names = peds["peds_names"].to_list()
-    positions = peds["peds_positions"].to_list()
-    return pl.DataFrame(
-        {
-            "time_ns": time_ns,
-            "peds_names": [names[i] if i >= 0 else [] for i in idx],
-            "peds_positions": [positions[i] if i >= 0 else [] for i in idx],
-        }
-    )
 
 
 __all__ = ["TaskReplayCalculator"]

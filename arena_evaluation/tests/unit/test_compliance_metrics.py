@@ -32,6 +32,12 @@ def _start_pos(data):
 
 
 def _episode(data, semantic_snapshot=None):
+    if data is not None and "pos_x" in data.columns and "pos_x_gt" not in data.columns:
+        data = data.with_columns(
+            pl.col("pos_x").alias("pos_x_gt"),
+            pl.col("pos_y").alias("pos_y_gt"),
+            pl.col("yaw").alias("yaw_gt"),
+        )
     return AlignedEpisodeBundle(
         episode_id=1,
         data=data,
@@ -410,23 +416,12 @@ def test_reconstruct_events_keeps_members_as_sorted_joined_names():
     snapshot = snapshot_frame(
         [
             (0, "env_0/lobby", "occupancy_cap", "cap", "continuous", 2.0),
+            (0, "env_0/lobby", "occupancy_cap", "members", "members", []),
+            (1_000_000_000, "env_0/lobby", "occupancy_cap", "members", "members", ["env_0/robot_0", "env_0/human_1"]),
+            (2_000_000_000, "env_0/lobby", "occupancy_cap", "members", "members", ["env_0/human_1", "env_0/robot_0"]),
+            (3_000_000_000, "env_0/lobby", "occupancy_cap", "members", "members", []),
         ]
     )
-    members = pl.DataFrame(
-        {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
-            "entity": ["env_0/lobby"] * 4,
-            "kind": ["occupancy_cap"] * 4,
-            "field": ["members"] * 4,
-            "field_kind": ["members"] * 4,
-            "value_str": [None] * 4,
-            "value_num": [None] * 4,
-            "value_bool": [None] * 4,
-            "value_list": [[], ["env_0/robot_0", "env_0/human_1"], ["env_0/human_1", "env_0/robot_0"], []],
-        },
-        schema_overrides={"value_str": pl.Utf8, "value_num": pl.Float64, "value_bool": pl.Boolean, "value_list": pl.List(pl.Utf8)},
-    )
-    snapshot = pl.concat([snapshot.with_columns(pl.lit(None, dtype=pl.List(pl.Utf8)).alias("value_list")), members], how="vertical_relaxed")
 
     events = _reconstruct_events(snapshot)
     member_rows = events.filter(pl.col("field") == "members").sort("time_ns")
@@ -437,18 +432,10 @@ def test_reconstruct_events_keeps_members_as_sorted_joined_names():
 
 
 def test_reconstruct_events_members_without_value_list_column():
-    snapshot = pl.DataFrame(
-        {
-            "time_ns": [0],
-            "entity": ["env_0/lobby"],
-            "kind": ["occupancy_cap"],
-            "field": ["members"],
-            "field_kind": ["members"],
-            "value_str": [None],
-            "value_num": [None],
-            "value_bool": [None],
-        },
-        schema_overrides={"value_str": pl.Utf8, "value_num": pl.Float64, "value_bool": pl.Boolean},
+    snapshot = snapshot_frame(
+        [
+            (0, "env_0/lobby", "occupancy_cap", "members", "members", []),
+        ]
     )
 
     events = _reconstruct_events(snapshot)

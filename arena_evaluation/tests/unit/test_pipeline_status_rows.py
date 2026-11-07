@@ -44,7 +44,7 @@ def test_outcome_verdict(state: int | None, info: str, expected: tuple[str, bool
 
 
 def test_record_outcome_prefers_last_record_over_metadata() -> None:
-    record = pl.DataFrame({"time_ns": [5, 0], "outcome_state": [3, 1], "outcome_info": ["collision", ""]})
+    record = pl.DataFrame({"t_ns": [5, 0], "outcome_state": [3, 1], "outcome_info": ["collision", ""]})
     assert _record_outcome(record, _meta(2)) == (3, "collision")
     assert _record_outcome(None, _meta(2, "finished")) == (2, "finished")
     assert _record_outcome(None, None) == (None, None)
@@ -52,16 +52,16 @@ def test_record_outcome_prefers_last_record_over_metadata() -> None:
 
 def test_record_conditions_skip_the_next_episodes_empty_reset_records() -> None:
     kept = '[{"op": "always", "p": {"each": "chest.openness", "le": 0.05}}]'
-    record = pl.DataFrame({"time_ns": [0, 2, 9, 9], "conditions": ["[]", kept, "[]", "not json"]})
+    record = pl.DataFrame({"t_ns": [0, 2, 9, 9], "conditions_yaml": ["[]", kept, "[]", "not json"]})
     assert _record_conditions(record) == [{"op": "always", "p": {"each": "chest.openness", "le": 0.05}}]
-    ended = pl.DataFrame({"time_ns": [0, 2, 9, 9], "outcome_state": [0, 1, 2, 0], "outcome_info": ["", "", "", ""], "conditions": ["[]", kept, kept, '[{"op": "never", "p": "robot in x"}]']})
+    ended = pl.DataFrame({"t_ns": [0, 2, 9, 9], "outcome_state": [0, 1, 2, 0], "outcome_info": ["", "", "", ""], "conditions_yaml": ["[]", kept, kept, '[{"op": "never", "p": "robot in x"}]']})
     assert _record_conditions(ended) == [{"op": "always", "p": {"each": "chest.openness", "le": 0.05}}]
-    assert _record_conditions(pl.DataFrame({"time_ns": [0], "conditions": ["[]"]})) is None
-    assert _record_conditions(pl.DataFrame({"time_ns": [0]})) is None
+    assert _record_conditions(pl.DataFrame({"t_ns": [0], "conditions_yaml": ["[]"]})) is None
+    assert _record_conditions(pl.DataFrame({"t_ns": [0]})) is None
 
 
 def test_record_outcome_ignores_the_next_episodes_queued_record_at_the_same_time() -> None:
-    record = pl.DataFrame({"time_ns": [0, 1, 9, 9, 9], "outcome_state": [0, 1, 2, 0, 0], "outcome_info": ["", "", "finished", "", ""]})
+    record = pl.DataFrame({"t_ns": [0, 1, 9, 9, 9], "outcome_state": [0, 1, 2, 0, 0], "outcome_info": ["", "", "finished", "", ""]})
     assert _record_outcome(record, None) == (2, "finished")
 
 
@@ -99,8 +99,8 @@ def test_metadata_robot_uses_bundle_key_style() -> None:
 
 
 def test_record_outcome_skips_the_previous_episodes_latched_record() -> None:
-    record = pl.DataFrame({"time_ns": [50, 100], "outcome_state": [3, 1], "outcome_info": ["timeout", ""]})
+    record = pl.DataFrame({"t_ns": [50, 100], "outcome_state": [3, 1], "outcome_info": ["timeout", ""]})
     assert _record_outcome(record, _meta(2, "finished after 77.2s")) == (2, "finished after 77.2s")
     assert _record_outcome(record, None) == (1, "")
-    with_terminal = pl.DataFrame({"time_ns": [50, 100, 900], "outcome_state": [3, 1, 2], "outcome_info": ["timeout", "", "done"]})
+    with_terminal = pl.DataFrame({"t_ns": [50, 100, 900], "outcome_state": [3, 1, 2], "outcome_info": ["timeout", "", "done"]})
     assert _record_outcome(with_terminal, _meta(3)) == (2, "done")

@@ -30,7 +30,7 @@ class PathMetricsCalculator(BaseMetricCalculator):
     NAME = "path_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["odom"]
+    REQUIRED_TOPICS = ["robot_odom"]
 
     UNITS = {
         "path": "m",

@@ -23,22 +23,28 @@ def _calc() -> TrajectoryMetricsCalculator:
 
 
 def _gt(xs: list[float], ys: list[float], yaws: list[float] | None = None) -> pl.DataFrame:
+    n = len(xs)
+    times = [i * SEC for i in range(n)]
     return pl.DataFrame(
         {
-            "time_ns": [i * SEC for i in range(len(xs))],
+            "time_ns": times,
+            "t_ns": times,
             "pos_x_gt": [float(x) for x in xs],
             "pos_y_gt": [float(y) for y in ys],
-            "yaw_gt": [0.0] * len(xs) if yaws is None else yaws,
+            "yaw_gt": [0.0] * n if yaws is None else yaws,
+            "x": [float(x) for x in xs],
+            "y": [float(y) for y in ys],
+            "yaw": [0.0] * n if yaws is None else yaws,
         },
-        schema={"time_ns": pl.Int64, "pos_x_gt": pl.Float64, "pos_y_gt": pl.Float64, "yaw_gt": pl.Float64},
     )
 
 
 def _episode(gt: pl.DataFrame, goal: list[float], *, map_name: str | None = None, peds: pl.DataFrame | None = None) -> AlignedEpisodeBundle:
-    topics = {"tf_gt": gt}
+    topics = {"robot_tracks": gt, "tf_gt": gt}
     if peds is not None:
+        topics["pedestrian_tracks"] = peds
         topics["peds"] = peds
-    return AlignedEpisodeBundle(1, gt, [], goal, map=map_name, topics=topics)
+    return AlignedEpisodeBundle(1, gt, [], goal, map=map_name, topics=topics, peds=peds)
 
 
 def test_frechet_of_an_empty_curve_is_zero():
@@ -89,7 +95,14 @@ def test_path_irregularity_is_turning_beyond_the_initial_heading_error_per_meter
 
 def test_topological_complexity_counts_net_winding_per_pedestrian():
     gt = _gt([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
-    peds = pl.DataFrame({"time_ns": [0, SEC, 2 * SEC], "peds_positions": ["[[1.0, 0.0], [0.0, 5.0]]", "[[0.0, 1.0]]", None]})
+    peds = pl.DataFrame(
+        {
+            "t_ns": [0, 0, SEC],
+            "ped_id": ["ped_0", "ped_1", "ped_0"],
+            "x": [1.0, 0.0, 0.0],
+            "y": [0.0, 5.0, 1.0],
+        }
+    )
 
     res = _calc().calculate(_episode(gt, [1.0, 1.0], peds=peds), {})
 
@@ -98,7 +111,7 @@ def test_topological_complexity_counts_net_winding_per_pedestrian():
 
 def test_unparseable_pedestrian_column_leaves_winding_at_zero():
     gt = _gt([0.0, 1.0], [0.0, 0.0])
-    peds = pl.DataFrame({"time_ns": [0, SEC], "peds_positions": [3, 4]})
+    peds = pl.DataFrame({"t_ns": [0, SEC], "x": ["invalid", "types"]})
 
     res = _calc().calculate(_episode(gt, [1.0, 0.0], peds=peds), {})
 

@@ -50,7 +50,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["odom"]
+    REQUIRED_TOPICS = ["robot_odom"]
 
     UNITS = {
         "timeseries_char_time_s": "s",
@@ -147,7 +147,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
 
     def _phase_map(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
         """Labels and targets of the schedule that ran, with the signed acceleration each ramp commands."""
-        recorded = self.native_topics(episode).get("characterization_schedule")
+        recorded = self.native_topics(episode).get("robot_characterization_schedule")
         if recorded is not None and len(recorded) > 0:
             table = recorded.select(list(self._SCHEDULE_SCHEMA)).unique(subset=["phase_label"], keep="last", maintain_order=True)
         else:

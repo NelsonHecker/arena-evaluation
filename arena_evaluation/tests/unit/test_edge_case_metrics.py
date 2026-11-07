@@ -26,10 +26,10 @@ from arena_evaluation.processing.metrics.edge_case.edge_case_metrics import (
     EdgeCaseFormationCalculator,
     agent_name,
 )
-from arena_evaluation.processing.mcap_reader import MCAPReader
 from arena_evaluation.processing.metrics.registry import MetricRegistry
 from arena_evaluation.processing.parquet_store import TopicParquetStore
 from arena_evaluation.processing.pipeline import ProcessingPipeline
+from flat_peds import flat_peds
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.manifest import MetadataWriter
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, EpisodeDescriptor, RobotParams, RunMetadata, TopicBundle
@@ -331,23 +331,21 @@ def _episode(run_dir: pathlib.Path, world: str, run: RunMetadata, peds: dict[str
     """The robot drives along y = 0 at 1 m/s, each pedestrian on its per-second track at its `twists` velocity, at 10 Hz."""
     times = [i * SEC // 10 for i in range(seconds * 10 + 1)]
     xs = [t / SEC for t in times]
-    tf_gt = pl.DataFrame({"time_ns": times, "pos_x_gt": xs, "pos_y_gt": [0.0] * len(times), "yaw_gt": [0.0] * len(times)})
+    zeros = [0.0] * len(times)
+    data = pl.DataFrame({"time_ns": times, "pos_x": xs, "pos_y": zeros, "yaw": zeros, "pos_x_gt": xs, "pos_y_gt": zeros, "yaw_gt": zeros})
+    robot_tracks = pl.DataFrame({"t_ns": times, "x": xs, "y": zeros, "yaw": zeros, "pose_source": ["tf_gt"] * len(times)})
     names = sorted(peds)
-    positions = []
+    frames = []
     for t in times:
         second = min(t // SEC, seconds)
-        positions.append([v for name in names for v in (*peds[name][second], 0.0)])
-    frame = pl.DataFrame(
-        {
-            "time_ns": times,
-            "peds_names": [[f"env_0/{name}" for name in names]] * len(times),
-            "peds_positions": positions,
-            "peds_twists": [[v for name in names for v in (*(twists or {}).get(name, (0.0, 0.0)), 0.0)]] * len(times),
-            "num_pedestrians": [len(names)] * len(times),
-        }
-    )
-    data = pl.DataFrame({"time_ns": times, "pos_x": xs, "pos_y": [0.0] * len(times), "yaw": [0.0] * len(times)})
-    return AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[0.0, 0.0, 0.0], goal_pos=[10.0, 0.0], map=world, run=run, topics={"tf_gt": tf_gt, "peds": frame}, run_dir=run_dir)
+        frames.append(
+            (
+                t,
+                [{"ped_id": f"Pedestrian_{i}", "ped_name": f"env_0/{name}", "x": peds[name][second][0], "y": peds[name][second][1], "vx": (twists or {}).get(name, (0.0, 0.0))[0], "vy": (twists or {}).get(name, (0.0, 0.0))[1]} for i, name in enumerate(names)],
+            )
+        )
+    pedestrians = flat_peds(frames)
+    return AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[0.0, 0.0, 0.0], goal_pos=[10.0, 0.0], map=world, run=run, topics={"robot_tracks": robot_tracks, "pedestrian_tracks": pedestrians}, run_dir=run_dir, peds=pedestrians)
 
 
 def _standing(x: float, y: float, seconds: int = 10) -> list[tuple[float, float]]:
@@ -428,8 +426,8 @@ def test_a_case_whose_agents_never_appeared_falls_back_to_everyone(tmp_path: pat
 def test_a_robot_that_stops_short_of_the_case_freezes(tmp_path: pathlib.Path, criticality: EdgeCaseCriticalityCalculator) -> None:
     world = _world(tmp_path, provenance=CASE)
     episode = _episode(tmp_path, world, _run(world), {"edge_0": _standing(6.0, 1.5)})
-    tf_gt = episode.topics["tf_gt"]
-    episode.topics["tf_gt"] = tf_gt.with_columns(pl.col("pos_x_gt").clip(upper_bound=4.0))
+    episode.topics["robot_tracks"] = episode.topics["robot_tracks"].with_columns(pl.col("x").clip(upper_bound=4.0))
+    episode.data = episode.data.with_columns(pl.col("pos_x_gt").clip(upper_bound=4.0))
     out = criticality.calculate(episode, {})
     assert out["edge_case_freeze_s"] == pytest.approx(6.0, abs=0.15)
 
@@ -447,7 +445,7 @@ def test_each_agent_counts_with_the_radius_its_scenario_entry_pins(tmp_path: pat
 def test_a_peds_stream_that_stops_early_is_not_held_past_its_last_message(tmp_path: pathlib.Path, criticality: EdgeCaseCriticalityCalculator) -> None:
     world = _world(tmp_path, provenance=CASE)
     episode = _episode(tmp_path, world, _run(world), {"edge_0": _standing(6.0, 0.0)})
-    episode.topics["peds"] = episode.topics["peds"].filter(pl.col("time_ns") <= 2 * SEC)
+    episode.topics["pedestrian_tracks"] = episode.topics["pedestrian_tracks"].filter(pl.col("t_ns") <= 2 * SEC)
     out = criticality.calculate(episode, {})
     assert out["edge_case_collided"] is False
     assert out["edge_case_min_clearance_at"] == pytest.approx(2.1)
@@ -461,7 +459,8 @@ HELD_CASE = CASE + "robot: {speed_mps: 1.0, hold_s: 3.0, traversals: 1, toleranc
 def test_the_designed_start_hold_is_not_a_freeze(tmp_path: pathlib.Path, criticality: EdgeCaseCriticalityCalculator, provenance: str, freeze_s: float) -> None:
     world = _world(tmp_path, provenance=provenance)
     episode = _episode(tmp_path, world, _run(world), {"edge_0": _standing(6.0, 1.5)})
-    episode.topics["tf_gt"] = episode.topics["tf_gt"].with_columns((pl.col("pos_x_gt") - 3.0).clip(lower_bound=0.0))
+    episode.topics["robot_tracks"] = episode.topics["robot_tracks"].with_columns((pl.col("x") - 3.0).clip(lower_bound=0.0))
+    episode.data = episode.data.with_columns((pl.col("pos_x_gt") - 3.0).clip(lower_bound=0.0))
     assert criticality.calculate(episode, {})["edge_case_freeze_s"] == pytest.approx(freeze_s, abs=0.15)
 
 
@@ -514,8 +513,9 @@ def test_the_encounter_point_moves_with_the_robot_level_into_the_map_frame(tmp_p
     world = _world(tmp_path, world_yaml=TWO_LEVELS, provenance=CASE, robot_level="1")
     ox, oy = WorldView(tmp_path / "worlds" / world).level_origins()["1"]
     episode = _episode(tmp_path, world, _run(world), {"edge_0": [(6.0 + ox, 4.0 + oy)] * 3 + [(6.0 + ox, oy)] * 8})
-    shifted = {"tf_gt": episode.topics["tf_gt"].with_columns(pl.col("pos_x_gt") + ox, pl.col("pos_y_gt") + oy), "peds": episode.topics["peds"]}
-    out = criticality.calculate(AlignedEpisodeBundle(episode_id=1, data=episode.data, start_pos=[], goal_pos=[], map=world, run=episode.run, topics=shifted, run_dir=tmp_path), {})
+    shifted = {"robot_tracks": episode.topics["robot_tracks"].with_columns(pl.col("x") + ox, pl.col("y") + oy), "pedestrian_tracks": episode.topics["pedestrian_tracks"]}
+    shifted_data = episode.data.with_columns(pl.col("pos_x_gt") + ox, pl.col("pos_y_gt") + oy)
+    out = criticality.calculate(AlignedEpisodeBundle(episode_id=1, data=shifted_data, start_pos=[], goal_pos=[], map=world, run=episode.run, topics=shifted, run_dir=tmp_path), {})
     assert out["edge_case_pet_s"] == pytest.approx(3.0) and out["edge_case_pet_with"] == "edge_0"
 
 
@@ -525,8 +525,9 @@ def test_a_level_filtered_snapshot_shifts_by_the_level_origins_the_runtime_store
     (tmp_path / "worlds" / world / "level_origins.yaml").write_text(f"'0': [0.0, 0.0]\n'1': [{ox}, {oy}]\n")
     filtered = world + "[1]"
     episode = _episode(tmp_path, filtered, _run(filtered), {"edge_0": [(6.0 + ox, 4.0 + oy)] * 3 + [(6.0 + ox, oy)] * 8})
-    shifted = {"tf_gt": episode.topics["tf_gt"].with_columns(pl.col("pos_x_gt") + ox, pl.col("pos_y_gt") + oy), "peds": episode.topics["peds"]}
-    out = criticality.calculate(AlignedEpisodeBundle(episode_id=1, data=episode.data, start_pos=[], goal_pos=[], map=filtered, run=episode.run, topics=shifted, run_dir=tmp_path), {})
+    shifted = {"robot_tracks": episode.topics["robot_tracks"].with_columns(pl.col("x") + ox, pl.col("y") + oy), "pedestrian_tracks": episode.topics["pedestrian_tracks"]}
+    shifted_data = episode.data.with_columns(pl.col("pos_x_gt") + ox, pl.col("pos_y_gt") + oy)
+    out = criticality.calculate(AlignedEpisodeBundle(episode_id=1, data=shifted_data, start_pos=[], goal_pos=[], map=filtered, run=episode.run, topics=shifted, run_dir=tmp_path), {})
     assert out["edge_case_pet_s"] == pytest.approx(3.0) and out["edge_case_pet_with"] == "edge_0"
 
 
@@ -562,13 +563,50 @@ def test_each_run_reads_its_own_snapshot(tmp_path: pathlib.Path, criticality: Ed
 
 
 def _timeline(fired: dict[str, float]) -> pl.DataFrame:
-    """A semantic snapshot whose timeline entity carries the `fired` stimulus fields, flattened by the MCAP reader."""
-    from arena_runtime_msgs.msg import SemanticEntityState
-
-    entity = SemanticEntityState(entity="env_0/timeline", kind="timeline", discrete_names=list(fired), discrete_values=[str(at) for at in fired.values()])
-    rows: defaultdict[str, list] = defaultdict(list)
-    MCAPReader._append_semantic_entity(rows, 0, 0, "hall", entity)
-    return pl.DataFrame(dict(rows), schema_overrides={"value_str": pl.String, "value_num": pl.Float64, "value_bool": pl.Boolean, "value_list": pl.List(pl.String)})
+    """A semantic snapshot whose timeline entity carries the `fired` stimulus fields, matching world_semantics schema."""
+    base = {
+        "t_ns": 0,
+        "env_id": "env_0",
+        "world": "hall",
+        "entity_name": "env_0/timeline",
+        "kind": "timeline",
+    }
+    rows = [
+        {
+            **base,
+            "field_name": "members",
+            "field_kind": "members",
+            "value_str": "",
+            "value_num": None,
+            "value_bool": None,
+        }
+    ]
+    for name, at in fired.items():
+        rows.append(
+            {
+                **base,
+                "field_name": name,
+                "field_kind": "discrete",
+                "value_str": str(at),
+                "value_num": None,
+                "value_bool": None,
+            }
+        )
+    return pl.DataFrame(
+        rows,
+        schema={
+            "t_ns": pl.Int64,
+            "env_id": pl.String,
+            "world": pl.String,
+            "entity_name": pl.String,
+            "kind": pl.String,
+            "field_name": pl.String,
+            "field_kind": pl.String,
+            "value_str": pl.String,
+            "value_num": pl.Float64,
+            "value_bool": pl.Boolean,
+        },
+    )
 
 
 def _intercept(tmp_path: pathlib.Path, fired: dict[str, float] | None) -> AlignedEpisodeBundle:
@@ -631,14 +669,15 @@ def test_a_head_on_contact_is_mutual_and_without_twists_the_robots(tmp_path: pat
     episode = _episode(tmp_path, world, _run(world), {"edge_0": oncoming}, twists={"edge_0": (-0.5, 0.0)})
     out = criticality.calculate(episode, {})
     assert (out["edge_case_collision_fault"], out["edge_case_collision_at"]) == ("mutual", pytest.approx(5.0))
-    episode.topics["peds"] = episode.topics["peds"].drop("peds_twists")
+    episode.topics["pedestrian_tracks"] = episode.topics["pedestrian_tracks"].with_columns(vx=0.0, vy=0.0)
     assert criticality.calculate(episode, {})["edge_case_collision_fault"] == "robot"
 
 
 def test_a_single_robot_pose_is_not_scored(tmp_path: pathlib.Path, criticality: EdgeCaseCriticalityCalculator) -> None:
     world = _world(tmp_path, provenance=CASE)
     episode = _episode(tmp_path, world, _run(world), {"edge_0": _standing(6.0, 1.5)})
-    episode.topics["tf_gt"] = episode.topics["tf_gt"].head(1)
+    episode.topics["robot_tracks"] = episode.topics["robot_tracks"].head(1)
+    episode.data = episode.data.head(1)
     out = criticality.calculate(episode, {})
     assert out["edge_case_id"] == "hospital_1__u_007" and out["edge_case_scope"] == "all"
     assert out["edge_case_min_clearance_m"] is None and out["edge_case_freeze_s"] is None
@@ -667,17 +706,21 @@ def _registry_run(episode: AlignedEpisodeBundle, *, topics: set[str], pedsim: bo
 def test_the_registry_gates_both_calculators_on_their_topics_and_pedsim(tmp_path: pathlib.Path) -> None:
     world = _world(tmp_path, provenance=CASE)
     episode = _episode(tmp_path, world, _run(world), {"edge_0": [(6.0, 3.0 - min(t, 3) * 1.0) for t in range(11)], "d_1": _standing(5.0, 3.0), "d_2": _standing(5.5, 3.0)})
-    out = _registry_run(episode, topics={"tf_gt", "peds"})
+    out = _registry_run(episode, topics={"robot_tracks", "pedestrian_tracks"})
     assert out["edge_case_id"] == "hospital_1__u_007" and out["edge_case_collided"] is True
     assert out["edge_case_formation_formed_at"] == pytest.approx(0.0)
     keys = [*EdgeCaseCriticalityCalculator.output_keys(), *EdgeCaseFormationCalculator.output_keys()]
-    for gated in (_registry_run(episode, topics={"tf_gt"}), _registry_run(episode, topics={"peds"}), _registry_run(episode, topics={"tf_gt", "peds"}, pedsim=False)):
+    for gated in (
+        _registry_run(episode, topics={"robot_tracks"}),
+        _registry_run(episode, topics={"pedestrian_tracks"}),
+        _registry_run(episode, topics={"robot_tracks", "pedestrian_tracks"}, pedsim=False),
+    ):
         assert all(gated[key] is None for key in keys)
 
 
 def test_a_malformed_encounter_leaves_the_case_unscored(tmp_path: pathlib.Path) -> None:
     world = _world(tmp_path, provenance=CASE.replace("[{agent: edge_0, point: [6.0, 0.0]}]", "[{agent: edge_0}]"))
-    out = _registry_run(_episode(tmp_path, world, _run(world), {"edge_0": _standing(6.0, 1.5)}), topics={"tf_gt", "peds"})
+    out = _registry_run(_episode(tmp_path, world, _run(world), {"edge_0": _standing(6.0, 1.5)}), topics={"robot_tracks", "pedestrian_tracks"})
     assert all(out[key] is None for key in [*EdgeCaseCriticalityCalculator.output_keys(), *EdgeCaseFormationCalculator.output_keys()])
 
 
@@ -689,10 +732,54 @@ def test_the_pipeline_scores_a_recorded_case_against_its_run_snapshot(tmp_path: 
     (episode_dir / "episode_000.mcap").touch()
     MetadataWriter.write(_run(world).model_copy(update={"pedsim_available": True}), episode_dir / "episode_000.yaml")
     recorded = _episode(run_dir, world, _run(world), {"edge_0": [(6.0, 3.0 - min(t, 3) * 1.0) for t in range(11)]})
-    times = recorded.topics["tf_gt"]["time_ns"]
-    odom = pl.DataFrame({"time_ns": times, "stamp_ns": times, "pos_x": recorded.topics["tf_gt"]["pos_x_gt"], "pos_y": [0.0] * len(times), "yaw": [0.0] * len(times), "vel_linear": [1.0] * len(times), "vel_angular": [0.0] * len(times)})
-    record = pl.DataFrame({"time_ns": [0, 10 * SEC], "episode_id": [1, 1], "outcome_state": [1, 2], "outcome_info": ["", "finished"]})
-    TopicParquetStore.write({"env_0_jackal_0": TopicBundle(odom=odom, tf_gt=recorded.topics["tf_gt"], peds=recorded.topics["peds"], episode_record=record)}, episode_dir / "topics")
+    times = recorded.topics["robot_tracks"]["t_ns"]
+    n = len(times)
+    odom = pl.DataFrame(
+        {
+            "t_ns": times,
+            "env_id": ["env_0"] * n,
+            "robot_id": ["env_0_jackal_0"] * n,
+            "odom_x": recorded.topics["robot_tracks"]["x"],
+            "odom_y": [0.0] * n,
+            "odom_yaw": [0.0] * n,
+            "odom_vx": [1.0] * n,
+            "odom_wz": [0.0] * n,
+            "drift_error_m": [0.0] * n,
+        }
+    )
+    robot_tracks = recorded.topics["robot_tracks"].with_columns(
+        env_id=pl.lit("env_0"),
+        robot_id=pl.lit("env_0_jackal_0"),
+        z=0.0,
+        vx=1.0,
+        vy=0.0,
+        vz=0.0,
+        omega_z=0.0,
+        speed_mps=1.0,
+    )
+    lifecycle = pl.DataFrame(
+        {
+            "t_ns": [0, 10 * SEC],
+            "env_id": ["env_0", "env_0"],
+            "episode_id": [1, 1],
+            "outcome_state": [1, 2],
+            "outcome_info": ["", "finished"],
+            "goal_uuid": ["", ""],
+            "phases_yaml": ["", ""],
+            "params_yaml": ["", ""],
+            "conditions_yaml": ["", ""],
+            "world": [world, world],
+            "seed": [0, 0],
+            "human_params": ["", ""],
+        }
+    )
+    topics_dir = episode_dir / "topics"
+    topics_dir.mkdir(parents=True, exist_ok=True)
+    odom.write_parquet(topics_dir / "robot_odom.parquet")
+    robot_tracks.write_parquet(topics_dir / "robot_tracks.parquet")
+    recorded.topics["pedestrian_tracks"].write_parquet(topics_dir / "pedestrian_tracks.parquet")
+    lifecycle.write_parquet(topics_dir / "episode_lifecycle.parquet")
+    TopicParquetStore.mark_complete(topics_dir)
     descriptor = EpisodeDescriptor(episode_dir=str(episode_dir), benchmark_id="run", episode_id=0, planner="nav2", stage="case", map=world)
     rows = ProcessingPipeline(FolderManager(data_root=tmp_path), workers=1).process_episode(descriptor)
     assert [row["edge_case_id"] for row in rows] == ["hospital_1__u_007"]

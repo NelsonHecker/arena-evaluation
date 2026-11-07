@@ -122,7 +122,7 @@ class VlnMetricsCalculator(BaseMetricCalculator):
     NAME = "vln_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["collision_metrics", "path_metrics"]
-    REQUIRED_TOPICS = [("tf_gt", "odom")]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
 
     UNITS = {
         "ne": "m",

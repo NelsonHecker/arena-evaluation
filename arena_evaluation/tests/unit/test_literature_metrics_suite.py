@@ -16,6 +16,21 @@ import polars as pl
 import pytest
 
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from flat_peds import flat_peds
+
+
+def _robot_tracks(df: pl.DataFrame) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "t_ns": df["time_ns"],
+            "x": df["pos_x_gt"],
+            "y": df["pos_y_gt"],
+            "yaw": df["yaw_gt"],
+            "pose_source": ["tf_gt"] * len(df),
+        }
+    )
+
+
 from arena_evaluation.processing.path.theta_star import compute_theta_star_path
 from arena_evaluation.processing.metrics.naturalness.trajectory import TrajectoryMetricsCalculator
 from arena_evaluation.processing.metrics.social.proxemics_extended import ProxemicsExtendedCalculator
@@ -87,9 +102,10 @@ def test_literature_topological_complexity_winding_loops():
     t_ns = np.linspace(0, 10 * SEC, 50, dtype=int)
 
     df_tf = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": rx, "pos_y_gt": ry, "yaw_gt": angles})
-    df_peds = pl.DataFrame({"time_ns": t_ns, "peds_positions": ["[ [5.0, 5.0] ]"] * 50, "num_pedestrians": [1] * 50})
+    tracks = _robot_tracks(df_tf)
+    df_peds = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 5.0, "y": 5.0}]) for t in t_ns])
 
-    ep = AlignedEpisodeBundle(1, df_tf, [7.0, 5.0, 0.0], [7.0, 5.0, 0.0], topics={"tf_gt": df_tf, "peds": df_peds})
+    ep = AlignedEpisodeBundle(1, df_tf, [7.0, 5.0, 0.0], [7.0, 5.0, 0.0], topics={"robot_tracks": tracks, "pedestrian_tracks": df_peds, "tf_gt": df_tf, "peds": df_peds})
     res = calc.calculate(ep, {})
 
     assert res["topological_complexity"] is not None
@@ -105,21 +121,23 @@ def test_literature_proxemics_four_zones_and_monotonic_psii():
     """Hall (1966) & Gao & Huang (2022): Clearance classifies zones; PSII increases monotonically with intrusion depth."""
     calc = ProxemicsExtendedCalculator(RobotParams(robot_radius=0.35))
 
-    tf_df = pl.DataFrame({"time_ns": [0, SEC], "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    t_ns = [0, SEC]
+    tf_df = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    tracks = _robot_tracks(tf_df)
 
     # Case A: Intimate Intrusion
-    peds_intimate = pl.DataFrame({"time_ns": [0, SEC], "peds_positions": ["[ [0.8, 0.0] ]", "[ [0.8, 0.0] ]"]})
-    ep_a = AlignedEpisodeBundle(1, tf_df, [0, 0, 0], [0, 0, 0], topics={"tf_gt": tf_df, "peds": peds_intimate})
+    peds_intimate = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 0.8, "y": 0.0}]) for t in t_ns])
+    ep_a = AlignedEpisodeBundle(1, tf_df, [0, 0, 0], [0, 0, 0], topics={"robot_tracks": tracks, "pedestrian_tracks": peds_intimate})
     res_a = calc.calculate(ep_a, {})
 
     # Case B: Personal Intrusion
-    peds_personal = pl.DataFrame({"time_ns": [0, SEC], "peds_positions": ["[ [1.45, 0.0] ]", "[ [1.45, 0.0] ]"]})
-    ep_b = AlignedEpisodeBundle(2, tf_df, [0, 0, 0], [0, 0, 0], topics={"tf_gt": tf_df, "peds": peds_personal})
+    peds_personal = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 1.45, "y": 0.0}]) for t in t_ns])
+    ep_b = AlignedEpisodeBundle(2, tf_df, [0, 0, 0], [0, 0, 0], topics={"robot_tracks": tracks, "pedestrian_tracks": peds_personal})
     res_b = calc.calculate(ep_b, {})
 
     # Case C: Free / Public
-    peds_free = pl.DataFrame({"time_ns": [0, SEC], "peds_positions": ["[ [4.0, 0.0] ]", "[ [4.0, 0.0] ]"]})
-    ep_c = AlignedEpisodeBundle(3, tf_df, [0, 0, 0], [0, 0, 0], topics={"tf_gt": tf_df, "peds": peds_free})
+    peds_free = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 4.0, "y": 0.0}]) for t in t_ns])
+    ep_c = AlignedEpisodeBundle(3, tf_df, [0, 0, 0], [0, 0, 0], topics={"robot_tracks": tracks, "pedestrian_tracks": peds_free})
     res_c = calc.calculate(ep_c, {})
 
     assert res_a["time_in_intimate_zone"] > 0.9
@@ -134,19 +152,16 @@ def test_literature_social_forces_anisotropic_potential():
     """Helbing & Molnar (1995): Pedestrian heading induces elliptical potential (higher in front, lower on sides)."""
     calc = SocialForcesCalculator(RobotParams(robot_radius=0.35))
 
-    tf_front = pl.DataFrame({"time_ns": [0, SEC], "pos_x_gt": [1.0, 1.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [np.pi, np.pi]})
-    tf_side = pl.DataFrame({"time_ns": [0, SEC], "pos_x_gt": [0.0, 0.0], "pos_y_gt": [1.0, 1.0], "yaw_gt": [-np.pi / 2, -np.pi / 2]})
+    t_ns = [0, SEC]
+    tf_front = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [1.0, 1.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [np.pi, np.pi]})
+    tracks_front = _robot_tracks(tf_front)
+    tf_side = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [1.0, 1.0], "yaw_gt": [-np.pi / 2, -np.pi / 2]})
+    tracks_side = _robot_tracks(tf_side)
 
-    peds_df = pl.DataFrame(
-        {
-            "time_ns": [0, SEC],
-            "peds_positions": ["[ [0.0, 0.0] ]", "[ [0.0, 0.0] ]"],
-            "peds_headings": ["[ 0.0 ]", "[ 0.0 ]"],
-        }
-    )
+    peds_df = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 0.0, "y": 0.0, "yaw": 0.0}]) for t in t_ns])
 
-    ep_front = AlignedEpisodeBundle(1, tf_front, [0, 0, 0], [0, 0, 0], topics={"tf_gt": tf_front, "peds": peds_df})
-    ep_side = AlignedEpisodeBundle(2, tf_side, [0, 0, 0], [0, 0, 0], topics={"tf_gt": tf_side, "peds": peds_df})
+    ep_front = AlignedEpisodeBundle(1, tf_front, [0, 0, 0], [0, 0, 0], topics={"robot_tracks": tracks_front, "pedestrian_tracks": peds_df})
+    ep_side = AlignedEpisodeBundle(2, tf_side, [0, 0, 0], [0, 0, 0], topics={"robot_tracks": tracks_side, "pedestrian_tracks": peds_df})
 
     res_front = calc.calculate(ep_front, {})
     res_side = calc.calculate(ep_side, {})
@@ -256,18 +271,19 @@ def test_literature_corridor_passing_rule_compliance():
     calc = ComplianceMetricsCalculator(RobotParams(0.35))
 
     t_ns = np.array([0, SEC, 2 * SEC, 3 * SEC])
-    ped_pos = ["[ [8.0, 0.0] ]", "[ [6.0, 0.0] ]", "[ [4.0, 0.0] ]", "[ [2.0, 0.0] ]"]
-    peds_df = pl.DataFrame({"time_ns": t_ns, "peds_positions": ped_pos})
+    peds_df = flat_peds([(int(t_ns[i]), [{"ped_id": "ped_0", "x": x, "y": 0.0, "vx": -2.0, "vy": 0.0}]) for i, x in enumerate([8.0, 6.0, 4.0, 2.0])])
 
     # Case A: Robot moves in +X direction at y = -0.5 (to the right of oncoming ped -> Compliant)
     tf_right = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [1.0, 3.0, 5.0, 7.0], "pos_y_gt": [-0.5, -0.5, -0.5, -0.5], "yaw_gt": [0.0, 0.0, 0.0, 0.0]})
-    ep_right = AlignedEpisodeBundle(1, tf_right, [0, 0, 0], [10, 0, 0], topics={"tf_gt": tf_right, "peds": peds_df})
+    tracks_right = _robot_tracks(tf_right)
+    ep_right = AlignedEpisodeBundle(1, tf_right, [0, 0, 0], [10, 0, 0], topics={"robot_tracks": tracks_right, "pedestrian_tracks": peds_df})
     comp_right = calc._compute_passing_compliance(ep_right)
     assert comp_right == 1.0
 
     # Case B: Robot moves in +X direction at y = +0.5 (to the left of oncoming ped -> Non-compliant)
     tf_left = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [1.0, 3.0, 5.0, 7.0], "pos_y_gt": [0.5, 0.5, 0.5, 0.5], "yaw_gt": [0.0, 0.0, 0.0, 0.0]})
-    ep_left = AlignedEpisodeBundle(2, tf_left, [0, 0, 0], [10, 0, 0], topics={"tf_gt": tf_left, "peds": peds_df})
+    tracks_left = _robot_tracks(tf_left)
+    ep_left = AlignedEpisodeBundle(2, tf_left, [0, 0, 0], [10, 0, 0], topics={"robot_tracks": tracks_left, "pedestrian_tracks": peds_df})
     comp_left = calc._compute_passing_compliance(ep_left)
     assert comp_left == 0.0
 

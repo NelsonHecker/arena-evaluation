@@ -166,33 +166,38 @@ class EpisodeDescriptor:
 
 @dataclass
 class TopicBundle:
-    """Raw topic dataframes extracted from MCAP."""
+    """Flat telemetry tables of one robot: the episode's ingested tables filtered to its robot and environment."""
 
-    odom: pl.DataFrame | pl.LazyFrame | None = None
-    scan: pl.DataFrame | pl.LazyFrame | None = None
-    cmd_vel: pl.DataFrame | pl.LazyFrame | None = None
-    joint_states: pl.DataFrame | pl.LazyFrame | None = None
-    peds: pl.DataFrame | pl.LazyFrame | None = None
-    peds_physics: pl.DataFrame | pl.LazyFrame | None = None
-    ped_gestures: pl.DataFrame | pl.LazyFrame | None = None
-    interactions: pl.DataFrame | pl.LazyFrame | None = None
-    interaction_events: pl.DataFrame | pl.LazyFrame | None = None
-    animation_states: pl.DataFrame | pl.LazyFrame | None = None
-    episode_record: pl.DataFrame | pl.LazyFrame | None = None
-    collision_events: pl.DataFrame | pl.LazyFrame | None = None
-    collision_monitor_state: pl.DataFrame | pl.LazyFrame | None = None
-    power: pl.DataFrame | pl.LazyFrame | None = None
-    energy: pl.DataFrame | pl.LazyFrame | None = None
-    acoustics: pl.DataFrame | pl.LazyFrame | None = None
-    plan: pl.DataFrame | pl.LazyFrame | None = None
-    characterization_phase: pl.DataFrame | pl.LazyFrame | None = None
-    characterization_schedule: pl.DataFrame | pl.LazyFrame | None = None
-    initialpose: pl.DataFrame | pl.LazyFrame | None = None
-    task_pose: pl.DataFrame | pl.LazyFrame | None = None
     tf: pl.DataFrame | pl.LazyFrame | None = None
     tf_static: pl.DataFrame | pl.LazyFrame | None = None
-    tf_gt: pl.DataFrame | pl.LazyFrame | None = None
-    semantic_snapshot: pl.DataFrame | pl.LazyFrame | None = None
+    world_semantics: pl.DataFrame | pl.LazyFrame | None = None
+    robot_tracks: pl.DataFrame | pl.LazyFrame | None = None
+    robot_odom: pl.DataFrame | pl.LazyFrame | None = None
+    robot_cmd_vel: pl.DataFrame | pl.LazyFrame | None = None
+    robot_scan_summary: pl.DataFrame | pl.LazyFrame | None = None
+    robot_scan_rays: pl.DataFrame | pl.LazyFrame | None = None
+    robot_joint_states: pl.DataFrame | pl.LazyFrame | None = None
+    robot_power: pl.DataFrame | pl.LazyFrame | None = None
+    robot_joint_power: pl.DataFrame | pl.LazyFrame | None = None
+    robot_energy: pl.DataFrame | pl.LazyFrame | None = None
+    robot_acoustics: pl.DataFrame | pl.LazyFrame | None = None
+    collision_events: pl.DataFrame | pl.LazyFrame | None = None
+    collision_contacts: pl.DataFrame | pl.LazyFrame | None = None
+    robot_collision_monitor: pl.DataFrame | pl.LazyFrame | None = None
+    robot_plans: pl.DataFrame | pl.LazyFrame | None = None
+    robot_characterization_phase: pl.DataFrame | pl.LazyFrame | None = None
+    robot_characterization_schedule: pl.DataFrame | pl.LazyFrame | None = None
+    robot_initialpose: pl.DataFrame | pl.LazyFrame | None = None
+    robot_task_pose: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_tracks: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_tracks_physics: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_gestures: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_animations: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_interactions: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_interaction_members: pl.DataFrame | pl.LazyFrame | None = None
+    pedestrian_interaction_events: pl.DataFrame | pl.LazyFrame | None = None
+    episode_lifecycle: pl.DataFrame | pl.LazyFrame | None = None
+    episode_integrity: pl.DataFrame | pl.LazyFrame | None = None
 
     def available(self) -> set[str]:
         """Names of the topics this bundle carries."""

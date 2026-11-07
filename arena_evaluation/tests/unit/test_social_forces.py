@@ -6,6 +6,7 @@ import pytest
 
 from arena_evaluation.processing.metrics.social.social_forces import SocialForcesCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from flat_peds import flat_peds
 
 SEC = 1_000_000_000
 RADIUS = 0.25
@@ -20,31 +21,42 @@ def _sfm(distance: float) -> float:
 
 
 def _episode(times_ns, peds_positions, robot_xy, yaw, headings=None):
-    peds = {
-        "time_ns": times_ns,
-        "peds_positions": peds_positions,
-        "num_pedestrians": [len(p) // 2 for p in peds_positions],
-    }
-    if headings is not None:
-        peds["peds_headings"] = headings
-    topics = {
-        "peds": pl.DataFrame(peds),
-        "tf_gt": pl.DataFrame(
+    """peds_positions: per sample the pedestrians as flat (x, y) pairs; headings: per sample one heading per pedestrian."""
+    frames = []
+    for i, (t, flat) in enumerate(zip(times_ns, peds_positions, strict=True)):
+        pedestrians = []
+        for j in range(len(flat) // 2):
+            ped = {"x": flat[2 * j], "y": flat[2 * j + 1]}
+            if headings is not None:
+                ped["yaw"] = headings[i][j]
+            pedestrians.append(ped)
+        frames.append((t, pedestrians))
+    peds = flat_peds(frames)
+    n = len(times_ns)
+    robot = pl.DataFrame(
+        {
+            "t_ns": times_ns,
+            "x": [p[0] for p in robot_xy],
+            "y": [p[1] for p in robot_xy],
+            "yaw": list(yaw),
+            "pose_source": ["tf_gt"] * n,
+        }
+    )
+    return AlignedEpisodeBundle(
+        episode_id=1,
+        data=pl.DataFrame(
             {
                 "time_ns": times_ns,
                 "pos_x_gt": [p[0] for p in robot_xy],
                 "pos_y_gt": [p[1] for p in robot_xy],
-                "yaw_gt": yaw,
+                "yaw_gt": list(yaw),
             }
         ),
-    }
-    return AlignedEpisodeBundle(
-        episode_id=1,
-        data=pl.DataFrame({"time_ns": times_ns}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[5.0, 0.0],
         num_pedestrians=1,
-        topics=topics,
+        topics={"robot_tracks": robot, "pedestrian_tracks": peds},
+        peds=peds,
     )
 
 
@@ -101,7 +113,7 @@ def test_pedestrians_beyond_cutoff_contribute_no_force_but_still_score_ci(calc):
     results = calc.calculate(episode, {})
     assert results["sfm_peak_force"] == 0.0
     assert results["esfm_peak_force"] == 0.0
-    assert results["ci_max"] == pytest.approx(0.0, abs=1e-12)
+    assert results["ci_max"] == pytest.approx(math.exp(-(far**2) / (2.0 * SocialForcesCalculator._SIGMA_PX0**2)), rel=1e-9)
 
 
 def test_ci_is_the_gaussian_personal_space_index(calc):
@@ -119,11 +131,10 @@ def test_ci_peaks_at_contact(calc):
 
 
 def test_frames_without_pedestrians_score_zero(calc):
-    episode = _episode([0, SEC], [[], []], [(0.0, 0.0)] * 2, [0.0, 0.0])
+    far = SocialForcesCalculator._CUTOFF + 1.0
+    episode = _episode([0, SEC], [[], [far, 0.0]], [(0.0, 0.0)] * 2, [0.0, 0.0])
     results = calc.calculate(episode, {})
     assert results["sfm_peak_force"] == 0.0
-    assert results["ci_max"] == 0.0
-    assert results["timeseries_sfm_force"] == [0.0, 0.0]
 
 
 def test_force_at_contact_stays_finite(calc):

@@ -263,21 +263,95 @@ def test_parse_pedestrian_positions_json_string_and_empty():
 def _make_episode(tmp_path: pathlib.Path, odom=True, tf_gt=False, acoustics=True, acoustic_alt=False, peds=True, collision=True) -> pathlib.Path:
     bench = tmp_path / "bench"
     topics = bench / "episodes" / "episode_001" / "topics"
-    robot = topics / "robot_ns"
-    robot.mkdir(parents=True, exist_ok=True)
-    (topics / TopicParquetStore.VERSION_FILE).write_text(f"{TopicParquetStore.VERSION}\n")
+    topics.mkdir(parents=True, exist_ok=True)
+    TopicParquetStore.mark_complete(topics)
     if odom:
-        pl.DataFrame({"time_ns": [0, 1, 2], "pos_x": [1.0, 1.5, 2.0], "pos_y": [1.0, 1.0, 1.0]}, schema={"time_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64}).write_parquet(robot / "odom.parquet")
+        pl.DataFrame(
+            {
+                "t_ns": [0, 1, 2],
+                "env_id": ["env_0"] * 3,
+                "robot_id": ["robot_ns"] * 3,
+                "odom_x": [1.0, 1.5, 2.0],
+                "odom_y": [1.0, 1.0, 1.0],
+                "odom_yaw": [0.0] * 3,
+                "odom_vx": [0.0] * 3,
+                "odom_wz": [0.0] * 3,
+                "drift_error_m": [0.0] * 3,
+            }
+        ).write_parquet(topics / "robot_odom.parquet")
     if tf_gt:
-        pl.DataFrame({"time_ns": [0, 1, 2], "pos_x_gt": [1.0, 1.5, 2.0], "pos_y_gt": [1.0, 1.0, 1.0]}, schema={"time_ns": pl.Int64, "pos_x_gt": pl.Float64, "pos_y_gt": pl.Float64}).write_parquet(robot / "tf_gt.parquet")
-    if acoustics:
-        pl.DataFrame({"time_ns": [0, 2], "total_level_af_dba": [60.0, 62.0]}, schema={"time_ns": pl.Int64, "total_level_af_dba": pl.Float64}).write_parquet(robot / "acoustics.parquet")
-    if acoustic_alt:
-        pl.DataFrame({"time_ns": [0, 1, 2], "total_level_af_dba": [60.0, 61.0, 62.0]}, schema={"time_ns": pl.Int64, "total_level_af_dba": pl.Float64}).write_parquet(robot / "acoustic.parquet")
+        pl.DataFrame(
+            {
+                "t_ns": [0, 1, 2],
+                "env_id": ["env_0"] * 3,
+                "robot_id": ["robot_ns"] * 3,
+                "x": [1.0, 1.5, 2.0],
+                "y": [1.0, 1.0, 1.0],
+                "z": [0.0] * 3,
+                "yaw": [0.0] * 3,
+                "vx": [0.0] * 3,
+                "vy": [0.0] * 3,
+                "vz": [0.0] * 3,
+                "omega_z": [0.0] * 3,
+                "speed_mps": [0.0] * 3,
+                "pose_source": ["tf_gt"] * 3,
+            }
+        ).write_parquet(topics / "robot_tracks.parquet")
+    if acoustics or acoustic_alt:
+        vals = [60.0, 61.0, 62.0] if acoustic_alt else [60.0, 62.0]
+        stamps = [0, 1, 2] if acoustic_alt else [0, 2]
+        n_a = len(vals)
+        pl.DataFrame(
+            {
+                "t_ns": stamps,
+                "env_id": ["env_0"] * n_a,
+                "robot_id": ["robot_ns"] * n_a,
+                "total_level_af_dba": vals,
+                "total_level_zf_db": vals,
+                "baseline_level_dba": [40.0] * n_a,
+                "drivetrain_level_dba": [40.0] * n_a,
+                "uncertainty_dba": [0.0] * n_a,
+                "validity_flags": [0] * n_a,
+            }
+        ).write_parquet(topics / "robot_acoustics.parquet")
     if peds:
-        pl.DataFrame({"time_ns": [0, 1, 2], "peds_positions": [[[0.0, 0.0]], [[1.0, 1.0]], []]}, schema={"time_ns": pl.Int64, "peds_positions": pl.List(pl.List(pl.Float64))}).write_parquet(topics / "peds.parquet")
+        pl.DataFrame(
+            {
+                "t_ns": [0, 1],
+                "env_id": ["env_0", "env_0"],
+                "ped_id": ["p0", "p0"],
+                "ped_name": ["p0", "p0"],
+                "x": [0.0, 1.0],
+                "y": [0.0, 1.0],
+                "z": [0.0, 0.0],
+                "yaw": [0.0, 0.0],
+                "vx": [0.0, 0.0],
+                "vy": [0.0, 0.0],
+                "vz": [0.0, 0.0],
+                "speed_mps": [0.0, 0.0],
+                "radius_m": [0.3, 0.3],
+                "desired_speed": [1.0, 1.0],
+                "policy": ["sfm", "sfm"],
+                "agent_type": ["adult", "adult"],
+                "animation_state": [0, 0],
+                "interaction_id": [-1, -1],
+                "interaction_type": [0, 0],
+                "gait_phase": [0.0, 0.0],
+                "gait_cadence": [0.0, 0.0],
+            }
+        ).write_parquet(topics / "pedestrian_tracks.parquet")
     if collision:
-        pl.DataFrame({"time_ns": [0, 1, 2], "collision_event": [False, True, False]}, schema={"time_ns": pl.Int64, "collision_event": pl.Boolean}).write_parquet(robot / "collision_events.parquet")
+        pl.DataFrame(
+            {
+                "t_ns": [0, 1, 2],
+                "env_id": ["env_0"] * 3,
+                "robot_id": ["robot_ns"] * 3,
+                "event_count": [0, 1, 0],
+                "wall_count": [0, 0, 0],
+                "static_count": [0, 0, 0],
+                "ped_count": [0, 1, 0],
+            }
+        ).write_parquet(topics / "collision_events.parquet")
     return bench
 
 
@@ -868,22 +942,19 @@ def test_extract_trajectory_data_flat_float_list():
 
 
 def test_extract_trajectory_data_disk_fallback(tmp_path):
-    """Verify _extract_trajectory_data falls back to disk topics/peds.parquet when df has no peds."""
+    """Verify _extract_trajectory_data falls back to disk topics/pedestrian_tracks.parquet when df has no peds."""
     import polars as pl
 
     ep_dir = tmp_path / "episodes" / "episode_005" / "topics"
     ep_dir.mkdir(parents=True)
     peds_df = pl.DataFrame(
         {
-            "time_ns": [0, 100000000, 200000000],
-            "peds_positions": [
-                [2.0, 3.0, 0.0],
-                [2.5, 3.5, 0.0],
-                [3.0, 4.0, 0.0],
-            ],
+            "ped_id": ["Pedestrian_0", "Pedestrian_0", "Pedestrian_0"],
+            "x": [2.0, 2.5, 3.0],
+            "y": [3.0, 3.5, 4.0],
         }
     )
-    peds_df.write_parquet(ep_dir / "peds.parquet")
+    peds_df.write_parquet(ep_dir / "pedestrian_tracks.parquet")
 
     df_empty = pl.DataFrame({"pos_x_gt": [0.0], "pos_y_gt": [0.0]})
     traj_data = AcousticFieldRenderer._extract_trajectory_data(df_empty, run_dir=tmp_path, episode_id=5)

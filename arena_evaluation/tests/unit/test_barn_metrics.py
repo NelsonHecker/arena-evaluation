@@ -68,10 +68,10 @@ def _episode(position, duration: float, collision_at: float | None = None, world
     stamps = t0 + np.arange(0.0, duration + 1e-9, 1.0 / RATE_HZ)
     xy = np.array([position(t - t0) for t in stamps])
     time_ns = np.round(stamps * 1e9).astype(np.int64)
-    tf_gt = pl.DataFrame({"time_ns": time_ns, "pos_x_gt": xy[:, 0], "pos_y_gt": xy[:, 1], "yaw_gt": np.full(len(stamps), math.pi / 2)})
+    robot_tracks = pl.DataFrame({"t_ns": time_ns, "x": xy[:, 0], "y": xy[:, 1], "yaw": np.full(len(stamps), math.pi / 2), "pose_source": ["tf_gt"] * len(stamps)})
     hits = np.zeros(len(stamps), dtype=np.int64) if collision_at is None else (stamps - t0 >= collision_at).astype(np.int64)
-    collisions = pl.DataFrame({"time_ns": time_ns, "collision_event": hits})
-    return AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[*START, math.pi / 2], goal_pos=list(GOAL), map=world, topics={"tf_gt": tf_gt, "collision_events": collisions})
+    collisions = pl.DataFrame({"t_ns": time_ns, "event_count": hits})
+    return AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[*START, math.pi / 2], goal_pos=list(GOAL), map=world, topics={"robot_tracks": robot_tracks, "collision_events": collisions})
 
 
 def _config(path_length: float) -> dict:
@@ -245,7 +245,7 @@ def test_reference_block_normalizes_numbers():
 
 def test_registry_reports_the_score_beside_the_native_metrics():
     episode = _episode(_drive(1.0), 10.0)
-    topics = {"tf_gt", "odom", "collision_events"}
+    topics = {"robot_tracks", "robot_odom", "collision_events"}
     with_reference = MetricRegistry(RobotParams(model="jackal"), metrics_config=_config(10.0))
     assert with_reference.calculators["barn_score"].metrics_config == _config(10.0)
     results = with_reference.run(episode, available_topics=topics, pedsim_available=False)
@@ -254,7 +254,7 @@ def test_registry_reports_the_score_beside_the_native_metrics():
     assert {"success", "collision_amount", "time_to_goal"} <= set(results)
     without = MetricRegistry(RobotParams(model="jackal")).run(_episode(_drive(1.0), 10.0), available_topics=topics, pedsim_available=False)
     assert {key: without[key] for key in NULLS} == NULLS
-    skipped = with_reference.run(_episode(_drive(1.0), 10.0), available_topics={"tf_gt", "odom"}, pedsim_available=False)
+    skipped = with_reference.run(_episode(_drive(1.0), 10.0), available_topics={"robot_tracks", "robot_odom"}, pedsim_available=False)
     assert {key: skipped[key] for key in NULLS} == NULLS
 
 

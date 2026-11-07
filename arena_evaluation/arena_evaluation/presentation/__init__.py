@@ -1,5 +1,11 @@
 """Report rendering. The heavy members load on first access."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .report_builder import ReportBuilder
+    from .viz_manifest import VizManifest
+
 __all__ = ["ReportBuilder", "VizManifest"]
 
 

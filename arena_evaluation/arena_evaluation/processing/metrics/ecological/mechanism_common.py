@@ -11,6 +11,8 @@ import typing
 import numpy as np
 import polars as pl
 
+from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, frames_of
+
 if typing.TYPE_CHECKING:
     from arena_simulation_setup.shared import Signal
     from arena_simulation_setup.tree.World import Level, World, Zone
@@ -100,15 +102,15 @@ def robot_env_snapshot(snapshot: pl.DataFrame | pl.LazyFrame | None, robot_name:
         return None
     if isinstance(snapshot, pl.LazyFrame):
         snapshot = snapshot.collect()
-    if len(snapshot) == 0 or "entity" not in snapshot.columns or not robot_name:
+    if len(snapshot) == 0 or "entity_name" not in snapshot.columns or not robot_name:
         return snapshot
     env = RobotIdentity(robot_name).env
     if env is None:
         return snapshot
-    envs = snapshot.select(pl.col("entity").str.extract(r"^/*(env_\d+)/", 1).unique())["entity"].to_list()
+    envs = snapshot.select(pl.col("entity_name").str.extract(r"^/*(env_\d+)/", 1).unique())["entity_name"].to_list()
     if env not in envs or len(envs) < 2:
         return snapshot
-    return snapshot.filter(pl.col("entity").str.contains(rf"^/*{env}/"))
+    return snapshot.filter(pl.col("entity_name").str.contains(rf"^/*{env}/"))
 
 
 @dataclasses.dataclass
@@ -307,7 +309,6 @@ def _level_geometry(out: MechanismWorld, level_id: str, level: Level) -> None:
                 activation_distance=float(elevator.activation_distance),
                 capacity=elevator.capacity,
                 destinations=list(elevator.destinations),
-                door_kind=elevator.door_kind,
             )
         )
     for zone in level.zones:
@@ -438,58 +439,27 @@ class PedTracks:
         return float(self.xy[i][j, 0]), float(self.xy[i][j, 1])
 
 
-def _flat_triples(raw: typing.Iterable[float] | None) -> np.ndarray:
-    if raw is None:
-        return np.empty((0, 3))
-    arr = np.asarray(list(raw), dtype=np.float64)
-    if arr.size == 0 or arr.size % 3 != 0:
-        return np.empty((0, 3))
-    return arr.reshape(-1, 3)
-
-
-def ped_tracks(data: pl.DataFrame | None, time_ns: np.ndarray | None = None) -> PedTracks | None:
-    """Pedestrian tracks from the aligned `peds_*` columns, None when no positions were recorded."""
-    if data is None or "peds_positions" not in data.columns or len(data) == 0:
+def ped_tracks(peds: pl.DataFrame | None, time_ns: np.ndarray) -> PedTracks | None:
+    """Pedestrian tracks held at each robot time, from the flat pedestrian table; None when no pedestrians were recorded."""
+    if peds is None or len(peds) == 0:
         return None
-    from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-
-    positions = data["peds_positions"].to_list()
-    hints = data["num_pedestrians"].to_list() if "num_pedestrians" in data.columns else None
-    names = data["peds_names"].to_list() if "peds_names" in data.columns else None
-    twists = data["peds_twists"].to_list() if "peds_twists" in data.columns else None
-    if time_ns is None:
-        time_ns = data["time_ns"].to_numpy()
-
+    frames = frames_of(peds)
+    frame_times = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
     keys: list[list[str]] = []
     xy: list[np.ndarray] = []
     vel: list[np.ndarray] = []
-    named = names is not None
-    prev: dict[str, tuple[float, float]] = {}
-    prev_t: int | None = None
-    for i in range(len(positions)):
-        parsed = BaseMetricCalculator._parse_peds(positions[i], hints[i] if hints is not None else None)
-        pos = parsed[:, :2] if parsed.ndim == 2 and parsed.shape[1] >= 2 else np.empty((0, 2))
-        row_names = list(names[i]) if names is not None and names[i] is not None else None
-        if row_names is not None and len(row_names) == len(pos):
-            row_keys = [_norm_path(n) for n in row_names]
-        else:
-            row_keys = [f"#{j}" for j in range(len(pos))]
-            if row_names is not None and len(pos):
-                named = False
-        tw = _flat_triples(twists[i])[:, :2] if twists is not None else np.empty((0, 2))
-        if len(tw) != len(pos):
-            tw = np.zeros((len(pos), 2))
-            if prev_t is not None:
-                step = max((int(time_ns[i]) - prev_t) / 1e9, 1e-3)
-                for j, key in enumerate(row_keys):
-                    if key in prev:
-                        tw[j] = (pos[j] - np.asarray(prev[key])) / step
-        keys.append(row_keys)
-        xy.append(pos)
-        vel.append(tw)
-        prev = {key: (float(pos[j, 0]), float(pos[j, 1])) for j, key in enumerate(row_keys)}
-        prev_t = int(time_ns[i])
-    return PedTracks(keys, xy, vel, named)
+    for t in time_ns:
+        idx = int(np.searchsorted(frame_times, t, side="right")) - 1
+        if idx < 0 or int(t) - int(frame_times[idx]) > ALIGN_TOLERANCE_NS:
+            keys.append([])
+            xy.append(np.empty((0, 2)))
+            vel.append(np.empty((0, 2)))
+            continue
+        held = frames[idx]
+        keys.append([_norm_path(name) for name in held["ped_name"].to_list()])
+        xy.append(held.select("x", "y").to_numpy())
+        vel.append(held.select("vx", "vy").to_numpy())
+    return PedTracks(keys, xy, vel, True)
 
 
 def true_runs(mask: np.ndarray) -> list[tuple[int, int]]:

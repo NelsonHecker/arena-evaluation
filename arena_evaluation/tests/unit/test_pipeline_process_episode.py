@@ -13,41 +13,34 @@ from arena_evaluation.processing.metrics.ecological.condition_metrics import _wa
 from arena_evaluation.processing.parquet_store import TopicParquetStore
 from arena_evaluation.processing.pipeline import ProcessingPipeline
 from arena_evaluation.storage.folder_manager import FolderManager
-from arena_evaluation.storage.schemas import EpisodeDescriptor, TopicBundle
+from arena_evaluation.storage.schemas import EpisodeDescriptor
 
 S = 1_000_000_000
 WORLD = "synthetic_pipeline_world"
+ENV = "env_0"
 ROBOT = "env_0_jackal_0"
 PHASES = {"jackal_0": {"phases": [{"goto": [1.0, 1.0, 0.0], "tolerance_radius": 0.5, "tolerance_angle": 0.0, "hold_time": 0.0}], "conditions": [], "map_poses": [[1.0, 1.0, 0.0]]}}
 
 
-def _track(points: list[tuple[float, float, float]]) -> pl.DataFrame:
-    return pl.DataFrame(
-        {
-            "time_ns": [int(t * S) for t, _, _ in points],
-            "stamp_ns": [int(t * S) for t, _, _ in points],
-            "pos_x": [x for _, x, _ in points],
-            "pos_y": [y for _, _, y in points],
-            "yaw": [0.0] * len(points),
-            "vel_linear": [0.5] * len(points),
-            "vel_angular": [0.0] * len(points),
-        }
-    )
+def _robot_frame(points: list[tuple[float, float, float]], columns: dict[str, str]) -> dict[str, list]:
+    """Flat robot rows of a track: the time, identity and the columns named by the mapping."""
+    return {"t_ns": [int(t * S) for t, _, _ in points], "env_id": [ENV] * len(points), "robot_id": [ROBOT] * len(points), **{column: [value(x, y) for _, x, y in points] for column, value in columns.items()}}
 
 
 def _snapshot(rows: list[tuple[int, str, str]]) -> pl.DataFrame:
+    n = len(rows)
     return pl.DataFrame(
         {
-            "time_ns": [t for t, _, _ in rows],
-            "env_id": [0] * len(rows),
-            "world": [WORLD] * len(rows),
-            "entity": ["env_0/jackal_0"] * len(rows),
-            "kind": ["robot"] * len(rows),
-            "field": [f for _, f, _ in rows],
-            "field_kind": ["discrete"] * len(rows),
+            "t_ns": [t for t, _, _ in rows],
+            "env_id": [ENV] * n,
+            "world": [WORLD] * n,
+            "entity_name": ["env_0/jackal_0"] * n,
+            "kind": ["robot"] * n,
+            "field_name": [f for _, f, _ in rows],
+            "field_kind": ["discrete"] * n,
             "value_str": [v for _, _, v in rows],
-            "value_num": pl.Series([None] * len(rows), dtype=pl.Float64),
-            "value_bool": pl.Series([None] * len(rows), dtype=pl.Boolean),
+            "value_num": pl.Series([None] * n, dtype=pl.Float64),
+            "value_bool": pl.Series([None] * n, dtype=pl.Boolean),
         }
     )
 
@@ -61,21 +54,28 @@ def _episode(tmp_path: pathlib.Path) -> tuple[FolderManager, EpisodeDescriptor]:
     episode_dir.mkdir(parents=True)
     (episode_dir / "episode_000.mcap").touch()
     track = [(t / 10, 5.0 - 0.4 * t, 5.0 - 0.4 * t) for t in range(11)] + [(t / 10, 1.0, 1.0) for t in range(11, 31)]
-    bundle = TopicBundle(
-        odom=_track(track),
-        task_pose=_track(track),
-        episode_record=pl.DataFrame(
-            {
-                "time_ns": [0, 3 * S],
-                "episode_id": [1, 1],
-                "outcome_state": [1, 2],
-                "outcome_info": ["", "finished"],
-                "phases": [json.dumps(PHASES), json.dumps(PHASES)],
-            }
-        ),
-        semantic_snapshot=_snapshot(_robot_rows(0, "0", "") + _robot_rows(int(1.5 * S), "", "0")),
+    topics = episode_dir / "topics"
+    topics.mkdir()
+    pl.DataFrame(_robot_frame(track, {"odom_x": lambda x, _: x, "odom_y": lambda _, y: y, "odom_yaw": lambda *_: 0.0, "odom_vx": lambda *_: 0.5, "odom_wz": lambda *_: 0.0, "drift_error_m": lambda *_: 0.0})).write_parquet(topics / "robot_odom.parquet")
+    pl.DataFrame(_robot_frame(track, {"x": lambda x, _: x, "y": lambda _, y: y, "z": lambda *_: 0.0, "yaw": lambda *_: 0.0, "vx": lambda *_: 0.0, "vy": lambda *_: 0.0, "vz": lambda *_: 0.0, "omega_z": lambda *_: 0.0, "speed_mps": lambda *_: 0.0, "pose_source": lambda *_: "tf_gt"})).write_parquet(
+        topics / "robot_tracks.parquet"
     )
-    TopicParquetStore.write({ROBOT: bundle}, episode_dir / "topics")
+    pl.DataFrame(_robot_frame(track, {"stamp_ns": lambda *_: 0, "pos_x": lambda x, _: x, "pos_y": lambda _, y: y, "yaw": lambda *_: 0.0})).write_parquet(topics / "robot_task_pose.parquet")
+    pl.DataFrame(
+        {
+            "t_ns": [0, 3 * S],
+            "env_id": [ENV, ENV],
+            "episode_id": [1, 1],
+            "outcome_state": [1, 2],
+            "outcome_info": ["", "finished"],
+            "goal_uuid": ["", ""],
+            "phases_yaml": [json.dumps(PHASES), json.dumps(PHASES)],
+            "params_yaml": ["", ""],
+            "conditions_yaml": ["", ""],
+        }
+    ).write_parquet(topics / "episode_lifecycle.parquet")
+    _snapshot(_robot_rows(0, "0", "") + _robot_rows(int(1.5 * S), "", "0")).write_parquet(topics / "world_semantics.parquet")
+    TopicParquetStore.mark_complete(topics)
     descriptor = EpisodeDescriptor(episode_dir=str(episode_dir), benchmark_id="run", episode_id=0, planner="nav2", stage="s0", map=WORLD)
     return FolderManager(data_root=tmp_path), descriptor
 

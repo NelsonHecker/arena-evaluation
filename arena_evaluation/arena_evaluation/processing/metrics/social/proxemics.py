@@ -3,8 +3,10 @@ from __future__ import annotations
 import typing
 
 import numpy as np
+import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import distances_to_pedestrians
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -15,7 +17,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
-    REQUIRED_TOPICS = ["odom", "peds"]
+    REQUIRED_TOPICS = ["robot_odom", "pedestrian_tracks"]
 
     UNITS = {
         "num_pedestrians": "",
@@ -41,13 +43,12 @@ class ProxemicsCalculator(BaseMetricCalculator):
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
 
-        if episode.data is None or "pos_x" not in episode.data.columns or "peds_positions" not in episode.data.columns:
+        peds_df = self.native_ped_frame(episode)
+        if episode.data is None or "pos_x" not in episode.data.columns or peds_df is None:
             return {k: None for k in self.output_keys()}
 
         pos_x, pos_y, _, _, _, _ = self.resolve_robot_pose(episode)
         time_ns = episode.data["time_ns"].to_numpy()
-        peds_positions = episode.data["peds_positions"].to_list()
-        num_pedestrians_col = episode.data["num_pedestrians"].to_numpy() if "num_pedestrians" in episode.data.columns else None
 
         velocity = prior_results.get("velocity", [])
 
@@ -60,41 +61,15 @@ class ProxemicsCalculator(BaseMetricCalculator):
                 "avg_velocity_in_personal_space": 0.0,
             }
 
-        in_personal_space_steps = []
-        in_personal_space_time_s = 0.0
-        vel_in_space = []
+        within = distances_to_pedestrians(time_ns, pos_x, pos_y, peds_df).filter(pl.col("distance") < self.PERSONAL_SPACE_RADIUS).group_by("row").len()
+        counts = np.zeros(N, dtype=int)
+        counts[within["row"].to_numpy()] = within["len"].to_numpy()
+        in_personal_space_steps = counts.tolist()
 
-        dt = np.diff(time_ns) / 1e9
-        dt = np.append(dt, 0.0)
-
-        for i in range(N):
-            peds = peds_positions[i]
-            if not peds or len(peds) == 0:
-                in_personal_space_steps.append(0)
-                continue
-
-            rx, ry = pos_x[i], pos_y[i]
-
-            peds_arr = self._parse_peds(
-                peds,
-                num_pedestrians_col[i] if num_pedestrians_col is not None else None,
-            )
-            if peds_arr.shape[0] == 0:
-                in_personal_space_steps.append(0)
-                continue
-
-            dx = peds_arr[:, 0] - rx
-            dy = peds_arr[:, 1] - ry
-            distances = np.sqrt(dx**2 + dy**2)
-
-            in_space_count = np.sum(distances < self.PERSONAL_SPACE_RADIUS)
-
-            in_personal_space_steps.append(int(in_space_count))
-
-            if in_space_count > 0:
-                in_personal_space_time_s += dt[i]
-                if velocity and i < len(velocity):
-                    vel_in_space.append(velocity[i])
+        dt = np.append(np.diff(time_ns) / 1e9, 0.0)
+        inside = np.flatnonzero(counts > 0)
+        in_personal_space_time_s = float(dt[inside].sum())
+        vel_in_space = [velocity[i] for i in inside if velocity and i < len(velocity)]
 
         if vel_in_space:
             avg_vel = float(np.nanmean(vel_in_space))

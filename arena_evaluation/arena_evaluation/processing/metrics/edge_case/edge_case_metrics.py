@@ -8,6 +8,7 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 
 from .criticality import SETTLE_S, Sample, formation_hold, score
 from .provenance import Provenance, load_provenance, scenario_name
@@ -48,7 +49,7 @@ def fired_stimuli(snapshot: pl.DataFrame | None, start_s: float | None) -> dict[
     if len(rows) == 0:
         return None
     fired: dict[str, dict[str, float]] = {}
-    for field, value in rows.filter((pl.col("field_kind") == "discrete") & pl.col("field").str.starts_with(STIMULUS_PREFIX)).select("field", "value_str").iter_rows():
+    for field, value in rows.filter((pl.col("field_kind") == "discrete") & pl.col("field_name").str.starts_with(STIMULUS_PREFIX)).select("field_name", "value_str").iter_rows():
         agent, _, need = field[len(STIMULUS_PREFIX) :].rpartition(".")
         try:
             at = float(value)
@@ -78,23 +79,11 @@ def episode_samples(calc: BaseMetricCalculator, episode: AlignedEpisodeBundle, r
     vx, vy = calc.velocity_from_pose(rx, ry, grid)
     rows: list[dict[str, tuple[tuple[float, float], tuple[float, float], float]]] = [{} for _ in grid]
     peds = calc.native_ped_frame(episode)
-    if peds is not None and "peds_names" in peds.columns and "peds_positions" in peds.columns:
-        twists = "peds_twists" in peds.columns
-        frame = peds.select(["time_ns", "peds_names", "peds_positions", *(["peds_twists"] if twists else [])])
-        held = pl.DataFrame({"time_ns": grid}).join_asof(frame, on="time_ns", strategy="backward", tolerance=PEDS_TOLERANCE_NS)
-        for i, row in enumerate(held.iter_rows(named=True)):
-            names = row["peds_names"] or []
-            if not names:
-                continue
-            positions = row["peds_positions"] or []
-            velocities = (row["peds_twists"] if twists else None) or []
-            stride = len(positions) // len(names)
-            v_stride = len(velocities) // len(names)
-            for k, name in enumerate(names):
-                p = (float(positions[k * stride]), float(positions[k * stride + 1]))
-                v = (float(velocities[k * v_stride]), float(velocities[k * v_stride + 1])) if v_stride >= 2 else (0.0, 0.0)
-                bare = agent_name(str(name))
-                rows[i][bare] = (p, v, radii.get(bare, PED_RADIUS))
+    if peds is not None and "ped_name" in peds.columns:
+        row_of = {int(t): i for i, t in enumerate(grid)}
+        for held in pedestrians_at(pl.Series("time_ns", grid), peds, PEDS_TOLERANCE_NS).iter_rows(named=True):
+            bare = agent_name(str(held["ped_name"]))
+            rows[row_of[int(held["time_ns"])]][bare] = ((float(held["x"]), float(held["y"])), (float(held["vx"]), float(held["vy"])), radii.get(bare, PED_RADIUS))
     radius = calc.robot_params.robot_radius
     return [Sample(t=float(t) / 1e9, robot=(float(x), float(y)), robot_vel=(float(u), float(w)), robot_radius=radius, peds=rows[i]) for i, (t, x, y, u, w) in enumerate(zip(grid, rx, ry, vx, vy, strict=True))]
 
@@ -105,7 +94,7 @@ class EdgeCaseCriticalityCalculator(BaseMetricCalculator):
     NAME = "edge_case_criticality"
     CATEGORY = "edge_case"
     REQUIRES_PEDSIM = True
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
         "edge_case_id": "",
@@ -209,7 +198,7 @@ class EdgeCaseFormationCalculator(BaseMetricCalculator):
     NAME = "edge_case_formation"
     CATEGORY = "edge_case"
     REQUIRES_PEDSIM = True
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
         "edge_case_formation_variant": "",

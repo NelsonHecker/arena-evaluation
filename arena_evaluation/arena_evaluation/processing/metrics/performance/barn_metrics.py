@@ -80,10 +80,10 @@ def replay(t: np.ndarray, x: np.ndarray, y: np.ndarray, start: typing.Sequence[f
 
 def _first_collision_s(episode: AlignedEpisodeBundle) -> float | None:
     frame = (episode.topics or {}).get("collision_events")
-    if frame is None or "collision_event" not in frame.columns:
+    if frame is None or "event_count" not in frame.columns:
         return None
-    hits = frame.filter(pl.col("collision_event") > 0)
-    return float(hits.select(pl.col("time_ns").min()).item()) / 1e9 if len(hits) else None
+    hits = frame.filter(pl.col("event_count") > 0)
+    return float(hits.select(pl.col("t_ns").min()).item()) / 1e9 if len(hits) else None
 
 
 class BARNScoreCalculator(BaseMetricCalculator):
@@ -91,7 +91,7 @@ class BARNScoreCalculator(BaseMetricCalculator):
 
     NAME = "barn_score"
     CATEGORY = "performance"
-    REQUIRED_TOPICS = ["collision_events", ("tf_gt", "odom")]
+    REQUIRED_TOPICS = ["collision_events", ("robot_tracks", "robot_odom")]
 
     UNITS = {
         "barn_score": "",

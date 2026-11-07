@@ -21,7 +21,7 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["proxemics_extended", "path_metrics", "energy_extended"]
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
         "mar": "",

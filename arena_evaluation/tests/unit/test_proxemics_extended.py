@@ -6,6 +6,7 @@ from arena_evaluation.processing.metrics.social.proxemics_extended import (
     ProxemicsExtendedCalculator,
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+from flat_peds import flat_peds
 
 SEC = 1_000_000_000
 RADIUS = 0.25
@@ -18,32 +19,28 @@ def _at_clearance(d_eff: float) -> list[float]:
 
 
 def _episode(times_ns, peds_positions, robot_xy=None, twists=None):
-    robot_xy = robot_xy or [(0.0, 0.0)] * len(times_ns)
-    peds = {
-        "time_ns": times_ns,
-        "peds_positions": peds_positions,
-        "num_pedestrians": [len(p) // 2 for p in peds_positions],
-    }
-    if twists is not None:
-        peds["peds_twists"] = twists
-    topics = {
-        "peds": pl.DataFrame(peds),
-        "tf_gt": pl.DataFrame(
-            {
-                "time_ns": times_ns,
-                "pos_x_gt": [p[0] for p in robot_xy],
-                "pos_y_gt": [p[1] for p in robot_xy],
-                "yaw_gt": [0.0] * len(times_ns),
-            }
-        ),
-    }
+    """peds_positions: per sample the pedestrians as flat (x, y) pairs; twists: per sample their (vx, vy, vz) triples."""
+    n = len(times_ns)
+    robot_xy = robot_xy or [(0.0, 0.0)] * n
+    frames = []
+    for i, (t, flat) in enumerate(zip(times_ns, peds_positions, strict=True)):
+        pedestrians = []
+        for j in range(len(flat) // 2):
+            ped = {"x": flat[2 * j], "y": flat[2 * j + 1]}
+            if twists is not None:
+                ped["vx"], ped["vy"] = twists[i][3 * j], twists[i][3 * j + 1]
+            pedestrians.append(ped)
+        frames.append((t, pedestrians))
+    peds = flat_peds(frames)
+    robot = pl.DataFrame({"t_ns": times_ns, "x": [p[0] for p in robot_xy], "y": [p[1] for p in robot_xy], "yaw": [0.0] * n, "pose_source": ["tf_gt"] * n})
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": times_ns}),
+        data=pl.DataFrame({"time_ns": times_ns, "pos_x_gt": [p[0] for p in robot_xy], "pos_y_gt": [p[1] for p in robot_xy], "yaw_gt": [0.0] * n}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[5.0, 0.0],
         num_pedestrians=1,
-        topics=topics,
+        topics={"robot_tracks": robot, "pedestrian_tracks": peds},
+        peds=peds,
     )
 
 
@@ -101,9 +98,9 @@ def test_psii_integrates_clearance_inside_personal_space(calc):
 
 def test_frames_without_pedestrians_report_no_clearance(calc):
     results = calc.calculate(_episode([0, SEC], [[], []]), {})
-    assert results["timeseries_min_ped_clearance"] == [None, None]
+    assert results["timeseries_min_ped_clearance"] is None
     assert results["movement_towards_peds_ratio"] is None
-    assert results["time_in_intimate_zone"] == 0.0
+    assert results["time_in_intimate_zone"] is None
 
 
 def test_movement_towards_peds_ratio_counts_approaching_frames(calc):

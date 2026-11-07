@@ -272,7 +272,7 @@ class RegimeMetricsCalculator(BaseMetricCalculator):
 
     NAME = "regime_metrics"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = ["odom"]
+    REQUIRED_TOPICS = ["robot_odom"]
 
     UNITS = {
         "used_elevator_during_alarm": "",

@@ -13,7 +13,7 @@ class EnergyMetricCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = [("power", "energy", "odom")]
+    REQUIRED_TOPICS = [("robot_power", "robot_energy", "robot_odom")]
 
     UNITS = {
         "energy_static_wh": "Wh",

@@ -18,6 +18,7 @@ from arena_evaluation.processing.acoustics.impedance_grid import compute_attenua
 from arena_evaluation.processing.map_registry import MapRegistry
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.characterization import _ACOUSTIC_DEFAULTS
+from arena_evaluation.processing.pedestrian_frames import pedestrians_by_time
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["proxemics"]
-    REQUIRED_TOPICS = ["tf_gt", "peds"]
+    REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
 
     UNITS = {
         "ped_max_exposure_dba": "dBA",
@@ -165,11 +166,12 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             source_dba = np.full(len(rx_m), _ACOUSTIC_DEFAULTS["L_base_0"])
 
         # Pedestrian positions
-        if "peds_positions" not in df.columns:
+        peds_df = self.native_ped_frame(episode)
+        if peds_df is None or "x" not in peds_df.columns:
             logger.warning("Pedestrian position data missing for episode %s", episode.episode_id)
             return nulls
 
-        peds_pos = df["peds_positions"].to_list()
+        peds_at_time = pedestrians_by_time(df["time_ns"].to_numpy(), peds_df)
 
         ts_exposure: list[list[float]] = []
         ts_attenuation: list[list[float]] = []
@@ -189,7 +191,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         last_attenuations: np.ndarray | None = None
 
         for i in range(total_frames):
-            pts = self._parse_pedestrian_positions(peds_pos[i])
+            frame = peds_at_time.get(int(time_ns[i]))
+            pts = [(x, y) for x, y in frame.select("x", "y").iter_rows()] if frame is not None else []
 
             if not pts:
                 ts_exposure.append([])
@@ -336,7 +339,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     max_idx = i
 
         # Re-parse the pedestrians for the worst-case frame
-        worst_pts = self._parse_pedestrian_positions(peds_pos[max_idx])
+        worst_frame_peds = peds_at_time.get(int(time_ns[max_idx]))
+        worst_pts = [(float(x), float(y)) for x, y in worst_frame_peds.select("x", "y").iter_rows()] if worst_frame_peds is not None else []
         worst_frame = {
             "robot_x": float(rx_m[max_idx]),
             "robot_y": float(ry_m[max_idx]),

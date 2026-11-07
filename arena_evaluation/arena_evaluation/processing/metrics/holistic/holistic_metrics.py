@@ -15,7 +15,7 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "holistic"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["energy_extended", "collision_metrics", "proxemics_extended", "time_metrics", "acoustic_exposure"]
-    REQUIRED_TOPICS = [("tf_gt", "odom"), "peds"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
         "aeps_linear_s": "s",

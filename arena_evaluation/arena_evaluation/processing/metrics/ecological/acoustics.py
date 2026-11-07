@@ -27,7 +27,7 @@ class AcousticsCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["path_metrics"]
-    REQUIRED_TOPICS = ["acoustics"]
+    REQUIRED_TOPICS = ["robot_acoustics"]
 
     UNITS = {
         "l_aeq_t": "dBA",
@@ -72,21 +72,21 @@ class AcousticsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
         topics = self.native_topics(episode)
-        acous = topics.get("acoustics")
-        if acous is None or "total_level_af_dba" not in acous.columns or "time_ns" not in acous.columns:
+        acous = topics.get("robot_acoustics")
+        if acous is None or "total_level_af_dba" not in acous.columns or "t_ns" not in acous.columns:
             return {k: None for k in self.output_keys()}
 
-        acous = acous.sort("time_ns")
+        acous = acous.sort("t_ns")
         try:
             dba = acous["total_level_af_dba"].cast(pl.Float64).fill_null(strategy="forward").fill_null(self._DEFAULT_DBA).to_numpy()
-        except Exception:
+        except (pl.ComputeError, TypeError):
             return {k: None for k in self.output_keys()}
 
         if len(dba) == 0 or np.all(np.isnan(dba)):
             return {k: None for k in self.output_keys()}
 
         dba = np.maximum(dba, self._MIN_DBA)
-        time_ns = acous["time_ns"].to_numpy()
+        time_ns = acous["t_ns"].to_numpy()
         if len(time_ns) < 2:
             return {k: None for k in self.output_keys()}
 

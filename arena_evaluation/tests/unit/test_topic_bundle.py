@@ -9,46 +9,39 @@ from arena_evaluation.processing.pipeline import _collect_native_topics
 from arena_evaluation.storage.schemas import TopicBundle
 
 
+def _odometry() -> pl.DataFrame:
+    return pl.DataFrame({"t_ns": [0, 1], "env_id": ["env_0"] * 2, "robot_id": ["env_0_jackal"] * 2, "odom_x": [0.0, 1.0]})
+
+
 def test_topic_bundle_available_reports_only_populated_fields():
-    odom = pl.DataFrame({"time_ns": [0, 1], "pos_x": [0.0, 1.0]})
-    schedule = pl.DataFrame({"phase_label": ["a"], "phase_kind": ["linear"]})
-    bundle = TopicBundle(odom=odom, characterization_schedule=schedule)
-    assert bundle.available() == {"odom", "characterization_schedule"}
+    schedule = pl.DataFrame({"t_ns": [0], "phase_label": ["a"], "phase_kind": ["linear"]})
+    bundle = TopicBundle(robot_odom=_odometry(), robot_characterization_schedule=schedule)
+
+    assert bundle.available() == {"robot_odom", "robot_characterization_schedule"}
 
 
-def test_collect_native_topics_excludes_shared_frames_but_keeps_schedule():
-    odom = pl.DataFrame({"time_ns": [0, 1], "pos_x": [0.0, 1.0]})
-    # characterization_schedule carries no time_ns column, unlike per-sample topics.
-    schedule = pl.DataFrame({"phase_label": ["a"], "phase_kind": ["linear"], "vx_target": [1.0]})
-    tf = pl.DataFrame({"time_ns": [0], "frame_id": ["map"]})
-    tf_static = pl.DataFrame({"time_ns": [0], "frame_id": ["map"]})
-    semantic_snapshot = pl.DataFrame({"time_ns": [0], "entity": ["x"]})
-    episode_record = pl.DataFrame({"time_ns": [0], "episode_id": [0]})
-
+def test_collect_native_topics_excludes_shared_frames_but_keeps_the_schedule():
+    schedule = pl.DataFrame({"t_ns": [0], "phase_label": ["a"], "phase_kind": ["linear"], "vx_target": [1.0]})
     bundle = TopicBundle(
-        odom=odom,
-        characterization_schedule=schedule,
-        tf=tf,
-        tf_static=tf_static,
-        semantic_snapshot=semantic_snapshot,
-        episode_record=episode_record,
+        robot_odom=_odometry(),
+        robot_characterization_schedule=schedule,
+        tf=pl.DataFrame({"t_ns": [0], "parent_frame": ["map"], "child_frame": ["base"]}),
+        tf_static=pl.DataFrame({"t_ns": [0], "parent_frame": ["map"], "child_frame": ["base"]}),
+        world_semantics=pl.DataFrame({"t_ns": [0], "entity_name": ["x"]}),
+        episode_lifecycle=pl.DataFrame({"t_ns": [0], "episode_id": [0]}),
     )
 
     topics = _collect_native_topics(bundle)
-    assert "tf" not in topics
-    assert "tf_static" not in topics
-    assert "semantic_snapshot" not in topics
-    assert "episode_record" not in topics
-    assert "odom" in topics
-    assert "characterization_schedule" in topics
+
+    assert set(topics) == {"robot_odom", "robot_characterization_schedule"}
 
 
 def test_collect_native_topics_keeps_an_empty_gesture_table():
-    odom = pl.DataFrame({"time_ns": [0, 1], "pos_x": [0.0, 1.0]})
-    gestures = pl.DataFrame(schema={"time_ns": pl.Int64, "ped_id": pl.Int64, "clip": pl.String})
-    interactions = pl.DataFrame(schema={"time_ns": pl.Int64, "interaction_id": pl.Int64})
+    gestures = pl.DataFrame(schema={"t_ns": pl.Int64, "ped_id": pl.String, "clip": pl.String})
+    interactions = pl.DataFrame(schema={"t_ns": pl.Int64, "interaction_id": pl.Int64})
 
-    topics = _collect_native_topics(TopicBundle(odom=odom, ped_gestures=gestures, interactions=interactions))
-    assert "ped_gestures" in topics
-    assert len(topics["ped_gestures"]) == 0
-    assert "interactions" not in topics
+    topics = _collect_native_topics(TopicBundle(robot_odom=_odometry(), pedestrian_gestures=gestures, pedestrian_interactions=interactions))
+
+    assert "pedestrian_gestures" in topics
+    assert len(topics["pedestrian_gestures"]) == 0
+    assert "pedestrian_interactions" not in topics

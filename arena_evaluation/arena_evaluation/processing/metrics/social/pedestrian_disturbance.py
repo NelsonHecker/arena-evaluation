@@ -15,7 +15,7 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["proxemics"]
-    REQUIRED_TOPICS = ["peds"]
+    REQUIRED_TOPICS = ["pedestrian_tracks"]
 
     UNITS = {
         "ped_path_deflection_m": "m",
@@ -83,21 +83,16 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
-        if episode.data is None or "peds_positions" not in episode.data.columns:
+        peds_df = self.native_ped_frame(episode)
+        if episode.data is None or peds_df is None or len(peds_df) == 0:
             return {k: None for k in self.output_keys()}
 
-        peds_pos = episode.data["peds_positions"].to_list()
-        if not peds_pos or len(peds_pos) == 0:
-            return {k: None for k in self.output_keys()}
-
-        # Extract pedestrian positions per agent
-        agent_paths: dict[int, list[tuple[float, float]]] = {}
-        for row in peds_pos:
-            arr = self._parse_peds(row)
-            for agent_idx, item in enumerate(arr):
-                if not (np.isfinite(item[0]) and np.isfinite(item[1]) and abs(item[0]) < 1e6 and abs(item[1]) < 1e6):
-                    continue
-                agent_paths.setdefault(agent_idx, []).append((float(item[0]), float(item[1])))
+        # Extract pedestrian positions per agent, identified by ped_id and kept in time order
+        agent_paths: dict[str, list[tuple[float, float]]] = {}
+        for ped_id, x, y in peds_df.select("ped_id", "x", "y").iter_rows():
+            if not (np.isfinite(x) and np.isfinite(y) and abs(x) < 1e6 and abs(y) < 1e6):
+                continue
+            agent_paths.setdefault(ped_id, []).append((float(x), float(y)))
 
         if not agent_paths:
             return {
