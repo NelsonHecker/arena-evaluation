@@ -333,7 +333,7 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
 
     NAME = "condition_compliance"
     CATEGORY = "ecological"
-    REQUIRED_TOPICS = ["robot_odom"]
+    REQUIRED_TOPICS = ["robot_tracks"]
 
     UNITS = {
         "condition_success": "",

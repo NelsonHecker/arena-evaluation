@@ -21,7 +21,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
-    REQUIRED_TOPICS = ["robot_odom", "pedestrian_tracks"]
+    REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
 
     UNITS = {
         "num_pedestrians": "",

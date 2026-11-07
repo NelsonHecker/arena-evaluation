@@ -15,7 +15,7 @@ class MotionMetricsCalculator(BaseMetricCalculator):
     NAME = "motion_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["robot_odom"]
+    REQUIRED_TOPICS = ["robot_tracks"]
 
     UNITS = {
         "velocity": "m/s",

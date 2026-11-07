@@ -146,7 +146,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
     NAME = "hhi_contact"
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
-    REQUIRED_TOPICS = ["robot_odom", "pedestrian_tracks", "pedestrian_interaction_events"]
+    REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks", "pedestrian_interaction_events"]
 
     UNITS = {
         "hhi_hold_onset_s": "s",

@@ -50,7 +50,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["robot_odom"]
+    REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
 
     UNITS = {
         "timeseries_char_time_s": "s",

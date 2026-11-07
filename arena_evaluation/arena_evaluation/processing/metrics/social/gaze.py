@@ -16,7 +16,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "social"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
-    REQUIRED_TOPICS = ["robot_odom", "pedestrian_tracks"]
+    REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
 
     UNITS = {
         "time_looking_at_pedestrians": "",

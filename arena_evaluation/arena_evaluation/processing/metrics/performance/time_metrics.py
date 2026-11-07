@@ -20,7 +20,7 @@ class TimeMetricsCalculator(BaseMetricCalculator):
     NAME = "time_metrics"
     CATEGORY = "performance"
     DEPENDS_ON = ["motion_metrics"]
-    REQUIRED_TOPICS = ["robot_odom"]
+    REQUIRED_TOPICS = ["robot_tracks"]
 
     UNITS = {
         "time": "ns",
