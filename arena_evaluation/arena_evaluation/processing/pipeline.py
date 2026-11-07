@@ -315,6 +315,24 @@ def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
     return df if end is None else df.head(end + 1)
 
 
+def _record_human_params(record: pl.DataFrame | pl.LazyFrame | None) -> dict[str, typing.Any] | None:
+    """Recorded EpisodeRecord.human_params as parameter name -> value, None when no record carried any."""
+    import json
+
+    df = record.collect() if isinstance(record, pl.LazyFrame) else record
+    # agent-contracts: ignore MCAP schema evolution
+    if df is None or len(df) == 0 or df.schema.get("human_params") is None:
+        return None
+    candidates = df.select(pl.col("human_params")).filter(pl.col("human_params").is_not_null() & (pl.col("human_params") != "")).tail(1)
+    if len(candidates) == 0:
+        return None
+    try:
+        parsed = json.loads(str(candidates.item(0, "human_params")))
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) and parsed else None
+
+
 def _record_conditions(record: pl.DataFrame) -> list[dict] | None:
     """The episode's conditions: the last of its own records whose `conditions` JSON is a non-empty list."""
     import json
@@ -612,6 +630,7 @@ class ProcessingPipeline:
                     semantic_snapshot_df = semantic_snapshot_df.collect()
 
                 conditions = None
+                human_params = None
                 phases = None
                 outcome_state = None
                 outcome_info = None
@@ -621,6 +640,7 @@ class ProcessingPipeline:
                         er = er.collect()
                     if len(er) > 0:
                         conditions = _record_conditions(er)
+                        human_params = _record_human_params(er)
                         if "outcome_state" in er.columns and "t_ns" in er.columns:
                             phases = _robot_phases(_episode_rows(er), robot_name)
                         outcome_state, outcome_info = _record_outcome(er, metadata)
@@ -639,6 +659,7 @@ class ProcessingPipeline:
                     robot_name=robot_name,
                     semantic_snapshot=semantic_snapshot_df,
                     conditions=conditions,
+                    human_params=human_params,
                     phases=phases,
                     fleet=fleet,
                     outcome_state=outcome_state,
