@@ -317,6 +317,15 @@ plots:
     layout_group: acoustic_comfort
 
   # ── Social Multi-Objective Trade-Off Frontiers ──────────────────────────────
+  - id: planner_ranking_stability
+    uses: planner_ranking_stability
+    layout_group: social_tradeoffs
+  - id: planner_behavioral_dendrogram
+    uses: planner_behavioral_dendrogram
+    layout_group: social_tradeoffs
+  - id: encounter_hierarchy_treemap
+    uses: encounter_hierarchy_treemap
+    layout_group: social_tradeoffs
   - id: scatter_passing_vs_psii
     type: scatter
     title: Etiquette vs. Personal Space Intrusion (Passing Compliance vs. PSII)

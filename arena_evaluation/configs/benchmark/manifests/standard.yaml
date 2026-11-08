@@ -675,6 +675,12 @@ plots:
   - id: planner_ranking_stability
     uses: planner_ranking_stability
     layout_group: tradeoffs
+  - id: planner_behavioral_dendrogram
+    uses: planner_behavioral_dendrogram
+    layout_group: tradeoffs
+  - id: encounter_hierarchy_treemap
+    uses: encounter_hierarchy_treemap
+    layout_group: tradeoffs
   - id: scatter_spl_vs_energy
     type: scatter
     title: Safety-Energy Frontier (SPL vs. Total Energy)
