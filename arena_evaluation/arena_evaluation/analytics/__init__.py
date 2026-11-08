@@ -13,6 +13,7 @@ from .catalog import (
     TELEMETRY_TABLE_SCHEMAS,
     BenchmarkCatalog,
     StarCatalog,
+    synthesize_star_schema_from_combined,
 )
 from .evidence import (
     EVIDENCE_INDEX_SCHEMA,
@@ -31,6 +32,7 @@ from .sql_engine import (
     FORBIDDEN_SQL_KEYWORDS,
     PolarsSQLEngine,
     SQLGuardError,
+    normalize_sql_scientific_notation,
     validate_readonly_sql,
 )
 from .stats import (
@@ -75,8 +77,10 @@ __all__ = [
     "compute_schema_signature",
     "format_sql_literal",
     "kendalls_w",
+    "normalize_sql_scientific_notation",
     "paired_treatment_diff",
     "rank_swap_matrix",
     "split_discovery_verification_seeds",
+    "synthesize_star_schema_from_combined",
     "validate_readonly_sql",
 ]

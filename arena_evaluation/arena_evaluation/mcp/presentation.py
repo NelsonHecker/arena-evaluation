@@ -201,6 +201,13 @@ def evaluation_render_plot(
     except Exception as exc:
         raise ToolError(f"Failed to resolve data for plot '{spec.id}': {exc}") from exc
 
+    if df.is_empty():
+        plot_id = spec.id or declaration or "plot"
+        raise ToolError(
+            f"Data source or query for plot '{plot_id}' returned 0 rows; cannot render plot with an empty dataset",
+            hint="Verify filter conditions or run 'evaluation_query' to check row counts.",
+        )
+
     plots_dir = benchmark_path / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
     clean_stem = component(spec.id or declaration or "plot", "plot_name")

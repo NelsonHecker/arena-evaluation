@@ -1,0 +1,18 @@
+id: robot_speed_card
+title: "Robot Velocity Summary Card"
+type: table
+data:
+  stored_query: robot_speed_distribution
+channels:
+  x: robot_id
+  y:
+    - sample_count
+    - duration_s
+    - mean_speed
+    - max_speed
+options:
+  format: "{:.2f}"
+checks:
+  require_columns:
+    - robot_id
+    - mean_speed

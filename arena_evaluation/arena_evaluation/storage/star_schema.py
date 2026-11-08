@@ -850,6 +850,8 @@ def scan_star_schema(benchmark_dir: pathlib.Path) -> dict[str, pl.LazyFrame]:
     for short_name, schema in FACT_SCHEMAS.items():
         table_name = f"fact_{short_name}"
         path = metrics_dir / f"{table_name}.parquet"
+        if not path.is_file():
+            path = benchmark_dir / f"{table_name}.parquet"
         if path.is_file():
             scanned[table_name] = pl.scan_parquet(path)
         else:

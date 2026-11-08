@@ -19,6 +19,7 @@ __all__ = [
     "FORBIDDEN_SQL_KEYWORDS",
     "PolarsSQLEngine",
     "SQLGuardError",
+    "normalize_sql_scientific_notation",
     "validate_readonly_sql",
 ]
 
@@ -44,6 +45,33 @@ _BLOCK_COMMENT_RE: Final[re.Pattern[str]] = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COMMENT_RE: Final[re.Pattern[str]] = re.compile(r"--[^\r\n]*")
 _STRING_LITERAL_RE: Final[re.Pattern[str]] = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"")
 _WORD_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+_SCIENTIFIC_NOTATION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![a-zA-Z0-9_])([0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+)(?![a-zA-Z0-9_])"
+)
+
+
+def normalize_sql_scientific_notation(sql: str) -> str:
+    """Replace scientific notation numbers outside string literals with standard float strings."""
+    def _repl(match: re.Match[str]) -> str:
+        val = float(match.group(1))
+        s = str(val)
+        if "e" in s or "E" in s:
+            s = f"{val:.12f}".rstrip("0")
+            if s.endswith("."):
+                s += "0"
+        return s
+
+    parts: list[str] = []
+    last_end = 0
+    for match in _STRING_LITERAL_RE.finditer(sql):
+        code_part = sql[last_end:match.start()]
+        parts.append(_SCIENTIFIC_NOTATION_RE.sub(_repl, code_part))
+        parts.append(match.group(0))
+        last_end = match.end()
+
+    code_part = sql[last_end:]
+    parts.append(_SCIENTIFIC_NOTATION_RE.sub(_repl, code_part))
+    return "".join(parts)
 
 
 class SQLGuardError(ValueError):
@@ -107,8 +135,9 @@ class PolarsSQLEngine:
     def query_lazy(self, sql: str) -> pl.LazyFrame:
         """Validate ``sql`` and return a lazy Polars execution plan."""
         cleaned_sql = validate_readonly_sql(sql)
+        preprocessed_sql = normalize_sql_scientific_notation(cleaned_sql)
         ctx = pl.SQLContext(frames=self.catalog.tables())
-        return ctx.execute(cleaned_sql, eager=False)
+        return ctx.execute(preprocessed_sql, eager=False)
 
     def query(
         self,

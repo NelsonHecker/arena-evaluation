@@ -439,3 +439,39 @@ def test_mcp_evaluation_render_plot_error_handling(
     # Error: Non-existent declaration
     with pytest.raises(ToolError, match="Plot declaration 'non_existent_rec' not found"):
         evaluation_render_plot(run_id="run-pres-003", declaration="non_existent_rec")
+
+
+def test_mcp_evaluation_render_plot_zero_row_diagnostic(
+    tmp_path: pathlib.Path,
+    mcp_star_tables: StarSchemaTables,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendering a plot whose query returns 0 rows raises a clear ToolError diagnostic."""
+    benchmarks_dir = tmp_path / "data" / "benchmarks"
+    run_dir = benchmarks_dir / "run-pres-empty"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write_star_schema(mcp_star_tables, run_dir)
+    monkeypatch.setenv("ARENA_DATA_DIR", str(tmp_path / "data"))
+
+    spec_with_empty_filter = """
+    id: empty_filter_plot
+    title: "Empty Filter Plot"
+    type: bar
+    data:
+      source: v_episode_summary
+      where: "planner = 'non_existent_planner'"
+    channels:
+      x: planner
+      y: time_to_goal_s
+    """
+
+    with pytest.raises(ToolError) as exc_info:
+        evaluation_render_plot(
+            run_id="run-pres-empty",
+            spec_yaml=spec_with_empty_filter,
+            output_format="png",
+        )
+
+    err = exc_info.value
+    assert "returned 0 rows; cannot render plot with an empty dataset" in str(err)
+    assert "Verify filter conditions or run 'evaluation_query' to check row counts." in (err.hint or "")
