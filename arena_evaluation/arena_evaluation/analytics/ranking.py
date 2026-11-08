@@ -316,7 +316,7 @@ def seed_split_rank_stability(
         if n_planners < 2:
             tau_val = 1.0
         else:
-            tau_res = scipy.stats.kendalltau(ranks_1, ranks_2)
+            tau_res = typing.cast(tuple[float, float], scipy.stats.kendalltau(ranks_1, ranks_2))
             tau_raw: float = float(tau_res[0])
             if math.isnan(tau_raw):
                 tau_val = 1.0 if np.array_equal(ranks_1, ranks_2) else 0.0
