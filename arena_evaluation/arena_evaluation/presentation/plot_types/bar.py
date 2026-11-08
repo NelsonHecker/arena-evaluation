@@ -39,6 +39,10 @@ class BarRenderer(BasePlotRenderer):
         is_stacked = bool(self.spec.options.get("stacked", False) or self.spec.options.get("barmode") == "stack")
         barmode = self.spec.options.get("barmode", "stack" if is_stacked else "group")
 
+        if self.spec.options.get("stacked", False) and not self.spec.options.get("metrics"):
+            if not isinstance(self.spec.channels.y, list) or not self.spec.channels.y:
+                return None
+
         metrics = self.spec.options.get("metrics", [])
         if not metrics and isinstance(self.spec.channels.y, list):
             metrics = self.spec.channels.y
@@ -55,7 +59,7 @@ class BarRenderer(BasePlotRenderer):
             if grouped.empty:
                 return None
 
-            if self.spec.options.get("normalize", False):
+            if self.spec.options.get("normalize", True):
                 total = grouped[valid_metrics].sum(axis=1)
                 total_mask = total > 0
                 grouped.loc[total_mask, valid_metrics] = grouped.loc[total_mask, valid_metrics].div(total[total_mask], axis=0) * 100.0
@@ -67,8 +71,8 @@ class BarRenderer(BasePlotRenderer):
                 template="plotly_white",
                 barmode=barmode,
                 labels={
-                    "value": "Percentage (%)" if self.spec.options.get("normalize") else "Value",
-                    "variable": "Metric",
+                    "value": "Percentage (%)" if self.spec.options.get("normalize", True) else "Value",
+                    "variable": "Component",
                     x_col: x_col.lstrip("_").replace("_", " ").title(),
                 },
             )

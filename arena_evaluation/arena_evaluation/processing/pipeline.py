@@ -608,10 +608,10 @@ class ProcessingPipeline:
 
             all_results: list[dict] = []
             episode_star_tables: list[StarSchemaTables] = []
-            robots = {name: bundle for name, bundle in bundles.items() if bundle.robot_tracks is not None}
+            robots = {name: bundle for name, bundle in bundles.items() if bundle.robot_tracks is not None or bundle.robot_odom is not None}
             if not robots:
                 any_record = next((b.episode_lifecycle for b in bundles.values() if b.episode_lifecycle is not None), None)
-                return finish([_status_row(ep, metadata, _metadata_robot(metadata, bundles), "no_trajectory", "no tf ground-truth rows", any_record)])
+                return finish([_status_row(ep, metadata, _metadata_robot(metadata, bundles), "no_trajectory", "no tf ground-truth or odometry rows", any_record)])
             for robot_name, bundle in robots.items():
                 window = _episode_window(bundle.episode_lifecycle)
                 tracks, pose_source = resolve_pose_source(bundle, window)

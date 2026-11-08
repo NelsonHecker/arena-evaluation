@@ -22,6 +22,7 @@ class PlotlyRenderer:
             BarRenderer,
             BoxRenderer,
             HeatmapRenderer,
+            HierarchyRenderer,
             HistogramRenderer,
             LineRenderer,
             RadarRenderer,
@@ -46,6 +47,8 @@ class PlotlyRenderer:
             "table": TableRenderer,
             "acoustic_field": AcousticFieldRenderer,
             "acoustic_field_animation": AcousticFieldAnimationRenderer,
+            "hierarchy": HierarchyRenderer,
+            "dendrogram": HierarchyRenderer,
         }
 
     def render(self, spec: PlotSpec, df: pl.DataFrame, run_dir: pathlib.Path | None = None) -> str | list[str] | None:

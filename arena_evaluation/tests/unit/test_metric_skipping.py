@@ -24,7 +24,7 @@ def test_registry_skipping_with_available_topics():
 
     episode = AlignedEpisodeBundle(episode_id=1, data=df_odom_only, start_pos=[0.0, 0.0, 0.0], goal_pos=[2.0, 0.0, 0.0])
 
-    available_topics = {"robot_odom"}
+    available_topics = {"robot_tracks"}
     results = registry.run(episode, pedsim_available=True, available_topics=available_topics)
 
     assert results["path_length"] > 0

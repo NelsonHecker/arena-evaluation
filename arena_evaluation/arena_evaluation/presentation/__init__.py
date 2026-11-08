@@ -18,4 +18,9 @@ def __getattr__(name: str) -> object:
         from .viz_manifest import VizManifest
 
         return VizManifest
-    raise AttributeError(name)
+    import importlib
+
+    try:
+        return importlib.import_module(f".{name}", __package__)
+    except ModuleNotFoundError:
+        raise AttributeError(name) from None

@@ -1,17 +1,19 @@
-# Social focus: proxemics, passing etiquette, directional social forces, gaze, and pedestrian acoustic comfort.
+# Social focus: proxemics, passing etiquette, directional social forces, gaze, pedestrian acoustic comfort, and encounter dynamics.
 manifest_version: "1.0"
 name: social
 title: Social Navigation & Human-Robot Interaction Report
-description: Comprehensive human-robot social co-navigation report covering proxemics zones, intrusion depth (PSII), passing etiquette compliance, social force disturbances, gaze, and acoustic comfort.
+description: Comprehensive human-robot social co-navigation report covering proxemics zones, intrusion depth (PSII), passing etiquette compliance, social force disturbances, gaze, acoustic comfort, and encounter dynamics.
 data_source: metrics
 groups:
   - {id: overview, title: Social Performance Overview}
+  - {id: encounters, title: Spatiotemporal Encounters & Fault Attribution}
   - {id: proxemics_zones, title: Proxemics & Zone Penetration Depth}
   - {id: etiquette_compliance, title: Passing Etiquette & Corridor Navigation Rules}
   - {id: social_forces, title: Directional Social Forces & Pedestrian Disturbance}
   - {id: gaze_interaction, title: Mutual Gaze & Attention Dynamics}
+  - {id: acoustics, title: Pedestrian Acoustic Exposure & Noise Dose}
   - {id: acoustic_comfort, title: Pedestrian Acoustic Comfort & Exposure}
-  - {id: social_tradeoffs, title: Social Multi-Objective Trade-Offs}
+  - {id: social_tradeoffs, title: Social Multi-Objective Trade-Off Frontiers}
   - {id: details, title: Encounter Traces & Trajectory Maps}
 units:
   passing_rule_compliance: ""
@@ -45,249 +47,351 @@ units:
   path_length: m
   success: "%"
   spl: ""
+  acoustic_dose_db: dB
+  energy_wh: Wh
+  total_contacts: ""
 plots:
   # ── Overview ────────────────────────────────────────────────────────────────
-  - id: social_summary_table
-    type: table
-    title: Social Co-Navigation Executive Summary
-    data_key: "*"
+  - id: social_scorecard_table
+    uses: scorecard_table
     layout_group: overview
-    options:
-      group_by: [local_planner]
-      columns:
-        - {metric: passing_rule_compliance, label: Passing Compl., format: "{:.0%}"}
-        - {metric: personal_space_intrusion_integral, label: PSII (m·s), format: "{:.2f}"}
-        - {metric: time_in_intimate_zone, label: Intimate (s), format: "{:.2f}"}
-        - {metric: ci_max, label: Max CI, format: "{:.2f}"}
-        - {metric: social_force_ped_max, label: Max Ped Force, format: "{:.2f}"}
-        - {metric: ped_path_deflection_m, label: Ped Deflect., format: "{:.2f}"}
-        - {metric: aeps_linear_s, label: AEPS (s), format: "{:.2f}"}
-  - id: radar_social
-    type: radar
-    title: Multi-Axis Social Interaction Profile
-    data_key: "*"
-    differentiate: local_planner
-    auto_differentiate: false
-    layout_group: overview
-    options:
-      metrics: [passing_rule_compliance, personal_space_intrusion_integral, social_force_ped_max, ci_max, ped_path_deflection_m, time_in_intimate_zone]
+    title: Social Benchmark Executive Scorecard
 
-  # ── Proxemics & Zone Penetration ────────────────────────────────────────────
+  - id: social_radar
+    uses: multi_planner_radar
+    layout_group: overview
+    title: Social Capability Tradeoff Radar
+
+  # ── Spatiotemporal Encounters & Fault Attribution ───────────────────────────
+  - id: social_closer_attribution
+    uses: closer_attribution_matrix
+    layout_group: encounters
+    title: Collision Fault Attribution by Crowd Condition
+
+  - id: social_encounter_energy
+    uses: encounter_energy_breakdown
+    layout_group: encounters
+
+  - id: social_encounter_trajectory
+    uses: encounter_trajectory_slice
+    layout_group: encounters
+
+  # ── Proxemics & Zone Penetration Depth ──────────────────────────────────────
   - id: violin_psii_local
     type: violin
     title: Personal Space Intrusion Integral (PSII Depth) by Local Planner
-    data_key: personal_space_intrusion_integral
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: personal_space_intrusion_integral
     layout_group: proxemics_zones
+
   - id: violin_psii_inter
     type: violin
     title: Personal Space Intrusion Integral (PSII Depth) by Inter-Planner
-    data_key: personal_space_intrusion_integral
-    differentiate: inter_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: inter_planner
+      y: personal_space_intrusion_integral
     layout_group: proxemics_zones
+
   - id: violin_personal_space_local
     type: violin
     title: Time in Personal Zone (0.45m - 1.2m) by Local Planner
-    data_key: total_time_in_personal_space
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: total_time_in_personal_space
     layout_group: proxemics_zones
+
   - id: violin_intimate_zone_local
     type: violin
     title: Time in Intimate Zone (< 0.45m) by Local Planner
-    data_key: time_in_intimate_zone
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: time_in_intimate_zone
     layout_group: proxemics_zones
+
   - id: box_intimate_events_local
     type: box
     title: Discrete Intimate Space Intrusion Events by Local Planner
-    data_key: psi_intimate_events
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: psi_intimate_events
     layout_group: proxemics_zones
+
   - id: box_personal_events_local
     type: box
     title: Discrete Personal Space Intrusion Events by Local Planner
-    data_key: psi_personal_events
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: psi_personal_events
     layout_group: proxemics_zones
 
-  # ── Passing Etiquette & Rules ───────────────────────────────────────────────
+  # ── Passing Etiquette & Corridor Navigation Rules ───────────────────────────
   - id: bar_passing_compliance_local
     type: bar
     title: Passing Rule Compliance Ratio (Right-Hand Rule) by Local Planner
-    data_key: passing_rule_compliance
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: passing_rule_compliance
     layout_group: etiquette_compliance
+
   - id: bar_passing_compliance_inter
     type: bar
     title: Passing Rule Compliance Ratio (Right-Hand Rule) by Inter-Planner
-    data_key: passing_rule_compliance
-    differentiate: inter_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: inter_planner
+      y: passing_rule_compliance
     layout_group: etiquette_compliance
+
   - id: box_speed_personal_zone_local
     type: box
     title: Max Speed Inside Personal Space by Local Planner
-    data_key: max_speed_personal_zone
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: max_speed_personal_zone
     layout_group: etiquette_compliance
+
   - id: box_speed_intimate_zone_local
     type: box
     title: Max Speed Inside Intimate Space by Local Planner
-    data_key: max_speed_intimate_zone
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: max_speed_intimate_zone
     layout_group: etiquette_compliance
 
-  # ── Directional Social Forces ───────────────────────────────────────────────
+  # ── Directional Social Forces & Pedestrian Disturbance ──────────────────────
   - id: box_ci_max_local
     type: box
     title: Directional Collision Index (CI Max) by Local Planner
-    data_key: ci_max
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: ci_max
     layout_group: social_forces
+
   - id: violin_ci_mean_local
     type: violin
     title: Directional Collision Index (CI Mean) by Local Planner
-    data_key: ci_mean
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: ci_mean
     layout_group: social_forces
+
   - id: box_social_force_ped_max_local
     type: box
     title: Max Social Force Exerted on Pedestrians (N) by Local Planner
-    data_key: social_force_ped_max
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: social_force_ped_max
     layout_group: social_forces
+
   - id: box_social_force_ped_mean_local
     type: box
     title: Mean Social Force Exerted on Pedestrians (N) by Local Planner
-    data_key: social_force_ped_mean
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: social_force_ped_mean
     layout_group: social_forces
+
   - id: violin_deflection_local
     type: violin
     title: Pedestrian Path Deflection (m) by Local Planner
-    data_key: ped_path_deflection_m
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: ped_path_deflection_m
     layout_group: social_forces
+
   - id: violin_deflection_inter
     type: violin
     title: Pedestrian Path Deflection (m) by Inter-Planner
-    data_key: ped_path_deflection_m
-    differentiate: inter_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: inter_planner
+      y: ped_path_deflection_m
     layout_group: social_forces
 
   # ── Mutual Gaze & Attention Dynamics ────────────────────────────────────────
   - id: box_looking_at_peds_local
     type: box
     title: Time Looking at Pedestrians by Local Planner
-    data_key: total_time_looking_at_pedestrians
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: total_time_looking_at_pedestrians
     layout_group: gaze_interaction
+
   - id: box_looking_at_peds_inter
     type: box
     title: Time Looking at Pedestrians by Inter-Planner
-    data_key: total_time_looking_at_pedestrians
-    differentiate: inter_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: inter_planner
+      y: total_time_looking_at_pedestrians
     layout_group: gaze_interaction
+
   - id: box_looked_at_by_peds_local
     type: box
     title: Time Looked at by Pedestrians by Local Planner
-    data_key: total_time_looked_at_by_pedestrians
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: total_time_looked_at_by_pedestrians
     layout_group: gaze_interaction
+
   - id: box_looked_at_by_peds_inter
     type: box
     title: Time Looked at by Pedestrians by Inter-Planner
-    data_key: total_time_looked_at_by_pedestrians
-    differentiate: inter_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: inter_planner
+      y: total_time_looked_at_by_pedestrians
     layout_group: gaze_interaction
 
-  # ── Pedestrian Acoustic Comfort ─────────────────────────────────────────────
+  # ── Acoustic Exposure & Noise Dose ─────────────────────────────────────────
+  - id: social_acoustic_sunburst
+    uses: acoustic_exposure_sunburst
+    layout_group: acoustics
+
+  # ── Pedestrian Acoustic Comfort & Exposure ──────────────────────────────────
   - id: box_aeps_local
     type: box
     title: Acoustic Exposure in Personal Space (AEPS) by Local Planner
-    data_key: aeps_linear_s
-    differentiate: local_planner
-    auto_differentiate: false
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: aeps_linear_s
     layout_group: acoustic_comfort
+
   - id: box_acoustic_max_local
     type: box
     title: Peak Acoustic Level at Pedestrian Position (dBA)
-    data_key: ped_max_exposure_dba
-    differentiate: local_planner
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: ped_max_exposure_dba
     layout_group: acoustic_comfort
+
   - id: box_acoustic_startle_local
     type: box
     title: Max Pedestrian Startle Factor (dBA/s)
-    data_key: ped_max_startle_factor
-    differentiate: local_planner
+    data:
+      source: fact_episodes
+    channels:
+      x: planner
+      y: ped_max_startle_factor
     layout_group: acoustic_comfort
 
-  # ── Social Trade-Offs ───────────────────────────────────────────────────────
+  # ── Social Multi-Objective Trade-Off Frontiers ──────────────────────────────
   - id: scatter_passing_vs_psii
     type: scatter
     title: Etiquette vs. Personal Space Intrusion (Passing Compliance vs. PSII)
-    data_key: passing_rule_compliance
-    differentiate: local_planner
+    data:
+      source: fact_episodes
+    channels:
+      x: passing_rule_compliance
+      y: personal_space_intrusion_integral
+      color: planner
     layout_group: social_tradeoffs
     options: {y: personal_space_intrusion_integral}
+
   - id: scatter_speed_vs_deflection
     type: scatter
     title: Proximity Speed vs. Pedestrian Disturbance (Speed in Personal Space vs. Deflection)
-    data_key: avg_velocity_in_personal_space
-    differentiate: local_planner
+    data:
+      source: fact_episodes
+    channels:
+      x: avg_velocity_in_personal_space
+      y: ped_path_deflection_m
+      color: planner
     layout_group: social_tradeoffs
     options: {y: ped_path_deflection_m}
+
   - id: scatter_psii_vs_time
     type: scatter
     title: Politeness vs. Travel Efficiency (PSII vs. Time to Goal)
-    data_key: time_to_goal
-    differentiate: local_planner
+    data:
+      source: fact_episodes
+    channels:
+      x: time_to_goal
+      y: personal_space_intrusion_integral
+      color: planner
     layout_group: social_tradeoffs
     options: {y: personal_space_intrusion_integral}
+
   - id: scatter_aeps_vs_psii
     type: scatter
     title: Acoustic Discomfort vs. Physical Intrusion (AEPS vs. PSII)
-    data_key: personal_space_intrusion_integral
-    differentiate: local_planner
+    data:
+      source: fact_episodes
+    channels:
+      x: personal_space_intrusion_integral
+      y: aeps_linear_s
+      color: planner
     layout_group: social_tradeoffs
     options: {y: aeps_linear_s}
 
-  # ── Spatial Encounter Maps ──────────────────────────────────────────────────
+  # ── Encounter Traces & Trajectory Maps ──────────────────────────────────────
   - id: pedestrian_trajectory_plot
     type: trajectory
     title: Pedestrian Trajectories & Encounter Corridors
+    data:
+      source: fact_episodes
+    channels:
+      x: pedestrian_path
+      color: planner
     data_key: pedestrian_path
     differentiate: local_planner
     auto_differentiate: false
     group_by: [stage]
     layout_group: details
     options: {overlay_markers: false}
+
   - id: trajectory_plot
     type: trajectory
     title: Robot Trajectories Across Social Scenarios
+    data:
+      source: fact_episodes
+    channels:
+      x: path
+      color: planner
     data_key: path
     differentiate: local_planner
     auto_differentiate: false
     group_by: [stage]
     layout_group: details
     filter: {is_reference: false}
-

@@ -256,6 +256,7 @@ class PlotChannels(BaseModel):
     size: str | None = None
     symbol: str | None = None
     split: bool = False
+    hierarchy: str | list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -305,6 +306,8 @@ class PlotSpec(BaseModel):
         if isinstance(data, dict):
             d = dict(data)
             # Normalize recipe aliases
+            if "uses" in d and not d.get("id"):
+                d["id"] = d["uses"]
             if "encodings" in d and "channels" not in d:
                 d["channels"] = d.pop("encodings")
             if "source" in d and "data" not in d:

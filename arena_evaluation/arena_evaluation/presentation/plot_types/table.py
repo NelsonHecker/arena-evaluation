@@ -113,32 +113,16 @@ class TableRenderer(BasePlotRenderer):
         y_ch = self.spec.channels.y
         if y_ch:
             metric_list = y_ch if isinstance(y_ch, list) else [y_ch]
+            fmt_opt = opts.get("format", "{:.2f}")
             return [
                 {
                     "metric": str(m),
                     "label": str(m).replace("_", " ").title(),
-                    "format": "{:.2f}",
+                    "format": fmt_opt,
                 }
                 for m in metric_list
                 if m
             ]
-
-        # Auto-infer columns from DataFrame schema if not specified
-        if df is not None:
-            group_cols = set(self._resolve_group_cols(df))
-            inferred = []
-            for col, dtype in df.schema.items():
-                if col in group_cols:
-                    continue
-                fmt = "{:.2f}" if dtype in (pl.Float64, pl.Float32) else "{}"
-                inferred.append(
-                    {
-                        "metric": col,
-                        "label": col.replace("_", " ").title(),
-                        "format": fmt,
-                    }
-                )
-            return inferred
 
         return []
 
@@ -185,7 +169,7 @@ class TableRenderer(BasePlotRenderer):
             if max_cnt == 1:
                 # Already pre-aggregated
                 rows: list[list[str]] = []
-                for row in df.to_dicts():
+                for row in df.sort(group_cols).to_dicts():
                     vals = []
                     for c in cols:
                         raw = row.get(c["metric"])
@@ -237,7 +221,7 @@ class TableRenderer(BasePlotRenderer):
         for idx, row in enumerate(rows):
             bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
             cells = row + [""] * (len(header) - len(row))
-            html.append(f"<tr style='background: {bg};'>" + "".join(f"<td style='border: 1px solid #e2e8f0; padding: 6px 12px;'>{c}</td>" for c in cells) + "</tr>")
+            html.append("<tr>" + "".join(f"<td style='border: 1px solid #e2e8f0; padding: 6px 12px; background: {bg};'>{c}</td>" for c in cells) + "</tr>")
         html.append("</tbody></table>")
         return "".join(html)
 
@@ -254,7 +238,7 @@ class TableRenderer(BasePlotRenderer):
             bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
             label = html_escape.escape(row.get("label", ""), quote=True)
             value = html_escape.escape(row.get("value", ""), quote=True).replace("\n", "<br>")
-            parts.append(f"<tr style='background: {bg};'><td style='border: 1px solid #e2e8f0; padding: 6px 12px; font-weight: 600;'>{label}</td><td style='border: 1px solid #e2e8f0; padding: 6px 12px;'>{value}</td></tr>")
+            parts.append(f"<tr><td style='border: 1px solid #e2e8f0; padding: 6px 12px; font-weight: 600; background: {bg};'>{label}</td><td style='border: 1px solid #e2e8f0; padding: 6px 12px; background: {bg};'>{value}</td></tr>")
         parts.append("</tbody></table>")
         return "".join(parts)
 

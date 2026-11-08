@@ -76,7 +76,7 @@ def evaluation_query(
     except Exception as exc:
         raise ToolError(f"Query execution failed: {exc}") from exc
 
-    should_pin = pin_evidence or bool(purpose.strip())
+    should_pin = (pin_evidence or bool(purpose.strip())) and df.height > 0
     if should_pin:
         ev_dir = benchmark_path / "evidence"
         store = EvidenceStore(evidence_dir=ev_dir)

@@ -171,6 +171,8 @@ class EvidenceStore:
             raise ValueError("operation must be a non-empty string.")
 
         df = frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+        if df.is_empty():
+            raise ValueError("Cannot record empty evidence artifact (DataFrame has 0 rows).")
         normalized_params = dict(params or {})
         schema_sig = compute_schema_signature(df)
         data_hash = compute_frame_hash(df)

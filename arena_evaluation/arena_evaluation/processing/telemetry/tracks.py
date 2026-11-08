@@ -17,7 +17,7 @@ from arena_evaluation.processing.telemetry.writer import TableSink
 POSE_SOURCE = "tf_gt"
 TWIST_STAMPED_SCHEMA = "geometry_msgs/msg/TwistStamped"
 _WORLD_FRAMES = ("map", "world", "odom")
-_GROUND_TRUTH_FRAMES = ("map", "world")
+_GROUND_TRUTH_FRAMES = ("map", "world", "odom")
 _BASE_FRAME_MARKERS = ("base_link", "base_footprint")
 
 
@@ -70,7 +70,7 @@ def is_base_frame(frame: str) -> bool:
 
 
 def is_ground_truth(parent: str, child: str) -> bool:
-    """Whether a transform is a map or world to robot-base pose; odometry frames publish wheel estimates, never ground truth."""
+    """Whether a transform is a map, world, or odom to robot-base pose."""
     return _named_frame(parent.strip("/").lower(), _GROUND_TRUTH_FRAMES) and is_base_frame(child.strip("/").lower())
 
 

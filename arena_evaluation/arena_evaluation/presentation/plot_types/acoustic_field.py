@@ -662,7 +662,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
     @staticmethod
     def _ped_tracks_from_disk(bdir: pathlib.Path, episode_id: str | int | None) -> dict[int, list[tuple[float, float]]]:
-        """Tracks from an episode's topics/peds.parquet, else its metrics.parquet, searching bdir and its parents."""
+        """Tracks from an episode's topics/pedestrian_tracks.parquet, searching bdir and its parents."""
         if episode_id is None:
             ep_names = [d.name for d in (bdir / "episodes").iterdir() if d.is_dir()] if (bdir / "episodes").is_dir() else []
         elif str(episode_id).isdigit():
@@ -676,6 +676,25 @@ class AcousticFieldRenderer(BasePlotRenderer):
             )
             if peds_pq is not None:
                 p_df = pl.read_parquet(peds_pq)
+                tf_static_pq = peds_pq.parent / "tf_static.parquet"
+                ox, oy = 0.0, 0.0
+                if tf_static_pq.exists():
+                    try:
+                        tf_static_df = pl.read_parquet(tf_static_pq)
+                        matches = tf_static_df.filter(
+                            (pl.col("parent_frame").str.to_lowercase().is_in(["map", "world", "odom", ""]))
+                            & (pl.col("child_frame").str.contains(r"^env_\d+(?:/map)?$"))
+                        )
+                        if len(matches) > 0:
+                            ox = float(matches["tx"][0])
+                            oy = float(matches["ty"][0])
+                    except Exception:
+                        pass
+                if ox != 0.0 or oy != 0.0:
+                    p_df = p_df.with_columns(
+                        (pl.col("x") - ox).alias("x"),
+                        (pl.col("y") - oy).alias("y"),
+                    )
                 grouped = p_df.select(["ped_id", "x", "y"]).group_by("ped_id", maintain_order=True).agg(pl.concat_arr(["x", "y"]).alias("points"))
                 tracks = {idx: [(float(x), float(y)) for x, y in pts] for idx, pts in enumerate(grouped["points"])}
                 if tracks:

@@ -82,7 +82,7 @@ def _default_summary_group_cols(df: pl.DataFrame) -> list[str]:
     return ([lead] if lead else []) + rest
 
 
-def _aggregate(df: pl.DataFrame, group_cols: list[str], agg_exprs: list) -> pd.DataFrame:
+def _aggregate(df: pl.DataFrame, group_cols: list[str], agg_exprs: list[pl.Expr]) -> pd.DataFrame:
     """Grouped aggregate, or a single ``All runs`` row when nothing identifies a run."""
     if group_cols:
         return df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
@@ -150,6 +150,7 @@ class ReportBuilder:
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
         self._source_frames: dict[str, pl.DataFrame] = {}
         self._merged_df: pl.DataFrame | None = None
+        self._agent_notes: dict[str, str] | None = None
 
     @classmethod
     def from_dirs(
@@ -170,6 +171,7 @@ class ReportBuilder:
         instance.generate_gifs = generate_gifs
         instance._source_frames = {}
         instance._manifest_obj = None
+        instance._agent_notes = None
 
         if manifest is not None:
             instance._manifest_obj = manifest if isinstance(manifest, VizManifest) else resolve_manifest(manifest, benchmark_dir=instance.benchmark_dir)
@@ -335,6 +337,14 @@ class ReportBuilder:
                 print(f"Skipping plot '{resolved_spec.id}': {e}")
                 continue
 
+            if diagnostics.status == "FAILED":
+                issues_str = "; ".join(diagnostics.issues) if diagnostics.issues else "Quality gate rejected"
+                print(f"Warning: Plot '{resolved_spec.id}' failed quality gate: {issues_str}")
+                gate_card = f'<div class="plot-gate-card gate-failed"><strong>[Plot Quality Gate Rejected]</strong> {html_escape.escape(issues_str)}</div>'
+                note_html = self._plot_note_html(resolved_spec)
+                html_plots.append((resolved_spec.layout_group, gate_card + note_html, resolved_spec.title))
+                continue
+
             diag_html = self._diagnostics_html(diagnostics)
 
             png_path = self.plots_dir / f"{resolved_spec.id}.png"
@@ -387,16 +397,48 @@ class ReportBuilder:
         print(f"Static plots saved to: {self.plots_dir}")
         return self.report_path
 
-    def _plot_note_html(self, spec: PlotSpec) -> str:
-        """Per-plot agent note, rendered under the plot.
+    def _load_agent_notes(self) -> dict[str, str]:
+        """Load plot annotations and insights from notes.json or insights.json."""
+        if self._agent_notes is not None:
+            return self._agent_notes
 
-        Sources (in priority order):
-        - ``spec.options.note`` - inline markdown-ish string.
-        - ``spec.options.notes_key`` - a key into the benchmark's notes.yaml;
-          the matching note's value is shown. (Reads the same notes file the
-          table plot type consumes, so agents write one notes.yaml.)
-        Returns an empty string when neither is set.
-        """
+        import json
+
+        notes: dict[str, str] = {}
+        search_dirs = [self.benchmark_dir]
+        if self.output_dir != self.benchmark_dir:
+            search_dirs.append(self.output_dir)
+
+        for sdir in search_dirs:
+            for filename in ("notes.json", "insights.json"):
+                path = sdir / filename
+                if not path.is_file():
+                    continue
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        for k, v in data.items():
+                            if isinstance(v, str):
+                                notes[str(k)] = v
+                            elif isinstance(v, dict):
+                                text = v.get("insight") or v.get("note") or v.get("text")
+                                if text:
+                                    notes[str(k)] = str(text)
+                    elif isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict):
+                                plot_id = item.get("plot_id") or item.get("id") or item.get("label")
+                                text = item.get("insight") or item.get("note") or item.get("value") or item.get("text")
+                                if plot_id and text:
+                                    notes[str(plot_id)] = str(text)
+                except Exception as e:
+                    print(f"Warning: Failed to load agent notes from {path}: {e}")
+
+        self._agent_notes = notes
+        return notes
+
+    def _plot_note_html(self, spec: PlotSpec) -> str:
+        """Per-plot agent note and diagnostic insight, rendered under the plot."""
         opts = spec.options or {}
         note = opts.get("note")
         if note is None:
@@ -407,7 +449,7 @@ class ReportBuilder:
 
                     notes_path = self.benchmark_dir / "notes.yaml"
                     if notes_path.is_file():
-                        data = _yaml.safe_load(notes_path.read_text())
+                        data = _yaml.safe_load(notes_path.read_text(encoding="utf-8"))
                         rows = data if isinstance(data, list) else ([{"label": str(k), "value": str(v)} for k, v in (data or {}).items()])
                         for row in rows:
                             if isinstance(row, dict) and str(row.get("label", "")) == str(key):
@@ -415,23 +457,25 @@ class ReportBuilder:
                                 break
                 except Exception:
                     note = None
-        if not note:
-            return ""
-        return f"<div class='plot-note'>{_render_markdown_light(str(note))}</div>"
+
+        chunks: list[str] = []
+        if note:
+            chunks.append(f"<div class='plot-note'>{_render_markdown_light(str(note))}</div>")
+
+        agent_notes = self._load_agent_notes()
+        if spec.id and spec.id in agent_notes:
+            agent_text = agent_notes[spec.id]
+            chunks.append(f'<div class="agent-annotation"><span class="badge">Agent Insight</span> {_render_markdown_light(str(agent_text))}</div>')
+
+        return "".join(chunks)
 
     @staticmethod
     def _diagnostics_html(diagnostics: PlotDiagnostics) -> str:
         """Render non-blocking diagnostic warnings as informative note banner."""
-        if not diagnostics.has_warnings:
-            return ""
-        items = "".join(f"<li>{html_escape.escape(w)}</li>" for w in diagnostics.warnings)
-        return (
-            f"<div class='plot-diagnostics' style='font-size: 0.85em; color: #856404; "
-            f"background-color: #fff3cd; border: 1px solid #ffeeba; border-radius: 4px; "
-            f"padding: 6px 12px; margin-top: 4px;'>"
-            f"<strong style='text-transform: uppercase;'>Diagnostic Notes (N={diagnostics.row_count}):</strong>"
-            f"<ul style='margin: 4px 0 0 16px; padding: 0;'>{items}</ul></div>"
-        )
+        if diagnostics.status == "WARNING" and diagnostics.issues:
+            issues_str = "; ".join(diagnostics.issues)
+            return f'<div class="plot-gate-card gate-warning"><strong>[Plot Quality Gate Warning]</strong> {html_escape.escape(issues_str)}</div>'
+        return ""
 
     def _write_note_file(self, manifest: VizManifest) -> None:
         """Best-effort note recording which manifest produced this report."""

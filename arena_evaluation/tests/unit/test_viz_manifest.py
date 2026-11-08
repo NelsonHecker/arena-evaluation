@@ -1,10 +1,9 @@
 """Unit tests for VizManifest YAML parsing/round-trip with the declarative fields."""
 
-import pathlib
 import pytest
 import yaml
 
-from arena_evaluation.presentation.manifest_registry import find_manifest_file, available_manifests
+from arena_evaluation.presentation.manifest_registry import available_manifests, find_manifest_file
 from arena_evaluation.presentation.viz_manifest import VizManifest
 
 
@@ -62,3 +61,121 @@ def test_characterization_manifest_loads():
     assert any(s.options.get("aggregate") for s in manifest.plots)
     assert manifest.units.get("timeseries_char_power_total_w") == "W"
     assert manifest.units.get("timeseries_char_dba") == "dBA"
+
+
+def test_standard_manifest_modernized_recipes_and_channels():
+    """Verify that standard.yaml uses declarative plot recipes and explicit GoG channels."""
+    from arena_evaluation.presentation.resolver import DataResolver
+
+    p = find_manifest_file("standard")
+    assert p is not None
+
+    manifest = VizManifest.load(p)
+    assert manifest.name == "standard"
+
+    plot_by_id = {s.id: s for s in manifest.plots}
+
+    # 1. Composite plot recipe checks
+    assert "overview_table" in plot_by_id
+    assert plot_by_id["overview_table"].uses == "scorecard_table"
+    assert plot_by_id["overview_table"].layout_group == "overview"
+    assert plot_by_id["overview_table"].title == "Benchmark Executive Overview"
+
+    assert "radar_local_planner" in plot_by_id
+    assert plot_by_id["radar_local_planner"].uses == "multi_planner_radar"
+    assert plot_by_id["radar_local_planner"].layout_group == "overview"
+    assert plot_by_id["radar_local_planner"].title == "Performance Overview by Local Planner"
+
+    assert "radar_inter_planner" in plot_by_id
+    assert plot_by_id["radar_inter_planner"].uses == "multi_planner_radar"
+    assert plot_by_id["radar_inter_planner"].layout_group == "overview"
+    assert plot_by_id["radar_inter_planner"].title == "Performance Overview by Inter-Planner"
+    assert plot_by_id["radar_inter_planner"].channels.color == "inter_planner"
+
+    assert "bar_collision_breakdown" in plot_by_id
+    assert plot_by_id["bar_collision_breakdown"].uses == "closer_attribution_matrix"
+    assert plot_by_id["bar_collision_breakdown"].layout_group == "safety"
+    assert plot_by_id["bar_collision_breakdown"].title == "Collision Fault Attribution by Obstacle & Crowd Condition"
+
+    assert "encounter_energy_breakdown" in plot_by_id
+    assert plot_by_id["encounter_energy_breakdown"].uses == "encounter_energy_breakdown"
+    assert plot_by_id["encounter_energy_breakdown"].layout_group == "ecological"
+
+    assert "acoustic_exposure_sunburst" in plot_by_id
+    assert plot_by_id["acoustic_exposure_sunburst"].uses == "acoustic_exposure_sunburst"
+    assert plot_by_id["acoustic_exposure_sunburst"].layout_group == "social"
+
+    assert "planner_ranking_stability" in plot_by_id
+    assert plot_by_id["planner_ranking_stability"].uses == "planner_ranking_stability"
+    assert plot_by_id["planner_ranking_stability"].layout_group == "tradeoffs"
+
+    # 2. Verify all recipes resolve cleanly via DataResolver
+    resolver = DataResolver()
+    for s in manifest.plots:
+        resolved = resolver.resolve_spec(s)
+        assert resolved.id == s.id
+        assert resolved.layout_group == s.layout_group
+
+    # 3. Check atomic metric plots (box, violin, bar, scatter) have explicit GoG channels & data source
+    for s in manifest.plots:
+        if s.uses is None and s.type in ("box", "violin", "bar", "scatter"):
+            assert s.data is not None, f"Plot {s.id} must declare data binding"
+            assert s.data.source == "fact_episodes", f"Plot {s.id} data source must be fact_episodes"
+            assert s.channels.x is not None, f"Plot {s.id} must declare x channel"
+            assert s.channels.y is not None, f"Plot {s.id} must declare y channel"
+
+
+def test_social_manifest_modernized_recipes_and_channels():
+    """Verify that social.yaml uses declarative plot recipes and explicit GoG channels."""
+    from arena_evaluation.presentation.resolver import DataResolver
+
+    p = find_manifest_file("social")
+    assert p is not None
+
+    manifest = VizManifest.load(p)
+    assert manifest.name == "social"
+
+    plot_by_id = {s.id: s for s in manifest.plots}
+
+    # 1. Composite plot recipe checks
+    assert "social_scorecard_table" in plot_by_id
+    assert plot_by_id["social_scorecard_table"].uses == "scorecard_table"
+    assert plot_by_id["social_scorecard_table"].layout_group == "overview"
+    assert plot_by_id["social_scorecard_table"].title == "Social Benchmark Executive Scorecard"
+
+    assert "social_radar" in plot_by_id
+    assert plot_by_id["social_radar"].uses == "multi_planner_radar"
+    assert plot_by_id["social_radar"].layout_group == "overview"
+    assert plot_by_id["social_radar"].title == "Social Capability Tradeoff Radar"
+
+    assert "social_closer_attribution" in plot_by_id
+    assert plot_by_id["social_closer_attribution"].uses == "closer_attribution_matrix"
+    assert plot_by_id["social_closer_attribution"].layout_group == "encounters"
+    assert plot_by_id["social_closer_attribution"].title == "Collision Fault Attribution by Crowd Condition"
+
+    assert "social_encounter_energy" in plot_by_id
+    assert plot_by_id["social_encounter_energy"].uses == "encounter_energy_breakdown"
+    assert plot_by_id["social_encounter_energy"].layout_group == "encounters"
+
+    assert "social_encounter_trajectory" in plot_by_id
+    assert plot_by_id["social_encounter_trajectory"].uses == "encounter_trajectory_slice"
+    assert plot_by_id["social_encounter_trajectory"].layout_group == "encounters"
+
+    assert "social_acoustic_sunburst" in plot_by_id
+    assert plot_by_id["social_acoustic_sunburst"].uses == "acoustic_exposure_sunburst"
+    assert plot_by_id["social_acoustic_sunburst"].layout_group == "acoustics"
+
+    # 2. Verify all recipes resolve cleanly via DataResolver
+    resolver = DataResolver()
+    for s in manifest.plots:
+        resolved = resolver.resolve_spec(s)
+        assert resolved.id == s.id
+        assert resolved.layout_group == s.layout_group
+
+    # 3. Check atomic metric plots (box, violin, bar, scatter) have explicit GoG channels & data source
+    for s in manifest.plots:
+        if s.uses is None and s.type in ("box", "violin", "bar", "scatter"):
+            assert s.data is not None, f"Plot {s.id} must declare data binding"
+            assert s.data.source == "fact_episodes", f"Plot {s.id} data source must be fact_episodes"
+            assert s.channels.x is not None, f"Plot {s.id} must declare x channel"
+            assert s.channels.y is not None, f"Plot {s.id} must declare y channel"

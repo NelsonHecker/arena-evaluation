@@ -24,6 +24,10 @@ _ALL_PLOT_TYPES = [
     "line",
     "acoustic_field",
     "acoustic_field_animation",
+    "timeseries",
+    "table",
+    "hierarchy",
+    "dendrogram",
 ]
 
 

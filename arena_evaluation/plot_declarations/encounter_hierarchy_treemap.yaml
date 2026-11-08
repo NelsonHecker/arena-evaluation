@@ -1,0 +1,13 @@
+id: encounter_hierarchy_treemap
+title: "Encounter Energy and Conflict Hierarchical Decomposition"
+type: hierarchy
+data:
+  source: fact_encounters
+channels:
+  hierarchy:
+    - crowd_condition
+    - approach_type
+    - planner
+  y: encounter_energy_j
+options:
+  mode: treemap

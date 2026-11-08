@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from arena_evaluation.presentation.checks import PlotDiagnostics
 
-__all__ = ["BasePlotRenderer"]
+__all__ = ["BasePlotRenderer", "BasePlot"]
 
 
 class BasePlotRenderer(ABC):
@@ -54,6 +54,8 @@ class BasePlotRenderer(ABC):
                 val = ch.size
             case "symbol":
                 val = ch.symbol
+            case "hierarchy":
+                val = ch.hierarchy
             case _:
                 val = None
 
@@ -75,6 +77,8 @@ class BasePlotRenderer(ABC):
                 val = ch.y
             case "color" | "hue":
                 val = ch.color
+            case "hierarchy":
+                val = ch.hierarchy
             case _:
                 val = None
 
@@ -145,3 +149,6 @@ class BasePlotRenderer(ABC):
                 else:
                     res_df = res_df.filter(pl.col(k) == v)
         return res_df
+
+
+BasePlot = BasePlotRenderer

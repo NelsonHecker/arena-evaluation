@@ -415,31 +415,17 @@ class TrajectoryRenderer(BasePlotRenderer):
                 if p_paths is None and run_dir is not None and "episode" in r:
                     try:
                         ep_id = int(r["episode"])  # pyright: ignore[reportArgumentType]
-                        peds_pq = pathlib.Path(run_dir) / "episodes" / f"episode_{ep_id:03d}" / "topics" / "peds.parquet"
-                        if peds_pq.exists():
-                            p_df = pl.read_parquet(peds_pq)
-                            if "peds_positions" in p_df.columns:
-                                raw_pos = p_df["peds_positions"].to_list()
-                                parsed_frames = []
-                                for frame_raw in raw_pos:
-                                    if frame_raw is not None and len(frame_raw) > 0:
-                                        if isinstance(frame_raw[0], (list, tuple, np.ndarray)):
-                                            parsed_frames.append([[float(p[0]), float(p[1])] for p in frame_raw if len(p) >= 2])
-                                        else:
-                                            pts = []
-                                            for j in range(0, len(frame_raw), 3):
-                                                if j + 1 < len(frame_raw):
-                                                    pts.append([float(frame_raw[j]), float(frame_raw[j + 1])])
-                                            parsed_frames.append(pts)
-                                    else:
-                                        parsed_frames.append([])
-                                if parsed_frames:
-                                    max_peds = max(len(f) for f in parsed_frames) if parsed_frames else 0
-                                    p_paths = []
-                                    for p_idx in range(max_peds):
-                                        ped_traj = [f[p_idx] for f in parsed_frames if len(f) > p_idx]
-                                        if len(ped_traj) > 1:
-                                            p_paths.append(ped_traj)
+                        topics_dir = pathlib.Path(run_dir) / "episodes" / f"episode_{ep_id:03d}" / "topics"
+                        if topics_dir.is_dir():
+                            from arena_evaluation.processing.parquet_store import TopicParquetStore
+
+                            bundles = TopicParquetStore.read(topics_dir)
+                            if bundles:
+                                bundle = next(iter(bundles.values()))
+                                if bundle.pedestrian_tracks is not None:
+                                    p_df = bundle.pedestrian_tracks.collect() if isinstance(bundle.pedestrian_tracks, pl.LazyFrame) else bundle.pedestrian_tracks
+                                    grouped = p_df.select(["ped_id", "x", "y"]).group_by("ped_id", maintain_order=True).agg(pl.concat_arr(["x", "y"]).alias("points"))
+                                    p_paths = [[(float(x), float(y)) for x, y in pts] for pts in grouped["points"]]
                     except Exception:
                         pass
 

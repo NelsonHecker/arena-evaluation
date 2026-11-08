@@ -1,0 +1,16 @@
+id: planner_behavioral_dendrogram
+title: "Planner Phenotypic Behavioral Cladistics (Dendrogram Clustering)"
+type: hierarchy
+data:
+  source: fact_episodes
+channels:
+  x: planner
+  y:
+    - time_to_goal
+    - path_length
+    - collision_amount
+    - jerk_mean
+    - specific_cost_of_transport
+options:
+  mode: dendrogram
+  clustering_method: ward

@@ -2,6 +2,7 @@ from .acoustic_field import AcousticFieldAnimationRenderer, AcousticFieldRendere
 from .bar import BarRenderer
 from .box import BoxRenderer
 from .heatmap import HeatmapRenderer
+from .hierarchy import HierarchyRenderer
 from .histogram import HistogramRenderer
 from .line import LineRenderer
 from .radar import RadarRenderer
@@ -25,4 +26,5 @@ __all__ = [
     "TableRenderer",
     "AcousticFieldRenderer",
     "AcousticFieldAnimationRenderer",
+    "HierarchyRenderer",
 ]

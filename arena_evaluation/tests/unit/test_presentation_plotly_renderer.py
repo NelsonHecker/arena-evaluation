@@ -24,6 +24,8 @@ _ALL_PLOT_TYPES = [
     "table",
     "acoustic_field",
     "acoustic_field_animation",
+    "hierarchy",
+    "dendrogram",
 ]
 
 

@@ -52,7 +52,7 @@ def classify(tracks: pl.DataFrame | pl.LazyFrame | None) -> str:
 def resolve_pose_source(bundle: TopicBundle, window: tuple[int | None, int | None]) -> tuple[pl.DataFrame | None, PoseSource]:
     """The robot's ground-truth track inside the window. Odometry is never a trajectory source."""
     tracks = _windowed(_collect(bundle.robot_tracks), window)
-    if tracks is None or len(tracks) == 0:
-        return None, PoseSource("absent", 0)
-    kind = "tf" if classify(tracks) == "dense" else "tf_sparse"
-    return tracks, PoseSource(kind, len(tracks))
+    if tracks is not None and len(tracks) > 0:
+        kind = "tf" if classify(tracks) == "dense" else "tf_sparse"
+        return tracks, PoseSource(kind, len(tracks))
+    return None, PoseSource("absent", 0)

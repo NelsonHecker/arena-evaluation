@@ -433,10 +433,34 @@ class StarSchemaBuilder:
             "outcome_state": metadata.outcome_state if metadata is not None else None,
             "outcome_info": metadata.outcome_info if metadata is not None else None,
         }
+        meta_params = metadata.params if metadata is not None else {}
+        robot_row: dict[str, object] = {
+            "run_id": run_id,
+            "episode_id": int(episode_id),
+            "env_id": env_id,
+            "robot_id": resolved_robot_id,
+            "robot_model": robot_model,
+            "planner": planner,
+            "inter_planner": inter_planner,
+            "dispatcher": dispatcher,
+            "lidar_variant": _opt_str(meta_params.get("lidar_variant")),
+            "max_linear_vel": _opt_float(meta_params.get("robot.mobile.max_linear_vel")) or _opt_float(meta_params.get("max_linear_vel")) or (float(self._robot_params.max_linear_velocity) if self._robot_params and self._robot_params.max_linear_velocity > 0.0 else None),
+            "max_angular_vel": _opt_float(meta_params.get("max_angular_vel")),
+            "linear_acc": _opt_float(meta_params.get("linear_acc")),
+            "linear_decel": _opt_float(meta_params.get("linear_decel")),
+            "robot_mass_kg": float(self._robot_params.total_mass) if self._robot_params else None,
+            "robot_radius_m": float(self._robot_params.robot_radius) if self._robot_params else None,
+            "static_power_w": _opt_float(meta_params.get("static_power_w")),
+            "start_x": None,
+            "start_y": None,
+            "goal_x": None,
+            "goal_y": None,
+        }
         empty = StarSchemaTables.empty()
         return dataclasses.replace(
             empty,
             dim_episodes=pl.DataFrame([row], schema=DIM_EPISODES_SCHEMA),
+            dim_robots=pl.DataFrame([robot_row], schema=DIM_ROBOTS_SCHEMA),
         )
 
     @staticmethod

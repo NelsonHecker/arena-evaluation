@@ -19,6 +19,7 @@ class SeabornRenderer:
             BarRenderer,
             BoxRenderer,
             HeatmapRenderer,
+            HierarchyRenderer,
             HistogramRenderer,
             LineRenderer,
             RadarRenderer,
@@ -43,6 +44,8 @@ class SeabornRenderer:
             "table": TableRenderer,
             "acoustic_field": AcousticFieldRenderer,
             "acoustic_field_animation": AcousticFieldAnimationRenderer,
+            "hierarchy": HierarchyRenderer,
+            "dendrogram": HierarchyRenderer,
         }
 
         from .color_utils import set_global_color_palette

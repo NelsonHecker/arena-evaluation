@@ -30,6 +30,8 @@ class ScatterRenderer(BasePlotRenderer):
         color_col = self.resolve_channel("color")
         if not color_col:
             diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            if diff_col not in df_filtered.columns:
+                return None
             color_col = diff_col
 
         size_col = self.resolve_channel("size", fallback=self.spec.options.get("size"))
@@ -107,6 +109,8 @@ class ScatterRenderer(BasePlotRenderer):
         color_col = self.resolve_channel("color")
         if not color_col:
             diff_col, df_filtered = self.resolve_diff_col(df_filtered)
+            if diff_col not in df_filtered.columns:
+                return None
             color_col = diff_col
 
         size_col = self.resolve_channel("size", fallback=self.spec.options.get("size"))
