@@ -51,6 +51,8 @@ _POSITION_COLUMNS: dict[str, tuple[str, str]] = {
     "robot_tracks": ("x", "y"),
     "robot_initialpose": ("pos_x", "pos_y"),
     "robot_plans": ("x", "y"),
+    "pedestrians": ("x", "y"),
+    "arena_peds": ("x", "y"),
     "pedestrian_tracks": ("x", "y"),
     "pedestrian_tracks_physics": ("x", "y"),
     "pedestrian_gestures": ("at_x", "at_y"),
@@ -152,7 +154,8 @@ class _Ingest:
             (_ends_with("/cmd_vel"), self._command),
             (_ends_with("/joint_states"), self._joint_states),
             (_both(_ends_with("/agent_meta"), _has_schema(_AGENT_META_SCHEMA)), self._agent_meta),
-            (_ends_with("/arena_peds", "/peds", "/agent_states"), self._pedestrian_frame),
+            (_ends_with("/arena_peds", "/peds"), self._arena_peds_frame),
+            (_ends_with("/agent_states", "/agent_frame"), self._agent_states_frame),
             (_both(_ends_with("/interactions"), _has_schema(_INTERACTION_FRAME_SCHEMA)), self._interactions),
             (_both(_ends_with("/animation_states"), _has_schema(_ANIMATION_STATES_SCHEMA)), self._animations),
             (_ends_with("/acoustics"), self._acoustics),
@@ -204,9 +207,11 @@ class _Ingest:
     def _agent_meta(self, _topic: str, envelope: Envelope) -> None:
         self._pedestrians.record_meta(envelope)
 
-    def _pedestrian_frame(self, topic: str, envelope: Envelope) -> None:
-        table = ENGINE_TABLE if topic.endswith("/agent_states") else ARENA_TABLE
-        self._pedestrians.record_frame(table, envelope)
+    def _arena_peds_frame(self, _topic: str, envelope: Envelope) -> None:
+        self._pedestrians.record_frame(ARENA_TABLE, envelope)
+
+    def _agent_states_frame(self, _topic: str, envelope: Envelope) -> None:
+        self._pedestrians.record_frame(ENGINE_TABLE, envelope)
 
     def _interactions(self, _topic: str, envelope: Envelope) -> None:
         events.record_interactions(self._sink, envelope)
@@ -318,12 +323,18 @@ def _robot_bundle(tables: _Tables, env_id: str, robot_id: str) -> TopicBundle:
     cmd_vel_controller = frames.pop("robot_cmd_vel_controller")
     frames["robot_odom"] = _first_present(odom_controller, frames["robot_odom"])
     frames["robot_cmd_vel"] = _first_present(frames["robot_cmd_vel"], cmd_vel_controller)
-    frames["pedestrian_tracks"] = _first_present(frames["pedestrian_tracks"], frames["pedestrian_tracks_physics"])
+    arena_peds = frames.pop("arena_peds", None)
+    pedestrians = frames.pop("pedestrians", None)
+    legacy_tracks = frames.get("pedestrian_tracks")
+    legacy_physics = frames.get("pedestrian_tracks_physics")
+    physics = _first_present(pedestrians, legacy_physics)
+    frames["pedestrian_tracks"] = _first_present(physics, arena_peds, legacy_tracks)
+    frames["pedestrian_tracks_physics"] = physics
     return TopicBundle(**tables.global_frames, **frames)
 
 
 def _check_map_frames(env_id: str, shifts: list[Anchor], pedestrian_frames: Mapping[tuple[str, str], frozenset[str]]) -> None:
-    for table in (ARENA_TABLE, ENGINE_TABLE):
+    for table in (ARENA_TABLE, ENGINE_TABLE, "pedestrian_tracks", "pedestrian_tracks_physics"):
         unmapped = sorted(frame for frame in pedestrian_frames.get((env_id, table), frozenset()) if frame not in _UNMAPPED_FRAMES)
         if unmapped:
             offsets = [anchor[1:] for anchor in shifts]

@@ -244,6 +244,8 @@ _ROBOT_TABLES = {
     "robot_task_pose": _TASK_POSE,
 }
 _ENV_TABLES = {
+    "arena_peds": _PEDESTRIAN,
+    "pedestrians": _PEDESTRIAN,
     "pedestrian_tracks": _PEDESTRIAN,
     "pedestrian_tracks_physics": _PEDESTRIAN,
     "pedestrian_gestures": _GESTURE,

@@ -24,8 +24,8 @@ HUMAN_KIND = 0
 NO_INTERACTION_ID = -1
 NO_INTERACTION_TYPE = 0
 NO_ANIMATION = 0
-ARENA_TABLE = "pedestrian_tracks"
-ENGINE_TABLE = "pedestrian_tracks_physics"
+ARENA_TABLE = "arena_peds"
+ENGINE_TABLE = "pedestrians"
 GESTURE_TABLE = "pedestrian_gestures"
 PEDESTRIANS_SCHEMA = "arena_people_msgs/msg/Pedestrians"
 AGENT_FRAME_SCHEMA = "arena_humansim_msgs/msg/AgentFrame"
@@ -111,10 +111,8 @@ class PedestrianRecorder:
 
 def _agent_meta(envelope: Envelope[RosAgentMeta]) -> AgentMeta:
     meta = envelope.body
-    # agent-contracts: ignore MCAP schema evolution
-    policies = tuple(str(policy) for policy in getattr(meta, "policies", ()))
-    # agent-contracts: ignore MCAP schema evolution
-    agent_type = getattr(meta, "agent_type", ())
+    policies = tuple(str(policy) for policy in meta.policies)
+    agent_type = meta.agent_type
     typed = len(meta.agent_id) == len(agent_type)
     types = {int(agent_id): _agent_type(t) for agent_id, t in zip(meta.agent_id, agent_type, strict=True)} if typed else {}
     return AgentMeta(policies=policies, types_by_id=types)
@@ -134,21 +132,15 @@ def _agents(envelope: Envelope[Pedestrians | AgentFrame | AgentStates], meta: Ag
 def _pedestrians_columns(envelope: Envelope[Pedestrians]) -> dict[str, list[Any]]:
     peds = envelope.body.pedestrians
     nulls = [None] * len(peds)
-    # agent-contracts: ignore MCAP schema evolution
-    agent_type = [_agent_type(getattr(ped, "agent_type", "")) for ped in peds]
-    # agent-contracts: ignore MCAP schema evolution
-    animation_state = [int(getattr(ped, "animation_state", NO_ANIMATION)) for ped in peds]
-    # agent-contracts: ignore MCAP schema evolution
-    interaction_id = [int(getattr(ped, "interaction_id", NO_INTERACTION_ID)) for ped in peds]
-    # agent-contracts: ignore MCAP schema evolution
-    interaction_type = [int(getattr(ped, "interaction_type", NO_INTERACTION_TYPE)) for ped in peds]
-    # agent-contracts: ignore MCAP schema evolution
-    gait_phase = [_nonzero(float(getattr(ped, "gait_phase", 0.0))) for ped in peds]
-    # agent-contracts: ignore MCAP schema evolution
-    gait_cadence = [_nonzero(float(getattr(ped, "gait_cadence", 0.0))) for ped in peds]
+    agent_type = [_agent_type(ped.agent_type) for ped in peds]
+    animation_state = [int(ped.animation_state) for ped in peds]
+    interaction_id = [int(ped.interaction_id) for ped in peds]
+    interaction_type = [int(ped.interaction_type) for ped in peds]
+    gait_phase = [_nonzero(float(ped.gait_phase)) for ped in peds]
+    gait_cadence = [_nonzero(float(ped.gait_cadence)) for ped in peds]
     return {
         "number": [int(ped.id) for ped in peds],
-        "name": [str(ped.name) for ped in peds],
+        "name": [str(ped.name) if ped.name else str(ped.id) for ped in peds],
         "x": [float(ped.pose.position.x) for ped in peds],
         "y": [float(ped.pose.position.y) for ped in peds],
         "z": [float(ped.pose.position.z) for ped in peds],
@@ -173,22 +165,14 @@ def _agent_frame_columns(envelope: Envelope[AgentFrame], meta: AgentMeta) -> dic
     humans = np.frombuffer(bytes(frame.kind), dtype=np.uint8) == HUMAN_KIND
     agent_ids = np.asarray(frame.agent_id, dtype=np.int64)[humans].tolist()
     count = len(agent_ids)
-    # agent-contracts: ignore MCAP schema evolution
-    policy_indices = _per_human(getattr(frame, "policy_idx", None), humans, int, missing=None)
-    # agent-contracts: ignore MCAP schema evolution
-    animation = _per_human(_byte_values(getattr(frame, "animation_state", ())), humans, int, missing=NO_ANIMATION)
-    # agent-contracts: ignore MCAP schema evolution
-    interaction_ids = _per_human(getattr(frame, "interaction_id", None), humans, int, missing=NO_INTERACTION_ID)
-    # agent-contracts: ignore MCAP schema evolution
-    interaction_types = _per_human(_byte_values(getattr(frame, "interaction_type", ())), humans, int, missing=NO_INTERACTION_TYPE)
-    # agent-contracts: ignore MCAP schema evolution
-    radii = _per_human(getattr(frame, "radius", None), humans, float, missing=None)
-    # agent-contracts: ignore MCAP schema evolution
-    desired = _per_human(getattr(frame, "desired_velocity", None), humans, float, missing=None)
-    # agent-contracts: ignore MCAP schema evolution
-    phases = _per_human(getattr(frame, "gait_phase", None), humans, float, missing=None)
-    # agent-contracts: ignore MCAP schema evolution
-    cadences = _per_human(getattr(frame, "gait_cadence", None), humans, float, missing=None)
+    policy_indices = _per_human(frame.policy_idx, humans, int, missing=None)
+    animation = _per_human(_byte_values(frame.animation_state), humans, int, missing=NO_ANIMATION)
+    interaction_ids = _per_human(frame.interaction_id, humans, int, missing=NO_INTERACTION_ID)
+    interaction_types = _per_human(_byte_values(frame.interaction_type), humans, int, missing=NO_INTERACTION_TYPE)
+    radii = _per_human(frame.radius, humans, float, missing=None)
+    desired = _per_human(frame.desired_velocity, humans, float, missing=None)
+    phases = _per_human(frame.gait_phase, humans, float, missing=None)
+    cadences = _per_human(frame.gait_cadence, humans, float, missing=None)
     return {
         "number": agent_ids,
         "name": [str(agent_id) for agent_id in agent_ids],
@@ -217,7 +201,7 @@ def _agent_states_columns(envelope: Envelope[AgentStates]) -> dict[str, list[Any
     nulls = [None] * len(agents)
     return {
         "number": [int(agent.agent_id) for agent in agents],
-        "name": [str(agent.agent_id) for agent in agents],
+        "name": [str(agent.name) if agent.name else str(agent.agent_id) for agent in agents],
         "x": [float(agent.pose.x) for agent in agents],
         "y": [float(agent.pose.y) for agent in agents],
         "z": [0.0] * len(agents),
@@ -225,16 +209,11 @@ def _agent_states_columns(envelope: Envelope[AgentStates]) -> dict[str, list[Any
         "vx": [float(agent.velocity.x) for agent in agents],
         "vy": [float(agent.velocity.y) for agent in agents],
         "vz": [float(agent.velocity.z) for agent in agents],
-        # agent-contracts: ignore MCAP schema evolution
-        "radius_m": [_nonzero(float(getattr(agent, "radius", 0.0))) for agent in agents],
-        # agent-contracts: ignore MCAP schema evolution
-        "desired_speed": [_nonzero(float(getattr(agent, "desired_velocity", 0.0))) for agent in agents],
-        # agent-contracts: ignore MCAP schema evolution
-        "policy": [_text_or_none(getattr(agent, "policy", "")) for agent in agents],
-        # agent-contracts: ignore MCAP schema evolution
-        "agent_type": [_text_or_none(getattr(agent, "agent_type", "")) for agent in agents],
-        # agent-contracts: ignore MCAP schema evolution
-        "animation_state": [int(getattr(agent, "animation_state", NO_ANIMATION)) for agent in agents],
+        "radius_m": [_nonzero(float(agent.radius)) for agent in agents],
+        "desired_speed": [_nonzero(float(agent.desired_velocity)) for agent in agents],
+        "policy": [_text_or_none(agent.policy) for agent in agents],
+        "agent_type": [_text_or_none(agent.agent_type) for agent in agents],
+        "animation_state": [int(agent.animation_state) for agent in agents],
         "interaction_id": [NO_INTERACTION_ID] * len(agents),
         "interaction_type": [NO_INTERACTION_TYPE] * len(agents),
         "gait_phase": nulls,
@@ -258,8 +237,7 @@ def _gesture_rows(envelope: Envelope) -> list[dict[str, Any]]:
             render_pose_override=bool(gesture.render_pose_override),
         )
         for ped in envelope.body.pedestrians
-        # agent-contracts: ignore MCAP schema evolution
-        for gesture in getattr(ped, "gestures", ())
+        for gesture in ped.gestures
     ]
 
 

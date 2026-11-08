@@ -17,7 +17,7 @@ from arena_evaluation.processing.mcap_reader import MCAPReader
 from arena_evaluation.processing.telemetry.writer import TABLE_SCHEMAS
 
 _TOPIC = "/arena/env_0/arena_env_node/agent_states"
-_PHYSICS = "pedestrian_tracks_physics.parquet"
+_PHYSICS = "pedestrians.parquet"
 
 # (agent_id, kind, x, y, theta, vx, vy)
 _AGENTS = [
