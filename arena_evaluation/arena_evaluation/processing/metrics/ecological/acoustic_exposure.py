@@ -192,15 +192,17 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         for i in range(total_frames):
             frame = peds_at_time.get(int(time_ns[i]))
-            pts = [(x, y) for x, y in frame.select("x", "y").iter_rows()] if frame is not None else []
-
-            if not pts:
+            if frame is None or len(frame) == 0:
                 ts_exposure.append([])
                 ts_attenuation.append([])
                 continue
 
-            px_m = np.array([p[0] for p in pts], dtype=np.float32)
-            py_m = np.array([p[1] for p in pts], dtype=np.float32)
+            px_m = frame["x"].to_numpy().astype(np.float32)
+            py_m = frame["y"].to_numpy().astype(np.float32)
+            if len(px_m) == 0:
+                ts_exposure.append([])
+                ts_attenuation.append([])
+                continue
 
             current_source = source_dba[i]
 

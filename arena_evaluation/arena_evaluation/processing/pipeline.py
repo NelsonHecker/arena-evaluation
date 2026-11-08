@@ -554,6 +554,14 @@ class ProcessingPipeline:
 
         episode_dir = pathlib.Path(ep.episode_dir)
 
+        if not force_extract and (episode_dir / "metrics.parquet").exists() and (episode_dir / "metrics").exists():
+            try:
+                df, _ = ParquetStore.read(episode_dir / "metrics.parquet")
+                if len(df) > 0:
+                    return df.to_dicts()
+            except Exception:
+                pass
+
         # Load episode metadata
         yaml_path = episode_dir / f"{episode_dir.name}.yaml"
         if not yaml_path.exists():
