@@ -286,6 +286,9 @@ class TableRenderer(BasePlotRenderer):
             header = ["Label", "Value"]
             rows = [[r.get("label", ""), r.get("value", "")] for r in agent_rows]
 
+        import matplotlib
+
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         n_rows = len(rows)

@@ -189,6 +189,8 @@ def synthesize_star_schema_from_combined(
         duration_expr = pl.col("time_to_goal").cast(pl.Float64)
     elif "time" in names:
         duration_expr = pl.col("time").cast(pl.Float64)
+    elif "outcome_info" in names:
+        duration_expr = pl.col("outcome_info").str.extract(r"(\d+(?:\.\d+)?)s", 1).cast(pl.Float64, strict=False).fill_null(0.0)
     else:
         duration_expr = pl.lit(0.0, dtype=pl.Float64)
 
@@ -249,6 +251,10 @@ def synthesize_star_schema_from_combined(
         ttg_expr = pl.col("time_to_goal").cast(pl.Float64)
     elif "time" in names:
         ttg_expr = pl.col("time").cast(pl.Float64)
+    elif "duration_s" in names:
+        ttg_expr = pl.col("duration_s").cast(pl.Float64)
+    elif "outcome_info" in names:
+        ttg_expr = pl.col("outcome_info").str.extract(r"(\d+(?:\.\d+)?)s", 1).cast(pl.Float64, strict=False)
     else:
         ttg_expr = pl.lit(None, dtype=pl.Float64)
 
@@ -431,7 +437,14 @@ class BenchmarkCatalog:
             self._register_telemetry_views(source)
             self._register_evidence_index(source)
 
-            has_fact_ep = (source / "metrics" / "fact_episodes.parquet").is_file() or (source / "fact_episodes.parquet").is_file()
+            fact_table = self._tables.get("fact_episodes")
+            has_fact_ep = False
+            if fact_table is not None:
+                try:
+                    has_fact_ep = fact_table.select(pl.len()).collect().item() > 0
+                except Exception:
+                    has_fact_ep = False
+
             combined_file = source / "combined_metrics.parquet"
             if not combined_file.is_file():
                 combined_file = source / "metrics" / "combined_metrics.parquet"
@@ -439,8 +452,26 @@ class BenchmarkCatalog:
             if not has_fact_ep and combined_file.is_file():
                 comb_lf = pl.scan_parquet(combined_file)
                 dim_ep, dim_rob, fact_ep = synthesize_star_schema_from_combined(comb_lf, default_run_id=source.name)
-                self._tables["dim_episodes"] = dim_ep
-                self._tables["dim_robots"] = dim_rob
+                dim_table = self._tables.get("dim_episodes")
+                dim_has_rows = False
+                if dim_table is not None:
+                    try:
+                        dim_has_rows = dim_table.select(pl.len()).collect().item() > 0
+                    except Exception:
+                        pass
+                if not dim_has_rows:
+                    self._tables["dim_episodes"] = dim_ep
+
+                rob_table = self._tables.get("dim_robots")
+                rob_has_rows = False
+                if rob_table is not None:
+                    try:
+                        rob_has_rows = rob_table.select(pl.len()).collect().item() > 0
+                    except Exception:
+                        pass
+                if not rob_has_rows:
+                    self._tables["dim_robots"] = dim_rob
+
                 self._tables["fact_episodes"] = fact_ep
 
             if combined_file.is_file() and "combined_metrics" not in self._tables:
