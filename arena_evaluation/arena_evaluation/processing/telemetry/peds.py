@@ -237,7 +237,8 @@ def _gesture_rows(envelope: Envelope) -> list[dict[str, Any]]:
             render_pose_override=bool(gesture.render_pose_override),
         )
         for ped in envelope.body.pedestrians
-        for gesture in ped.gestures
+        # agent-contracts: ignore MCAP schema evolution
+        for gesture in getattr(ped, "gestures", ())
     ]
 
 
