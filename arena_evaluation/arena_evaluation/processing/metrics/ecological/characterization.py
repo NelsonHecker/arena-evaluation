@@ -251,9 +251,11 @@ class CharacterizationCalculator(BaseMetricCalculator):
         return dict(_ACOUSTIC_DEFAULTS)
 
     def _enrich(self, df: pl.DataFrame) -> pl.DataFrame:
+        pos_x_col = "pos_x_gt" if "pos_x_gt" in df.columns else ("x" if "x" in df.columns else "pos_x")
+        pos_y_col = "pos_y_gt" if "pos_y_gt" in df.columns else ("y" if "y" in df.columns else "pos_y")
         out = df.with_columns(
             (pl.col("time_ns").diff().fill_null(0).cast(pl.Float64) / 1e9).clip(lower_bound=0.0).alias("_dt"),
-            ((pl.col("pos_x").diff().fill_null(0.0).cast(pl.Float64) ** 2) + (pl.col("pos_y").diff().fill_null(0.0).cast(pl.Float64) ** 2)).sqrt().clip(lower_bound=0.0).alias("_ds"),
+            ((pl.col(pos_x_col).diff().fill_null(0.0).cast(pl.Float64) ** 2) + (pl.col(pos_y_col).diff().fill_null(0.0).cast(pl.Float64) ** 2)).sqrt().clip(lower_bound=0.0).alias("_ds"),
         )
         if "total_mechanical_power_w" in out.columns:
             out = out.with_columns(pl.col("total_mechanical_power_w").cast(pl.Float64).fill_null(0.0).alias("_p_mech"))
@@ -314,26 +316,24 @@ class CharacterizationCalculator(BaseMetricCalculator):
             out["turn_radius_m"].fill_null(0.0).alias("_turn_radius"),
         )
 
-        import numpy as np
-
-        # Compute achieved linear acceleration (dv/dt)
-        if "vel_linear" in out.columns:
-            vx_arr = out["vel_linear"].cast(pl.Float64).fill_null(0.0).to_numpy()
-        else:
-            vx_arr = speed.to_numpy()
-        dt_arr = dt.to_numpy()
-
-        accel_achieved = np.zeros_like(vx_arr)
-        for i in range(1, len(vx_arr)):
-            if dt_arr[i] > 1e-4:
-                accel_achieved[i] = (vx_arr[i] - vx_arr[i - 1]) / dt_arr[i]
-
-        p_tot_arr = out["_p_total"].to_numpy()
-        p_mech_arr = out["_p_mech"].to_numpy()
-        eff_arr = np.zeros_like(p_tot_arr)
-        for i in range(len(p_tot_arr)):
-            if p_tot_arr[i] > 0.1:
-                eff_arr[i] = max(0.0, min(1.0, float(p_mech_arr[i] / p_tot_arr[i])))
+        # Vectorized achieved linear acceleration (dv/dt) and efficiency
+        vx_s = pl.col("vel_linear").cast(pl.Float64).fill_null(0.0) if "vel_linear" in out.columns else speed
+        dt_expr = pl.col("_dt").fill_null(0.0)
+        accel_expr = (
+            pl.when(dt_expr > 1e-4)
+            .then(vx_s.diff() / dt_expr)
+            .otherwise(0.0)
+            .fill_null(0.0)
+        )
+        eff_expr = (
+            pl.when(pl.col("_p_total") > 0.1)
+            .then((pl.col("_p_mech") / pl.col("_p_total")).clip(0.0, 1.0))
+            .otherwise(0.0)
+        )
+        out = out.with_columns(
+            _accel_achieved=accel_expr,
+            _efficiency=eff_expr,
+        )
 
         rows = {
             "timeseries_char_time_s": t_s.to_list(),
@@ -344,9 +344,9 @@ class CharacterizationCalculator(BaseMetricCalculator):
             "timeseries_char_vy_achieved": out["vel_lateral"].cast(pl.Float64).fill_null(0.0).to_list() if "vel_lateral" in out.columns else [0.0] * len(out),
             "timeseries_char_wz_achieved": out["vel_angular"].cast(pl.Float64).fill_null(0.0).to_list() if "vel_angular" in out.columns else [0.0] * len(out),
             "timeseries_char_speed_achieved": out["vel_linear"].cast(pl.Float64).abs().fill_null(0.0).to_list() if "vel_linear" in out.columns else [0.0] * len(out),
-            "timeseries_char_accel_achieved": accel_achieved.tolist(),
+            "timeseries_char_accel_achieved": out["_accel_achieved"].to_list(),
             "timeseries_char_accel_target": out["accel_target"].fill_null(0.0).to_list(),
-            "timeseries_char_efficiency": eff_arr.tolist(),
+            "timeseries_char_efficiency": out["_efficiency"].to_list(),
             "timeseries_char_phase_kind": out["phase_kind"].fill_null("unknown").to_list(),
             "timeseries_char_vx_target": out["vx_target"].fill_null(0.0).to_list(),
             "timeseries_char_vy_target": out["vy_target"].fill_null(0.0).to_list(),
@@ -359,3 +359,63 @@ class CharacterizationCalculator(BaseMetricCalculator):
             "char_phase_coverage": self._phase_coverage,
         }
         return rows
+
+    def series_table(
+        self,
+        episode: AlignedEpisodeBundle,
+        run_id: str = "",
+        robot_id: str = "",
+    ) -> pl.DataFrame:
+        """1NF flat series table of characterization timeseries."""
+        df = episode.data
+        if df is None or len(df) == 0:
+            return pl.DataFrame()
+
+        out = self._attach_phases(episode)
+        out = self._enrich(out)
+
+        t_s = (out["time_ns"].cast(pl.Float64) - out["time_ns"].cast(pl.Float64).min()) / 1e9
+        ds = out["_ds"].fill_null(0.0)
+        dt = out["_dt"].fill_null(0.0)
+        speed = out["vel_linear"].cast(pl.Float64).abs().fill_null(0.0) if "vel_linear" in out.columns else pl.select(pl.when(dt > 1e-6).then(ds / dt).otherwise(0.0)).to_series()
+        wz_achieved = out["vel_angular"].cast(pl.Float64).abs().fill_null(0.0) if "vel_angular" in out.columns else pl.lit(0.0)
+
+        out = out.with_columns(
+            pl.when(speed >= 0.05).then(out["_p_total"] / speed).otherwise(None).alias("_e_per_m"),
+            pl.when(wz_achieved >= 0.05).then(out["_p_total"] / wz_achieved).otherwise(None).alias("_e_per_rad"),
+            out["turn_radius_m"].fill_null(0.0).alias("_turn_radius"),
+        )
+
+        vx_s = out["vel_linear"].cast(pl.Float64).fill_null(0.0) if "vel_linear" in out.columns else speed
+        accel_achieved = pl.when(dt > 1e-4).then(vx_s.diff() / dt).otherwise(0.0).fill_null(0.0)
+        eff_achieved = pl.when(out["_p_total"] > 0.1).then((out["_p_mech"] / out["_p_total"]).clip(0.0, 1.0)).otherwise(0.0)
+
+        n_rows = len(out)
+        return pl.DataFrame(
+            {
+                "run_id": [run_id] * n_rows,
+                "episode_id": [episode.episode_id] * n_rows,
+                "robot_id": [robot_id or (episode.robot_name or "robot")] * n_rows,
+                "t_ns": out["time_ns"],
+                "time_s": t_s,
+                "power_total_w": out["_p_total"],
+                "power_mech_w": out["_p_mech"],
+                "dba": out["_dba"],
+                "vx_achieved": out["vel_linear"].cast(pl.Float64).fill_null(0.0) if "vel_linear" in out.columns else [0.0] * n_rows,
+                "vy_achieved": out["vel_lateral"].cast(pl.Float64).fill_null(0.0) if "vel_lateral" in out.columns else [0.0] * n_rows,
+                "wz_achieved": out["vel_angular"].cast(pl.Float64).fill_null(0.0) if "vel_angular" in out.columns else [0.0] * n_rows,
+                "speed_achieved": speed,
+                "accel_achieved": accel_achieved,
+                "accel_target": out["accel_target"].fill_null(0.0),
+                "efficiency": eff_achieved,
+                "phase_kind": out["phase_kind"].fill_null("unknown"),
+                "vx_target": out["vx_target"].fill_null(0.0),
+                "vy_target": out["vy_target"].fill_null(0.0),
+                "wz_target": out["wz_target"].fill_null(0.0),
+                "speed_target": out["vx_target"].cast(pl.Float64).abs().fill_null(0.0),
+                "turn_radius_m": out["_turn_radius"],
+                "energy_intensity_j_m": out["_e_per_m"],
+                "energy_per_rad_j_rad": out["_e_per_rad"],
+                "leq_power_w": _leq_power(out["_dba"].fill_null(0.0)),
+            }
+        )
