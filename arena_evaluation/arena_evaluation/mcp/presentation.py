@@ -46,7 +46,10 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
     try:
         from ament_index_python.packages import get_package_share_directory
 
-        share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "plot_declarations"
+        share_dir = (
+            pathlib.Path(get_package_share_directory("arena_evaluation"))
+            / "plot_declarations"
+        )
         candidates.append(share_dir)
     except Exception:
         pass
@@ -54,7 +57,9 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
     for directory in candidates:
         if not directory.is_dir():
             continue
-        for file_path in sorted(directory.glob("*.yaml")) + sorted(directory.glob("*.yml")):
+        for file_path in sorted(directory.glob("*.yaml")) + sorted(
+            directory.glob("*.yml")
+        ):
             name = file_path.stem
             if name in results:
                 continue
@@ -63,8 +68,16 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
                 if not isinstance(raw, dict) or "type" not in raw:
                     continue
                 spec = PlotSpec.model_validate(raw)
-                source_val = spec.data.source if (spec.data and spec.data.source) else spec.data_source
-                stored_query_val = spec.data.stored_query if (spec.data and spec.data.stored_query) else None
+                source_val = (
+                    spec.data.source
+                    if (spec.data and spec.data.source)
+                    else spec.data_source
+                )
+                stored_query_val = (
+                    spec.data.stored_query
+                    if (spec.data and spec.data.stored_query)
+                    else None
+                )
                 results[name] = {
                     "id": spec.id or name,
                     "title": spec.title,
@@ -82,13 +95,18 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
 
 @domain.tool(read_only=True)
 def evaluation_read_plot_declaration(
-    name: Annotated[str, pydantic.Field(description="Name or stem of registered plot declaration")],
+    name: Annotated[
+        str, pydantic.Field(description="Name or stem of registered plot declaration")
+    ],
 ) -> dict[str, Any]:
     """Read a registered plot declaration YAML document and its validated specification."""
     safe_name = component(name.removesuffix(".yaml").removesuffix(".yml"), "name")
     path = find_recipe_path(safe_name)
     if path is None:
-        raise ToolError(f"Plot declaration {name!r} not found", hint="evaluation_plot_declarations lists available declarations")
+        raise ToolError(
+            f"Plot declaration {name!r} not found",
+            hint="evaluation_plot_declarations lists available declarations",
+        )
 
     text = path.read_text(encoding="utf-8")
     parsed = parse_yaml(text, f"plot declaration '{safe_name}'")
@@ -98,7 +116,9 @@ def evaluation_read_plot_declaration(
     try:
         spec = PlotSpec.model_validate(parsed)
     except Exception as exc:
-        raise ToolError(f"Invalid PlotSpec schema in declaration '{safe_name}': {exc}") from exc
+        raise ToolError(
+            f"Invalid PlotSpec schema in declaration '{safe_name}': {exc}"
+        ) from exc
 
     return {
         "name": safe_name,
@@ -109,7 +129,9 @@ def evaluation_read_plot_declaration(
 
 @domain.tool(read_only=False)
 def evaluation_save_plot_declaration(
-    name: Annotated[str, pydantic.Field(description="Unique identifier for the plot declaration")],
+    name: Annotated[
+        str, pydantic.Field(description="Unique identifier for the plot declaration")
+    ],
     yaml_text: YamlText,
 ) -> dict[str, Any]:
     """Validate against PlotSpec and save a plot declaration recipe to the plot declarations catalog."""
@@ -147,22 +169,47 @@ def evaluation_save_plot_declaration(
 @domain.tool(read_only=False)
 def evaluation_render_plot(
     run_id: OptionalRunId = None,
-    declaration: Annotated[str | None, pydantic.Field(description="Name of registered plot recipe/declaration to render")] = None,
-    spec_yaml: Annotated[str | None, pydantic.Field(description="Inline YAML string defining a PlotSpec to render")] = None,
-    overrides: Annotated[dict[str, Any] | None, pydantic.Field(description="Optional dictionary to deep-merge over declaration")] = None,
-    output_format: Annotated[Literal["png", "svg", "pdf", "html"], pydantic.Field(description="Desired output format")] = "png",
+    *,
+    declaration: Annotated[
+        str | None,
+        pydantic.Field(
+            description="Name of registered plot recipe/declaration to render"
+        ),
+    ] = None,
+    spec_yaml: Annotated[
+        str | None,
+        pydantic.Field(description="Inline YAML string defining a PlotSpec to render"),
+    ] = None,
+    overrides: Annotated[
+        dict[str, Any] | None,
+        pydantic.Field(
+            description="Optional dictionary to deep-merge over declaration"
+        ),
+    ] = None,
+    output_format: Annotated[
+        Literal["png", "svg", "pdf", "html"],
+        pydantic.Field(description="Desired output format"),
+    ] = "png",
 ) -> dict[str, Any]:
     """Render a plot recipe or inline spec directly into a standalone artifact file with quality diagnostics."""
     if declaration is None and spec_yaml is None:
-        raise ToolError("Must provide either 'declaration' or 'spec_yaml'", hint="evaluation_plot_declarations lists available recipes")
+        raise ToolError(
+            "Must provide either 'declaration' or 'spec_yaml'",
+            hint="evaluation_plot_declarations lists available recipes",
+        )
     if declaration is not None and spec_yaml is not None:
         raise ToolError("Cannot provide both 'declaration' and 'spec_yaml'")
 
     if declaration is not None:
-        safe_decl = component(declaration.removesuffix(".yaml").removesuffix(".yml"), "declaration")
+        safe_decl = component(
+            declaration.removesuffix(".yaml").removesuffix(".yml"), "declaration"
+        )
         recipe_path = find_recipe_path(safe_decl)
         if recipe_path is None:
-            raise ToolError(f"Plot declaration {declaration!r} not found", hint="evaluation_plot_declarations lists available recipes")
+            raise ToolError(
+                f"Plot declaration {declaration!r} not found",
+                hint="evaluation_plot_declarations lists available recipes",
+            )
         raw_recipe = yaml.safe_load(recipe_path.read_text(encoding="utf-8"))
         if not isinstance(raw_recipe, dict):
             raise ToolError(f"Recipe '{safe_decl}' is not a valid YAML mapping")
@@ -170,7 +217,9 @@ def evaluation_render_plot(
         try:
             spec = PlotSpec.model_validate(merged)
         except Exception as exc:
-            raise ToolError(f"Invalid PlotSpec schema in recipe '{safe_decl}': {exc}") from exc
+            raise ToolError(
+                f"Invalid PlotSpec schema in recipe '{safe_decl}': {exc}"
+            ) from exc
     else:
         parsed = parse_yaml(spec_yaml or "", "spec_yaml")
         if not isinstance(parsed, dict):

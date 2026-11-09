@@ -12,7 +12,14 @@ EnvId = Annotated[int | None, pydantic.Field(description="env id, the only env w
 NO_RECORDER = "the env records only with record.dir set and record.auto true, a benchmark always records"
 
 
-async def _record(env_id: int | None, stop: bool, episode_id: int, outcome_state: int = 0, outcome_info: str = "") -> dict[str, Any]:
+async def _record(
+    env_id: int | None,
+    episode_id: int,
+    *,
+    stop: bool,
+    outcome_state: int = 0,
+    outcome_info: str = "",
+) -> dict[str, Any]:
     from arena_evaluation_msgs.srv import RecordEpisode
 
     node = await tg(env_id)
@@ -27,13 +34,14 @@ async def _record(env_id: int | None, stop: bool, episode_id: int, outcome_state
 @domain.tool(destructive=True)
 async def evaluation_record_start(episode_id: Annotated[int, pydantic.Field(ge=0)], env_id: EnvId = None) -> dict[str, Any]:
     """Open a new episode recording on an env's recorder, closing the open one."""
-    return await _record(env_id, False, episode_id)
+    return await _record(env_id, episode_id, stop=False)
 
 
 @domain.tool(destructive=True)
 async def evaluation_record_stop(
     episode_id: Annotated[int, pydantic.Field(ge=0)],
     outcome: Annotated[Literal["success", "failed", "skipped", "fatal"], pydantic.Field(description="terminal outcome stored in the episode metadata")],
+    *,
     info: str = "",
     env_id: EnvId = None,
 ) -> dict[str, Any]:
@@ -41,7 +49,7 @@ async def evaluation_record_stop(
     from arena_runtime_msgs.msg import EpisodeRecord
 
     states = {name: value for value, name in msgs.constants(EpisodeRecord).items()}
-    return await _record(env_id, True, episode_id, outcome_state=states[outcome], outcome_info=info)
+    return await _record(env_id, episode_id, stop=True, outcome_state=states[outcome], outcome_info=info)
 
 
 @domain.tool(read_only=True)

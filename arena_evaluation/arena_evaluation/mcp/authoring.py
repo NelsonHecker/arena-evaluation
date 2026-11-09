@@ -218,7 +218,7 @@ def check_manifest(data: object) -> dict[str, Any]:
     return {"valid": True, "n_plots": len(manifest.plots), "n_groups": len(manifest.groups), "problems": []}
 
 
-def write_config(kind: str, name: str, text: str, overwrite: bool) -> pathlib.Path:
+def write_config(kind: str, name: str, text: str, *, overwrite: bool = False) -> pathlib.Path:
     """Write a suite, contest or manifest to the write target its resolver chain names, as a flat <name>.yaml."""
     stem = config_stem(name)
     if stem in config_names(kind) and not overwrite:
@@ -254,7 +254,7 @@ def evaluation_create_suite(name: str, yaml_content: YamlText, overwrite: Overwr
     verdict = check_suite(parse_yaml(yaml_content, "suite"))
     if not verdict["valid"]:
         raise ToolError("suite does not validate: " + "; ".join(verdict["problems"]), hint="evaluation_config_schema kind=suite shows the schema")
-    return {"path": str(write_config("suite", name, yaml_content, overwrite)), **verdict}
+    return {"path": str(write_config("suite", name, yaml_content, overwrite=overwrite)), **verdict}
 
 
 @domain.tool()
@@ -263,12 +263,13 @@ def evaluation_create_contest(name: str, yaml_content: YamlText, overwrite: Over
     verdict = check_contest(parse_yaml(yaml_content, "contest"))
     if not verdict["valid"]:
         raise ToolError("contest does not validate: " + "; ".join(verdict["problems"]), hint="planners_list lists the planners")
-    return {"path": str(write_config("contest", name, yaml_content, overwrite)), **verdict}
+    return {"path": str(write_config("contest", name, yaml_content, overwrite=overwrite)), **verdict}
 
 
 @domain.tool()
 def evaluation_create_manifest(
     name: str,
+    *,
     yaml_content: Annotated[str | None, pydantic.Field(description="complete manifest YAML, or omit and give a template")] = None,
     template: Annotated[str | None, pydantic.Field(description="a resolvable manifest to start from (evaluation_manifests)")] = None,
     run_id: Annotated[str | None, pydantic.Field(description="write into this run's directory instead of the shared manifest root")] = None,
@@ -292,7 +293,7 @@ def evaluation_create_manifest(
     if not verdict["valid"]:
         raise ToolError("manifest does not validate: " + "; ".join(verdict["problems"]))
     if run_id is None:
-        return {"path": str(write_config("manifest", name, yaml_content, overwrite)), **verdict}
+        return {"path": str(write_config("manifest", name, yaml_content, overwrite=overwrite)), **verdict}
     path = run_path(run_id) / f"{config_stem(name)}.yaml"
     if path.exists() and not overwrite:
         raise ToolError(f"{path} exists", hint="pick another name or pass overwrite=true")
