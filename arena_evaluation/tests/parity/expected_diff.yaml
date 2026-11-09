@@ -1,0 +1,59 @@
+# Reviewed allowlist of legitimate legacy-to-star differences.
+#
+# An entry is only consulted when the observed values differ; a listed metric that
+# still matches stays EXACT. Every entry needs a reason. The kinds:
+#
+#   unit_scale    star = legacy * factor. Verified before it is accepted; the default
+#                 bound is 1e-9 relative (override with max_rel).
+#   derived       a reviewed relationship that is not a single factor, verified inside
+#                 a reviewed relative bound (`max_rel` is mandatory).
+#   ground_truth  the value may change freely because the port moved from wheel
+#                 odometry to /tf ground truth; accepted without a numeric bound.
+#   null_fill     the legacy fill_null(0.0) masking was replaced by null plus a
+#                 null_reason; accepted only for star-null rows.
+#   dtype         the star column stores a different dtype; the comparison casts.
+#
+# `allows_null: true` additionally accepts a star null where the legacy value is
+# present (for metrics whose scoped producer can legitimately be unable to compute).
+version: 1
+entries:
+  - metric_key: energy_per_meter
+    star_table: fact_episodes
+    star_column: energy_per_meter_j_m
+    kind: unit_scale
+    factor: 3600.0
+    max_rel: 1.0e-9
+    reason: "wh_per_metre -> joules_per_metre: _episode_fact_row multiplies by METRES_PER_WH_J = 3600"
+  - metric_key: energy_mechanical_wh
+    star_table: fact_robots
+    star_column: mechanical_work_j
+    kind: unit_scale
+    factor: 3600.0
+    max_rel: 1.0e-9
+    reason: "mechanical energy is stored in SI joules in fact_robots, Wh in the legacy frame"
+  - metric_key: energy_thermal_wh
+    star_table: fact_robots
+    star_column: thermal_energy_j
+    kind: unit_scale
+    factor: 3600.0
+    max_rel: 1.0e-9
+    reason: "thermal energy is stored in SI joules in fact_robots, Wh in the legacy frame"
+  - metric_key: timeseries_power_total_w
+    star_table: fact_robots
+    star_column: mean_power_w
+    kind: derived
+    max_rel: 0.10
+    reason: "fact_robots.mean_power_w is the ROBOT-scope time-weighted mean over the resolved pose window; the legacy value is the raw sample mean of the recorded total-power series. The two differ where the power stream runs beyond the resolved trajectory slice, so they cannot be bit-identical."
+notes:
+  - topic: crowd_condition
+    change: nullability
+    reason: "dim_episodes.crowd_condition is null when the episode recorded neither humansim.robots_visible nor a run-level condition; it is not a metric mismatch."
+  - topic: fill_null
+    change: "0.0 -> null"
+    reason: "the scoped producers replaced the legacy fill_null(0.0) masking with null plus a null_reason; the harness reports that as NULL_REASON when the null_reason is non-empty."
+  - topic: odometry_to_tf
+    change: "value source"
+    reason: "the port computes trajectory metrics from /tf ground truth (pose_source = tf_gt), the legacy frame from pre-anchor wheel odometry; only metrics actually affected are listed here as ground_truth entries."
+  - topic: dtype
+    change: "column dtype"
+    reason: "count-like legacy columns are Int64 and their star counterparts Int64; a dtype-only change is accepted only with an explicit dtype entry."
