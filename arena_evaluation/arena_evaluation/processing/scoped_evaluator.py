@@ -212,24 +212,27 @@ def _declared_value(value: object, declaration: MetricDeclaration) -> object:
     """One calculator value coerced to its declared fact dtype; None stays null for provenance."""
     if value is None:
         return None
-    dtype = declaration.dtype
-    if dtype == pl.Float64:
-        return float(typing.cast(float, value))
-    if dtype == pl.Int64:
-        return int(typing.cast(int, value))
-    if dtype == pl.Boolean:
-        if not isinstance(value, (bool, int, float, np.bool_, np.integer, np.floating)):
-            raise TypeError(
-                f"{declaration.name}: expected a boolean, got {type(value).__name__}"
-            )
-        return bool(value)
-    if dtype == pl.String:
-        if not isinstance(value, str):
-            raise TypeError(
-                f"{declaration.name}: expected a string, got {type(value).__name__}"
-            )
-        return value
-    raise TypeError(f"{declaration.name}: unsupported fact dtype {dtype}")
+    match declaration.dtype:
+        case pl.Float64:
+            return float(typing.cast(float, value))
+        case pl.Int64:
+            return int(typing.cast(int, value))
+        case pl.Boolean:
+            if not isinstance(
+                value, (bool, int, float, np.bool_, np.integer, np.floating)
+            ):
+                raise TypeError(
+                    f"{declaration.name}: expected a boolean, got {type(value).__name__}"
+                )
+            return bool(value)
+        case pl.String:
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"{declaration.name}: expected a string, got {type(value).__name__}"
+                )
+            return value
+        case unsupported:
+            raise TypeError(f"{declaration.name}: unsupported fact dtype {unsupported}")
 
 
 def _declared_fact_values(
