@@ -81,4 +81,4 @@ def test_main_measures_every_benchmark_dir_about_the_center(tmp_path: pathlib.Pa
 def test_episode_summary_is_read_from_the_catalog(tmp_path: pathlib.Path) -> None:
     run = tmp_path / "run"
     write_benchmark(run, _summary().to_dicts(), robot_tracks=_tracks().to_dicts())
-    assert read_summary(run)["episode_id"].to_list() == [0, 1, 2]
+    assert sorted(read_summary(run)["episode_id"].to_list()) == [0, 1, 2]

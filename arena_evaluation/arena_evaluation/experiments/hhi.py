@@ -242,7 +242,7 @@ def paper_outcomes(df: pl.DataFrame) -> pl.DataFrame:
     """Success is the goal before the timeout with zero collisions, and time to goal is kept only over successes."""
     collisions = (pl.col("total_collisions_ped").fill_null(0) + pl.col("total_collisions_static").fill_null(0)) > 0
     success = (pl.col("success").cast(pl.Float64).fill_null(0.0) > 0.5) & ~collisions
-    return df.with_columns(success.alias("success"), pl.when(success).then(pl.col("time_to_goal")).otherwise(None).alias("time_to_goal"))
+    return df.with_columns(success.alias("success"), pl.when(success).then(pl.col("time_to_goal_s")).otherwise(None).alias("time_to_goal"))
 
 
 def family_table(df: pl.DataFrame, *, n_boot: int = DEFAULT_BOOT, seed: int = 0) -> pl.DataFrame:

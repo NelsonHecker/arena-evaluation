@@ -335,13 +335,13 @@ class ReportBuilder:
         report_title = manifest.title or self.output_dir.name
 
         html_content = self._assemble_html(summary_html, html_plots, report_title, manifest)
-        with open(self.report_path, "w") as f:
+        with open(self.report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
         import plotly.offline
 
         js_path = self.output_dir / "plotly.min.js"
-        with open(js_path, "w") as f:
+        with open(js_path, "w", encoding="utf-8") as f:
             f.write(plotly.offline.get_plotlyjs())
 
         self._write_note_file(manifest)
@@ -444,7 +444,7 @@ class ReportBuilder:
                 "n_plots": len(manifest.plots),
                 "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
-            (self.output_dir / "report_manifest.yaml").write_text(yaml.safe_dump(note, sort_keys=False))
+            (self.output_dir / "report_manifest.yaml").write_text(yaml.safe_dump(note, sort_keys=False), encoding="utf-8")
         except Exception as e:
             print(f"Warning: failed to write report_manifest.yaml note: {e}")
 

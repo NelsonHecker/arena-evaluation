@@ -17,17 +17,22 @@ def _frame(rows: list[dict[str, object]], schema: pl.Schema) -> pl.DataFrame:
     return pl.DataFrame([{name: row.get(name) for name in schema.names()} for row in rows], schema=schema)
 
 
+_KEYS: dict[str, object] = {"run_id": "run", "episode_id": 0, "robot_id": "robot_0", "env_id": "env_0"}
+
+
 def write_benchmark(directory: pathlib.Path, rows: list[dict[str, object]], *, robot_tracks: list[dict[str, object]] | None = None) -> pathlib.Path:
     """Write ``dim_episodes`` and ``metrics/fact_episodes`` for ``rows`` (dimension keys and fact measures in one mapping).
 
-    ``robot_tracks`` rows carry ``episode_id`` plus pose samples; the catalog stamps the episode
-    id itself, so it is stripped from each per-episode telemetry file.
+    The Star Schema joins on ``(run_id, episode_id, robot_id)``, so the default keys are filled in
+    for a row that does not name them. ``robot_tracks`` rows carry ``episode_id`` plus pose samples;
+    the catalog stamps the episode id itself, so it is stripped from each telemetry file.
     """
+    resolved = [{**_KEYS, **row} for row in rows]
     directory.mkdir(parents=True, exist_ok=True)
-    _frame(rows, DIM_EPISODES_SCHEMA).write_parquet(directory / "dim_episodes.parquet")
+    _frame(resolved, DIM_EPISODES_SCHEMA).write_parquet(directory / "dim_episodes.parquet")
     metrics = directory / "metrics"
     metrics.mkdir(exist_ok=True)
-    _frame(rows, EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
+    _frame(resolved, EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
 
     if robot_tracks is not None:
         for episode_id in sorted({int(row["episode_id"]) for row in rows}):

@@ -51,7 +51,7 @@ def test_stage_carries_the_arm_as_the_gesture_mode() -> None:
     assert (stage["map"], stage["robot"], stage["episodes"], stage["timeout"]) == (social.WORLD, social.ROBOT, 3, "90s")
 
 
-def _rows(*, cases: tuple[str, ...] = ("contact_hug_ward", "group_ward"), planners: tuple[str, ...] = ("dwb",), episodes: int = 2, through: bool = False) -> list[dict[str, object]]:
+def _rows(*, arm: str, cases: tuple[str, ...] = ("contact_hug_ward", "group_ward"), planners: tuple[str, ...] = ("dwb",), episodes: int = 2, through: bool = False) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     episode = 0
     for planner in planners:
@@ -59,7 +59,7 @@ def _rows(*, cases: tuple[str, ...] = ("contact_hug_ward", "group_ward"), planne
             for seed in range(episodes):
                 rows.append(
                     {
-                        "stage": f"{case}_on",
+                        "stage": f"{case}_{arm}",
                         "planner": planner,
                         "episode_id": episode,
                         "result": "GOAL_REACHED",
@@ -77,7 +77,7 @@ def _rows(*, cases: tuple[str, ...] = ("contact_hug_ward", "group_ward"), planne
 def _tracks(rows: list[dict[str, object]], *, through: bool) -> list[dict[str, object]]:
     samples: list[dict[str, object]] = []
     for row in rows:
-        cx, cy = social.CENTERS[row["stage"].removesuffix("_on")]
+        cx, cy = social.CENTERS[str(row["stage"]).rsplit("_", 1)[0]]
         offset = 0.0 if through else 2.0
         samples.extend(
             {
@@ -91,7 +91,7 @@ def _tracks(rows: list[dict[str, object]], *, through: bool) -> list[dict[str, o
 
 
 def _run(tmp_path: pathlib.Path, arm: str, **kwargs: object) -> pathlib.Path:
-    rows = _rows(**kwargs)
+    rows = _rows(arm=arm, **kwargs)
     directory = tmp_path / arm
     return write_benchmark(directory, rows, robot_tracks=_tracks(rows, through=bool(kwargs.get("through", False))))
 

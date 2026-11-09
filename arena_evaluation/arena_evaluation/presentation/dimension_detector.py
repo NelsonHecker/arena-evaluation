@@ -7,8 +7,8 @@ import polars as pl
 if TYPE_CHECKING:
     from arena_evaluation.storage.schemas import PlotSpec
 
-# Ordered priority list of identity columns
-IDENTITY_COLS: list[str] = ["local_planner", "inter_planner", "robot", "stage", "map", "benchmark_id"]
+# Ordered priority list of the canonical Star Schema identity columns
+IDENTITY_COLS: list[str] = ["local_planner", "planner", "inter_planner", "robot_model", "stage", "world", "scenario", "crowd_condition", "dispatcher", "benchmark_id"]
 
 COMPOUND_LABEL_COL = "__label__"
 

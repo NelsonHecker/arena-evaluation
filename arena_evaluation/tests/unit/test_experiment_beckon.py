@@ -9,7 +9,7 @@ import yaml
 pl = pytest.importorskip("polars")
 
 from arena_evaluation.experiments import beckon
-from star_benchmark import read_summary, write_benchmark
+from star_benchmark import write_benchmark
 
 
 def test_robot_loops_the_route_until_the_call_is_seen_or_the_route_passes_the_caller() -> None:

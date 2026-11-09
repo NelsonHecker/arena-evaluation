@@ -186,9 +186,9 @@ def load(run: pathlib.Path, arm: str) -> pl.DataFrame:
         pl.col("stage").str.replace(r"_(on|off)$", "").alias("case"),
         pl.lit(arm).alias("arm"),
     )
-    center_x = pl.col("case").replace_strict({case: value[0] for case, value in CENTERS.items()}, default=0.0, return_dtype=pl.Float64)
-    center_y = pl.col("case").replace_strict({case: value[1] for case, value in CENTERS.items()}, default=0.0, return_dtype=pl.Float64)
-    radius = pl.when(pl.col("case").str.starts_with("group")).then(GROUP_RADIUS_M).otherwise(0.8)
+    center_x = pl.col("case").replace_strict({case: value[0] for case, value in CENTERS.items()}, default=0.0, return_dtype=pl.Float64).alias("center_x")
+    center_y = pl.col("case").replace_strict({case: value[1] for case, value in CENTERS.items()}, default=0.0, return_dtype=pl.Float64).alias("center_y")
+    radius = pl.when(pl.col("case").str.starts_with("group")).then(GROUP_RADIUS_M).otherwise(0.8).alias("radius")
     points = cases.select("episode_id", "case").join(tracks.select("episode_id", "x", "y"), on="episode_id", how="inner").with_columns(center_x, center_y, radius)
     distance = ((pl.col("x") - pl.col("center_x")) ** 2 + (pl.col("y") - pl.col("center_y")) ** 2).sqrt()
     per_episode = points.group_by("episode_id").agg(

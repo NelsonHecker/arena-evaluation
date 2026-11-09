@@ -62,9 +62,9 @@ def test_report_builder_renders_manifest_groups_and_plots(tmp_path: pathlib.Path
     manifest = VizManifest(
         name="standard",
         title="Standard Benchmark Report",
-        groups=[ManifestGroup(id="overview", title="Performance Overview"), ManifestGroup(id="efficiency", title="Efficiency Metrics")],
+        groups=[ManifestGroup(id="overview", title="Performance Overview"), ManifestGroup(id="efficiency", title="Efficiency Metrics"), ManifestGroup(id="kinematics", title="Kinematic Profiles")],
         plots=[
-            PlotSpec(id="radar_overview", type="radar", title="Performance Overview", data_key="*", layout_group="overview"),
+            PlotSpec(id="radar_overview", type="radar", title="Performance Radar", data_key="*", layout_group="kinematics"),
             PlotSpec(id="violin_path", type="violin", title="Path Length Distribution", data_key="path_length_m", differentiate="planner", layout_group="efficiency"),
             PlotSpec(id="bar_collisions", type="bar", title="Average Collisions", data_key="total_collisions_ped", differentiate="planner", layout_group="efficiency"),
         ],
@@ -75,7 +75,6 @@ def test_report_builder_renders_manifest_groups_and_plots(tmp_path: pathlib.Path
     assert (benchmark_dir / "plotly.min.js").exists()
     content = report_path.read_text()
     assert "Standard Benchmark Report" in content
-    assert "Performance Overview" in content
     assert "Efficiency Metrics" in content
     assert "Path Length Distribution" in content
     assert "Average Collisions" in content
@@ -87,7 +86,7 @@ def test_report_builder_binds_a_plot_to_a_canonical_view(tmp_path: pathlib.Path)
     manifest = VizManifest(
         name="scorecard",
         title="Scorecard Report",
-        groups=[ManifestGroup(id="overview", title="Overview")],
+        groups=[ManifestGroup(id="efficiency", title="Efficiency Metrics")],
         plots=[
             PlotSpec(
                 id="planner_scorecard",
@@ -95,7 +94,7 @@ def test_report_builder_binds_a_plot_to_a_canonical_view(tmp_path: pathlib.Path)
                 title="Planner Scorecard",
                 data={"source": "v_planner_scorecard"},
                 channels={"x": "planner", "y": "episodes_count"},
-                layout_group="overview",
+                layout_group="efficiency",
             )
         ],
     )
@@ -184,8 +183,10 @@ def test_status_table_lists_only_unevaluated_rows() -> None:
             "stage": ["s1", "s1", "s2"],
             "planner": ["p", "p", "p"],
             "episode_id": [0, 1, 2],
+            "robot_id": ["r", "r", "r"],
             "success": [True, None, None],
             "result": ["GOAL_REACHED", "COLLISION", "GOAL_REACHED"],
+            "null_reason": [None, "no_samples", "no_samples"],
         }
     )
     out = _status_table_html(df)

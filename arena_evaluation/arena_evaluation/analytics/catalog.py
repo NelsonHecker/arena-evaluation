@@ -332,8 +332,8 @@ class BenchmarkCatalog:
             pl.when(pl.col("planner").is_null() | (pl.col("planner") == ""))
             .then(pl.lit("unknown"))
             .when(planner_parts.list.len() >= 3)
-            .then(planner_parts.list.get(1))
-            .otherwise(planner_parts.list.get(0))
+            .then(planner_parts.list.get(1, null_on_oob=True))
+            .otherwise(planner_parts.list.get(0, null_on_oob=True))
             .alias("local_planner")
         )
         v_episode_summary = (

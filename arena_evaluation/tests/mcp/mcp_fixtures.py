@@ -101,10 +101,11 @@ def write_star_schema(benchmark_dir: pathlib.Path, rows: list[dict]) -> None:
     from arena_evaluation.storage.star_schema import DIM_EPISODES_SCHEMA
 
     benchmark_dir.mkdir(parents=True, exist_ok=True)
-    pl.DataFrame([{name: row.get(name) for name in DIM_EPISODES_SCHEMA.names()} for row in rows], schema=DIM_EPISODES_SCHEMA).write_parquet(benchmark_dir / "dim_episodes.parquet")
+    resolved = [{"run_id": "run", "robot_id": "robot_0", "env_id": "env_0", **row} for row in rows]
+    pl.DataFrame([{name: row.get(name) for name in DIM_EPISODES_SCHEMA.names()} for row in resolved], schema=DIM_EPISODES_SCHEMA).write_parquet(benchmark_dir / "dim_episodes.parquet")
     metrics = benchmark_dir / "metrics"
     metrics.mkdir(exist_ok=True)
-    pl.DataFrame([{name: row.get(name) for name in EPISODE_FACT_SCHEMA.names()} for row in rows], schema=EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
+    pl.DataFrame([{name: row.get(name) for name in EPISODE_FACT_SCHEMA.names()} for row in resolved], schema=EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
 
 
 def _iso(timestamp: float) -> str:
