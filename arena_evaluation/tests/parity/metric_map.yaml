@@ -199,6 +199,22 @@ mappings:
     legacy_columns: [energy_thermal_wh]
     note: "_robot_fact_frame converts thermal Wh to J"
 
+  # --- child fact tables: one row per list element -----------------------------------------
+  - metric_key: mechanism_states
+    star_table: fact_mechanism_states
+    star_column: mechanism_states
+    legacy_columns: [mechanism_states]
+    legacy_reduction: list_len
+    star_reduction: sum
+    note: "legacy list_len is the number of mechanisms; the fact table marks the first change-point row of each mechanism, so the flag sum reproduces it"
+  - metric_key: collision_obstacles
+    star_table: fact_collisions
+    star_column: collision_obstacles
+    legacy_columns: [collision_obstacles]
+    legacy_reduction: list_len
+    star_reduction: count
+    note: "legacy list_len is the number of distinct hit obstacles; fact_collisions holds one row per obstacle"
+
   # --- ported producers: 52 reviewed claims of the 127 declared columns -------------
   - metric_key: l_aeq_t
     star_table: fact_robots

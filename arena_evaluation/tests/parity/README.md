@@ -214,4 +214,38 @@ fact column yet. The one `UNMAPPED` key is `ped_path_deflection_m`, which does e
 in `fact_pedestrians`. `NO_PRODUCER` (215) is therefore the honest porting gap at the
 star-schema boundary, not a mapping missing from `metric_map.yaml`.
 
+### Child fact tables (identity-grain list outputs)
+
+The last eleven `NO_PRODUCER` keys are identity-grain list outputs. `storage/declarations.py`
+now names the target fact table per declaration and derives eleven fact schemas, and the
+scoped evaluator reshapes the calculator lists into six child fact tables written under
+`metrics/` like the scoped facts:
+
+| table | one row per | source keys |
+| --- | --- | --- |
+| `fact_edge_cases` | case step or case agent | `edge_case_steps`, `edge_case_agents`, `edge_case_missing`, `edge_case_unplayed` |
+| `fact_formations` | formation member or absent agent | `edge_case_formation_members`, `edge_case_formation_absent` |
+| `fact_phase_outcomes` | replayed phase | `phase_outcomes` |
+| `fact_judge_disagreements` | judge disagreement | `judge_disagreements` |
+| `fact_mechanism_states` | door/elevator state change point | `mechanism_states` |
+| `fact_collisions` | hit obstacle | `collision_obstacles`, `collisions` |
+
+`certify.py` reads the six tables when present, so a run processed before they landed
+still certifies against the five scoped tables. Two length reductions are claimed:
+`mechanism_states` (legacy `list_len` is the number of mechanisms, reproduced by the sum
+of the first change-point flag) and `collision_obstacles` (legacy `list_len`, reproduced
+by the row count). The other nine keys stay `UNMAPPED`: eight legacy lists are null in
+every evaluated episode of this benchmark (no edge-case provenance or replayable phases
+recorded), and `collisions` is hardcoded empty by the legacy producer, so it has no
+scalar value to certify.
+
+| run | input | EXACT | CERT_NULL_ONLY | RELOCATED_SERIES | UNMAPPED | NO_PRODUCER | MISMATCH |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `parity-g1-child-full` | 6 ped6 episodes reprocessed by `enhancement/eval-star-publish` | 79 (+1 `WITHIN_TOL`) | 4 | 48 | 134 | 4 | 0 |
+
+The four remaining `NO_PRODUCER` keys are the deferred acoustic ones
+(`ped_max_exposure_dba`, `ped_leq_exposure_dba`, `ped_max_startle_factor`,
+`worst_case_acoustic_frame`). The gate still fails only on the four pre-existing
+`CERT_NULL_ONLY` keys (`mar`, `pfi`, `min_obstacle_clearance`, `robot_path_deviation_m`).
+
 Per-run provenance is in `results/<run>/PROVENANCE.md`.

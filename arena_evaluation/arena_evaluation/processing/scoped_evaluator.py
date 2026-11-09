@@ -55,19 +55,32 @@ from arena_evaluation.processing.windows import (
     pedestrian_pairs_lf,
 )
 from arena_evaluation.storage.declarations import (
+    COLLISION_FACT_SCHEMA,
     CONTACT_FACT_SCHEMA,
+    EDGE_CASE_FACT_SCHEMA,
     ENCOUNTER_FACT_SCHEMA,
     EPISODE_FACT_SCHEMA,
     FACT_SCHEMAS,
     FACT_TABLE_NAMES,
+    FORMATION_FACT_SCHEMA,
+    JUDGE_DISAGREEMENT_FACT_SCHEMA,
+    MECHANISM_STATE_FACT_SCHEMA,
     PEDESTRIAN_FACT_SCHEMA,
+    PHASE_OUTCOME_FACT_SCHEMA,
     ROBOT_FACT_SCHEMA,
+    FactTable,
     MetricDeclaration,
     ScopedFactTables,
+    _COLLISION_NULLABLE,
     _CONTACT_NULLABLE,
+    _EDGE_CASE_NULLABLE,
     _ENCOUNTER_NULLABLE,
     _EPISODE_NULLABLE,
+    _FORMATION_NULLABLE,
+    _JUDGE_DISAGREEMENT_NULLABLE,
+    _MECHANISM_STATE_NULLABLE,
     _PEDESTRIAN_NULLABLE,
+    _PHASE_OUTCOME_NULLABLE,
     _ROBOT_NULLABLE,
     declarations_for,
     write_fact_tables,
@@ -83,9 +96,15 @@ ZERO_DENOMINATOR: Final[str] = "zero_denominator"
 TOPIC_MISSING: Final[str] = "topic_missing"
 
 __all__ = [
+    "COLLISION_FACT_SCHEMA",
     "CONTACT_FACT_SCHEMA",
+    "EDGE_CASE_FACT_SCHEMA",
     "ENCOUNTER_FACT_SCHEMA",
     "EPISODE_FACT_SCHEMA",
+    "FORMATION_FACT_SCHEMA",
+    "JUDGE_DISAGREEMENT_FACT_SCHEMA",
+    "MECHANISM_STATE_FACT_SCHEMA",
+    "PHASE_OUTCOME_FACT_SCHEMA",
     "FACT_SCHEMAS",
     "FACT_TABLE_NAMES",
     "PEDESTRIAN_FACT_SCHEMA",
@@ -192,6 +211,19 @@ def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...]) -> st
     )
 
 
+def _null_reason_expression(nullable: tuple[str, ...]) -> pl.Expr:
+    """``field:code`` provenance expression for every nullable column of a child table row."""
+    if not nullable:
+        return pl.lit("", dtype=pl.String)
+    parts = [
+        pl.when(pl.col(name).is_null())
+        .then(pl.lit(f"{name}:{NO_SAMPLES}", dtype=pl.String))
+        .otherwise(pl.lit(None, dtype=pl.String))
+        for name in nullable
+    ]
+    return pl.concat_str(parts, separator=";", ignore_nulls=True).fill_null("")
+
+
 def _merge_provenance_reasons(
     base_reason: str, provenance: Mapping[str, str], row: Mapping[str, object]
 ) -> str:
@@ -236,13 +268,62 @@ def _declared_value(value: object, declaration: MetricDeclaration) -> object:
 
 
 def _declared_fact_values(
-    results: Mapping[str, object], scope: MetricScope
+    results: Mapping[str, object], table: FactTable
 ) -> dict[str, object]:
-    """Every declared fact column of ``scope``, copied from the calculator result of its name."""
+    """Every declared fact column of ``table``, copied from the calculator result of its name."""
     return {
         declaration.name: _declared_value(results.get(declaration.name), declaration)
-        for declaration in declarations_for(scope)
+        for declaration in declarations_for(table)
     }
+
+
+
+_EDGE_CASE_LIST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("step", "edge_case_steps"),
+    ("agent", "edge_case_agents"),
+    ("missing", "edge_case_missing"),
+    ("unplayed", "edge_case_unplayed"),
+)
+_FORMATION_LIST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("member", "edge_case_formation_members"),
+    ("absent", "edge_case_formation_absent"),
+)
+_EDGE_CASE_ELEMENT_COLUMNS: Final[tuple[str, ...]] = tuple(
+    key for _, key in _EDGE_CASE_LIST_FIELDS
+)
+_FORMATION_ELEMENT_COLUMNS: Final[tuple[str, ...]] = tuple(
+    key for _, key in _FORMATION_LIST_FIELDS
+)
+_MECHANISM_FIELDS: Final[tuple[str, ...]] = ("locked", "progress")
+
+
+def _sequence(value: object) -> list[object]:
+    """The list a child-table builder reshapes; a non-list output has no rows."""
+    if isinstance(value, list):
+        return typing.cast(list[object], value)
+    return []
+
+
+def _with_element_columns(
+    frame: pl.DataFrame, columns: tuple[str, ...]
+) -> pl.DataFrame:
+    """Add the element columns a sparse list made absent, as null strings."""
+    return frame.with_columns(
+        [
+            pl.col(column)
+            if column in frame.columns
+            else pl.lit(None, dtype=pl.String).alias(column)
+            for column in columns
+        ]
+    )
+
+
+def _event_time_ns(episode: AlignedEpisodeBundle) -> np.ndarray:
+    """Nanosecond clock the EPISODE-scope calculators sampled their per-sample lists on."""
+    frame = episode.data
+    if frame is None or "time_ns" not in frame.columns:
+        return np.array([], dtype=np.int64)
+    return frame.get_column("time_ns").to_numpy().astype(np.int64)
 
 
 def _frame(rows: list[dict[str, object]], schema: pl.Schema) -> pl.DataFrame:
@@ -673,6 +754,15 @@ class ScopedEvaluator:
         robots = self._robot_fact_frame(
             registry, hierarchy.robots[0], metrics, episode_provenance
         )
+        robot_id = self._robot_actor_id(
+            materialized, _table(materialized, ROBOT_TRACKS_TOPIC)
+        )
+        child_identity = {
+            "run_id": run_id,
+            "episode_id": int(episode_id),
+            "robot_id": robot_id,
+            "metrics": metrics,
+        }
 
         return ScopedFactTables(
             episodes=_frame([episode_row], EPISODE_FACT_SCHEMA),
@@ -680,6 +770,14 @@ class ScopedEvaluator:
             contacts=_frame(contact_rows, CONTACT_FACT_SCHEMA),
             pedestrians=pedestrians,
             robots=robots,
+            edge_cases=self._edge_case_fact_frame(**child_identity),
+            formations=self._formation_fact_frame(**child_identity),
+            phase_outcomes=self._phase_outcome_fact_frame(**child_identity),
+            judge_disagreements=self._judge_disagreement_fact_frame(**child_identity),
+            mechanism_states=self._mechanism_state_fact_frame(
+                materialized, **child_identity
+            ),
+            collisions=self._collision_fact_frame(materialized, **child_identity),
         )
 
     def _detect_encounters(
@@ -973,7 +1071,7 @@ class ScopedEvaluator:
             "robot_path_dev_m": _float(metrics.get("robot_path_deviation_m")),
             "total_acoustic_dose_pa2s": _float(metrics.get("total_acoustic_dose_pa2s")),
         }
-        row.update(_declared_fact_values(metrics, MetricScope.EPISODE))
+        row.update(_declared_fact_values(metrics, FactTable.EPISODES))
         row["null_reason"] = self._episode_null_reason(episode, row, provenance or {})
         return row
 
@@ -1036,7 +1134,7 @@ class ScopedEvaluator:
                     "fault_attributed_to", "unavoidable"
                 ),
             }
-            row.update(_declared_fact_values(contact_res, MetricScope.CONTACT))
+            row.update(_declared_fact_values(contact_res, FactTable.CONTACTS))
             base_reason = _row_null_reason(row, _CONTACT_NULLABLE)
             row["null_reason"] = _merge_provenance_reasons(
                 base_reason, outcome.provenance, row
@@ -1168,7 +1266,7 @@ class ScopedEvaluator:
                 if linked_contact is None
                 else linked_contact.get("contact_id"),
             }
-            row.update(_declared_fact_values(enc_res, MetricScope.ENCOUNTER))
+            row.update(_declared_fact_values(enc_res, FactTable.ENCOUNTERS))
             base_reason = self._encounter_null_reason(
                 row, has_reference=has_reference, has_power=has_power
             )
@@ -1290,7 +1388,7 @@ class ScopedEvaluator:
                 "ped_path_deflection_m": _float(ped_res.get("ped_path_deflection_m")),
                 "round_trips_completed": int(ped_res.get("round_trips_completed") or 0),
             }
-            row.update(_declared_fact_values(ped_res, MetricScope.PEDESTRIAN))
+            row.update(_declared_fact_values(ped_res, FactTable.PEDESTRIANS))
             base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE)
             row["null_reason"] = _merge_provenance_reasons(
                 base_reason, outcome.provenance, row
@@ -1372,13 +1470,278 @@ class ScopedEvaluator:
             ),
             "drivetrain_scrub_j": _float(robot_res.get("drivetrain_scrub_j")),
         }
-        row.update(_declared_fact_values(robot_res, MetricScope.ROBOT))
+        row.update(_declared_fact_values(robot_res, FactTable.ROBOTS))
         base_reason = _row_null_reason(row, _ROBOT_NULLABLE)
         merged = _merge_provenance_reasons(base_reason, outcome.provenance, row)
         row["null_reason"] = _merge_provenance_reasons(
             merged, episode_provenance, row
         )
         return _frame([row], ROBOT_FACT_SCHEMA)
+
+
+    def _edge_case_fact_frame(
+        self,
+        *,
+        run_id: str,
+        episode_id: int,
+        robot_id: str,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
+        """One row per case step and per scored, missing or unplayed case agent."""
+        parts: list[pl.DataFrame] = []
+        for kind, key in _EDGE_CASE_LIST_FIELDS:
+            elements = _sequence(metrics.get(key))
+            if not elements:
+                continue
+            part = pl.DataFrame(
+                {
+                    "kind": [kind] * len(elements),
+                    "ordinal": pl.int_range(0, len(elements), eager=True),
+                    key: pl.Series(key, elements, dtype=pl.String),
+                }
+            )
+            parts.append(part)
+        if not parts:
+            return pl.DataFrame(schema=EDGE_CASE_FACT_SCHEMA)
+        frame = _with_element_columns(
+            pl.concat(parts, how="diagonal_relaxed"), _EDGE_CASE_ELEMENT_COLUMNS
+        ).with_columns(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id, dtype=pl.String),
+            case_idx=pl.lit(0, dtype=pl.Int64),
+            null_reason=_null_reason_expression(_EDGE_CASE_NULLABLE),
+        )
+        return frame.select(list(EDGE_CASE_FACT_SCHEMA.names())).cast(EDGE_CASE_FACT_SCHEMA)
+
+    def _formation_fact_frame(
+        self,
+        *,
+        run_id: str,
+        episode_id: int,
+        robot_id: str,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
+        """One row per formation member and per formation agent that was never recorded."""
+        parts: list[pl.DataFrame] = []
+        for role, key in _FORMATION_LIST_FIELDS:
+            elements = _sequence(metrics.get(key))
+            if not elements:
+                continue
+            parts.append(
+                pl.DataFrame(
+                    {
+                        "role": [role] * len(elements),
+                        key: pl.Series(key, elements, dtype=pl.String),
+                    }
+                )
+            )
+        if not parts:
+            return pl.DataFrame(schema=FORMATION_FACT_SCHEMA)
+        frame = _with_element_columns(
+            pl.concat(parts, how="diagonal_relaxed"), _FORMATION_ELEMENT_COLUMNS
+        ).with_columns(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id, dtype=pl.String),
+            formation_idx=pl.lit(0, dtype=pl.Int64),
+            null_reason=_null_reason_expression(_FORMATION_NULLABLE),
+        )
+        return frame.select(list(FORMATION_FACT_SCHEMA.names())).cast(
+            FORMATION_FACT_SCHEMA
+        )
+
+    def _phase_outcome_fact_frame(
+        self,
+        *,
+        run_id: str,
+        episode_id: int,
+        robot_id: str,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
+        """One row per replayed phase with its outcome token and met flag."""
+        outcomes = _sequence(metrics.get("phase_outcomes"))
+        if not outcomes:
+            return pl.DataFrame(schema=PHASE_OUTCOME_FACT_SCHEMA)
+        frame = pl.DataFrame(
+            {
+                "phase_idx": pl.int_range(0, len(outcomes), eager=True),
+                "phase_outcomes": pl.Series("phase_outcomes", outcomes, dtype=pl.String),
+            }
+        ).with_columns(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id, dtype=pl.String),
+            met=pl.col("phase_outcomes") == pl.lit("met"),
+        ).with_columns(
+            null_reason=_null_reason_expression(_PHASE_OUTCOME_NULLABLE)
+        )
+        return frame.select(list(PHASE_OUTCOME_FACT_SCHEMA.names())).cast(
+            PHASE_OUTCOME_FACT_SCHEMA
+        )
+
+    def _judge_disagreement_fact_frame(
+        self,
+        *,
+        run_id: str,
+        episode_id: int,
+        robot_id: str,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
+        """One row per judge disagreement with its text."""
+        disagreements = _sequence(metrics.get("judge_disagreements"))
+        if not disagreements:
+            return pl.DataFrame(schema=JUDGE_DISAGREEMENT_FACT_SCHEMA)
+        frame = pl.DataFrame(
+            {
+                "disagreement_idx": pl.int_range(0, len(disagreements), eager=True),
+                "judge_disagreements": pl.Series(
+                    "judge_disagreements", disagreements, dtype=pl.String
+                ),
+            }
+        ).with_columns(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id, dtype=pl.String),
+        ).with_columns(
+            null_reason=_null_reason_expression(_JUDGE_DISAGREEMENT_NULLABLE)
+        )
+        return frame.select(list(JUDGE_DISAGREEMENT_FACT_SCHEMA.names())).cast(
+            JUDGE_DISAGREEMENT_FACT_SCHEMA
+        )
+
+    def _mechanism_state_fact_frame(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str,
+        episode_id: int,
+        robot_id: str,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
+        """Change-point rows of every door and elevator state series, one flag per mechanism."""
+        states = _sequence(metrics.get("mechanism_states"))
+        if not states:
+            return pl.DataFrame(schema=MECHANISM_STATE_FACT_SCHEMA)
+        times = _event_time_ns(episode)
+        frames: list[pl.DataFrame] = []
+        for state in states:
+            if not isinstance(state, Mapping):
+                continue
+            progress = _sequence(state.get("progress"))
+            locked = _sequence(state.get("locked"))
+            if not progress:
+                continue
+            count = len(progress)
+            time_column = (
+                pl.Series("t_ns", times[:count], dtype=pl.Int64)
+                if len(times) >= count
+                else pl.Series("t_ns", [None] * count, dtype=pl.Int64)
+            )
+            series = pl.DataFrame(
+                {
+                    "t_ns": time_column,
+                    "progress": pl.Series("progress", progress).cast(pl.Float64),
+                    "locked": pl.Series(
+                        "locked", locked[:count] if locked else [None] * count
+                    ).cast(pl.Boolean),
+                }
+            ).with_columns(pl.col("progress").fill_nan(None))
+            changed = series.filter(
+                (pl.int_range(0, pl.len()) == 0)
+                | pl.col("progress").ne_missing(pl.col("progress").shift(1))
+                | pl.col("locked").ne_missing(pl.col("locked").shift(1))
+            )
+            rows = pl.concat(
+                [
+                    changed.select(
+                        "t_ns",
+                        pl.lit(field).alias("field"),
+                        pl.col(field).cast(pl.Float64).alias("value"),
+                    )
+                    for field in _MECHANISM_FIELDS
+                ],
+                how="vertical",
+            ).sort("t_ns", "field", nulls_last=True)
+            frame = rows.with_columns(
+                entity=pl.lit(str(state.get("entity") or ""), dtype=pl.String),
+                level=pl.lit(str(state.get("level") or ""), dtype=pl.String),
+                kind=pl.lit(str(state.get("kind") or ""), dtype=pl.String),
+                mechanism_states=pl.int_range(0, pl.len()) == 0,
+            )
+            frames.append(frame)
+        if not frames:
+            return pl.DataFrame(schema=MECHANISM_STATE_FACT_SCHEMA)
+        frame = pl.concat(frames, how="vertical").with_columns(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id, dtype=pl.String),
+        ).with_columns(null_reason=_null_reason_expression(_MECHANISM_STATE_NULLABLE))
+        return frame.select(list(MECHANISM_STATE_FACT_SCHEMA.names())).cast(
+            MECHANISM_STATE_FACT_SCHEMA
+        )
+
+    def _collision_fact_frame(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str,
+        episode_id: int,
+        robot_id: str,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
+        """One row per obstacle the episode hit, with the first contact's kind, time and point."""
+        obstacles = _sequence(metrics.get("collision_obstacles"))
+        if not obstacles:
+            return pl.DataFrame(schema=COLLISION_FACT_SCHEMA)
+        identifiers = pl.DataFrame(
+            {
+                "collision_obstacles": pl.Series(
+                    "collision_obstacles", obstacles, dtype=pl.String
+                )
+            }
+        ).with_row_index("collision_idx")
+        contacts = _table(episode, COLLISION_CONTACTS_TOPIC)
+        if contacts is None or not {"obstacle_id", "t_ns"} <= set(contacts.columns):
+            firsts = identifiers.with_columns(
+                obstacle_kind=pl.lit(None, dtype=pl.String),
+                t_ns=pl.lit(None, dtype=pl.Int64),
+                x_m=pl.lit(None, dtype=pl.Float64),
+                y_m=pl.lit(None, dtype=pl.Float64),
+            )
+        else:
+            firsts = identifiers.join(
+                contacts.filter(
+                    pl.col("obstacle_id").is_not_null()
+                    & (pl.col("obstacle_id") != pl.lit(""))
+                )
+                .sort("t_ns")
+                .group_by("obstacle_id")
+                .agg(
+                    pl.col("kind").first().alias("obstacle_kind")
+                    if "kind" in contacts.columns
+                    else pl.lit(None, dtype=pl.String).alias("obstacle_kind"),
+                    pl.col("t_ns").first().cast(pl.Int64).alias("t_ns"),
+                    pl.col("obstacle_x").first().cast(pl.Float64).alias("x_m")
+                    if "obstacle_x" in contacts.columns
+                    else pl.lit(None, dtype=pl.Float64).alias("x_m"),
+                    pl.col("obstacle_y").first().cast(pl.Float64).alias("y_m")
+                    if "obstacle_y" in contacts.columns
+                    else pl.lit(None, dtype=pl.Float64).alias("y_m"),
+                ),
+                left_on="collision_obstacles",
+                right_on="obstacle_id",
+                how="left",
+            ).sort("collision_idx")
+        frame = firsts.with_columns(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id, dtype=pl.String),
+            collisions=pl.lit(1, dtype=pl.Int64),
+        ).with_columns(null_reason=_null_reason_expression(_COLLISION_NULLABLE))
+        return frame.select(list(COLLISION_FACT_SCHEMA.names())).cast(
+            COLLISION_FACT_SCHEMA
+        )
 
     @staticmethod
     def _encounter_id(episode_id: int, robot_token: str, encounter_idx: int) -> str:
