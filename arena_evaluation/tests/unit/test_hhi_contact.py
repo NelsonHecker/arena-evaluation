@@ -194,7 +194,10 @@ def _window_bundle(episode: AlignedEpisodeBundle, *, end_ns: int | None = None) 
             "vy": pl.Float64,
         },
     )
-    topics: dict[str, pl.DataFrame] = {"robot_tracks": tracks}
+    topics: dict[str, pl.DataFrame] = {}
+    if end_ns is not None:
+        tracks = tracks.filter(pl.col("t_ns") <= end_ns)
+    topics["robot_tracks"] = tracks
     for name, frame in (episode.topics or {}).items():
         topics[name] = frame.filter(pl.col("t_ns") <= end_ns) if end_ns is not None else frame
     return AlignedEpisodeBundle(
