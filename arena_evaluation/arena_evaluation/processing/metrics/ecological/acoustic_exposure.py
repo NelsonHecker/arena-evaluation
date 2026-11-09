@@ -18,7 +18,7 @@ from arena_evaluation.processing.acoustics.door_map import (
 from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
 from arena_evaluation.processing.map_registry import MapRegistry
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.characterization import _ACOUSTIC_DEFAULTS
 from arena_evaluation.processing.pedestrian_frames import pedestrians_by_time
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
@@ -58,7 +58,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["proxemics"]
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.PEDESTRIAN})
 
     UNITS = {
         "ped_max_exposure_dba": "dBA",
@@ -77,12 +76,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             "ped_max_startle_factor",
             "worst_case_acoustic_frame",
         ]
-
-    @classmethod
-    def output_keys_for_scope(cls, scope: MetricScope) -> tuple[str, ...]:
-        if scope == MetricScope.PEDESTRIAN:
-            return ("ped_max_exposure_dba", "ped_leq_exposure_dba", "ped_max_startle_factor")
-        return tuple(cls.output_keys())
 
     def _get_map_occupancy(self, map_name: str, run_dir: pathlib.Path | None = None) -> tuple[np.ndarray, float, tuple[float, float, float]] | None:
         """Load the map PNG as a binary occupancy grid, flipped so row 0 = bottom (y = origin_y)."""
@@ -117,7 +110,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         )
         return aligned["_rx"].to_numpy().astype(np.float64), aligned["_ry"].to_numpy().astype(np.float64)
 
-    def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
+    def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult | None:
         """Scalar summaries and per-frame pedestrian exposure series, None when the episode cannot be evaluated."""
         null_result = AcousticExposureResult(
             scalars={key: None for key in self.output_keys()},
@@ -353,37 +346,14 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         )
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        return dict(self._compute(episode, prior_results).scalars)
-
-    def calculate_for_scope(
-        self,
-        episode: AlignedEpisodeBundle,
-        prior_results: dict[str, typing.Any],
-        scope_slice: ScopeSlice | None = None,
-    ) -> dict[str, typing.Any]:
-        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
-            return self.calculate(episode, prior_results)
-        if scope_slice.scope == MetricScope.PEDESTRIAN:
-            return self._pedestrian_result(prior_results, scope_slice)
-        raise ValueError(f"acoustic_exposure does not serve the {scope_slice.scope.value} scope")
-
-    def _pedestrian_result(
-        self, prior_results: dict[str, typing.Any], scope_slice: ScopeSlice
-    ) -> dict[str, typing.Any]:
-        """That pedestrian's own exposure over the episode window, from the slice's single-pedestrian track."""
-        pedestrian_episode = dataclasses.replace(
-            scope_slice.full_episode, topics=scope_slice.window_bundle.topics
-        )
-        result = self._compute(pedestrian_episode, prior_results)
-        return {
-            key: result.scalars.get(key)
-            for key in self.output_keys_for_scope(MetricScope.PEDESTRIAN)
-        }
+        result = self._compute(episode, prior_results)
+        assert result is not None
+        return dict(result.scalars)
 
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat pedestrian acoustic exposure series, one row per (sample, pedestrian); empty with the same schema without data."""
         result = self._compute(episode, {})
-        if not any(result.frame_exposure_dba):
+        if result is None or not any(result.frame_exposure_dba):
             return pl.DataFrame(schema=SERIES_SCHEMA)
 
         frame_index: list[int] = []
