@@ -130,7 +130,7 @@ class BaseMetricCalculator(ABC):
         empty = np.array([], dtype=np.float64)
         if episode.data is None or "pos_x_gt" not in episode.data.columns:
             return empty, empty, empty, empty, empty, empty
-        episode.data = episode.data.filter(
+        df = episode.data.filter(
             pl.col("pos_x_gt").is_not_null()
             & ~pl.col("pos_x_gt").is_nan()
             & pl.col("pos_y_gt").is_not_null()
@@ -138,26 +138,16 @@ class BaseMetricCalculator(ABC):
             & pl.col("yaw_gt").is_not_null()
             & ~pl.col("yaw_gt").is_nan()
         )
-        if len(episode.data) == 0:
+        if len(df) == 0:
             return empty, empty, empty, empty, empty, empty
 
-        track_x = episode.data["pos_x_gt"].to_numpy().copy()
-        track_y = episode.data["pos_y_gt"].to_numpy().copy()
-        track_yaw = episode.data["yaw_gt"].to_numpy().copy()
-        has_odometry = "pos_x" in episode.data.columns
-        odom_x = (
-            episode.data["pos_x"].to_numpy().astype(np.float64)
-            if has_odometry
-            else empty
-        )
-        odom_y = (
-            episode.data["pos_y"].to_numpy().astype(np.float64)
-            if has_odometry
-            else empty
-        )
-        odom_yaw = (
-            episode.data["yaw"].to_numpy().astype(np.float64) if has_odometry else empty
-        )
+        track_x = df["pos_x_gt"].to_numpy().copy()
+        track_y = df["pos_y_gt"].to_numpy().copy()
+        track_yaw = df["yaw_gt"].to_numpy().copy()
+        has_odometry = "pos_x" in df.columns
+        odom_x = df["pos_x"].to_numpy().astype(np.float64) if has_odometry else empty
+        odom_y = df["pos_y"].to_numpy().astype(np.float64) if has_odometry else empty
+        odom_yaw = df["yaw"].to_numpy().astype(np.float64) if has_odometry else empty
         odometry_origin = (
             (odom_x[0], odom_y[0], odom_yaw[0])
             if has_odometry and len(odom_x) > 0
@@ -167,10 +157,9 @@ class BaseMetricCalculator(ABC):
         start, end = consistent_segment(
             track_x,
             track_y,
-            episode.data["time_ns"].to_numpy(),
+            df["time_ns"].to_numpy(),
             self._ride_arrivals(episode),
         )
-        episode.data = episode.data.slice(start, end - start)
         odom_x_trans, odom_y_trans, odom_yaw_trans = _anchored_odometry(
             odom_x[start:end],
             odom_y[start:end],
