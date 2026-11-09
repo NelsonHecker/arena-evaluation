@@ -1630,7 +1630,7 @@ class ScopedEvaluator:
                 }
             ).with_columns(pl.col("progress").fill_nan(None))
             changed = series.filter(
-                (pl.int_range(0, pl.len(), eager=True) == 0)
+                (pl.int_range(0, pl.len()) == 0)
                 | pl.col("progress").ne_missing(pl.col("progress").shift(1))
                 | pl.col("locked").ne_missing(pl.col("locked").shift(1))
             )
@@ -1649,7 +1649,7 @@ class ScopedEvaluator:
                 entity=pl.lit(str(state.get("entity") or ""), dtype=pl.String),
                 level=pl.lit(str(state.get("level") or ""), dtype=pl.String),
                 kind=pl.lit(str(state.get("kind") or ""), dtype=pl.String),
-                mechanism_states=pl.int_range(0, pl.len(), eager=True) == 0,
+                mechanism_states=pl.int_range(0, pl.len()) == 0,
             )
             frames.append(frame)
         if not frames:
