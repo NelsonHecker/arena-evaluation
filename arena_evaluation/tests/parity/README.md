@@ -196,6 +196,7 @@ not port gaps. Keys in `list_violations` stay gaps but their note names the know
 | `parity-g1-merged` | 6 ped6 episodes reprocessed by the merged integration branch | 20 | 4 | 30 | 1 | 215 | 0 |
 | `parity-g1-roster-ped6` | 6 ped6 episodes reprocessed by this branch | 20 | 4 | 30 | 1 | 215 | 0 |
 | `test-eval3-agent-mcp` | existing dual-path run, 5 episodes | 20 | 4 | 30 | 1 | 215 | 0 |
+| `parity-g1-window-social` | 6 ped6 episodes reprocessed by `enhancement/eval-window-social` (merged integration `f4f5668`) | 77 (+1 WITHIN_TOL) | 4 | 37 | 125 | 26 | 0 |
 
 The merged-run certificate **does not pass the gate**: four mapped keys
 (`mar`, `pfi`, `min_obstacle_clearance`, `robot_path_deviation_m` on this run) are
