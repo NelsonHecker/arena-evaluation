@@ -284,15 +284,9 @@ _EDGE_CASE_LIST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("missing", "edge_case_missing"),
     ("unplayed", "edge_case_unplayed"),
 )
-_EDGE_CASE_ELEMENT_COLUMNS: Final[tuple[str, ...]] = tuple(
-    key for _, key in _EDGE_CASE_LIST_FIELDS
-)
 _FORMATION_LIST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("member", "edge_case_formation_members"),
     ("absent", "edge_case_formation_absent"),
-)
-_FORMATION_ELEMENT_COLUMNS: Final[tuple[str, ...]] = tuple(
-    key for _, key in _FORMATION_LIST_FIELDS
 )
 _MECHANISM_FIELDS: Final[tuple[str, ...]] = ("locked", "progress")
 

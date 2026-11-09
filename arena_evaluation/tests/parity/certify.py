@@ -746,12 +746,17 @@ def _legacy_value_frame(artifacts: BenchmarkArtifacts, mapping: MetricMapping) -
 
 
 def _null_reason_frame(artifacts: BenchmarkArtifacts, star_table: str) -> pl.DataFrame:
+    """One provenance row per joined key, so a reduced star frame is not expanded by the join."""
     frame = artifacts.star[star_table]
     names = _schema_names(frame)
     keys = _star_keys(star_table)
     if "null_reason" not in names:
         return frame.select([*keys]).with_columns(pl.lit(None, dtype=pl.String).alias("star_null_reason"))
-    return frame.select([*keys, pl.col("null_reason").alias("star_null_reason")])
+    return (
+        frame.select([*keys, pl.col("null_reason").alias("star_null_reason")])
+        .group_by(list(keys))
+        .agg(pl.col("star_null_reason").drop_nulls().first())
+    )
 
 
 def _join_comparison_frame(*, legacy: pl.DataFrame, star: pl.DataFrame, keys: tuple[str, ...]) -> pl.DataFrame:
