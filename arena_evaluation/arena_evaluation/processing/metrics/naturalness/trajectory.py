@@ -231,13 +231,14 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         """Modified Hausdorff distance between two paths."""
         try:
             from scipy.spatial import cKDTree
+
+            robot_tree = cKDTree(robot_points)
+            reference_tree = cKDTree(reference_points)
+            robot_to_reference, _ = reference_tree.query(robot_points, k=1)
+            reference_to_robot, _ = robot_tree.query(reference_points, k=1)
         except (ImportError, ValueError):
             distances = cdist(robot_points, reference_points)
             return float(max(np.mean(np.min(distances, axis=1)), np.mean(np.min(distances, axis=0))))
-        robot_tree = cKDTree(robot_points)
-        reference_tree = cKDTree(reference_points)
-        robot_to_reference, _ = reference_tree.query(robot_points, k=1)
-        reference_to_robot, _ = robot_tree.query(reference_points, k=1)
         return float(max(np.mean(robot_to_reference), np.mean(reference_to_robot)))
 
     @staticmethod

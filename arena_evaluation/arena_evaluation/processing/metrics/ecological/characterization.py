@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 import typing
 from dataclasses import dataclass
 
@@ -451,7 +452,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         mean_efficiency = series["_efficiency"].mean()
         mean_intensity = series["_energy_intensity"].mean()
         dba = series["_dba"].drop_nulls()
-        leq_dba = float(10.0 * (10.0 ** (dba / 10.0)).mean().log10()) if len(dba) > 0 else None
+        leq_dba = 10.0 * math.log10(float((10.0 ** (dba / 10.0)).mean())) if len(dba) > 0 else None
 
         return {
             "char_phase_coverage": phase_coverage,

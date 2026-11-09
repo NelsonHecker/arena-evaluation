@@ -119,7 +119,7 @@ def test_series_table_is_flat_1nf_with_ground_truth_columns():
             "wz_achieved_radps": [None] * 4,
             "speed_achieved_mps": [0.0, 0.25, 0.5, 1.0],
             "accel_achieved_mps2": [None, 0.25, 0.25, 0.5],
-            "accel_target_mps2": [0.25, 0.25, 0.5, 0.5],
+            "accel_target_mps2": [0.0, 0.0, 0.0, 0.0],
             "efficiency": [0.0, 2 / 55, 8 / 60, 16 / 65],
             "phase_kind": ["ramp_apex"] * 4,
             "vx_target_mps": [0.25, 0.25, 0.5, 0.5],

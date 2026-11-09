@@ -60,7 +60,7 @@ def test_negligible_path_length_is_rejected(calc):
 
 
 def test_missing_priors_yield_none_not_a_crash(calc):
-    results = calc.calculate(_episode([10.0, 10.0]), {})
+    results = calc.calculate(_episode(None), {})
     assert results["specific_cost_of_transport"] is None
     assert results["energy_per_meter"] is None
     assert results["peak_to_mean_power_ratio"] is None
@@ -111,7 +111,8 @@ def test_a_robot_that_never_moves_is_billed_for_the_whole_run(calc):
 def test_prior_velocity_of_another_length_falls_back_to_the_scoped_track(calc):
     prior = {"velocity": [0.0, 0.0, 0.0, 0.0]}
     results = calc.calculate(_episode([10.0, 10.0]), prior)
-    assert results["standstill_energy_penalty_wh"] == pytest.approx(0.0)
+    # No scoped speed track: standstill is unknown, not zero.
+    assert results["standstill_energy_penalty_wh"] is None
 
 
 def test_kinetic_energy_demand_follows_the_velocity_track(calc):

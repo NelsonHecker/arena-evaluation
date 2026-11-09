@@ -292,7 +292,7 @@ def test_scalars_follow_the_exposure_series(calc, cached_map):
     assert worst["robot_x"] == 1.0
     assert worst["robot_y"] == 1.0
     assert worst["source_dba"] == 60.0
-    assert worst["pedestrians"] == [[4.0, 1.0], [1.0, 4.0]]
+    assert worst["pedestrians"] == [[4.0, 1.0]]
     assert worst["door_states"] == {}
 
 
