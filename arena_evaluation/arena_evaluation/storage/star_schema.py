@@ -1110,19 +1110,17 @@ def write_star_schema(
         frame.write_parquet(path)
         written[name] = path
 
+    fact_frames = tables.fact_tables()
     write_fact_tables(
         ScopedFactTables(
             **{
-                name: frame
-                for name, frame in (
-                    (fact_name.removeprefix("fact_"), fact_frame)
-                    for fact_name, fact_frame in tables.fact_tables().items()
-                )
+                name.removeprefix("fact_"): frame
+                for name, frame in fact_frames.items()
             }
         ),
         metrics_dir,
     )
-    for name in tables.fact_tables():
+    for name in fact_frames:
         written[name] = metrics_dir / f"{name}.parquet"
 
     return written
