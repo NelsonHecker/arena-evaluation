@@ -1005,10 +1005,9 @@ class AcousticFieldRenderer(BasePlotRenderer):
         wall_outline = (mask_grid == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"], linewidths=0.3, alpha=0.25)
 
-        door_contour = None
         open_door_contour = None
         if show_doors and door_mask_all.any():
-            door_contour = ax.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5], colors=["#64748b"], linewidths=0.9, alpha=0.6, linestyles="dashed")
+            ax.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5], colors=["#64748b"], linewidths=0.9, alpha=0.6, linestyles="dashed")
             if open_door_masks[0].any():
                 open_door_contour = ax.contour(cx, cy, open_door_masks[0].astype(np.uint8), levels=[0.5], colors=["#10b981"], linewidths=1.4, alpha=0.75)
 
