@@ -284,7 +284,8 @@ def _clause_verdict(clause: dict, ctx: _EvalContext) -> bool | None:
     """Score one clause dict, returning UNKNOWN (None) on any malformed or unresolvable input."""
     try:
         cond = EpisodeCondition.parse(clause)
-    except Exception:
+    except (ValueError, TypeError, KeyError):
+        # A malformed clause is an unresolvable condition, not a calculator failure.
         return None
 
     p_series, p_ok = _node_series(cond.p_node, ctx)

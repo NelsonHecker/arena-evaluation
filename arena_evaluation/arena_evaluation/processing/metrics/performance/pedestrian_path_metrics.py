@@ -5,7 +5,7 @@ import typing
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
@@ -18,6 +18,9 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["pedestrian_tracks"]
     REQUIRES_PEDSIM = True
+
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.PEDESTRIAN})
 
     UNITS = {"pedestrian_path": "m"}
 
@@ -49,3 +52,39 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
 
         valid_paths = [path for path in paths.values() if any(not np.isnan(pt[0]) for pt in path)]
         return {"pedestrian_path": valid_paths}
+
+    def _native_paths(self, episode: AlignedEpisodeBundle) -> list[list[list[float]]]:
+        """One path per pedestrian from the window's native pedestrian track, gaps forward-filled per pedestrian."""
+        peds = self.native_ped_frame(episode)
+        if peds is None or len(peds) == 0 or not {"t_ns", "ped_id", "x", "y"} <= set(peds.columns):
+            return []
+        z = pl.col("z").forward_fill().over("ped_id") if "z" in peds.columns else pl.lit(0.0, dtype=pl.Float64)
+        rows = (
+            peds.sort(["ped_id", "t_ns"])
+            .with_columns(
+                x=pl.col("x").cast(pl.Float64).forward_fill().over("ped_id"),
+                y=pl.col("y").cast(pl.Float64).forward_fill().over("ped_id"),
+                z=z,
+            )
+            .filter(pl.col("x").is_not_null() & pl.col("y").is_not_null())
+        )
+        if len(rows) == 0:
+            return []
+        grouped = (
+            rows.group_by("ped_id", maintain_order=True)
+            .agg(pl.concat_list([pl.col("x"), pl.col("y"), pl.col("z")]).alias("path"))
+            .sort("ped_id")
+        )
+        return [[list(point) for point in path] for path in grouped["path"].to_list()]
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
+            return self.calculate(episode, prior_results)
+        if scope_slice.scope == MetricScope.PEDESTRIAN:
+            return {"pedestrian_path": self._native_paths(episode)}
+        raise ValueError(f"pedestrian_path_metrics does not serve the {scope_slice.scope.value} scope")
