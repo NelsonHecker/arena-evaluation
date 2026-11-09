@@ -20,7 +20,6 @@ from arena_runtime.env.task_layer import decode_modes
 from arena_runtime_msgs.msg import EpisodeRecord, RecordedTopics, RobotFleet
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
@@ -29,7 +28,6 @@ from rosgraph_msgs.msg import Clock
 from tf2_msgs.msg import TFMessage
 
 if TYPE_CHECKING:
-    from arena_evaluation_msgs.srv import RecordEpisode
     from arena_runtime_msgs.msg import RecordedTopic
     from rcl_interfaces.msg import ParameterValue
     from rclpy.context import Context
@@ -324,16 +322,6 @@ class DataRecorderNode(Node, EpisodeWriter):
         self._log_info("Setting up topic subscriptions")
         self._setup_subscriptions()
 
-        try:
-            from arena_evaluation_msgs.srv import RecordEpisode
-        except ImportError:
-            RecordEpisode = None
-        if RecordEpisode is not None:
-            self.service_cb_group = MutuallyExclusiveCallbackGroup()
-            self._start_service = self.create_service(RecordEpisode, "start_episode", self._start_episode_service_callback, callback_group=self.service_cb_group)
-            self._log_info("start_episode service ready")
-        else:
-            self._start_service = None
         self._log_info("Topic subscriptions ready. Waiting for first episode to open MCAP writer...")
 
     def _open_log_file(self):
@@ -598,25 +586,6 @@ class DataRecorderNode(Node, EpisodeWriter):
             self._flush_tf(self.current_time, force=True)
         self._close_current_writer()
         self._pre_episode_buffer.clear()
-
-    def _start_episode_service_callback(self, request: RecordEpisode.Request, response: RecordEpisode.Response) -> RecordEpisode.Response:
-        """Authoritative episode lifecycle: START opens the writer, STOP closes it."""
-        episode_id = int(request.episode_id)
-        command = request.command
-        if command == request.COMMAND_START:  # pyright: ignore[reportAttributeAccessIssue]
-            self._log_info(f"start_episode service called: episode_id={episode_id}")
-            self._begin_episode(episode_id, source="runner")
-            response.success = True
-            response.message = f"recording episode {self.current_episode_id}"
-        elif command == request.COMMAND_STOP:  # pyright: ignore[reportAttributeAccessIssue]
-            self._log_info(f"stop_episode service called: episode_id={episode_id} outcome={request.outcome_state}")
-            self._stop_episode(episode_id, outcome_state=int(request.outcome_state), outcome_info=str(request.outcome_info))
-            response.success = True
-            response.message = "stopped"
-        else:
-            response.success = False
-            response.message = f"unknown command {command}"
-        return response
 
     def episode_record_callback(self, msg: EpisodeRecord):
         outcome_state = msg.outcome_state
