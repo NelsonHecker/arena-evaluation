@@ -194,6 +194,12 @@ class BaseMetricCalculator(ABC):
             odom_yaw_trans,
         )
 
+    def series_table(
+        self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = ""
+    ) -> pl.DataFrame | None:
+        """1NF long-format series this calculator publishes, None when it publishes none."""
+        return None
+
     @staticmethod
     def _ride_arrivals(episode: AlignedEpisodeBundle) -> np.ndarray:
         """Elevator arrival and stair crossing log times of the robot's env, the teleports that are rides."""

@@ -16,6 +16,8 @@ import polars as pl
 if typing.TYPE_CHECKING:
     import numpy as np
 
+    from arena_evaluation.processing.metrics.registry import MetricRegistry
+
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import (
     AlignedEpisodeBundle,
@@ -30,6 +32,31 @@ _log = logging.getLogger(__name__)
 # Frames shared across robots or scoped to the whole episode, never per-robot sample data.
 _SHARED_FRAMES = frozenset({"tf", "tf_static", "world_semantics", "episode_lifecycle", "episode_integrity"})
 KEPT_EMPTY_TABLES = ("collision_contacts", "pedestrian_gestures")
+
+
+def _episode_series_tables(
+    registry: MetricRegistry,
+    episode: AlignedEpisodeBundle,
+    *,
+    run_id: str,
+    robot_id: str,
+) -> dict[str, pl.DataFrame]:
+    """1NF series frames the registered calculators publish for one robot episode, keyed by table stem."""
+    frames: dict[str, pl.DataFrame] = {}
+    for stem, calculator in registry.series_calculators():
+        frame = calculator.series_table(episode, run_id=run_id, robot_id=robot_id)
+        if frame is not None and frame.height > 0:
+            frames[stem] = frame
+    return frames
+
+
+def _merge_series_frames(groups: list[dict[str, pl.DataFrame]]) -> dict[str, pl.DataFrame]:
+    """Concatenate per-robot series frames by table stem."""
+    parts: dict[str, list[pl.DataFrame]] = {}
+    for group in groups:
+        for stem, frame in group.items():
+            parts.setdefault(stem, []).append(frame)
+    return {stem: frames[0] if len(frames) == 1 else pl.concat(frames, how="vertical_relaxed") for stem, frames in parts.items()}
 
 
 def _worker_init():
@@ -574,7 +601,11 @@ class ProcessingPipeline:
             except Exception as e:
                 _log.warning(f"episode_{ep.episode_id:03d}: could not read metadata: {e}")
 
-        def finish(rows: list[dict], star_tables: list[StarSchemaTables] | None = None) -> list[dict]:
+        def finish(
+            rows: list[dict],
+            star_tables: list[StarSchemaTables] | None = None,
+            series: list[dict[str, pl.DataFrame]] | None = None,
+        ) -> list[dict]:
             try:
                 ParquetStore.write_rows(rows, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES)
             except Exception as e:
@@ -594,6 +625,10 @@ class ProcessingPipeline:
                 write_episode_star_tables(merged_star, episode_dir / "metrics")
             except Exception as e:
                 _log.warning(f"episode_{ep.episode_id:03d}: scoped star tables not written: {e!r}")
+            series_dir = episode_dir / "metrics"
+            for stem, frame in _merge_series_frames(series or []).items():
+                series_dir.mkdir(parents=True, exist_ok=True)
+                frame.write_parquet(series_dir / f"series_{stem}.parquet")
             return rows
 
         bundles = self.extract_episode(ep, force_extract=force_extract)
@@ -616,6 +651,7 @@ class ProcessingPipeline:
 
             all_results: list[dict] = []
             episode_star_tables: list[StarSchemaTables] = []
+            episode_series: list[dict[str, pl.DataFrame]] = []
             robots = {name: bundle for name, bundle in bundles.items() if bundle.robot_tracks is not None or bundle.robot_odom is not None}
             if not robots:
                 any_record = next((b.episode_lifecycle for b in bundles.values() if b.episode_lifecycle is not None), None)
@@ -775,8 +811,16 @@ class ProcessingPipeline:
                             metrics_config=suite_metrics_cfg,
                         )
                     )
+                    episode_series.append(
+                        _episode_series_tables(
+                            registry,
+                            aligned_ep,
+                            run_id=ep.benchmark_id,
+                            robot_id=str(ep_metrics.get("robot") or ""),
+                        )
+                    )
 
-            return finish(all_results, episode_star_tables)
+            return finish(all_results, episode_star_tables, episode_series)
 
     def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """Extract all episodes in a benchmark."""
@@ -981,6 +1025,16 @@ class ProcessingPipeline:
 
         benchmark_star = StarSchemaBuilder.concat_tables(collected_star)
         write_star_schema(benchmark_star, combined_path.parent)
+
+        series_parts: dict[str, list[pl.DataFrame]] = {}
+        for ep in episodes:
+            for path in sorted((pathlib.Path(ep.episode_dir) / "metrics").glob("series_*.parquet")):
+                series_parts.setdefault(path.stem.removeprefix("series_"), []).append(pl.read_parquet(path))
+        if series_parts:
+            series_dir = combined_path.parent / "metrics"
+            series_dir.mkdir(parents=True, exist_ok=True)
+            for stem, frames in series_parts.items():
+                pl.concat(frames, how="vertical_relaxed").write_parquet(series_dir / f"series_{stem}.parquet")
 
         print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")
         return combined_path

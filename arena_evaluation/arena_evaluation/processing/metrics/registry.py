@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
+import re
 import types
 import typing
 from collections import defaultdict, deque
@@ -18,6 +19,14 @@ from arena_evaluation.processing.metrics.base import (
 )
 from arena_evaluation.storage.exceptions import CircularDependencyError
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
+
+
+_SERIES_STEM_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _series_table_stem(class_name: str) -> str:
+    """Snake-case calculator class name without its Calculator suffix, the 1NF series table stem."""
+    return _SERIES_STEM_BOUNDARY.sub("_", class_name.removesuffix("Calculator")).lower()
 
 
 def _topic_row_count(table: pl.DataFrame | pl.LazyFrame | None) -> int:
@@ -99,6 +108,17 @@ class MetricRegistry:
             self.calculators_by_scope[scope][calc.NAME] = calc
             self.execution_stages_by_scope[scope] = self._compute_execution_order(scope)
         self.execution_stages = self.execution_stages_by_scope[MetricScope.EPISODE]
+
+    def series_calculators(self) -> list[tuple[str, BaseMetricCalculator]]:
+        """Registered calculators publishing a 1NF series table, with their table stem, ordered by stem."""
+        return sorted(
+            (
+                (_series_table_stem(type(calc).__name__), calc)
+                for calc in self.calculators.values()
+                if type(calc).series_table is not BaseMetricCalculator.series_table
+            ),
+            key=lambda item: item[0],
+        )
 
     @classmethod
     def get_all_units(cls) -> dict[str, str]:
