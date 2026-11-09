@@ -228,7 +228,11 @@ def test_reconcile_pfi_ignores_samples_before_first_pedestrian_message():
         peds = flat_peds(frames)
         data = pl.DataFrame({"time_ns": [i * 1_000_000_000 for i in range(len(rows))]})
         ep = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], topics={"pedestrian_tracks": peds})
-        return calc.calculate(ep, {})["pedestrian_path"]
+        table = calc.series_table(ep)
+        if table.height == 0:
+            return []
+        grouped = table.group_by("ped_id", maintain_order=True).agg(pl.concat_list([pl.col("x_m"), pl.col("y_m"), pl.col("z_m")]).alias("path"))
+        return [list(path) for path in grouped["path"].to_list()]
 
     dynamic = {"pedestrian_path": ped_paths([None, [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]])}
     ref_ped = {"pedestrian_path": ped_paths([None, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])}

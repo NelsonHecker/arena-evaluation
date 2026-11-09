@@ -24,11 +24,11 @@ def _floats(values: list[str]) -> list[float]:
 
 
 class MechanismStatesCalculator(BaseMetricCalculator):
-    """Per door and elevator: opening progress and lock state at every sample of `time`."""
+    """Per door and elevator: opening progress and lock state at every episode sample."""
 
     NAME = "mechanism_states"
     CATEGORY = "ecological"
-    DEPENDS_ON = ["time_metrics"]
+    DEPENDS_ON = []
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom")]
     UNITS = {"mechanism_states": ""}
 
@@ -37,11 +37,12 @@ class MechanismStatesCalculator(BaseMetricCalculator):
         return ["mechanism_states"]
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        time_ns = prior_results.get("time")
-        if not time_ns:
+        del prior_results
+        frame = episode.data
+        if frame is None or "time_ns" not in frame.columns or len(frame) == 0:
             return {"mechanism_states": None}
         view = SemanticView.from_episode(episode)
-        query = np.asarray(time_ns, dtype=np.int64)
+        query = frame["time_ns"].to_numpy().astype(np.int64)
         states = []
         for kind, field in PROGRESS_FIELD.items():
             for entity in view.entities(kind):
