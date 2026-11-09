@@ -30,26 +30,26 @@ class FolderManager:
         return resolved
 
     def benchmark_dir(self, benchmark_id: str) -> pathlib.Path:
-        """Return the root directory for a benchmark."""
+        """Return the root directory for a benchmark: the first layout that exists, else the default one."""
         for cand in [
-            self.data_root / "benchmarks" / benchmark_id,
             self.data_root / benchmark_id,
             self.data_root / "runs" / benchmark_id,
+            self.data_root / "benchmarks" / benchmark_id,
         ]:
             if cand.is_dir():
                 return self._safe_resolve(cand)
-        return self._safe_resolve(self.data_root / "benchmarks" / benchmark_id)
+        return self._safe_resolve(self.data_root / benchmark_id)
 
     def episodes_dir(self, benchmark_id: str) -> pathlib.Path:
         """Return the episodes directory for a benchmark or run."""
         for cand in [
-            self.data_root / "benchmarks" / benchmark_id / "episodes",
             self.data_root / benchmark_id / "episodes",
             self.data_root / "runs" / benchmark_id / "episodes",
+            self.data_root / "benchmarks" / benchmark_id / "episodes",
         ]:
             if cand.is_dir():
                 return self._safe_resolve(cand)
-        return self._safe_resolve(self.benchmark_dir(benchmark_id) / "episodes")
+        return self._safe_resolve(self.data_root / benchmark_id / "episodes")
 
     def episode_dir(self, benchmark_id: str, episode_id: int) -> pathlib.Path:
         """Return the directory for a specific episode."""
