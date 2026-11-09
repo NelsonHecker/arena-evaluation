@@ -120,7 +120,7 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
     NAME = "proxemics_extended"
     CATEGORY = "social"
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics", "path_metrics"]
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
@@ -140,7 +140,7 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
         "movement_towards_peds_ratio": "",
         "tti_min": "s",
         "tti_mean": "s",
-        "personal_space_intrusion_integral": "m·s",
+        "personal_space_intrusion_integral": "mÂ·s",
     }
 
     PRIMARY_OUTPUTS = [
@@ -292,11 +292,16 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
         scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        """EPISODE scope only: the slice's own window and pedestrian set are the population."""
+        """EPISODE keeps the aligned population; an ENCOUNTER slice measures its own window telemetry."""
         del prior_results
-        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
-            return dict.fromkeys(self.output_keys())
-        return self._episode_metrics(episode)
+        scope = MetricScope.EPISODE if scope_slice is None else scope_slice.scope
+        match scope:
+            case MetricScope.EPISODE:
+                return self._episode_metrics(episode)
+            case MetricScope.ENCOUNTER:
+                return self._episode_metrics(scope_slice.window_bundle)
+            case _:
+                return dict.fromkeys(self.output_keys())
 
     def series_table(
         self,

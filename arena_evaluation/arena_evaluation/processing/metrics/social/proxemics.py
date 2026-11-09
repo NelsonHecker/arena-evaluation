@@ -14,6 +14,7 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.social.interaction_common import native_robot_frame
 from arena_evaluation.processing.pedestrian_frames import distances_to_pedestrians
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, pedestrian_pairs_lf
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
@@ -60,7 +61,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
     NAME = "proxemics"
     CATEGORY = "social"
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
@@ -108,16 +109,51 @@ class ProxemicsCalculator(BaseMetricCalculator):
             "avg_velocity_in_personal_space": avg_velocity,
         }
 
+    def _window_metrics(self, window: AlignedEpisodeBundle) -> dict[str, typing.Any]:
+        """Personal-space dwell over the window's own robot samples and pedestrian set."""
+        robot = native_robot_frame(window)
+        peds = self.native_ped_frame(window)
+        if robot is None or robot.height == 0 or peds is None or peds.height == 0:
+            return dict.fromkeys(self.output_keys())
+        time_ns = robot.get_column("t_ns").to_numpy().astype(np.int64)
+        counts = personal_space_counts(
+            robot.select(
+                time_ns=pl.col("t_ns"),
+                pos_x_gt=pl.col("x"),
+                pos_y_gt=pl.col("y"),
+            ),
+            peds,
+            self.PERSONAL_SPACE_RADIUS,
+        )
+        occupancy = counts.get_column("count").to_numpy()
+        step_s = np.append(np.diff(time_ns) / 1e9, 0.0)
+        inside = occupancy > 0
+        speed_mps = np.hypot(
+            robot.get_column("vx").to_numpy(), robot.get_column("vy").to_numpy()
+        )
+        return {
+            "num_pedestrians": int(peds.get_column("ped_id").n_unique()),
+            "total_time_in_personal_space": float(step_s[inside].sum()),
+            "avg_velocity_in_personal_space": float(speed_mps[inside].mean())
+            if bool(inside.any())
+            else 0.0,
+        }
+
     def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
         scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        """EPISODE scope only: the slice's own robot samples and pedestrian set are the population."""
-        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
-            return dict.fromkeys(self.output_keys())
-        return self.calculate(episode, prior_results)
+        """EPISODE keeps the aligned population; an ENCOUNTER slice measures its own window telemetry."""
+        scope = MetricScope.EPISODE if scope_slice is None else scope_slice.scope
+        match scope:
+            case MetricScope.EPISODE:
+                return self.calculate(episode, prior_results)
+            case MetricScope.ENCOUNTER:
+                return self._window_metrics(scope_slice.window_bundle)
+            case _:
+                return dict.fromkeys(self.output_keys())
 
     def series_table(
         self,

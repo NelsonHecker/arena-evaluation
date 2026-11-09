@@ -120,19 +120,19 @@ class SocialForcesCalculator(BaseMetricCalculator):
     NAME = "social_forces"
     CATEGORY = "social"
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
-        "sfm_cumulative_force": "N·s",
+        "sfm_cumulative_force": "NÂ·s",
         "sfm_peak_force": "N",
         "sfm_mean_force": "N",
-        "esfm_cumulative_force": "N·s",
+        "esfm_cumulative_force": "NÂ·s",
         "esfm_peak_force": "N",
         "esfm_mean_force": "N",
-        "esfm_ped_cumulative_force": "N·s",
+        "esfm_ped_cumulative_force": "NÂ·s",
         "esfm_ped_peak_force": "N",
         "esfm_ped_mean_force": "N",
         "social_force_max": "N",
@@ -294,11 +294,16 @@ class SocialForcesCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
         scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        """EPISODE scope only: the slice's own window and pedestrian set are the population."""
+        """EPISODE keeps the aligned population; an ENCOUNTER slice measures its own window telemetry."""
         del prior_results
-        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
-            return dict.fromkeys(self.output_keys())
-        return self._episode_metrics(episode)
+        scope = MetricScope.EPISODE if scope_slice is None else scope_slice.scope
+        match scope:
+            case MetricScope.EPISODE:
+                return self._episode_metrics(episode)
+            case MetricScope.ENCOUNTER:
+                return self._episode_metrics(scope_slice.window_bundle)
+            case _:
+                return dict.fromkeys(self.output_keys())
 
     def series_table(
         self,

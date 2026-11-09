@@ -1036,6 +1036,7 @@ class ScopedEvaluator:
                     "fault_attributed_to", "unavoidable"
                 ),
             }
+            row.update(_declared_fact_values(contact_res, MetricScope.CONTACT))
             base_reason = _row_null_reason(row, _CONTACT_NULLABLE)
             row["null_reason"] = _merge_provenance_reasons(
                 base_reason, outcome.provenance, row
@@ -1167,6 +1168,7 @@ class ScopedEvaluator:
                 if linked_contact is None
                 else linked_contact.get("contact_id"),
             }
+            row.update(_declared_fact_values(enc_res, MetricScope.ENCOUNTER))
             base_reason = self._encounter_null_reason(
                 row, has_reference=has_reference, has_power=has_power
             )

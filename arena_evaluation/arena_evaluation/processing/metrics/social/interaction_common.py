@@ -25,6 +25,27 @@ ROBOT_VISIBILITY_PARAM: Final[str] = "humansim.robots_visible"
 
 CrowdCondition = typing.Literal["blind", "visible"]
 
+NATIVE_ROBOT_COLUMNS: Final[tuple[str, ...]] = ("t_ns", "x", "y", "yaw", "vx", "vy")
+
+
+def native_robot_frame(episode: AlignedEpisodeBundle) -> pl.DataFrame | None:
+    """The bundle's own robot track, one row per sample: nanosecond time, planar pose and planar velocity."""
+    tracks = episode.topics.get(ROBOT_TRACKS_TOPIC) if episode.topics else None
+    if tracks is None:
+        return None
+    return (
+        tracks.select(
+            pl.col("t_ns").cast(pl.Int64),
+            pl.col("x").cast(pl.Float64),
+            pl.col("y").cast(pl.Float64),
+            pl.col("yaw").cast(pl.Float64),
+            pl.col("vx").cast(pl.Float64),
+            pl.col("vy").cast(pl.Float64),
+        )
+        .drop_nulls(list(NATIVE_ROBOT_COLUMNS))
+        .sort("t_ns")
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class Trajectory2D:

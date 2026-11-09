@@ -83,6 +83,8 @@ def resolve_crowd_condition(
 
 
 _EPISODE: Final[MetricScope] = MetricScope.EPISODE
+_ENCOUNTER: Final[MetricScope] = MetricScope.ENCOUNTER
+_CONTACT: Final[MetricScope] = MetricScope.CONTACT
 _ROBOT: Final[MetricScope] = MetricScope.ROBOT
 _PEDESTRIAN: Final[MetricScope] = MetricScope.PEDESTRIAN
 _EPISODE_TABLE: Final[str] = MetricScope.EPISODE.value
@@ -207,7 +209,7 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     # --- ROBOT scope -> fact_robots ----------------------------------------------------
     MetricDeclaration(name="acoustic_cost", unit="s/m", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="acoustic_startle_factor", unit="dBA/s", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
-    MetricDeclaration(name="acoustic_surge_index", unit="dBA²", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
+    MetricDeclaration(name="acoustic_surge_index", unit="dBAÃ‚Â²", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="l_a10", unit="dBA", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="l_a50", unit="dBA", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="l_a90", unit="dBA", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
@@ -221,11 +223,71 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="peak_to_mean_power_ratio", unit="", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
     MetricDeclaration(name="specific_cost_of_transport", unit="", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
     MetricDeclaration(name="standstill_energy_penalty_wh", unit="Wh", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
-    MetricDeclaration(name="acceleration_mean", unit="m/s²", scopes=(_ROBOT,), dtype=pl.Float64, direction="", description="performance metric of the motion_metrics calculator"),
-    MetricDeclaration(name="jerk_mean", unit="m/s³", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="performance metric of the motion_metrics calculator"),
+    MetricDeclaration(name="acceleration_mean", unit="m/sÃ‚Â²", scopes=(_ROBOT,), dtype=pl.Float64, direction="", description="performance metric of the motion_metrics calculator"),
+    MetricDeclaration(name="jerk_mean", unit="m/sÃ‚Â³", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="performance metric of the motion_metrics calculator"),
     # --- PEDESTRIAN scope -> fact_pedestrians -----------------------------------------------
     MetricDeclaration(name="ped_round_trips_completed", unit="", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
     MetricDeclaration(name="ped_velocity_delay_ratio", unit="", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
+    MetricDeclaration(name="ped_max_exposure_dba", unit="dBA", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="ecological metric of the acoustic_exposure calculator"),
+    MetricDeclaration(name="ped_leq_exposure_dba", unit="dBA", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="ecological metric of the acoustic_exposure calculator"),
+    MetricDeclaration(name="ped_max_startle_factor", unit="dBA/s", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="ecological metric of the acoustic_exposure calculator"),
+    # --- ENCOUNTER scope -> fact_encounters -------------------------------------------------
+    MetricDeclaration(name="sfm_cumulative_force", unit="N·s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="sfm_peak_force", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="sfm_mean_force", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="esfm_cumulative_force", unit="N·s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="esfm_peak_force", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="esfm_mean_force", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="esfm_ped_cumulative_force", unit="N·s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="esfm_ped_peak_force", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="esfm_ped_mean_force", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="social_force_max", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="social_force_mean", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="social_force_ped_max", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="social_force_ped_mean", unit="N", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="ci_max", unit="", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="ci_mean", unit="", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the social_forces calculator"),
+    MetricDeclaration(name="time_in_intimate_zone", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="time_in_personal_zone", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="time_in_social_zone", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="time_in_public_zone", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="psi_intimate_events", unit="", scopes=(_ENCOUNTER,), dtype=pl.Int64, direction="lower", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="psi_personal_events", unit="", scopes=(_ENCOUNTER,), dtype=pl.Int64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="psi_social_events", unit="", scopes=(_ENCOUNTER,), dtype=pl.Int64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="max_speed_intimate_zone", unit="m/s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="max_speed_personal_zone", unit="m/s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="max_speed_social_zone", unit="m/s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="max_speed_public_zone", unit="m/s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="movement_towards_peds_ratio", unit="", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="tti_min", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="higher", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="tti_mean", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="personal_space_intrusion_integral", unit="m·s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the proxemics_extended calculator"),
+    MetricDeclaration(name="total_time_looking_at_pedestrians", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the gaze_metrics calculator"),
+    MetricDeclaration(name="total_time_looked_at_by_pedestrians", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the gaze_metrics calculator"),
+    MetricDeclaration(name="num_pedestrians", unit="", scopes=(_ENCOUNTER,), dtype=pl.Int64, direction="", description="social metric of the proxemics calculator"),
+    MetricDeclaration(name="total_time_in_personal_space", unit="s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="lower", description="social metric of the proxemics calculator"),
+    MetricDeclaration(name="avg_velocity_in_personal_space", unit="m/s", scopes=(_ENCOUNTER,), dtype=pl.Float64, direction="", description="social metric of the proxemics calculator"),
+    # --- CONTACT scope -> fact_contacts -----------------------------------------------------
+    MetricDeclaration(name="hhi_interaction", unit="", scopes=(_CONTACT,), dtype=pl.String, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_hold_onset_s", unit="s", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_release_s", unit="s", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_episode_s", unit="s", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_stall_count", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="lower", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_stall_time_s", unit="s", scopes=(_CONTACT,), dtype=pl.Float64, direction="lower", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_stalls_approach", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_stalls_hold", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_stalls_post", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_stalls_rest", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_share_approach", unit="", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_share_hold", unit="", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_share_post", unit="", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_share_rest", unit="", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_passes_between", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_min_pair_clearance", unit="m", scopes=(_CONTACT,), dtype=pl.Float64, direction="higher", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="hhi_pair_gap_hold", unit="m", scopes=(_CONTACT,), dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
+    MetricDeclaration(name="collision_amount", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="lower", description="performance metric of the collision_metrics calculator"),
+    MetricDeclaration(name="collision_amount_wall", unit="", scopes=(_CONTACT,), dtype=pl.Int64, direction="", description="performance metric of the collision_metrics calculator"),
+    MetricDeclaration(name="spl", unit="", scopes=(_CONTACT,), dtype=pl.Float64, direction="higher", description="performance metric of the collision_metrics calculator"),
 )
 
 _BASE_FACT_SCHEMAS: Final[Mapping[str, pl.Schema]] = {
@@ -427,14 +489,14 @@ _ENCOUNTER_NULLABLE: Final[tuple[str, ...]] = (
     "probst_R_time",
     "probst_E_robot",
     "probst_E_actor2",
-)
+) + declared_columns(_ENCOUNTER)
 _CONTACT_NULLABLE: Final[tuple[str, ...]] = (
     "impact_speed_mps",
     "robot_speed_at_impact_mps",
     "obstacle_speed_at_impact_mps",
     "closer_label",
     "robot_closing_share",
-)
+) + declared_columns(_CONTACT)
 _PEDESTRIAN_NULLABLE: Final[tuple[str, ...]] = (
     "ped_policy",
     "desired_speed",

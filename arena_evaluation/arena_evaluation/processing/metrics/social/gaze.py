@@ -16,6 +16,7 @@ from typing import Final
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.social.interaction_common import native_robot_frame
 from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
@@ -26,6 +27,15 @@ SAMPLE_SCHEMA: Final[pl.Schema] = pl.Schema(
         "t_ns": pl.Int64,
         "looking_at_peds": pl.Int64,
         "looked_at_by_peds": pl.Int64,
+    }
+)
+
+ROBOT_SAMPLE_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "time_ns": pl.Int64,
+        "robot_x_m": pl.Float64,
+        "robot_y_m": pl.Float64,
+        "robot_yaw_rad": pl.Float64,
     }
 )
 
@@ -109,7 +119,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
     NAME = "gaze_metrics"
     CATEGORY = "social"
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
@@ -135,14 +145,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         """Ground-truth robot rows of the episode view, one per aligned sample."""
         frame = self.resolve_robot_frame(episode)
         if frame is None or frame.height == 0:
-            return pl.DataFrame(
-                schema={
-                    "time_ns": pl.Int64,
-                    "robot_x_m": pl.Float64,
-                    "robot_y_m": pl.Float64,
-                    "robot_yaw_rad": pl.Float64,
-                }
-            )
+            return pl.DataFrame(schema=ROBOT_SAMPLE_SCHEMA)
         return frame.select(
             time_ns=pl.col("time_ns").cast(pl.Int64),
             robot_x_m=pl.col("pos_x_gt").cast(pl.Float64),
@@ -150,17 +153,33 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             robot_yaw_rad=pl.col("yaw_gt").cast(pl.Float64),
         ).drop_nulls(["time_ns", "robot_x_m", "robot_y_m", "robot_yaw_rad"])
 
-    def _samples(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
-        """Per robot sample gaze counts over the episode view's own pedestrian stream."""
-        robot = self._robot_rows(episode)
+    def _native_robot_rows(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
+        """The window's own robot samples in the native topic frame, one row per sample."""
+        frame = native_robot_frame(episode)
+        if frame is None or frame.height == 0:
+            return pl.DataFrame(schema=ROBOT_SAMPLE_SCHEMA)
+        return frame.select(
+            time_ns=pl.col("t_ns"),
+            robot_x_m=pl.col("x"),
+            robot_y_m=pl.col("y"),
+            robot_yaw_rad=pl.col("yaw"),
+        )
+
+    @staticmethod
+    def _samples_on_robot_axis(robot: pl.DataFrame, peds: pl.DataFrame | None) -> pl.DataFrame:
+        """Per robot sample gaze counts, zero where the sample matched no pedestrian of the population."""
         if robot.height == 0:
             return pl.DataFrame(schema=SAMPLE_SCHEMA)
-        counts = gaze_counts(robot, self.native_ped_frame(episode))
+        counts = gaze_counts(robot, peds)
         return robot.select(pl.col("time_ns").alias("t_ns")).join(counts, on="t_ns", how="left").select(
             t_ns=pl.col("t_ns"),
             looking_at_peds=pl.col("looking_at_peds").fill_null(0).cast(pl.Int64),
             looked_at_by_peds=pl.col("looked_at_by_peds").fill_null(0).cast(pl.Int64),
         )
+
+    def _samples(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
+        """Per robot sample gaze counts over the episode view's own pedestrian stream."""
+        return self._samples_on_robot_axis(self._robot_rows(episode), self.native_ped_frame(episode))
 
     def _episode_metrics(self, episode: AlignedEpisodeBundle) -> dict[str, typing.Any]:
         """Total gaze dwell of both directions over the given episode view."""
@@ -183,17 +202,32 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         del prior_results
         return self._episode_metrics(episode)
 
+    def _window_metrics(self, window: AlignedEpisodeBundle) -> dict[str, typing.Any]:
+        """Gaze dwell over the window's own samples; null when the window carries no robot sample."""
+        samples = self._samples_on_robot_axis(self._native_robot_rows(window), self.native_ped_frame(window))
+        if samples.height == 0:
+            return dict.fromkeys(self.output_keys())
+        return {
+            "total_time_looking_at_pedestrians": time_with_cone_contact_s(samples, "looking_at_peds"),
+            "total_time_looked_at_by_pedestrians": time_with_cone_contact_s(samples, "looked_at_by_peds"),
+        }
+
     def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
         scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        """EPISODE scope only: the slice's own window and pedestrian set are the population."""
+        """EPISODE measures the ground-truth axis; an ENCOUNTER slice measures its own window telemetry."""
         del prior_results
-        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
-            return dict.fromkeys(self.output_keys())
-        return self._episode_metrics(episode)
+        scope = MetricScope.EPISODE if scope_slice is None else scope_slice.scope
+        match scope:
+            case MetricScope.EPISODE:
+                return self._episode_metrics(episode)
+            case MetricScope.ENCOUNTER:
+                return self._window_metrics(scope_slice.window_bundle)
+            case _:
+                return dict.fromkeys(self.output_keys())
 
     SERIES_TABLE_STEM = "gaze"
 
