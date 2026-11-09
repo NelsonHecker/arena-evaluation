@@ -36,14 +36,14 @@ def _yamlable(v: object) -> object:
     return repr(v)
 
 
-_STAGE_OWNED_KEYS = frozenset({"world", "robot", "run_seed", "task_layer"})
+_STAGE_OWNED_KEYS = frozenset({"world", "robot", "run_seed", "task_layer", "crowd_condition"})
 _STAGE_OWNED_PREFIXES = ("task.", "record.")
 
 _SUITE_METRIC_KEYS = frozenset({"max_collisions", "barn"})
 
 _LEGACY_MODE_PREFIX = "tm_"
 
-_IMPLICIT_SEED_EXCLUDES = ("timeout", "timeout_peds", "optim")
+_IMPLICIT_SEED_EXCLUDES = ("timeout", "timeout_peds", "optim", "crowd_condition")
 
 
 def _layer(task_layer_key: str = "") -> TaskLayer:
@@ -143,6 +143,7 @@ class Suite(typing.NamedTuple):
         timeout: float
         optim: dict | None = None
         timeout_peds: float | None = None
+        crowd_condition: typing.Literal["visible", "blind"] = "visible"
 
         @classmethod
         def _make_serializable(cls, item: object) -> object:
@@ -166,15 +167,22 @@ class Suite(typing.NamedTuple):
 
         @classmethod
         def parse(cls, obj: dict, layer: TaskLayer | None = None) -> Suite.Stage:
-            obj, legacy = _expand_modes(obj, _layer() if layer is None else layer)
+            obj, _ = _expand_modes(obj, _layer() if layer is None else layer)
             obj.setdefault("config", {})
-            raw_timeout, raw_timeout_peds, optim = (obj.pop(key, None) for key in _IMPLICIT_SEED_EXCLUDES)
+            raw_crowd = obj.pop("crowd_condition", "visible")
+            crowd_condition = "blind" if str(raw_crowd).lower() == "blind" else "visible"
+            raw_timeout = obj.pop("timeout", None)
+            raw_timeout_peds = obj.pop("timeout_peds", None)
+            optim = obj.pop("optim", None)
             timeout_f = _DEFAULT_TIMEOUT_S if raw_timeout is None else _parse_duration(str(raw_timeout))
             timeout_peds_f = _parse_duration(str(raw_timeout_peds)) if raw_timeout_peds is not None else None
             modes = obj.pop("modes", {})
             if "seed" not in obj:
-                obj["seed"] = cls.hash({key: value for key, value in legacy.items() if key not in _IMPLICIT_SEED_EXCLUDES})
-            return cls(timeout=timeout_f, optim=optim, timeout_peds=timeout_peds_f, modes=modes, **obj)
+                hash_dict = {key: value for key, value in obj.items() if key not in _IMPLICIT_SEED_EXCLUDES}
+                if modes:
+                    hash_dict["modes"] = modes
+                obj["seed"] = cls.hash(hash_dict)
+            return cls(timeout=timeout_f, optim=optim, timeout_peds=timeout_peds_f, modes=modes, crowd_condition=crowd_condition, **obj)
 
     name: str
     stages: list[Suite.Stage]

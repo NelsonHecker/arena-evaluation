@@ -1,0 +1,26 @@
+name: stage1_planners
+description: "Stage 1 Crowd Visibility Ablation Contest: Classic Nav2 (DWB, Graceful, TEB, MPPI) and Learned DRL (AttnGraph)"
+contestants:
+- name: dwb
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+- name: graceful
+  mobile:
+    driver: nav2
+    local_planner: graceful
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+- name: teb
+  mobile:
+    driver: nav2
+    local_planner: teb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+- name: mppi
+  mobile:
+    driver: nav2
+    local_planner: mppi
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+- name: attngraph
+  mobile: drl
+  mobile.planner: attngraph

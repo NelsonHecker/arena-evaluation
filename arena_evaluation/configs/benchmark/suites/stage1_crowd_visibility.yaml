@@ -1,0 +1,164 @@
+# Stage 1 Study: Crowd Visibility Switch (visible vs blind) & Contact Attribution
+# Hypothesis 1: switching crowds from visible to blind shifts raw contact-free rankings
+# more than seed spread (H1a), while fault-attributed success restores concordance (H1b).
+name: stage1_crowd_visibility
+references: true
+launch:
+  sim: gazebo
+  headless: true
+  env.n: 4
+stages:
+  # -------------------------------------------------------------------------
+  # 1. Hospital Head-On Corridor Encounters (s01_head_on)
+  # -------------------------------------------------------------------------
+  - name: hospital_head_on_vis
+    map: hospital_1
+    robot: jackal
+    crowd_condition: visible
+    episodes: 6
+    seed: 76001
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s01_head_on
+
+  - name: hospital_head_on_blind
+    map: hospital_1
+    robot: jackal
+    crowd_condition: blind
+    episodes: 6
+    seed: 76001
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s01_head_on
+
+  # -------------------------------------------------------------------------
+  # 2. Hospital Doorway Bottleneck Passage (s05_doorway_passage)
+  # -------------------------------------------------------------------------
+  - name: hospital_doorway_vis
+    map: hospital_1
+    robot: jackal
+    crowd_condition: visible
+    episodes: 6
+    seed: 76002
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s05_doorway_passage
+
+  - name: hospital_doorway_blind
+    map: hospital_1
+    robot: jackal
+    crowd_condition: blind
+    episodes: 6
+    seed: 76002
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s05_doorway_passage
+
+  # -------------------------------------------------------------------------
+  # 3. Hospital Bidirectional Flow (s06_bidirectional_flow)
+  # -------------------------------------------------------------------------
+  - name: hospital_bidirectional_vis
+    map: hospital_1
+    robot: jackal
+    crowd_condition: visible
+    episodes: 6
+    seed: 76003
+    timeout: 120.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s06_bidirectional_flow
+
+  - name: hospital_bidirectional_blind
+    map: hospital_1
+    robot: jackal
+    crowd_condition: blind
+    episodes: 6
+    seed: 76003
+    timeout: 120.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s06_bidirectional_flow
+
+  # -------------------------------------------------------------------------
+  # 4. Office Crossing Encounters (s03_perpendicular_crossing)
+  # -------------------------------------------------------------------------
+  - name: office_crossing_vis
+    map: office_1
+    robot: jackal
+    crowd_condition: visible
+    episodes: 6
+    seed: 76004
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s03_perpendicular_crossing
+
+  - name: office_crossing_blind
+    map: office_1
+    robot: jackal
+    crowd_condition: blind
+    episodes: 6
+    seed: 76004
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s03_perpendicular_crossing
+
+  # -------------------------------------------------------------------------
+  # 5. Blind Corner Encounters (s04_blind_corner)
+  # -------------------------------------------------------------------------
+  - name: corner_encounter_vis
+    map: hospital_1
+    robot: jackal
+    crowd_condition: visible
+    episodes: 6
+    seed: 76005
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s04_blind_corner
+
+  - name: corner_encounter_blind
+    map: hospital_1
+    robot: jackal
+    crowd_condition: blind
+    episodes: 6
+    seed: 76005
+    timeout: 90.0
+    modes:
+      robots: scenario
+      obstacles: scenario
+    config:
+      scenario:
+        file: s04_blind_corner

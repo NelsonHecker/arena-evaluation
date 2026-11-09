@@ -21,6 +21,10 @@ class Step:
     task_layer: str = ""
 
     @property
+    def crowd_condition(self) -> str:
+        return self.stage.crowd_condition
+
+    @property
     def robot(self) -> str:
         """The stage's robot with the contestant's parts."""
         return robot_with_parts(self.stage.robot, self.contestant.parts)

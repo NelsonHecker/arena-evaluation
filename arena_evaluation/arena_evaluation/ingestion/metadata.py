@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Literal
 
 from arena_evaluation.storage.planner_names import split_planner_name
 from arena_evaluation.storage.schemas import RunMetadata
@@ -58,6 +59,7 @@ class IngestionMetadata:
         env_ns_root: str | None = None,
         is_reference: bool = False,
         reference_type: str | None = None,
+        crowd_condition: Literal["visible", "blind"] = "visible",
         suite_name: str = "",
         contest_name: str = "",
         episodes_requested: int = 0,
@@ -92,4 +94,5 @@ class IngestionMetadata:
             env_ns_root=env_ns_root,
             is_reference=is_reference,
             reference_type=reference_type,
+            crowd_condition=crowd_condition,
         )

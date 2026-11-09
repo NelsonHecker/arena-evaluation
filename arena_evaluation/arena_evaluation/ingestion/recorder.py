@@ -129,6 +129,7 @@ class DataRecorderNode(Node, EpisodeWriter):
             ("episodes_requested", 0),
             ("is_reference", False),
             ("reference_type", ""),
+            ("crowd_condition", "visible"),
             ("episode_id_offset", 0),
             ("workspace_dir", ""),
             ("world.lighting", "authored"),
@@ -245,6 +246,7 @@ class DataRecorderNode(Node, EpisodeWriter):
         self.is_reference = bool(self.get_parameter("is_reference").value)
         ref_type = self.get_parameter("reference_type").value
         self.reference_type = ref_type if ref_type else None
+        self.crowd_condition = str(self.get_parameter("crowd_condition").value or "visible")
         self._episode_id_offset = int(self.get_parameter("episode_id_offset").value or 0)
         self.workspace_dir = str(self.get_parameter("workspace_dir").value or "")
         self.world_lighting = str(self.get_parameter("world.lighting").value or "authored")
@@ -832,6 +834,7 @@ class DataRecorderNode(Node, EpisodeWriter):
             env_ns_root=self.env_ns_root,
             is_reference=self.is_reference,
             reference_type=self.reference_type,
+            crowd_condition=self.crowd_condition,
             suite_name=self.suite_name,
             contest_name=self.contest_name,
             episodes_requested=self.episodes_requested,
