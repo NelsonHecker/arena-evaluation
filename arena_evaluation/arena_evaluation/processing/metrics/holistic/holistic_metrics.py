@@ -106,12 +106,7 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
         nearest = nearest_pedestrian_frames(geometry)
         if nearest.height == 0:
             return None
-        return (
-            nearest.select((pl.col("distance_m") - self._combined_radius_m).alias("clearance_m"))
-            .get_column("clearance_m")
-            .to_numpy()
-            .astype(np.float64)
-        )
+        return nearest.select((pl.col("distance_m") - self._combined_radius_m).alias("clearance_m")).get_column("clearance_m").to_numpy().astype(np.float64)
 
     @staticmethod
     def _level_series(
@@ -169,11 +164,7 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
         intrusion_m_s = 0.0 if intrusion_integral is None else float(intrusion_integral)
         time_to_goal = prior_results.get("time_to_goal")
         duration_s = max(float(time_to_goal), MIN_EPISODE_TIME_S) if time_to_goal else MIN_EPISODE_TIME_S
-        value = float(cost_of_transport) * (
-            1.0
-            + COLLISION_PENALTY * collision_count
-            + INTRUSION_WEIGHT * intrusion_m_s / duration_s
-        )
+        value = float(cost_of_transport) * (1.0 + COLLISION_PENALTY * collision_count + INTRUSION_WEIGHT * intrusion_m_s / duration_s)
         return round(value, COT_DECIMALS)
 
     def _episode_metrics(
@@ -187,9 +178,7 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
             "e_cot": self._effective_cost_of_transport(prior_results),
         }
 
-    def calculate(
-        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         """Compute the episode-scope holistic metrics over the bundle's own samples."""
         return self._episode_metrics(episode, prior_results)
 

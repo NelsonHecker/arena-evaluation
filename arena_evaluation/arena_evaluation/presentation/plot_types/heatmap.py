@@ -64,11 +64,7 @@ class HeatmapRenderer(BasePlotRenderer):
 
         valid_cols = [column for column in candidates if schema.get(column) is not None and not df_filtered[column].is_null().all()]
         if len(valid_cols) < 2:
-            valid_cols = [
-                column
-                for column, dtype in schema.items()
-                if dtype in (pl.Float64, pl.Float32, pl.Int64, pl.Int32, pl.UInt64, pl.UInt32) and not df_filtered[column].is_null().all()
-            ]
+            valid_cols = [column for column, dtype in schema.items() if dtype in (pl.Float64, pl.Float32, pl.Int64, pl.Int32, pl.UInt64, pl.UInt32) and not df_filtered[column].is_null().all()]
         if len(valid_cols) < 2:
             return None
 

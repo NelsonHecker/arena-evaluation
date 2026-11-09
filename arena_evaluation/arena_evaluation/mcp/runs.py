@@ -9,7 +9,6 @@ import pathlib
 from typing import Annotated, Any, Literal
 
 import pydantic
-
 from arena_mcp.core import JOBS, ROS, Job, ToolError, cli, msgs, proc
 from arena_mcp.core.jobs import RUNNING, SUCCEEDED
 

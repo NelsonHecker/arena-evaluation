@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import dataclasses
-from enum import StrEnum
 import pathlib
+import typing
+from collections.abc import Mapping
+from enum import StrEnum
 from typing import Any, Final, Literal
+
+if typing.TYPE_CHECKING:
+    from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 import polars as pl
 
@@ -90,7 +94,7 @@ class MetricDeclaration:
 
 
 def resolve_crowd_condition(
-    episode: Any,
+    episode: AlignedEpisodeBundle,
     metrics_config: Mapping[str, Any] | None = None,
 ) -> CrowdCondition:
     """Crowd visibility of the episode: explicit metrics config first, else the recorded humansim parameter, else visible."""
@@ -542,11 +546,7 @@ _BASE_FACT_SCHEMAS: Final[Mapping[str, pl.Schema]] = {
 
 def declarations_for(table: FactTable) -> tuple[MetricDeclaration, ...]:
     """Declarations that publish into ``table``, in declaration order."""
-    return tuple(
-        declaration
-        for declaration in METRIC_DECLARATIONS
-        if declaration.fact_table is table
-    )
+    return tuple(declaration for declaration in METRIC_DECLARATIONS if declaration.fact_table is table)
 
 
 def declared_columns(table: FactTable) -> tuple[str, ...]:
@@ -560,21 +560,15 @@ def _derived_schema(table: FactTable) -> pl.Schema:
     null_reason = base_columns.pop("null_reason")
     for declaration in declarations_for(table):
         if declaration.name in base_columns:
-            raise ValueError(
-                f"declaration {declaration.name!r} duplicates a base column of {table.value}"
-            )
+            raise ValueError(f"declaration {declaration.name!r} duplicates a base column of {table.value}")
         base_columns[declaration.name] = declaration.dtype
     base_columns["null_reason"] = null_reason
     return pl.Schema(base_columns)
 
 
 FACT_TABLE_NAMES: Final[tuple[str, ...]] = tuple(table.value for table in FactTable)
-SCOPED_FACT_TABLE_NAMES: Final[tuple[str, ...]] = tuple(
-    table.value for table in SCOPED_FACT_TABLES
-)
-CHILD_FACT_TABLE_NAMES: Final[tuple[str, ...]] = tuple(
-    table.value for table in CHILD_FACT_TABLES
-)
+SCOPED_FACT_TABLE_NAMES: Final[tuple[str, ...]] = tuple(table.value for table in SCOPED_FACT_TABLES)
+CHILD_FACT_TABLE_NAMES: Final[tuple[str, ...]] = tuple(table.value for table in CHILD_FACT_TABLES)
 
 EPISODE_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.EPISODES)
 ENCOUNTER_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.ENCOUNTERS)
@@ -584,17 +578,11 @@ ROBOT_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.ROBOTS)
 EDGE_CASE_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.EDGE_CASES)
 FORMATION_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.FORMATIONS)
 PHASE_OUTCOME_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.PHASE_OUTCOMES)
-JUDGE_DISAGREEMENT_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(
-    FactTable.JUDGE_DISAGREEMENTS
-)
-MECHANISM_STATE_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(
-    FactTable.MECHANISM_STATES
-)
+JUDGE_DISAGREEMENT_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.JUDGE_DISAGREEMENTS)
+MECHANISM_STATE_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.MECHANISM_STATES)
 COLLISION_FACT_SCHEMA: Final[pl.Schema] = _derived_schema(FactTable.COLLISIONS)
 
-FACT_SCHEMAS: Final[dict[str, pl.Schema]] = {
-    table.value: _derived_schema(table) for table in FactTable
-}
+FACT_SCHEMAS: Final[dict[str, pl.Schema]] = {table.value: _derived_schema(table) for table in FactTable}
 
 _EPISODE_NULLABLE: Final[tuple[str, ...]] = (
     "result",
@@ -683,24 +671,12 @@ class ScopedFactTables:
     contacts: pl.DataFrame
     pedestrians: pl.DataFrame
     robots: pl.DataFrame
-    edge_cases: pl.DataFrame = dataclasses.field(
-        default_factory=lambda: pl.DataFrame(schema=EDGE_CASE_FACT_SCHEMA)
-    )
-    formations: pl.DataFrame = dataclasses.field(
-        default_factory=lambda: pl.DataFrame(schema=FORMATION_FACT_SCHEMA)
-    )
-    phase_outcomes: pl.DataFrame = dataclasses.field(
-        default_factory=lambda: pl.DataFrame(schema=PHASE_OUTCOME_FACT_SCHEMA)
-    )
-    judge_disagreements: pl.DataFrame = dataclasses.field(
-        default_factory=lambda: pl.DataFrame(schema=JUDGE_DISAGREEMENT_FACT_SCHEMA)
-    )
-    mechanism_states: pl.DataFrame = dataclasses.field(
-        default_factory=lambda: pl.DataFrame(schema=MECHANISM_STATE_FACT_SCHEMA)
-    )
-    collisions: pl.DataFrame = dataclasses.field(
-        default_factory=lambda: pl.DataFrame(schema=COLLISION_FACT_SCHEMA)
-    )
+    edge_cases: pl.DataFrame = dataclasses.field(default_factory=lambda: pl.DataFrame(schema=EDGE_CASE_FACT_SCHEMA))
+    formations: pl.DataFrame = dataclasses.field(default_factory=lambda: pl.DataFrame(schema=FORMATION_FACT_SCHEMA))
+    phase_outcomes: pl.DataFrame = dataclasses.field(default_factory=lambda: pl.DataFrame(schema=PHASE_OUTCOME_FACT_SCHEMA))
+    judge_disagreements: pl.DataFrame = dataclasses.field(default_factory=lambda: pl.DataFrame(schema=JUDGE_DISAGREEMENT_FACT_SCHEMA))
+    mechanism_states: pl.DataFrame = dataclasses.field(default_factory=lambda: pl.DataFrame(schema=MECHANISM_STATE_FACT_SCHEMA))
+    collisions: pl.DataFrame = dataclasses.field(default_factory=lambda: pl.DataFrame(schema=COLLISION_FACT_SCHEMA))
 
     def by_name(self) -> dict[str, pl.DataFrame]:
         """Fact tables keyed by their star-schema table name."""
@@ -736,9 +712,5 @@ def read_fact_tables(directory: pathlib.Path) -> ScopedFactTables | None:
         frames[name] = pl.read_parquet(path)
     for name in CHILD_FACT_TABLE_NAMES:
         path = directory / f"fact_{name}.parquet"
-        frames[name] = (
-            pl.read_parquet(path)
-            if path.is_file()
-            else pl.DataFrame(schema=FACT_SCHEMAS[name])
-        )
+        frames[name] = pl.read_parquet(path) if path.is_file() else pl.DataFrame(schema=FACT_SCHEMAS[name])
     return ScopedFactTables(**frames)

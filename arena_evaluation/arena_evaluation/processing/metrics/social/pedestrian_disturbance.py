@@ -51,12 +51,7 @@ def _track_frame(peds: pl.DataFrame) -> pl.DataFrame:
             x_m=pl.col("x").cast(pl.Float64),
             y_m=pl.col("y").cast(pl.Float64),
         )
-        .filter(
-            pl.col("x_m").is_finite()
-            & pl.col("y_m").is_finite()
-            & (pl.col("x_m").abs() < VALID_POSITION_LIMIT_M)
-            & (pl.col("y_m").abs() < VALID_POSITION_LIMIT_M)
-        )
+        .filter(pl.col("x_m").is_finite() & pl.col("y_m").is_finite() & (pl.col("x_m").abs() < VALID_POSITION_LIMIT_M) & (pl.col("y_m").abs() < VALID_POSITION_LIMIT_M))
         .sort("ped_id", "t_ns")
     )
 
@@ -74,41 +69,28 @@ def pedestrian_geometry_frame(peds: pl.DataFrame | None) -> pl.DataFrame:
     chord_x_m = pl.col("x_m").last() - first_x_m
     chord_y_m = pl.col("y_m").last() - first_y_m
     chord_m = (chord_x_m.pow(2) + chord_y_m.pow(2)).sqrt()
-    lateral_m = (
-        (pl.col("x_m") - first_x_m) * (chord_y_m / chord_m)
-        - (pl.col("y_m") - first_y_m) * (chord_x_m / chord_m)
-    ).abs()
-    return track.group_by("ped_id").agg(
-        n_points=pl.len(),
-        first_t_ns=pl.col("t_ns").first(),
-        last_t_ns=pl.col("t_ns").last(),
-        path_length_m=(pl.col("x_m").diff().pow(2) + pl.col("y_m").diff().pow(2)).sqrt().sum(),
-        chord_m=chord_m,
-        max_displacement_m=(
-            (pl.col("x_m") - first_x_m).pow(2) + (pl.col("y_m") - first_y_m).pow(2)
+    lateral_m = ((pl.col("x_m") - first_x_m) * (chord_y_m / chord_m) - (pl.col("y_m") - first_y_m) * (chord_x_m / chord_m)).abs()
+    return (
+        track.group_by("ped_id")
+        .agg(
+            n_points=pl.len(),
+            first_t_ns=pl.col("t_ns").first(),
+            last_t_ns=pl.col("t_ns").last(),
+            path_length_m=(pl.col("x_m").diff().pow(2) + pl.col("y_m").diff().pow(2)).sqrt().sum(),
+            chord_m=chord_m,
+            max_displacement_m=((pl.col("x_m") - first_x_m).pow(2) + (pl.col("y_m") - first_y_m).pow(2)).sqrt().max(),
+            lateral_deviation_m=pl.when(chord_m > DEFLECTION_MIN_CHORD_M).then(lateral_m.mean()).otherwise(None).alias("lateral_deviation_m"),
         )
-        .sqrt()
-        .max(),
-        lateral_deviation_m=pl.when(chord_m > DEFLECTION_MIN_CHORD_M)
-        .then(lateral_m.mean())
-        .otherwise(None)
-        .alias("lateral_deviation_m"),
-    ).select("ped_id", "n_points", "first_t_ns", "last_t_ns", "path_length_m", "chord_m", "max_displacement_m", "lateral_deviation_m")
+        .select("ped_id", "n_points", "first_t_ns", "last_t_ns", "path_length_m", "chord_m", "max_displacement_m", "lateral_deviation_m")
+    )
 
 
 def lateral_deflection_sums(geometry: pl.DataFrame) -> tuple[float, int]:
     """Sum of the per-pedestrian mean lateral deviations and the number of pedestrians they average over."""
     if geometry.height == 0:
         return 0.0, 0
-    qualifying = geometry.filter(
-        (pl.col("n_points") >= PEDESTRIAN_MIN_POINTS)
-        & pl.col("lateral_deviation_m").is_not_null()
-    )
-    total = (
-        0.0
-        if qualifying.height == 0
-        else float(qualifying.select(pl.col("lateral_deviation_m").sum()).item())
-    )
+    qualifying = geometry.filter((pl.col("n_points") >= PEDESTRIAN_MIN_POINTS) & pl.col("lateral_deviation_m").is_not_null())
+    total = 0.0 if qualifying.height == 0 else float(qualifying.select(pl.col("lateral_deviation_m").sum()).item())
     return total, geometry.height
 
 
@@ -130,19 +112,11 @@ def round_trips_completed(geometry: pl.DataFrame, peds: pl.DataFrame) -> int:
     """Completed away-and-return rounds of the pedestrians with enough samples to define one."""
     if geometry.height == 0:
         return 0
-    qualifying_ids = geometry.filter(
-        (pl.col("n_points") >= PEDESTRIAN_MIN_POINTS)
-        & (pl.col("max_displacement_m") > ROUND_TRIP_MIN_DISPLACEMENT_M)
-    ).get_column("ped_id")
+    qualifying_ids = geometry.filter((pl.col("n_points") >= PEDESTRIAN_MIN_POINTS) & (pl.col("max_displacement_m") > ROUND_TRIP_MIN_DISPLACEMENT_M)).get_column("ped_id")
     if len(qualifying_ids) == 0:
         return 0
-    displacement_m = (
-        (pl.col("x_m") - pl.col("x_m").first()).pow(2)
-        + (pl.col("y_m") - pl.col("y_m").first()).pow(2)
-    ).sqrt().over("ped_id")
-    trajectory = _track_frame(peds).filter(pl.col("ped_id").is_in(qualifying_ids.implode())).with_columns(
-        displacement_m=displacement_m
-    )
+    displacement_m = ((pl.col("x_m") - pl.col("x_m").first()).pow(2) + (pl.col("y_m") - pl.col("y_m").first()).pow(2)).sqrt().over("ped_id")
+    trajectory = _track_frame(peds).filter(pl.col("ped_id").is_in(qualifying_ids.implode())).with_columns(displacement_m=displacement_m)
     completed = pedestrian_round_trips_frame(trajectory)
     if completed.height == 0:
         return 0
@@ -155,9 +129,7 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
     NAME = "pedestrian_disturbance"
     CATEGORY = "social"
     SCOPE = MetricScope.PEDESTRIAN
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset(
-        {MetricScope.PEDESTRIAN, MetricScope.EPISODE}
-    )
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.PEDESTRIAN, MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["proxemics"]
     REQUIRED_TOPICS = ["pedestrian_tracks"]
@@ -180,9 +152,7 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         ]
 
     @staticmethod
-    def _compute_trajectory_deflection(
-        actual_coords: np.ndarray, reference_coords: np.ndarray
-    ) -> float:
+    def _compute_trajectory_deflection(actual_coords: np.ndarray, reference_coords: np.ndarray) -> float:
         """Mean distance of the recorded points to their nearest reference point, ignoring non-finite rows."""
         if len(actual_coords) == 0 or len(reference_coords) == 0:
             return 0.0
@@ -217,17 +187,11 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
                 "ped_velocity_delay_ratio": 0.0,
                 "ped_round_trips_completed": 0,
             }
-        span_ns = int(geometry.select(pl.col("last_t_ns").max()).item()) - int(
-            geometry.select(pl.col("first_t_ns").min()).item()
-        )
+        span_ns = int(geometry.select(pl.col("last_t_ns").max()).item()) - int(geometry.select(pl.col("first_t_ns").min()).item())
         prior_deflection = prior_results.get("ped_path_deflection_m")
         return {
-            "ped_path_deflection_m": None
-            if prior_deflection is None
-            else float(prior_deflection),
-            "ped_velocity_delay_ratio": round(
-                velocity_delay_value(geometry, span_ns / 1e9), SUMMED_VALUE_DECIMALS
-            ),
+            "ped_path_deflection_m": None if prior_deflection is None else float(prior_deflection),
+            "ped_velocity_delay_ratio": round(velocity_delay_value(geometry, span_ns / 1e9), SUMMED_VALUE_DECIMALS),
             "ped_round_trips_completed": round_trips_completed(geometry, peds),
         }
 
@@ -262,9 +226,7 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         duration_s = float(span_ns) / 1e9
         return duration_s if duration_s > 0.0 else None
 
-    def calculate(
-        self, episode: AlignedEpisodeBundle, prior_results: typing.Mapping[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: typing.Mapping[str, typing.Any]) -> dict[str, typing.Any]:
         """EPISODE scope: the pedestrian mean of the per-pedestrian geometry."""
         del prior_results
         return self._episode_outputs(episode)

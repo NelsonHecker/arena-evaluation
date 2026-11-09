@@ -99,15 +99,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         pos_x_native, pos_y_native, _yaw, native_times_ns = self.resolve_native_pose(episode)
         if len(native_times_ns) == 0:
             return None
-        reference = (
-            pl.DataFrame({"t_ns": native_times_ns, "_rx": pos_x_native, "_ry": pos_y_native})
-            .drop_nulls()
-            .sort("t_ns")
-        )
-        aligned = (
-            pl.DataFrame({"time_ns": sample_times_ns.astype(np.int64)})
-            .join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
-        )
+        reference = pl.DataFrame({"t_ns": native_times_ns, "_rx": pos_x_native, "_ry": pos_y_native}).drop_nulls().sort("t_ns")
+        aligned = pl.DataFrame({"time_ns": sample_times_ns.astype(np.int64)}).join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
         return aligned["_rx"].to_numpy().astype(np.float64), aligned["_ry"].to_numpy().astype(np.float64)
 
     def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult | None:
@@ -164,11 +157,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         rx_m, ry_m = pose
         robot_valid = ~np.isnan(rx_m) & ~np.isnan(ry_m)
 
-        source_dba = (
-            df["total_level_af_dba"].cast(pl.Float64).fill_null(strategy="forward").fill_null(_ACOUSTIC_DEFAULTS["L_base_0"]).to_numpy()
-            if "total_level_af_dba" in df.columns
-            else np.full(len(time_ns), _ACOUSTIC_DEFAULTS["L_base_0"])
-        )
+        source_dba = df["total_level_af_dba"].cast(pl.Float64).fill_null(strategy="forward").fill_null(_ACOUSTIC_DEFAULTS["L_base_0"]).to_numpy() if "total_level_af_dba" in df.columns else np.full(len(time_ns), _ACOUSTIC_DEFAULTS["L_base_0"])
 
         peds_df = self.native_ped_frame(episode)
         if peds_df is None or "x" not in peds_df.columns:
@@ -215,9 +204,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 should_eval = True
             if not should_eval:
                 robot_moved = np.hypot(rx_m[index] - last_eval_rx, ry_m[index] - last_eval_ry) > POSITION_EVALUATION_THRESHOLD_M
-                pedestrians_changed = len(px_m) != len(last_eval_peds[0]) or np.any(
-                    np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1]) > POSITION_EVALUATION_THRESHOLD_M
-                )
+                pedestrians_changed = len(px_m) != len(last_eval_peds[0]) or np.any(np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1]) > POSITION_EVALUATION_THRESHOLD_M)
                 should_eval = bool(robot_moved or pedestrians_changed)
 
             if should_eval:
@@ -310,11 +297,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     worst_index = index
 
         worst_frame_peds = peds_at_time.get(int(time_ns[worst_index]))
-        worst_points = (
-            list(zip(worst_frame_peds["x"].cast(pl.Float64).to_list(), worst_frame_peds["y"].cast(pl.Float64).to_list(), strict=True))
-            if worst_frame_peds is not None and len(worst_frame_peds) > 0
-            else []
-        )
+        worst_points = list(zip(worst_frame_peds["x"].cast(pl.Float64).to_list(), worst_frame_peds["y"].cast(pl.Float64).to_list(), strict=True)) if worst_frame_peds is not None and len(worst_frame_peds) > 0 else []
         worst_frame = {
             "robot_x": float(rx_m[worst_index]),
             "robot_y": float(ry_m[worst_index]),
@@ -361,9 +344,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         ped_ids: list[str] = []
         exposure: list[float] = []
         attenuation: list[float] = []
-        for index, (ped_id_row, exposure_row, attenuation_row) in enumerate(
-            zip(result.frame_ped_ids, result.frame_exposure_dba, result.frame_attenuation_db, strict=True)
-        ):
+        for index, (ped_id_row, exposure_row, attenuation_row) in enumerate(zip(result.frame_ped_ids, result.frame_exposure_dba, result.frame_attenuation_db, strict=True)):
             for ped_id, exposure_dba, attenuation_db in zip(ped_id_row, exposure_row, attenuation_row, strict=True):
                 frame_index.append(index)
                 t_ns.append(int(result.frame_times_ns[index]))

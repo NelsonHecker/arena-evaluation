@@ -5,7 +5,6 @@ import re
 from typing import Annotated
 
 import pydantic
-
 from arena_mcp.core import Domain, ToolError
 
 domain = Domain(

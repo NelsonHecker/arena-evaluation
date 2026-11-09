@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal
 
 import pydantic
 import yaml
+from arena_mcp.core import ToolError
 
 from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.analytics.evidence import EvidenceStore
@@ -25,7 +26,6 @@ from arena_evaluation.presentation.resolver import (
 )
 from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.storage.schemas import PlotSpec
-from arena_mcp.core import ToolError
 
 from .base import OptionalRunId, YamlText, component, domain, parse_yaml, run_path
 
@@ -46,10 +46,7 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
     try:
         from ament_index_python.packages import get_package_share_directory
 
-        share_dir = (
-            pathlib.Path(get_package_share_directory("arena_evaluation"))
-            / "plot_declarations"
-        )
+        share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "plot_declarations"
         candidates.append(share_dir)
     except Exception:
         pass
@@ -57,9 +54,7 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
     for directory in candidates:
         if not directory.is_dir():
             continue
-        for file_path in sorted(directory.glob("*.yaml")) + sorted(
-            directory.glob("*.yml")
-        ):
+        for file_path in sorted(directory.glob("*.yaml")) + sorted(directory.glob("*.yml")):
             name = file_path.stem
             if name in results:
                 continue
@@ -68,16 +63,8 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
                 if not isinstance(raw, dict) or "type" not in raw:
                     continue
                 spec = PlotSpec.model_validate(raw)
-                source_val = (
-                    spec.data.source
-                    if (spec.data and spec.data.source)
-                    else spec.data_source
-                )
-                stored_query_val = (
-                    spec.data.stored_query
-                    if (spec.data and spec.data.stored_query)
-                    else None
-                )
+                source_val = spec.data.source if (spec.data and spec.data.source) else spec.data_source
+                stored_query_val = spec.data.stored_query if (spec.data and spec.data.stored_query) else None
                 results[name] = {
                     "id": spec.id or name,
                     "title": spec.title,
@@ -95,9 +82,7 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
 
 @domain.tool(read_only=True)
 def evaluation_read_plot_declaration(
-    name: Annotated[
-        str, pydantic.Field(description="Name or stem of registered plot declaration")
-    ],
+    name: Annotated[str, pydantic.Field(description="Name or stem of registered plot declaration")],
 ) -> dict[str, Any]:
     """Read a registered plot declaration YAML document and its validated specification."""
     safe_name = component(name.removesuffix(".yaml").removesuffix(".yml"), "name")
@@ -116,9 +101,7 @@ def evaluation_read_plot_declaration(
     try:
         spec = PlotSpec.model_validate(parsed)
     except Exception as exc:
-        raise ToolError(
-            f"Invalid PlotSpec schema in declaration '{safe_name}': {exc}"
-        ) from exc
+        raise ToolError(f"Invalid PlotSpec schema in declaration '{safe_name}': {exc}") from exc
 
     return {
         "name": safe_name,
@@ -129,9 +112,7 @@ def evaluation_read_plot_declaration(
 
 @domain.tool(read_only=False)
 def evaluation_save_plot_declaration(
-    name: Annotated[
-        str, pydantic.Field(description="Unique identifier for the plot declaration")
-    ],
+    name: Annotated[str, pydantic.Field(description="Unique identifier for the plot declaration")],
     yaml_text: YamlText,
 ) -> dict[str, Any]:
     """Validate against PlotSpec and save a plot declaration recipe to the plot declarations catalog."""
@@ -172,9 +153,7 @@ def evaluation_render_plot(
     *,
     declaration: Annotated[
         str | None,
-        pydantic.Field(
-            description="Name of registered plot recipe/declaration to render"
-        ),
+        pydantic.Field(description="Name of registered plot recipe/declaration to render"),
     ] = None,
     spec_yaml: Annotated[
         str | None,
@@ -182,9 +161,7 @@ def evaluation_render_plot(
     ] = None,
     overrides: Annotated[
         dict[str, Any] | None,
-        pydantic.Field(
-            description="Optional dictionary to deep-merge over declaration"
-        ),
+        pydantic.Field(description="Optional dictionary to deep-merge over declaration"),
     ] = None,
     output_format: Annotated[
         Literal["png", "svg", "pdf", "html"],
@@ -201,9 +178,7 @@ def evaluation_render_plot(
         raise ToolError("Cannot provide both 'declaration' and 'spec_yaml'")
 
     if declaration is not None:
-        safe_decl = component(
-            declaration.removesuffix(".yaml").removesuffix(".yml"), "declaration"
-        )
+        safe_decl = component(declaration.removesuffix(".yaml").removesuffix(".yml"), "declaration")
         recipe_path = find_recipe_path(safe_decl)
         if recipe_path is None:
             raise ToolError(
@@ -217,9 +192,7 @@ def evaluation_render_plot(
         try:
             spec = PlotSpec.model_validate(merged)
         except Exception as exc:
-            raise ToolError(
-                f"Invalid PlotSpec schema in recipe '{safe_decl}': {exc}"
-            ) from exc
+            raise ToolError(f"Invalid PlotSpec schema in recipe '{safe_decl}': {exc}") from exc
     else:
         parsed = parse_yaml(spec_yaml or "", "spec_yaml")
         if not isinstance(parsed, dict):
@@ -270,14 +243,7 @@ def evaluation_render_plot(
         if isinstance(html_body, list):
             html_body = "\n".join(html_body)
 
-        full_html = (
-            "<!DOCTYPE html>\n<html>\n<head>\n"
-            f"<title>{spec.title or clean_stem}</title>\n"
-            '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>\n'
-            "</head>\n<body style='margin: 0; padding: 12px; font-family: sans-serif;'>\n"
-            f"{html_body}\n"
-            "</body>\n</html>\n"
-        )
+        full_html = f"<!DOCTYPE html>\n<html>\n<head>\n<title>{spec.title or clean_stem}</title>\n<script src=\"https://cdn.plot.ly/plotly-2.35.2.min.js\"></script>\n</head>\n<body style='margin: 0; padding: 12px; font-family: sans-serif;'>\n{html_body}\n</body>\n</html>\n"
         out_file.write_text(full_html, encoding="utf-8")
     else:
         static_renderer = StaticRenderer(generate_gifs=False, units={})

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ BUILTIN_ACOUSTIC_PROFILE: typing.Final[AcousticProfile] = AcousticProfile(
 )
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def load_acoustic_profile(model: str) -> AcousticProfile:
     """Per-robot acoustic profile from the arena_robots share directory, the shared profile, else the built-in."""
     from pathlib import Path
@@ -190,7 +190,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         "turn_radius_m": pl.Float64,
     }
 
-    def __init__(self, robot_params: typing.Any) -> None:
+    def __init__(self, robot_params: RobotParams) -> None:
         super().__init__(robot_params)
         self._acoustic_profile = load_acoustic_profile(self.robot_params.model)
 
@@ -229,9 +229,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         """Labels and targets of the schedule that ran, with the signed acceleration each ramp commands."""
         recorded = self.native_topics(episode).get("robot_characterization_schedule")
         if recorded is not None and len(recorded) > 0:
-            table = recorded.select(list(self._SCHEDULE_SCHEMA)).unique(
-                subset=["phase_label"], keep="last", maintain_order=True
-            )
+            table = recorded.select(list(self._SCHEDULE_SCHEMA)).unique(subset=["phase_label"], keep="last", maintain_order=True)
         else:
             logger.warning("characterization: no recorded schedule, rebuilding the default one from the robot envelope")
             table = self._rebuilt_schedule()
@@ -246,11 +244,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         if "label" not in out.columns:
             # No phase markers at all: not a characterization episode, every sample classifies from cmd_vel.
             out = out.with_columns(pl.lit("unknown").alias("phase_label"))
-            phase_map = (
-                pl.DataFrame(schema=self._SCHEDULE_SCHEMA)
-                .drop(["duration_s", "ramp_s"])
-                .with_columns(pl.lit(0.0).alias("accel_target"))
-            )
+            phase_map = pl.DataFrame(schema=self._SCHEDULE_SCHEMA).drop(["duration_s", "ramp_s"]).with_columns(pl.lit(0.0).alias("accel_target"))
         else:
             out = out.with_columns(pl.col("label").fill_null("unknown").alias("phase_label"))
             phase_map = self._phase_map(episode)
@@ -273,52 +267,26 @@ class CharacterizationCalculator(BaseMetricCalculator):
         idle = (cmd_vx == 0.0) & (cmd_vy == 0.0) & (cmd_wz == 0.0)
         lateral = (cmd_vy != 0.0) & (cmd_vx == 0.0) & (cmd_wz == 0.0)
         arc = (cmd_vx != 0.0) & (cmd_wz != 0.0)
-        fallback_kind = (
-            pl.when(idle)
-            .then(pl.lit("idle"))
-            .when(lateral)
-            .then(pl.lit("lateral"))
-            .when(arc)
-            .then(pl.lit("arc"))
-            .when(cmd_wz != 0.0)
-            .then(pl.lit("angular"))
-            .otherwise(pl.lit("linear"))
-        )
+        fallback_kind = pl.when(idle).then(pl.lit("idle")).when(lateral).then(pl.lit("lateral")).when(arc).then(pl.lit("arc")).when(cmd_wz != 0.0).then(pl.lit("angular")).otherwise(pl.lit("linear"))
         out = out.with_columns(
             pl.col("phase_kind").fill_null(fallback_kind).alias("phase_kind"),
             pl.col("vx_target").fill_null(cmd_vx).alias("vx_target"),
             pl.col("vy_target").fill_null(cmd_vy).alias("vy_target"),
             pl.col("wz_target").fill_null(cmd_wz).alias("wz_target"),
             pl.col("accel_target").fill_null(0.0).alias("accel_target"),
-            pl.col("turn_radius_m")
-            .fill_null(pl.when((cmd_vx.abs() >= 0.05) & (cmd_wz.abs() >= 0.05)).then(cmd_vx.abs() / cmd_wz.abs()).otherwise(0.0))
-            .alias("turn_radius_m"),
+            pl.col("turn_radius_m").fill_null(pl.when((cmd_vx.abs() >= 0.05) & (cmd_wz.abs() >= 0.05)).then(cmd_vx.abs() / cmd_wz.abs()).otherwise(0.0)).alias("turn_radius_m"),
         )
 
         # Split the transient windows off the steady-state part of every dwell:
         # the accelerating head, plus the trailing decel/cutoff on long blocks.
         if "time_ns" in out.columns and len(out) > 0:
-            out = out.with_columns(
-                (
-                    (pl.col("phase_label") != pl.col("phase_label").shift(1))
-                    | (pl.col("vx_target") != pl.col("vx_target").shift(1))
-                    | (pl.col("vy_target") != pl.col("vy_target").shift(1))
-                    | (pl.col("wz_target") != pl.col("wz_target").shift(1))
-                )
-                .fill_null(True)
-                .cum_sum()
-                .alias("_phase_block_id")
-            )
+            out = out.with_columns(((pl.col("phase_label") != pl.col("phase_label").shift(1)) | (pl.col("vx_target") != pl.col("vx_target").shift(1)) | (pl.col("vy_target") != pl.col("vy_target").shift(1)) | (pl.col("wz_target") != pl.col("wz_target").shift(1))).fill_null(True).cum_sum().alias("_phase_block_id"))
             out = out.with_columns(
                 ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).alias("_phase_elapsed_s"),
                 ((pl.col("time_ns").max().over("_phase_block_id") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).alias("_phase_total_duration_s"),
             )
             is_settle = pl.col("phase_label").str.contains("settle")
-            is_transient_dwell = (
-                pl.col("phase_label").str.starts_with("linear_vx_")
-                | pl.col("phase_label").str.starts_with("lateral_vy_")
-                | pl.col("phase_label").str.starts_with("arc_vx_")
-            )
+            is_transient_dwell = pl.col("phase_label").str.starts_with("linear_vx_") | pl.col("phase_label").str.starts_with("lateral_vy_") | pl.col("phase_label").str.starts_with("arc_vx_")
             is_angular_dwell = pl.col("phase_label").str.starts_with("angular_wz_")
             is_long_block = pl.col("_phase_total_duration_s") >= 4.0
             tail_s = pl.min_horizontal(pl.lit(0.8), pl.col("_phase_total_duration_s") * 0.15)
@@ -409,11 +377,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             out = out.join(joints, on="time_ns", how="left").with_columns(
                 pl.col("_omega_eq").clip(lower_bound=profile.omega_active_radps),
             )
-            p_drive = (
-                (10.0 ** (profile.beta_0_db / 10.0))
-                * (pl.col("_omega_eq") / profile.omega_ref_radps) ** (profile.beta_1_db / 10.0)
-                * (1.0 + pl.col("_t_eq") / profile.tau_ref_nm) ** (profile.beta_2_db / 10.0)
-            )
+            p_drive = (10.0 ** (profile.beta_0_db / 10.0)) * (pl.col("_omega_eq") / profile.omega_ref_radps) ** (profile.beta_1_db / 10.0) * (1.0 + pl.col("_t_eq") / profile.tau_ref_nm) ** (profile.beta_2_db / 10.0)
             out = out.with_columns((10.0 * ((10.0 ** (profile.l_base_0_db / 10.0)) + p_drive).log10()).alias("_dba"))
 
         return out

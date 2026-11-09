@@ -9,12 +9,12 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import pydantic
+from arena_mcp.core import ToolError
 
 from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.analytics.evidence import EvidenceStore
 from arena_evaluation.analytics.queries import QueryCatalog, QueryDeclaration
 from arena_evaluation.analytics.sql_engine import PolarsSQLEngine, validate_readonly_sql
-from arena_mcp.core import ToolError
 
 from .base import OptionalRunId, component, domain, run_path
 

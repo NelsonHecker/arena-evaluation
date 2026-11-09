@@ -5,7 +5,6 @@ import pathlib
 from typing import Annotated, Any, Literal
 
 import pydantic
-
 from arena_mcp.core import ToolError
 
 from .base import OptionalRunId, domain, run_path

@@ -147,14 +147,7 @@ def frame_geometry(
     if peds is None or robot_tracks is None or peds.height == 0 or robot_tracks.height == 0:
         return empty_frame_geometry()
 
-    frames = (
-        peds.select(pl.col("t_ns").cast(pl.Int64))
-        .unique()
-        .sort("t_ns")
-        .with_row_index("frame_ix")
-        .with_columns(dt_s=_frame_step_s())
-        .with_columns(dt_s=_integration_step_s())
-    )
+    frames = peds.select(pl.col("t_ns").cast(pl.Int64)).unique().sort("t_ns").with_row_index("frame_ix").with_columns(dt_s=_frame_step_s()).with_columns(dt_s=_integration_step_s())
     sampled = frames.join_asof(
         robot_track_state(robot_tracks),
         left_on="t_ns",
@@ -195,9 +188,7 @@ def nearest_pedestrian_frames(geometry: FrameGeometry) -> pl.DataFrame:
     """
     if geometry.pedestrians.height == 0:
         return pl.DataFrame(schema=PEDESTRIAN_FRAME_SCHEMA)
-    ranked = geometry.pedestrians.filter(pl.col("distance_m").is_not_null()).with_columns(
-        distance_rank=pl.col("distance_m").rank("ordinal").over("frame_ix")
-    )
+    ranked = geometry.pedestrians.filter(pl.col("distance_m").is_not_null()).with_columns(distance_rank=pl.col("distance_m").rank("ordinal").over("frame_ix"))
     nearest = ranked.filter(pl.col("distance_rank") == 1).drop("distance_rank")
     return nearest.join(
         geometry.frames.select("frame_ix", "dt_s", "robot_vx_mps", "robot_vy_mps", "robot_speed_mps"),
@@ -283,4 +274,3 @@ def pedestrians_at(time_ns: pl.Series, peds: pl.DataFrame, tolerance_ns: int = A
     robot_times = pl.DataFrame({"time_ns": time_ns.cast(pl.Int64)}).sort("time_ns")
     matched = robot_times.join_asof(frames, left_on="time_ns", right_on="frame_ns", strategy="backward", tolerance=tolerance_ns)
     return matched.drop_nulls("frame_ns").join(peds, left_on="frame_ns", right_on="t_ns", how="inner")
-

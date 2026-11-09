@@ -87,11 +87,7 @@ class HierarchyRenderer(BasePlot):
         select_cols = list(dict.fromkeys(path_cols + ([values_col] if values_col else []) + ([color_col] if color_col else [])))
         selected = df_clean.select(select_cols)
         mode = str(self.spec.options.get("mode", "treemap")).lower()
-        fig = (
-            px.sunburst(selected, path=path_cols, values=values_col, color=color_col, title=self.spec.title or None)
-            if mode == "sunburst"
-            else px.treemap(selected, path=path_cols, values=values_col, color=color_col, title=self.spec.title or None)
-        )
+        fig = px.sunburst(selected, path=path_cols, values=values_col, color=color_col, title=self.spec.title or None) if mode == "sunburst" else px.treemap(selected, path=path_cols, values=values_col, color=color_col, title=self.spec.title or None)
         fig.update_layout(template="plotly_white", margin=dict(t=50 if self.spec.title else 30, b=30, l=30, r=30))
         return fig.to_html(include_plotlyjs=False, full_html=False)
 

@@ -49,26 +49,13 @@ SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
 
 def _anisotropy(angle_rad: pl.Expr) -> pl.Expr:
     """Extended-SFM anisotropy weight in [0, 1] of a heading angle difference."""
-    return (ESFM_ANISOTROPY + (1.0 - ESFM_ANISOTROPY) * (1.0 + angle_rad.cos()) / 2.0).clip(
-        0.0, 1.0
-    )
+    return (ESFM_ANISOTROPY + (1.0 - ESFM_ANISOTROPY) * (1.0 + angle_rad.cos()) / 2.0).clip(0.0, 1.0)
 
 
 def _force_expression(combined_radius_m: float) -> pl.Expr:
     """Helbing repulsive magnitude of one pedestrian, clamped, zero beyond the cutoff, null while unresolved."""
     distance_m = pl.col("distance_m")
-    return (
-        pl.when(distance_m.is_null())
-        .then(pl.lit(None, dtype=pl.Float64))
-        .when(distance_m <= SFM_CUTOFF_M)
-        .then(
-            (
-                SFM_INTERACTION_STRENGTH_N
-                * ((combined_radius_m - distance_m) / SFM_INTERACTION_RANGE_M).exp()
-            ).clip(upper_bound=SFM_MAX_FORCE_N)
-        )
-        .otherwise(0.0)
-    )
+    return pl.when(distance_m.is_null()).then(pl.lit(None, dtype=pl.Float64)).when(distance_m <= SFM_CUTOFF_M).then((SFM_INTERACTION_STRENGTH_N * ((combined_radius_m - distance_m) / SFM_INTERACTION_RANGE_M).exp()).clip(upper_bound=SFM_MAX_FORCE_N)).otherwise(0.0)
 
 
 def _personal_space_index_expression() -> pl.Expr:
@@ -77,31 +64,14 @@ def _personal_space_index_expression() -> pl.Expr:
     heading_sin = pl.col("ped_yaw_rad").sin()
     d_front_m = pl.col("dx_m") * heading_cos + pl.col("dy_m") * heading_sin
     d_side_m = -pl.col("dx_m") * heading_sin + pl.col("dy_m") * heading_cos
-    positional_exponent = -(
-        pl.col("dx_m").pow(2) / (2.0 * CI_SIGMA_X_M**2)
-        + pl.col("dy_m").pow(2) / (2.0 * CI_SIGMA_Y_M**2)
-    )
-    heading_exponent = -(
-        d_front_m.pow(2) / (2.0 * CI_SIGMA_FRONT_M**2)
-        + d_side_m.pow(2) / (2.0 * CI_SIGMA_SIDE_M**2)
-    )
-    return (
-        pl.when(pl.col("ped_yaw_rad").is_null())
-        .then(positional_exponent)
-        .otherwise(heading_exponent)
-        .exp()
-    )
+    positional_exponent = -(pl.col("dx_m").pow(2) / (2.0 * CI_SIGMA_X_M**2) + pl.col("dy_m").pow(2) / (2.0 * CI_SIGMA_Y_M**2))
+    heading_exponent = -(d_front_m.pow(2) / (2.0 * CI_SIGMA_FRONT_M**2) + d_side_m.pow(2) / (2.0 * CI_SIGMA_SIDE_M**2))
+    return pl.when(pl.col("ped_yaw_rad").is_null()).then(positional_exponent).otherwise(heading_exponent).exp()
 
 
 def _frame_value(column: str, resolved: str) -> pl.Expr:
     """A frame's pedestrian-derived value: zero without pedestrians, null while the robot state is unresolved."""
-    return (
-        pl.when(~pl.col("has_pedestrians"))
-        .then(pl.lit(0.0))
-        .when(~pl.col(resolved))
-        .then(pl.lit(None, dtype=pl.Float64))
-        .otherwise(pl.col(column))
-    )
+    return pl.when(~pl.col("has_pedestrians")).then(pl.lit(0.0)).when(~pl.col(resolved)).then(pl.lit(None, dtype=pl.Float64)).otherwise(pl.col(column))
 
 
 def _integral_expression(value: str) -> pl.Expr:
@@ -187,18 +157,8 @@ class SocialForcesCalculator(BaseMetricCalculator):
     def _frame_forces(self, geometry: FrameGeometry) -> pl.DataFrame:
         """Per-frame social force totals and personal-space index, one row per pedestrian frame."""
         force_n = _force_expression(self._combined_radius_m)
-        robot_anisotropy = _anisotropy(
-            pl.col("robot_yaw_rad") - pl.arctan2(pl.col("dy_m"), pl.col("dx_m"))
-        )
-        pedestrian_anisotropy = (
-            pl.when(pl.col("ped_yaw_rad").is_null())
-            .then(pl.lit(1.0))
-            .otherwise(
-                _anisotropy(
-                    pl.col("ped_yaw_rad") - pl.arctan2(-pl.col("dy_m"), -pl.col("dx_m"))
-                )
-            )
-        )
+        robot_anisotropy = _anisotropy(pl.col("robot_yaw_rad") - pl.arctan2(pl.col("dy_m"), pl.col("dx_m")))
+        pedestrian_anisotropy = pl.when(pl.col("ped_yaw_rad").is_null()).then(pl.lit(1.0)).otherwise(_anisotropy(pl.col("ped_yaw_rad") - pl.arctan2(-pl.col("dy_m"), -pl.col("dx_m"))))
         contributions = geometry.pedestrians.with_columns(
             force_n=force_n,
             esfm_force_n=force_n * robot_anisotropy,
@@ -245,9 +205,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
             "ci_max",
             "ci_mean",
         )
-        if frame_forces.height == 0 or frame_forces.select(
-            pl.col("sfm_force_n").is_not_null().any()
-        ).item() is not True:
+        if frame_forces.height == 0 or frame_forces.select(pl.col("sfm_force_n").is_not_null().any()).item() is not True:
             return dict.fromkeys(keys)
         row = frame_forces.select(
             sfm_cumulative_force=_integral_expression("sfm_force_n"),
@@ -262,10 +220,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
             ci_max=pl.col("ci").drop_nulls().max(),
             ci_mean=pl.col("ci").drop_nulls().mean(),
         ).row(0, named=True)
-        return {
-            key: None if row[key] is None else float(row[key])
-            for key in keys
-        }
+        return {key: None if row[key] is None else float(row[key]) for key in keys}
 
     def _episode_metrics(self, episode: AlignedEpisodeBundle) -> dict[str, float | None]:
         """Every social-force output over the given episode view."""
@@ -281,9 +236,7 @@ class SocialForcesCalculator(BaseMetricCalculator):
             "social_force_ped_mean": aggregate["esfm_ped_mean_force"],
         }
 
-    def calculate(
-        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         """Compute the episode-scope social forces over the bundle's own pedestrian frames."""
         del prior_results
         return self._episode_metrics(episode)

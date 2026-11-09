@@ -4,7 +4,6 @@ import math
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import pydantic
-
 from arena_mcp.core import ToolError
 from arena_mcp.core.msgs import jsonable
 
@@ -201,10 +200,7 @@ def correlation_frame(frame: pl.DataFrame, metrics: list[str]) -> dict[str, Any]
     correlation = work.corr()
     matrix: dict[str, dict[str, float | None]] = {}
     for row_index, row in enumerate(correlation.columns):
-        matrix[row] = {
-            col: round(value, 3) if value is not None and math.isfinite(value) else None
-            for col, value in zip(correlation.columns, correlation.row(row_index), strict=True)
-        }
+        matrix[row] = {col: round(value, 3) if value is not None and math.isfinite(value) else None for col, value in zip(correlation.columns, correlation.row(row_index), strict=True)}
     return {"metrics": metrics, "correlation_matrix": matrix}
 
 

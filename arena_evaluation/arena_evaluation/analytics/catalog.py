@@ -179,6 +179,7 @@ _ENCOUNTER_MEAN_METRICS: Final[tuple[str, ...]] = (
 def _to_lazy(frame: pl.LazyFrame | pl.DataFrame) -> pl.LazyFrame:
     return frame.lazy() if isinstance(frame, pl.DataFrame) else frame
 
+
 def _sync_bidirectional_aliases(lf: pl.LazyFrame, pairs: Sequence[tuple[str, str]]) -> pl.LazyFrame:
     """Ensure both column names in each `(col_a, col_b)` pair exist if either is present."""
     schema_names = set(lf.collect_schema().names())
@@ -365,19 +366,8 @@ class BenchmarkCatalog:
         # names carry the inter-planner suffix, the local planner is the first
         # segment for a plain name and the middle segment for a three-part name.
         planner_parts = pl.col("planner").str.split("-")
-        local_planner = (
-            pl.when(pl.col("planner").is_null() | (pl.col("planner") == ""))
-            .then(pl.lit("unknown"))
-            .when(planner_parts.list.len() >= 3)
-            .then(planner_parts.list.get(1, null_on_oob=True))
-            .otherwise(planner_parts.list.get(0, null_on_oob=True))
-            .alias("local_planner")
-        )
-        v_episode_summary = (
-            fact_ep.join(dim_ep.select(_DIM_EPISODE_VIEW_COLS), on=list(_JOIN_KEYS), how="left")
-            .join(dim_rob.select(_DIM_ROBOT_VIEW_COLS), on=list(_JOIN_KEYS), how="left")
-            .with_columns(local_planner)
-        )
+        local_planner = pl.when(pl.col("planner").is_null() | (pl.col("planner") == "")).then(pl.lit("unknown")).when(planner_parts.list.len() >= 3).then(planner_parts.list.get(1, null_on_oob=True)).otherwise(planner_parts.list.get(0, null_on_oob=True)).alias("local_planner")
+        v_episode_summary = fact_ep.join(dim_ep.select(_DIM_EPISODE_VIEW_COLS), on=list(_JOIN_KEYS), how="left").join(dim_rob.select(_DIM_ROBOT_VIEW_COLS), on=list(_JOIN_KEYS), how="left").with_columns(local_planner)
         self._tables["v_episode_summary"] = v_episode_summary
 
         enc_counts = fact_enc.group_by(_JOIN_KEYS).agg(encounter_count=pl.len().cast(pl.Int64))

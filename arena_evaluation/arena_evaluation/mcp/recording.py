@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 import pydantic
-
 from arena_mcp.core import LATCHED, ROS, ToolError, msgs, tg
 
 from .base import domain

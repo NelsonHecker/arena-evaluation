@@ -39,11 +39,7 @@ class HistogramRenderer(BasePlotRenderer):
             return None
         centers, series = binned
         color_arg = color_col if len(series) > 1 or series[0][0] else None
-        counts_df = (
-            pl.concat([pl.DataFrame({"bin_center": centers, "count": counts, color_col: label}) for label, counts in series])
-            if color_arg
-            else pl.DataFrame({"bin_center": centers, "count": series[0][1]})
-        )
+        counts_df = pl.concat([pl.DataFrame({"bin_center": centers, "count": counts, color_col: label}) for label, counts in series]) if color_arg else pl.DataFrame({"bin_center": centers, "count": series[0][1]})
 
         fig = px.area(counts_df, x="bin_center", y="count", color=color_arg, template="plotly_white")
         fig.update_traces(opacity=float(self.spec.options.get("opacity", 0.6)), line=dict(shape="spline", smoothing=0.8))

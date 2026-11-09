@@ -76,9 +76,7 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
         if missing:
             raise ValueError(f"pedestrian_tracks lacks {missing}; the telemetry contract is (t_ns, ped_id, x, y, z, yaw, vx, vy, speed_mps)")
 
-        present = tracks.filter(
-            pl.col("x").is_not_null() & ~pl.col("x").is_nan() & pl.col("y").is_not_null() & ~pl.col("y").is_nan()
-        ).sort(["t_ns", "ped_id"])
+        present = tracks.filter(pl.col("x").is_not_null() & ~pl.col("x").is_nan() & pl.col("y").is_not_null() & ~pl.col("y").is_nan()).sort(["t_ns", "ped_id"])
         if present.height == 0:
             return pl.DataFrame(schema=SERIES_SCHEMA)
 

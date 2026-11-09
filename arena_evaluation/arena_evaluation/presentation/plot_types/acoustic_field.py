@@ -681,10 +681,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 if tf_static_pq.exists():
                     try:
                         tf_static_df = pl.read_parquet(tf_static_pq)
-                        matches = tf_static_df.filter(
-                            (pl.col("parent_frame").str.to_lowercase().is_in(["map", "world", "odom", ""]))
-                            & (pl.col("child_frame").str.contains(r"^env_\d+(?:/map)?$"))
-                        )
+                        matches = tf_static_df.filter((pl.col("parent_frame").str.to_lowercase().is_in(["map", "world", "odom", ""])) & (pl.col("child_frame").str.contains(r"^env_\d+(?:/map)?$")))
                         if len(matches) > 0:
                             ox = float(matches["tx"][0])
                             oy = float(matches["ty"][0])

@@ -20,7 +20,6 @@ from arena_evaluation.processing.metrics.base import (
 from arena_evaluation.storage.exceptions import CircularDependencyError
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
-
 _SERIES_STEM_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 
 
@@ -112,11 +111,7 @@ class MetricRegistry:
     def series_calculators(self) -> list[tuple[str, BaseMetricCalculator]]:
         """Registered calculators publishing a 1NF series table, with their table stem, ordered by stem."""
         return sorted(
-            (
-                (calc.SERIES_TABLE_STEM or _series_table_stem(type(calc).__name__), calc)
-                for calc in self.calculators.values()
-                if type(calc).series_table is not BaseMetricCalculator.series_table
-            ),
+            ((calc.SERIES_TABLE_STEM or _series_table_stem(type(calc).__name__), calc) for calc in self.calculators.values() if type(calc).series_table is not BaseMetricCalculator.series_table),
             key=lambda item: item[0],
         )
 

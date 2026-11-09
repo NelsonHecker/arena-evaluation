@@ -6,7 +6,6 @@ import pathlib
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import pydantic
-
 from arena_mcp.core import ToolError
 
 from .base import YamlText, config_stem, domain, parse_yaml, run_path
