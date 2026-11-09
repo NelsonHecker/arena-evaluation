@@ -30,6 +30,7 @@ __all__ = [
 def evaluation_query(
     run_id: OptionalRunId = None,
     query: Annotated[str | None, pydantic.Field(description="Ad-hoc read-only SQL query to execute")] = None,
+    *,
     stored_query: Annotated[str | None, pydantic.Field(description="Name of stored query declaration to execute")] = None,
     params: Annotated[dict[str, Any] | None, pydantic.Field(description="Parameters for stored query or SQL placeholders")] = None,
     pin_evidence: Annotated[bool, pydantic.Field(description="Persist query result as content-addressed evidence")] = False,
@@ -122,6 +123,7 @@ def evaluation_query_save(
     name: Annotated[str, pydantic.Field(description="Unique identifier for the query declaration")],
     description: Annotated[str, pydantic.Field(description="Description of what this analytical query computes")],
     sql: Annotated[str, pydantic.Field(description="Read-only SQL statement with optional :param placeholders")],
+    *,
     parameters: Annotated[dict[str, Any] | None, pydantic.Field(description="Parameter declarations with types and defaults")] = None,
     title: Annotated[str | None, pydantic.Field(description="Human-readable title")] = None,
 ) -> dict[str, Any]:

@@ -27,25 +27,25 @@ def test_metadata(converted: Path):
 
 def test_frames_carry_scan_pose_velocity_and_command_per_step(converted: Path):
     frames = RecordedEpisodes(converted).frames(0)
-    row = frames.row(5, named=True)
-    assert row["scan_min"] == pytest.approx(scan_ranges(5)[1])
-    assert (row["pos_x"], row["pos_y"], row["yaw"]) == pytest.approx(pose(5))
-    assert (row["vel_linear"], row["vel_angular"]) == pytest.approx((velocity(5)[0], velocity(5)[2]))
-    assert (row["linear_x"], row["angular_z"]) == pytest.approx(cmd_vel(4))
+    assert frames["scan_min"][5] == pytest.approx(scan_ranges(5)[1])
+    assert (frames["pos_x"][5], frames["pos_y"][5], frames["yaw"][5]) == pytest.approx(pose(5))
+    assert (frames["vel_linear"][5], frames["vel_angular"][5]) == pytest.approx((velocity(5)[0], velocity(5)[2]))
+    assert (frames["linear_x"][5], frames["angular_z"][5]) == pytest.approx(cmd_vel(4))
     assert frames["linear_x"][0] is None
 
 
 def test_frames_match_extracted_topics(converted: Path):
     import polars as pl
+    from polars.testing import assert_series_equal
 
     frames = RecordedEpisodes(converted).frames(0)
     odom = pl.read_parquet(converted / TOPICS / "robot_odom.parquet").sort("t_ns")
     scan = pl.read_parquet(converted / TOPICS / "robot_scan_summary.parquet").sort("t_ns")
-    assert frames["pos_x"].to_list() == odom["odom_x"].to_list()
-    assert frames["pos_y"].to_list() == odom["odom_y"].to_list()
-    assert frames["yaw"].to_list() == odom["odom_yaw"].to_list()
-    assert frames["scan_min"].to_list() == scan["scan_min_m"].to_list()
-    assert frames["scan_range_max"].to_list() == scan["range_max_m"].to_list()
+    assert_series_equal(frames["pos_x"], odom["odom_x"], check_names=False)
+    assert_series_equal(frames["pos_y"], odom["odom_y"], check_names=False)
+    assert_series_equal(frames["yaw"], odom["odom_yaw"], check_names=False)
+    assert_series_equal(frames["scan_min"], scan["scan_min_m"], check_names=False)
+    assert_series_equal(frames["scan_range_max"], scan["range_max_m"], check_names=False)
 
 
 def test_missing_episode_raises(converted: Path):
