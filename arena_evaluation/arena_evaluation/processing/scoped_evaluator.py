@@ -288,6 +288,12 @@ _FORMATION_LIST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("member", "edge_case_formation_members"),
     ("absent", "edge_case_formation_absent"),
 )
+_EDGE_CASE_ELEMENT_COLUMNS: Final[tuple[str, ...]] = tuple(
+    key for _, key in _EDGE_CASE_LIST_FIELDS
+)
+_FORMATION_ELEMENT_COLUMNS: Final[tuple[str, ...]] = tuple(
+    key for _, key in _FORMATION_LIST_FIELDS
+)
 _MECHANISM_FIELDS: Final[tuple[str, ...]] = ("locked", "progress")
 
 
@@ -296,6 +302,20 @@ def _sequence(value: object) -> list[object]:
     if isinstance(value, list):
         return typing.cast(list[object], value)
     return []
+
+
+def _with_element_columns(
+    frame: pl.DataFrame, columns: tuple[str, ...]
+) -> pl.DataFrame:
+    """Add the element columns a sparse list made absent, as null strings."""
+    return frame.with_columns(
+        [
+            pl.col(column)
+            if column in frame.columns
+            else pl.lit(None, dtype=pl.String).alias(column)
+            for column in columns
+        ]
+    )
 
 
 def _event_time_ns(episode: AlignedEpisodeBundle) -> np.ndarray:
@@ -1483,7 +1503,9 @@ class ScopedEvaluator:
             parts.append(part)
         if not parts:
             return pl.DataFrame(schema=EDGE_CASE_FACT_SCHEMA)
-        frame = pl.concat(parts, how="diagonal_relaxed").with_columns(
+        frame = _with_element_columns(
+            pl.concat(parts, how="diagonal_relaxed"), _EDGE_CASE_ELEMENT_COLUMNS
+        ).with_columns(
             run_id=pl.lit(run_id, dtype=pl.String),
             episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
             robot_id=pl.lit(robot_id, dtype=pl.String),
@@ -1516,7 +1538,9 @@ class ScopedEvaluator:
             )
         if not parts:
             return pl.DataFrame(schema=FORMATION_FACT_SCHEMA)
-        frame = pl.concat(parts, how="diagonal_relaxed").with_columns(
+        frame = _with_element_columns(
+            pl.concat(parts, how="diagonal_relaxed"), _FORMATION_ELEMENT_COLUMNS
+        ).with_columns(
             run_id=pl.lit(run_id, dtype=pl.String),
             episode_id=pl.lit(int(episode_id), dtype=pl.Int64),
             robot_id=pl.lit(robot_id, dtype=pl.String),
