@@ -53,18 +53,64 @@ _STAR_RUN_COLUMN = "run_id"
 _STAR_EPISODE_COLUMN = "episode_id"
 _STAR_ROBOT_COLUMN = "robot_id"
 
-STAR_TABLES: tuple[str, ...] = (
-    "dim_episodes",
+_REQUIRED_FACT_TABLES: tuple[str, ...] = (
     "fact_episodes",
     "fact_encounters",
     "fact_contacts",
     "fact_pedestrians",
     "fact_robots",
 )
-_ROBOT_KEYED_TABLES: frozenset[str] = frozenset({"fact_episodes", "fact_encounters", "fact_contacts", "fact_robots"})
-_FACT_TABLES: tuple[str, ...] = ("fact_episodes", "fact_encounters", "fact_contacts", "fact_pedestrians", "fact_robots")
+_CHILD_FACT_TABLES: tuple[str, ...] = (
+    "fact_edge_cases",
+    "fact_formations",
+    "fact_phase_outcomes",
+    "fact_judge_disagreements",
+    "fact_mechanism_states",
+    "fact_collisions",
+)
+STAR_TABLES: tuple[str, ...] = (
+    "dim_episodes",
+    *_REQUIRED_FACT_TABLES,
+    *_CHILD_FACT_TABLES,
+)
+_ROBOT_KEYED_TABLES: frozenset[str] = frozenset(
+    {
+        "fact_episodes",
+        "fact_encounters",
+        "fact_contacts",
+        "fact_robots",
+        *_CHILD_FACT_TABLES,
+    }
+)
+# Child tables are optional: a run processed before they landed carries only the five
+# scoped fact tables and must still certify.
+_FACT_TABLES: tuple[str, ...] = (*_REQUIRED_FACT_TABLES, *_CHILD_FACT_TABLES)
 _KEY_COLUMNS: frozenset[str] = frozenset(
-    {"run_id", "episode_id", "env_id", "robot_id", "ped_id", "encounter_id", "contact_id", "null_reason"}
+    {
+        "run_id",
+        "episode_id",
+        "env_id",
+        "robot_id",
+        "ped_id",
+        "encounter_id",
+        "contact_id",
+        "null_reason",
+        "case_idx",
+        "formation_idx",
+        "phase_idx",
+        "disagreement_idx",
+        "ordinal",
+        "collision_idx",
+        "entity",
+        "level",
+        "kind",
+        "field",
+        "role",
+        "t_ns",
+        "value",
+        "x_m",
+        "y_m",
+    }
 )
 
 
@@ -592,8 +638,8 @@ def load_benchmark_artifacts(benchmark_dir: pathlib.Path) -> BenchmarkArtifacts:
     """Read the legacy frame and all star tables of one processed benchmark run."""
     root = benchmark_dir.resolve()
     missing = [name for name in ("combined_metrics.parquet", "dim_episodes.parquet") if not (root / name).is_file()]
-    fact_paths = {name: _fact_table_path(root, name) for name in _FACT_TABLES}
-    missing.extend(name for name, path in fact_paths.items() if path is None)
+    required_paths = {name: _fact_table_path(root, name) for name in _REQUIRED_FACT_TABLES}
+    missing.extend(name for name, path in required_paths.items() if path is None)
     if missing:
         raise ParityInputError(
             f"{root} is not a dual-path benchmark: missing {', '.join(missing)}. "
@@ -601,9 +647,12 @@ def load_benchmark_artifacts(benchmark_dir: pathlib.Path) -> BenchmarkArtifacts:
             "`arena evaluation process --benchmark-dir <dir> --workers 1` so both artifacts are written in one pass."
         )
     star: dict[str, pl.DataFrame] = {"dim_episodes": pl.read_parquet(root / "dim_episodes.parquet")}
-    for name, path in fact_paths.items():
-        assert path is not None
-        star[name] = pl.read_parquet(path)
+    for name in _FACT_TABLES:
+        path = _fact_table_path(root, name)
+        if path is None and name in _REQUIRED_FACT_TABLES:
+            raise ParityInputError(f"{root} is not a dual-path benchmark: missing {name}")
+        if path is not None:
+            star[name] = pl.read_parquet(path)
     return BenchmarkArtifacts(benchmark_dir=root, legacy=pl.read_parquet(root / "combined_metrics.parquet"), star=star)
 
 
@@ -655,7 +704,9 @@ def _legacy_value_expression(mapping: MetricMapping) -> pl.Expr:
 
 
 def _star_value_frame(artifacts: BenchmarkArtifacts, mapping: MetricMapping) -> pl.DataFrame | None:
-    frame = artifacts.star[mapping.star_table]
+    frame = artifacts.star.get(mapping.star_table)
+    if frame is None:
+        return None
     names = _schema_names(frame)
     if mapping.star_column not in names:
         return None
@@ -695,12 +746,17 @@ def _legacy_value_frame(artifacts: BenchmarkArtifacts, mapping: MetricMapping) -
 
 
 def _null_reason_frame(artifacts: BenchmarkArtifacts, star_table: str) -> pl.DataFrame:
+    """One provenance row per joined key, so a reduced star frame is not expanded by the join."""
     frame = artifacts.star[star_table]
     names = _schema_names(frame)
     keys = _star_keys(star_table)
     if "null_reason" not in names:
         return frame.select([*keys]).with_columns(pl.lit(None, dtype=pl.String).alias("star_null_reason"))
-    return frame.select([*keys, pl.col("null_reason").alias("star_null_reason")])
+    return (
+        frame.select([*keys, pl.col("null_reason").alias("star_null_reason")])
+        .group_by(list(keys))
+        .agg(pl.col("star_null_reason").drop_nulls().first())
+    )
 
 
 def _join_comparison_frame(*, legacy: pl.DataFrame, star: pl.DataFrame, keys: tuple[str, ...]) -> pl.DataFrame:
@@ -1058,6 +1114,8 @@ def _star_column_index(artifacts: BenchmarkArtifacts) -> Mapping[str, tuple[tupl
     """Produced column name -> (star table, dtype) pairs across the dimension and all fact tables."""
     index: dict[str, list[tuple[str, str]]] = {}
     for table in ("dim_episodes", *_FACT_TABLES):
+        if table not in artifacts.star:
+            continue
         for column, dtype in artifacts.star[table].collect_schema().items():
             index.setdefault(column, []).append((table, str(dtype)))
     return {name: tuple(locations) for name, locations in index.items()}
@@ -1079,6 +1137,8 @@ def _unmapped_star_columns(*, artifacts: BenchmarkArtifacts, mappings: tuple[Met
     mapped: set[tuple[str, str]] = {(mapping.star_table, mapping.star_column) for mapping in mappings}
     rows: list[UnmappedStarColumn] = []
     for table in _FACT_TABLES:
+        if table not in artifacts.star:
+            continue
         schema = artifacts.star[table].collect_schema()
         for column, dtype in schema.items():
             if column in _KEY_COLUMNS or column.endswith(("_ns", "_id")) or (table, column) in mapped or not _is_numeric(dtype):

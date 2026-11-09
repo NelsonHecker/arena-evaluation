@@ -1,0 +1,49 @@
+benchmark_dir: /opt/arena_ws/data/benchmarks/parity-g1-child-full
+run_ids:
+- parity-g1-child-full
+inventory_keys: 267
+compared_metric_mappings: 84
+mapped_keys: 81
+expected_diff_entries: 34
+expected_diff_pending: 10
+relocated_series_keys: 48
+structural_replacements: 5
+list_violation_keys: 0
+min_nonnull_episodes: 3
+legacy_episode_rows: 24
+star_episode_rows: 6
+status_counts:
+  EXACT: 79
+  WITHIN_TOL: 1
+  EXPECTED_DIFF: 0
+  UNMAPPED: 134
+  NO_PRODUCER: 4
+  MISSING_LEGACY: 0
+  NULL_REASON: 0
+  RELOCATED_SERIES: 48
+  CERT_NULL_ONLY: 4
+  INSUFFICIENT_EVIDENCE: 0
+  MISMATCH: 0
+unmapped_count: 134
+no_producer_count: 4
+gap_owner_counts:
+  parity-g1: 1
+  port-eco: 3
+gap_calculator_counts:
+  acoustic_exposure: 4
+unmapped_star_columns: 139
+accepted_statuses:
+- EXACT
+- EXPECTED_DIFF
+- MISSING_LEGACY
+- NO_PRODUCER
+- NULL_REASON
+- RELOCATED_SERIES
+- UNMAPPED
+- WITHIN_TOL
+failing_statuses:
+- CERT_NULL_ONLY
+- INSUFFICIENT_EVIDENCE
+- MISMATCH
+hard_failure_count: 4
+gate_passed: false

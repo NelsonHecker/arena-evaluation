@@ -57,6 +57,7 @@ from arena_evaluation.storage.schemas import (
     RunMetadata,
 )
 from arena_evaluation.storage.star_schema import (
+    CHILD_FACT_TABLE_NAMES,
     DIM_EPISODES_SCHEMA,
     DIM_WORLD_ENTITIES_SCHEMA,
     STAR_SCHEMA_SCHEMAS,
@@ -412,7 +413,9 @@ def test_star_schema_tables_match_authoritative_schemas_and_1nf(
     frame = star_tables.by_name()[table_name]
     expected_schema = STAR_SCHEMA_SCHEMAS[table_name]
     assert frame.schema == expected_schema
-    assert frame.height > 0
+    # Child fact tables are sparse: a fixture without the provoking calculator outputs is empty.
+    if table_name.removeprefix("fact_") not in CHILD_FACT_TABLE_NAMES:
+        assert frame.height > 0
     # Invariant 3: 100% Flat Tables (1NF) - zero nested List, Struct, or Array columns
     for col_name, dtype in frame.schema.items():
         assert not isinstance(dtype, (pl.List, pl.Struct, pl.Array)), f"Table {table_name} column {col_name} has nested dtype {dtype}"
