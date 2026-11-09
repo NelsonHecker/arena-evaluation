@@ -52,13 +52,13 @@ PEDESTRIAN_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
 
 ROBOT_TRACK_SCHEMA: Final[pl.Schema] = pl.Schema(
     {
-        "t_ns": pl.Int64,
-        "x_m": pl.Float64,
-        "y_m": pl.Float64,
-        "yaw_rad": pl.Float64,
-        "vx_mps": pl.Float64,
-        "vy_mps": pl.Float64,
-        "speed_mps": pl.Float64,
+        "robot_t_ns": pl.Int64,
+        "robot_x_m": pl.Float64,
+        "robot_y_m": pl.Float64,
+        "robot_yaw_rad": pl.Float64,
+        "robot_vx_mps": pl.Float64,
+        "robot_vy_mps": pl.Float64,
+        "robot_speed_mps": pl.Float64,
     }
 )
 
@@ -124,7 +124,15 @@ def robot_track_state(robot_tracks: pl.DataFrame) -> pl.DataFrame:
             vy_mps=((pl.col("y_m") - pl.col("previous_y_m")) / safe_step_s).fill_null(0.0),
         )
         .with_columns(speed_mps=(pl.col("vx_mps").pow(2) + pl.col("vy_mps").pow(2)).sqrt())
-        .select("t_ns", "x_m", "y_m", "yaw_rad", "vx_mps", "vy_mps", "speed_mps")
+        .select(
+            robot_t_ns=pl.col("t_ns"),
+            robot_x_m=pl.col("x_m"),
+            robot_y_m=pl.col("y_m"),
+            robot_yaw_rad=pl.col("yaw_rad"),
+            robot_vx_mps=pl.col("vx_mps"),
+            robot_vy_mps=pl.col("vy_mps"),
+            robot_speed_mps=pl.col("speed_mps"),
+        )
     )
 
 
@@ -149,7 +157,7 @@ def frame_geometry(
     sampled = frames.join_asof(
         robot_track_state(robot_tracks),
         left_on="t_ns",
-        right_on="t_ns",
+        right_on="robot_t_ns",
         strategy="backward",
         tolerance=tolerance_ns,
     )
