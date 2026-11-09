@@ -19,6 +19,7 @@ import numpy as np
 
 from arena_evaluation.processing.acoustics.barrier_map import BarrierMap, DoorOpening, WallSegment, derive_barrier_map
 from arena_evaluation.processing.world_lookup import installed_world_dir
+from arena_evaluation.storage.exceptions import AcousticsError
 
 if typing.TYPE_CHECKING:
     from arena_simulation_setup.shared import Level
@@ -98,7 +99,7 @@ def load_barrier_map(
 ) -> BarrierMap:
     """The barrier grid of a world, derived from its zones, walls and doors.
 
-    Raises FileNotFoundError, naming every location searched, when no world declares the map. A world that is found
+    Raises AcousticsError, naming every location searched, when no world declares the map. A world that is found
     but cannot be read or derived raises its own error.
     """
     found = _find_world_level(map_name, run_dir=run_dir)
@@ -106,7 +107,7 @@ def load_barrier_map(
         searched = "; ".join(
             label if path is None else f"{label} at {path}" for label, path in _world_candidates(map_name, run_dir=run_dir)
         )
-        raise FileNotFoundError(f"no world declares map {map_name!r}; searched {searched}")
+        raise AcousticsError(f"no world declares map {map_name!r}; searched {searched}")
     world_dir, _level = found
     return _barrier_map_for_world(str(world_dir), float(resolution))
 

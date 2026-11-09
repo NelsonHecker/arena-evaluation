@@ -13,6 +13,7 @@ from arena_evaluation.processing.acoustics.barrier_map import BarrierMap
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
 from arena_evaluation.processing.metrics.ecological import acoustic_exposure as acoustic_exposure_module
 from arena_evaluation.processing.metrics.ecological.acoustic_exposure import AcousticExposureCalculator
+from arena_evaluation.storage.exceptions import AcousticsError
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, EpisodeDescriptor, RobotParams
 
@@ -164,7 +165,7 @@ def derived_map(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
 
     def load(map_name: str, run_dir=None, resolution=None) -> BarrierMap:  # noqa: ARG001
         if map_name not in registry:
-            raise FileNotFoundError(f"no world declares map {map_name!r}")
+            raise AcousticsError(f"no world declares map {map_name!r}")
         return registry[map_name]
 
     monkeypatch.setattr(acoustic_exposure_module, "load_barrier_map", load)
@@ -303,7 +304,7 @@ def test_parse_returns_nothing_for_unusable_rows(row):
 
 def test_metric_raises_when_no_barrier_map_exists(calc, derived_map):
     data = _frames([(1.0, 1.0)], [[(4.0, 1.0)]])
-    with pytest.raises(FileNotFoundError, match="unknown"):
+    with pytest.raises(AcousticsError, match="unknown"):
         calc.calculate(_episode(data, "unknown"), {})
 
 
@@ -323,7 +324,7 @@ def test_missing_map_name_yields_nulls():
 
 
 def test_unknown_map_raises_instead_of_nulls():
-    with pytest.raises(FileNotFoundError, match="unknown"):
+    with pytest.raises(AcousticsError, match="unknown"):
         _calc().calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {})
 
 

@@ -27,6 +27,7 @@ from arena_evaluation.processing.acoustics.door_map import (
     build_pixel_tl,
     load_barrier_map,
 )
+from arena_evaluation.storage.exceptions import AcousticsError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -172,7 +173,7 @@ def test_load_level_cached(tmp_path):
 
 
 def test_load_barrier_map_no_world_raises_and_names_the_search(tmp_path):
-    with pytest.raises(FileNotFoundError, match="ae_nonesuch_map") as error:
+    with pytest.raises(AcousticsError, match="ae_nonesuch_map") as error:
         load_barrier_map("ae_nonesuch_map", run_dir=tmp_path / "run")
     assert "run directory" in str(error.value)
 
@@ -180,7 +181,7 @@ def test_load_barrier_map_no_world_raises_and_names_the_search(tmp_path):
 def test_load_barrier_map_unusable_ament_is_named_in_the_error(tmp_path, monkeypatch):
     monkeypatch.delenv("AMENT_PREFIX_PATH", raising=False)
     monkeypatch.delenv("ARENA_DIR", raising=False)
-    with pytest.raises(FileNotFoundError, match="installed package unavailable"):
+    with pytest.raises(AcousticsError, match="installed package unavailable"):
         load_barrier_map("ae_nonesuch_map", run_dir=tmp_path / "run")
 
 

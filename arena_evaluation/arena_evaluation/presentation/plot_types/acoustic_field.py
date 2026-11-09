@@ -21,6 +21,7 @@ from arena_evaluation.processing.acoustics.impedance_grid import (
     downsample_mask,
     downsample_occupancy,
 )
+from arena_evaluation.storage.exceptions import AcousticsError
 
 if typing.TYPE_CHECKING:
     from matplotlib.artist import Artist
@@ -54,7 +55,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
     def _load_grid_and_meta(map_name: str, run_dir: pathlib.Path | None = None) -> tuple[np.ndarray, dict] | None:
         try:
             barrier = load_barrier_map(map_name, run_dir=run_dir)
-        except FileNotFoundError as error:
+        except AcousticsError as error:
             logger.error("Acoustic plot skipped: %s", error)
             return None
         meta = {"resolution": barrier.resolution, "origin": barrier.origin, "doors": barrier_door_tl(barrier)}

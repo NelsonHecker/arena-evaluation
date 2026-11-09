@@ -32,3 +32,15 @@ class ManifestGenerationError(ArenaEvaluationError):
     """Raised when generating or validating a manifest fails."""
 
     pass
+
+
+class MetricInputError(ArenaEvaluationError):
+    """Raised when a metric calculator's required input is missing; the registry re-raises it instead of recording a null."""
+
+    pass
+
+
+class AcousticsError(MetricInputError):
+    """Raised when the acoustic metric cannot run because its world or barrier map is missing."""
+
+    pass
