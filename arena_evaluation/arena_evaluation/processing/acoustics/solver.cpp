@@ -263,13 +263,20 @@ static inline void run_acoustic_dijkstra(
                 new_par_dist  = par_dist;
                 next_tl_contrib = 0.0f;
             } else {
+                // No squeezing between barriers: a diagonal step may not pass a barrier corner where both cells
+                // beside it are barrier, otherwise a path could cross fewer cells of a wall end or door edge.
+                if (dir >= 4 && is_acoustic_barrier(grid, pixel_tl, cy * width + nx) &&
+                    is_acoustic_barrier(grid, pixel_tl, ny * width + cx)) {
+                    continue;
+                }
                 ndist         = curr.dist + step_dist[dir] * resolution;
                 new_par_x     = cx;
                 new_par_y     = cy;
                 new_par_dist  = curr.dist;
+                // Every barrier cell entered costs its own per-cell TL, so travelling inside a barrier and
+                // crossing touching barriers are not free. Walls and doors are normalised per cell upstream.
                 float next_tl_val = pixel_tl_of(nidx);
-                float curr_tl_val = pixel_tl_of(curr.index);
-                next_tl_contrib   = (next_tl_val > 0.0f && next_tl_val != curr_tl_val) ? next_tl_val : 0.0f;
+                next_tl_contrib   = next_tl_val > 0.0f ? next_tl_val : 0.0f;
             }
 
             float new_tl = curr.tl + next_tl_contrib;

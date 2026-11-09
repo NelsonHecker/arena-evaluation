@@ -28,8 +28,9 @@ class DoorStateTimeline:
             return None
 
         df = semantic
-        if not {"t_ns", "entity_name", "kind", "field_name"} <= set(df.columns):
-            return None
+        missing = {"t_ns", "entity_name", "kind", "field_name"} - set(df.columns)
+        if missing:
+            raise ValueError(f"semantic table lacks columns {sorted(missing)}; re-extract world_semantics for the episode (has {df.columns})")
         df = df.filter(pl.col("kind") == "door")
         if len(df) == 0:
             return None

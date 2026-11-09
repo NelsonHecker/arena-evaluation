@@ -176,11 +176,14 @@ def derived_map(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
     ) -> str:
         name = f"acx-{uuid.uuid4().hex}"
         barrier = np.flipud((_white() if pixels is None else pixels) < 200).astype(np.uint8)
+        door_masks = doors or {}
         registry[name] = BarrierMap(
             occupancy=np.ascontiguousarray(barrier),
             resolution=resolution,
             origin=(origin[0], origin[1]),
-            door_masks=doors or {},
+            door_masks=door_masks,
+            # The door masks used in these tests are three cells across.
+            door_cells_across={door: 3 for door in door_masks},
         )
         return name
 

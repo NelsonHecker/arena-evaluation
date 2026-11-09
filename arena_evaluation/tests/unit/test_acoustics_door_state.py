@@ -87,7 +87,8 @@ def test_from_semantic_frame_missing_kind_column():
         {"time_ns": [1], "entity": ["e"]},
         schema=pl.Schema({"time_ns": pl.Int64, "entity": pl.String}),
     )
-    assert DoorStateTimeline.from_semantic_frame(df) is None
+    with pytest.raises(ValueError, match="lacks columns"):
+        DoorStateTimeline.from_semantic_frame(df)
 
 
 def test_from_semantic_frame_no_door_rows():

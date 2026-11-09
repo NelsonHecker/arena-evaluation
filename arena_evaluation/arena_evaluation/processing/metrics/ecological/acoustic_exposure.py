@@ -121,11 +121,11 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         doors = barrier_door_tl(barrier)
         tl_cache: dict[tuple, np.ndarray] = {}
         state_timeline = DoorStateTimeline.from_semantic_frame(episode.semantic_snapshot)
-        if doors:
-            logger.info(
-                "AcousticExposureCalculator: %d semantic doors loaded; semantic timeline %s",
+        if doors and state_timeline is None:
+            logger.warning(
+                "AcousticExposureCalculator: %d doors but no door-state timeline for episode %s; all doors stay closed",
                 len(doors),
-                "present" if state_timeline is not None else "ABSENT (doors default closed)",
+                episode.episode_id,
             )
 
         if "pos_x_gt" not in df.columns or "pos_y_gt" not in df.columns:

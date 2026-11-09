@@ -14,6 +14,7 @@ import sys
 import types
 
 import numpy as np
+import pytest
 import yaml
 from hypothesis import given, settings, strategies as st
 
@@ -179,9 +180,26 @@ def test_load_barrier_map_corrupt_world_yaml_is_none(tmp_path):
     assert load_barrier_map("m1", run_dir=tmp_path / "run") is None
 
 
-def test_load_barrier_map_level_without_zones_is_none(tmp_path):
+def test_load_barrier_map_world_without_walls_or_doors_is_none(tmp_path):
     _write_world(tmp_path / "run" / "worlds" / "m1", levels=[_level("0", [], zones=False)])
     assert load_barrier_map("m1", run_dir=tmp_path / "run") is None
+
+
+def test_load_barrier_map_needs_walls_and_doors_not_zones(tmp_path):
+    world_dir = tmp_path / "run" / "worlds" / "m1"
+    world_dir.mkdir(parents=True)
+    level = {
+        "id": "0",
+        "walls": [{"path": [[0.0, 0.0], [10.0, 0.0]]}],
+        "doors": [_door("d", start=(4.0, 0.0), end=(6.0, 0.0), width=1.0)],
+    }
+    (world_dir / "world.yaml").write_text(yaml.safe_dump({"format": "arena-world/2", "levels": [level]}))
+
+    barrier = load_barrier_map("m1", run_dir=tmp_path / "run", resolution=1.0)
+
+    assert barrier is not None
+    assert barrier.occupancy.sum() > 0
+    assert not barrier.occupancy[barrier.door_masks["d"]].any()
 
 
 def test_load_barrier_map_room_and_door_on_the_grid(tmp_path):
@@ -194,7 +212,7 @@ def test_load_barrier_map_room_and_door_on_the_grid(tmp_path):
     assert barrier.origin == (-4.5, -4.5)
     assert set(barrier.door_masks) == {"main_door"}
     door_mask = barrier.door_masks["main_door"]
-    assert door_mask.sum() == 6 * 2
+    assert door_mask.sum() == 12
     assert not barrier.occupancy[door_mask].any()
 
 
@@ -207,7 +225,7 @@ def test_barrier_door_tl_keys_and_closed_tl(tmp_path):
     assert set(tl_map) == {"world/s"}
     mask, tl = tl_map["world/s"]
     assert mask is barrier.door_masks["s"]
-    assert tl == DEFAULT_DOOR_TL_DB
+    assert tl == pytest.approx(DEFAULT_DOOR_TL_DB * barrier.resolution / 1.0)
 
 
 def test_barrier_doors_carve_the_tl_map(tmp_path):
@@ -217,7 +235,7 @@ def test_barrier_doors_carve_the_tl_map(tmp_path):
     mask = doors["world/main_door"][0]
 
     closed = build_pixel_tl(barrier.occupancy, doors)
-    assert np.all(closed[mask] == DEFAULT_DOOR_TL_DB)
+    assert np.allclose(closed[mask], DEFAULT_DOOR_TL_DB * barrier.resolution / 1.0)
 
     opened = build_pixel_tl(barrier.occupancy, doors, open_doors={"env_0/world/main_door/2"})
     assert np.all(opened[mask] == 0.0)

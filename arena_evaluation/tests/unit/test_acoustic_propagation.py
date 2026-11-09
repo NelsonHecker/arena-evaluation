@@ -242,6 +242,17 @@ def test_door_carving_open_vs_closed():
     assert a_closed >= los + 20.0, f"closed door should block: {a_closed:.1f}"
 
 
+def test_touching_walls_pay_for_each_wall_crossed():
+    # Two wall cells side by side with no free cell between them: a perpendicular crossing enters both.
+    grid = np.zeros((40, 40), dtype=np.uint8)
+    grid[18:20, :] = 1
+    start, target = (20 * RES, 5 * RES), (20 * RES, 30 * RES)
+
+    att = _solve(grid, start, target)
+
+    assert np.isclose(att, _los_db(start, target) + 2 * WALL_TL, atol=0.5), f"two touching walls must cost twice: {att:.1f}"
+
+
 def test_world_door_in_a_derived_wall_blocks_when_closed_and_opens_the_path(tmp_path):
     """A door in a wall derived from the world model blocks when closed and is free when open."""
     import yaml
@@ -249,12 +260,15 @@ def test_world_door_in_a_derived_wall_blocks_when_closed_and_opens_the_path(tmp_
     from arena_evaluation.processing.acoustics.door_map import barrier_door_tl, build_pixel_tl, load_barrier_map
 
     room = {"name": "room", "polygon": [[0.0, 0.0], [6.0, 0.0], [6.0, 6.0], [0.0, 6.0]]}
-    wall = {"path": [[0.0, 3.0], [6.0, 3.0]]}
+    walls = [
+        {"path": [[0.0, 3.0], [6.0, 3.0]]},
+        {"path": [[0.0, 0.0], [6.0, 0.0], [6.0, 6.0], [0.0, 6.0]], "closed": True},
+    ]
     door = {"name": "d", "span": [[2.0, 3.0], [4.0, 3.0]], "width": 0.1}
     world_dir = tmp_path / "worlds" / "doorworld"
     world_dir.mkdir(parents=True)
     (world_dir / "world.yaml").write_text(
-        yaml.safe_dump({"format": "arena-world/2", "levels": [{"id": "0", "zones": [room], "walls": [wall], "doors": [door]}]})
+        yaml.safe_dump({"format": "arena-world/2", "levels": [{"id": "0", "zones": [room], "walls": walls, "doors": [door]}]})
     )
 
     barrier = load_barrier_map("doorworld", run_dir=tmp_path, resolution=RES)
@@ -262,7 +276,7 @@ def test_world_door_in_a_derived_wall_blocks_when_closed_and_opens_the_path(tmp_
     doors = barrier_door_tl(barrier)
     assert set(doors) == {"world/d"}
     mask, tl_db = doors["world/d"]
-    assert tl_db == DOOR_TL
+    assert tl_db * barrier.door_cells_across["d"] == pytest.approx(DOOR_TL)
     assert mask.any()
     assert not barrier.occupancy[mask].any()
 

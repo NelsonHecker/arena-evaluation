@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Acoustic barrier grid and door transmission loss for a world.
 
-The solver works on a barrier grid derived from the world model (zones, walls and doors) by
+The solver works on a barrier grid derived from the world's walls and doors by
 ``barrier_map.derive_barrier_map``. The grid is not read from the rendered map PNG, so walls and doors sit where the
 world puts them. This module loads a world, derives its grid, and gives each door its own cells with a closed
 transmission loss (TL) for the solver.
@@ -72,15 +72,14 @@ def _find_world_level(map_name: str, run_dir: pathlib.Path | str | None = None) 
 @functools.lru_cache(maxsize=8)
 def _barrier_map_for_world(world_dir: str, resolution: float) -> BarrierMap:
     level = _load_level(world_dir)
-    if not level.zones:
-        raise ValueError(f"world {world_dir} has no zones, so no barrier map can be derived from it")
-    rooms = [[(point.x, point.y) for point in zone.polygon] for zone in level.zones if len(zone.polygon) >= 3]
     walls = [WallSegment(start=(wall.start.x, wall.start.y), end=(wall.end.x, wall.end.y)) for wall in level.all_walls]
     doors = [
         DoorOpening(name=door.name, start=(door.start.x, door.start.y), end=(door.end.x, door.end.y), width=door.width)
         for door in level.doors
     ]
-    return derive_barrier_map(rooms=rooms, walls=walls, doors=doors, resolution=resolution)
+    # Zones give the walkable extent, so that agents standing in open space are on the grid. They are not barriers.
+    extent = [(point.x, point.y) for zone in level.zones for point in zone.polygon]
+    return derive_barrier_map(walls=walls, doors=doors, extent=extent, resolution=resolution)
 
 
 def load_barrier_map(
@@ -102,8 +101,15 @@ def load_barrier_map(
 
 
 def barrier_door_tl(barrier: BarrierMap) -> dict[str, tuple[np.ndarray, float]]:
-    """Door masks keyed as the door-state timeline names them (``world/<name>``), each with its closed-door TL."""
-    return {f"world/{name}": (mask, DEFAULT_DOOR_TL_DB) for name, mask in barrier.door_masks.items()}
+    """Door masks keyed as the door-state timeline names them (``world/<name>``), with the closed-door TL per cell.
+
+    The solver charges every barrier cell a path enters, so a door's closed TL is shared by the cells it crosses: each
+    cell holds ``1 / door_cells_across`` of the door's TL, and a path through the whole door pays the full TL once.
+    """
+    return {
+        f"world/{name}": (mask, DEFAULT_DOOR_TL_DB / barrier.door_cells_across[name])
+        for name, mask in barrier.door_masks.items()
+    }
 
 
 def _entity_matches_door(door_key: str, entity: str) -> bool:
