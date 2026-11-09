@@ -29,10 +29,13 @@ MIN_PATH_DEVIATION_M: Final[float] = 0.01
 
 
 def _point_matrix(points: object) -> np.ndarray | None:
-    """(N, 2) float matrix of a trajectory, None when it cannot be interpreted as planar points."""
+    """(N, 2) float matrix of a trajectory, None when it is not a rectangular planar point container."""
     if points is None:
         return None
-    array = np.asarray(points, dtype=np.float64)
+    try:
+        array = np.asarray(points, dtype=np.float64)
+    except (TypeError, ValueError):
+        return None
     if array.ndim == 3:
         array = array[0]
     if array.ndim != 2 or array.shape[1] < 2 or array.shape[0] == 0:
@@ -41,13 +44,23 @@ def _point_matrix(points: object) -> np.ndarray | None:
 
 
 def _stack_paths(paths: object) -> np.ndarray | None:
-    """Concatenated (N, 2) points of a list of pedestrian paths, None when none carries points."""
-    if not isinstance(paths, Sequence) or not paths:
+    """Concatenated (N, 2) points of a recorded pedestrian path list, None when the paths are not uniform planar samples."""
+    if not isinstance(paths, list) or not paths:
         return None
-    matrices = [matrix for matrix in (_point_matrix(path) for path in paths) if matrix is not None]
-    if not matrices:
+    matrices: list[np.ndarray] = []
+    for path in paths:
+        if not path:
+            continue
+        try:
+            matrix = np.asarray(path, dtype=np.float64)
+        except (TypeError, ValueError):
+            return None
+        if matrix.ndim != 2 or matrix.shape[1] < 2:
+            return None
+        matrices.append(matrix)
+    if not matrices or len({matrix.shape[1] for matrix in matrices}) != 1:
         return None
-    return np.concatenate(matrices, axis=0)
+    return np.concatenate(matrices, axis=0)[:, :2]
 
 
 class MutualAccommodationCalculator(BaseMetricCalculator):
@@ -186,20 +199,19 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
         actual_ped_paths = dynamic_row.get("pedestrian_path")
         actual_robot_path = dynamic_row.get("path")
         reference_ped_paths = None if ref_ped_row is None else ref_ped_row.get("pedestrian_path")
-        actual_ped_points = _stack_paths(actual_ped_paths)
-        reference_ped_points = _stack_paths(reference_ped_paths)
 
-        interference = (
-            cls.compute_pfi_dtw(actual_ped_paths, reference_ped_paths)
-            if actual_ped_points is not None and reference_ped_points is not None
-            else None
-        )
-        if interference is not None:
-            results["pfi"] = round(float(interference), 4)
-            deflection = PedestrianDisturbanceCalculator._compute_trajectory_deflection(
-                actual_ped_points, reference_ped_points
-            )
-            results["ped_path_deflection_m"] = round(float(deflection), 3)
+        interference: float | None = None
+        if actual_ped_paths and reference_ped_paths:
+            interference = cls.compute_pfi_dtw(actual_ped_paths, reference_ped_paths)
+            if interference is not None:
+                results["pfi"] = round(float(interference), 4)
+            actual_ped_points = _stack_paths(actual_ped_paths)
+            reference_ped_points = _stack_paths(reference_ped_paths)
+            if actual_ped_points is not None and reference_ped_points is not None:
+                deflection = PedestrianDisturbanceCalculator._compute_trajectory_deflection(
+                    actual_ped_points, reference_ped_points
+                )
+                results["ped_path_deflection_m"] = round(float(deflection), 3)
 
         if ref_robot_row is None:
             return results

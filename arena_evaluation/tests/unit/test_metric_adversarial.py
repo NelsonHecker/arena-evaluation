@@ -96,7 +96,7 @@ def test_gaze_adversarial_chaotic():
 
     # Must run without crashing
     results = calc.calculate(episode, {})
-    assert "time_looking_at_pedestrians" in results
+    assert "total_time_looking_at_pedestrians" in results
 
 
 def test_proxemics_adversarial_chaotic():

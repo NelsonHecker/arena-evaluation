@@ -221,12 +221,10 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
             geometry.select(pl.col("first_t_ns").min()).item()
         )
         prior_deflection = prior_results.get("ped_path_deflection_m")
-        total_m, num_agents = lateral_deflection_sums(geometry)
-        computed_deflection = round(total_m / num_agents, SUMMED_VALUE_DECIMALS)
         return {
-            "ped_path_deflection_m": float(prior_deflection)
-            if prior_deflection is not None
-            else computed_deflection,
+            "ped_path_deflection_m": None
+            if prior_deflection is None
+            else float(prior_deflection),
             "ped_velocity_delay_ratio": round(
                 velocity_delay_value(geometry, span_ns / 1e9), SUMMED_VALUE_DECIMALS
             ),
