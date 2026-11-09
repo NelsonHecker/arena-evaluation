@@ -1,31 +1,129 @@
+"""Hall proxemic-zone dwell, zone-entry events, closing-time and personal-space intrusion integral.
+
+One vectorized plan: the robot track is sampled onto the pedestrian frame axis by a single
+backward asof join (:func:`~arena_evaluation.processing.pedestrian_frames.frame_geometry`),
+the closest pedestrian of every frame is picked with a per-frame rank, and every aggregate
+is a Polars expression over that frame table. There is no per-frame Python loop and no
+nested list column: the per-frame clearance series is emitted as a 1NF table by
+:meth:`ProxemicsExtendedCalculator.series_table`.
+"""
+
 from __future__ import annotations
 
 import typing
+from typing import Final
 
-import numpy as np
+import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.processing.pedestrian_frames import frames_of
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.social.proxemics import (
+    INTIMATE_CLEARANCE_M,
+    PERSONAL_CLEARANCE_M,
+)
+from arena_evaluation.processing.pedestrian_frames import (
+    ALIGN_TOLERANCE_NS,
+    NS_PER_S,
+    FrameGeometry,
+    frame_geometry,
+    nearest_pedestrian_frames,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+SOCIAL_CLEARANCE_M: Final[float] = 3.6
+PEDESTRIAN_RADIUS_M: Final[float] = 0.3
+TTI_LOOKAHEAD_S: Final[float] = 5.0
+TTI_MIN_REL_SPEED_MPS: Final[float] = 0.05
+ZONE_EVENT_MERGE_GAP_NS: Final[int] = 2 * 10**9
+ZONES: Final[tuple[str, ...]] = ("intimate", "personal", "social", "public")
+
+SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "run_id": pl.String,
+        "episode_id": pl.Int64,
+        "robot_id": pl.String,
+        "t_ns": pl.Int64,
+        "time_s": pl.Float64,
+        "min_ped_clearance_m": pl.Float64,
+    }
+)
+
+
+def _zone_expression() -> pl.Expr:
+    """Hall zone of an edge-to-edge clearance, null while the clearance is unknown."""
+    clearance_m = pl.col("clearance_m")
+    return (
+        pl.when(clearance_m.is_null())
+        .then(pl.lit(None, dtype=pl.String))
+        .when(clearance_m < INTIMATE_CLEARANCE_M)
+        .then(pl.lit("intimate"))
+        .when(clearance_m < PERSONAL_CLEARANCE_M)
+        .then(pl.lit("personal"))
+        .when(clearance_m < SOCIAL_CLEARANCE_M)
+        .then(pl.lit("social"))
+        .otherwise(pl.lit("public"))
+    )
+
+
+def _dwell_expression(zone: str) -> pl.Expr:
+    """Seconds whose closest pedestrian sat in ``zone``."""
+    return (
+        pl.when(pl.col("zone") == zone)
+        .then(pl.col("dt_s"))
+        .otherwise(0.0)
+        .sum()
+        .alias(f"time_in_{zone}_zone_s")
+    )
+
+
+def _zone_top_speed_expression(zone: str) -> pl.Expr:
+    """Fastest robot speed while the closest pedestrian sat in ``zone``, null when never."""
+    return (
+        pl.when(pl.col("zone") == zone)
+        .then(pl.col("robot_speed_mps"))
+        .otherwise(None)
+        .max()
+        .alias(f"max_speed_{zone}_zone_mps")
+    )
+
+
+def zone_entry_events(
+    cleared: pl.DataFrame,
+    zone: str,
+    merge_gap_ns: int = ZONE_EVENT_MERGE_GAP_NS,
+) -> int:
+    """Number of contiguous zone stays, bridging stays that resume within ``merge_gap_ns`` of the previous one."""
+    runs = (
+        cleared.with_columns(in_zone=pl.col("zone") == zone)
+        .select("t_ns", "in_zone")
+        .with_columns(run_id=pl.col("in_zone").rle_id())
+        .group_by("run_id")
+        .agg(
+            in_zone=pl.col("in_zone").first(),
+            start_ns=pl.col("t_ns").min(),
+            end_ns=pl.col("t_ns").max(),
+        )
+        .filter(pl.col("in_zone"))
+        .sort("start_ns")
+    )
+    if runs.height == 0:
+        return 0
+    previous_end_ns = pl.col("end_ns").shift(1)
+    starts_event = previous_end_ns.is_null() | (
+        (pl.col("start_ns") - previous_end_ns) >= merge_gap_ns
+    )
+    return int(runs.select(starts_event.sum()).item())
 
 
 class ProxemicsExtendedCalculator(BaseMetricCalculator):
-    """Computes edge-to-edge proxemic zone metrics on the native pedestrian time base."""
+    """Hall proxemic zone dwell, zone-entry events and closing-time metrics on the pedestrian frame axis."""
 
     NAME = "proxemics_extended"
     CATEGORY = "social"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics", "path_metrics"]
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
-
-    # Hall's proxemic zones (meters), edge-to-edge
-    _INTIMATE_R = 0.45
-    _PERSONAL_R = 1.2
-    _SOCIAL_R = 3.6
-
-    _PED_RADIUS = 0.3  # m
-    _TTI_LOOKAHEAD = 5.0  # s
-    _EVENT_GAP_S = 2.0  # s, min gap between distinct interactions
 
     UNITS = {
         "time_in_intimate_zone": "s",
@@ -43,7 +141,6 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
         "tti_min": "s",
         "tti_mean": "s",
         "personal_space_intrusion_integral": "m·s",
-        "timeseries_min_ped_clearance": "m",
     }
 
     PRIMARY_OUTPUTS = [
@@ -79,155 +176,153 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
             "tti_min",
             "tti_mean",
             "personal_space_intrusion_integral",
-            "timeseries_min_ped_clearance",
         ]
 
+    @property
+    def _combined_radius_m(self) -> float:
+        """Robot-plus-pedestrian radius removed from the centre distance to reach the edge clearance."""
+        return float(self.robot_params.robot_radius) + PEDESTRIAN_RADIUS_M
+
+    def _geometry(self, episode: AlignedEpisodeBundle) -> FrameGeometry:
+        """Robot state on the pedestrian frame axis, with every pedestrian's relative geometry."""
+        return frame_geometry(
+            self.native_ped_frame(episode),
+            self.native_topics(episode).get("robot_tracks"),
+            tolerance_ns=ALIGN_TOLERANCE_NS,
+        )
+
+    def _cleared_frames(self, geometry: FrameGeometry) -> pl.DataFrame:
+        """The closest pedestrian of every resolved frame, its edge clearance, Hall zone and integration step."""
+        return (
+            nearest_pedestrian_frames(geometry)
+            .with_columns(clearance_m=pl.col("distance_m") - self._combined_radius_m)
+            .sort("t_ns")
+            .with_columns(zone=_zone_expression())
+        )
+
+    def _closing_times(self, geometry: FrameGeometry) -> pl.DataFrame:
+        """Telemetry-only time-to-collision of every pedestrian closing on the robot inside the lookahead."""
+        clearance_m = pl.col("distance_m") - self._combined_radius_m
+        closing_m2_s2 = pl.col("dx_m") * pl.col("rel_vx_mps") + pl.col("dy_m") * pl.col("rel_vy_mps")
+        return (
+            geometry.pedestrians.with_columns(clearance_m=clearance_m)
+            .filter(
+                (pl.col("rel_speed_mps") > TTI_MIN_REL_SPEED_MPS)
+                & (closing_m2_s2 < 0.0)
+                & (pl.col("clearance_m") > 0.0)
+            )
+            .with_columns(tti_s=pl.col("clearance_m") / pl.col("rel_speed_mps"))
+            .filter((pl.col("tti_s") > 0.0) & (pl.col("tti_s") < TTI_LOOKAHEAD_S))
+            .select("tti_s")
+        )
+
+    def _episode_metrics(self, episode: AlignedEpisodeBundle) -> dict[str, typing.Any]:
+        """Every proxemic output over the given episode view, all null without a resolved robot-pedestrian frame."""
+        geometry = self._geometry(episode)
+        cleared = self._cleared_frames(geometry)
+        if cleared.height == 0:
+            return dict.fromkeys(self.output_keys())
+
+        summary = cleared.select(
+            _dwell_expression("intimate"),
+            _dwell_expression("personal"),
+            _dwell_expression("social"),
+            _dwell_expression("public"),
+            _zone_top_speed_expression("intimate"),
+            _zone_top_speed_expression("personal"),
+            _zone_top_speed_expression("social"),
+            _zone_top_speed_expression("public"),
+            personal_space_intrusion_integral_m_s=(
+                pl.when(pl.col("clearance_m") < PERSONAL_CLEARANCE_M)
+                .then(
+                    (PERSONAL_CLEARANCE_M - pl.col("clearance_m").clip(lower_bound=0.0))
+                    * pl.col("dt_s")
+                )
+                .otherwise(0.0)
+                .sum()
+            ),
+            approaching_frames=(
+                (
+                    pl.col("robot_vx_mps") * pl.col("dx_m")
+                    + pl.col("robot_vy_mps") * pl.col("dy_m")
+                )
+                > 0.0
+            ).sum(),
+            sampled_frames=pl.len(),
+        ).row(0, named=True)
+
+        closing = self._closing_times(geometry)
+        tti_min = closing.select(pl.col("tti_s").min()).item()
+        tti_mean = closing.select(pl.col("tti_s").mean()).item()
+        sampled_frames = int(summary["sampled_frames"])
+        approaching_frames = int(summary["approaching_frames"])
+
+        return {
+            "time_in_intimate_zone": float(summary["time_in_intimate_zone_s"]),
+            "time_in_personal_zone": float(summary["time_in_personal_zone_s"]),
+            "time_in_social_zone": float(summary["time_in_social_zone_s"]),
+            "time_in_public_zone": float(summary["time_in_public_zone_s"]),
+            "psi_intimate_events": zone_entry_events(cleared, "intimate"),
+            "psi_personal_events": zone_entry_events(cleared, "personal"),
+            "psi_social_events": zone_entry_events(cleared, "social"),
+            "max_speed_intimate_zone": summary["max_speed_intimate_zone_mps"],
+            "max_speed_personal_zone": summary["max_speed_personal_zone_mps"],
+            "max_speed_social_zone": summary["max_speed_social_zone_mps"],
+            "max_speed_public_zone": summary["max_speed_public_zone_mps"],
+            "movement_towards_peds_ratio": approaching_frames / sampled_frames
+            if sampled_frames > 0
+            else None,
+            "tti_min": tti_min,
+            "tti_mean": tti_mean,
+            "personal_space_intrusion_integral": float(
+                summary["personal_space_intrusion_integral_m_s"]
+            ),
+        }
+
     def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
+    ) -> dict[str, typing.Any]:
+        """Compute the episode-scope proxemics set over the bundle's own pedestrian frames."""
+        del prior_results
+        return self._episode_metrics(episode)
+
+    def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        peds_df = self.native_ped_frame(episode)
-        if peds_df is None or "x" not in peds_df.columns:
-            return {k: None for k in self.output_keys()}
-        pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
-        if len(pos_x) == 0:
-            return {k: None for k in self.output_keys()}
+        """EPISODE scope only: the slice's own window and pedestrian set are the population."""
+        del prior_results
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self._episode_metrics(episode)
 
-        frames = frames_of(peds_df)
-        peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
-
-        N = len(peds_time_ns)
-        if N == 0:
-            return {k: None for k in self.output_keys()}
-
-        rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom)
-        vx_full, vy_full = self.velocity_from_pose(pos_x, pos_y, t_odom)
-        speed_full = self.speed_from_pose(pos_x, pos_y, t_odom)
-        rvx = self.values_at_times(vx_full, t_odom, peds_time_ns)
-        rvy = self.values_at_times(vy_full, t_odom, peds_time_ns)
-        rspeed = self.values_at_times(speed_full, t_odom, peds_time_ns)
-        rvx = np.nan_to_num(rvx, nan=0.0)
-        rvy = np.nan_to_num(rvy, nan=0.0)
-        rspeed = np.nan_to_num(rspeed, nan=0.0)
-
-        dt = np.diff(peds_time_ns) / 1e9
-        dt = np.append(dt, 0.0)
-        dt = np.where(dt == 0.0, 1e-6, dt)
-
-        robot_radius = self.robot_params.robot_radius
-        d_combined = robot_radius + self._PED_RADIUS
-
-        time_zone = {"intimate": 0.0, "personal": 0.0, "social": 0.0, "public": 0.0}
-        max_speed_zone = {"intimate": 0.0, "personal": 0.0, "social": 0.0, "public": 0.0}
-        zone_mask = {"intimate": [], "personal": [], "social": []}
-        approaching_count = 0
-        peds_frames = 0
-        psii_sum = 0.0
-        all_tti = []
-        min_clearances: list[float | None] = []
-
-        def band(d_eff: float) -> str:
-            if d_eff < self._INTIMATE_R:
-                return "intimate"
-            if d_eff < self._PERSONAL_R:
-                return "personal"
-            if d_eff < self._SOCIAL_R:
-                return "social"
-            return "public"
-
-        for i, frame in enumerate(frames):
-            rx, ry = float(rpx[i]), float(rpy[i])
-            peds_arr = frame.select("x", "y").to_numpy()
-
-            if peds_arr.shape[0] == 0:
-                min_clearances.append(None)
-                zone_mask["intimate"].append(False)
-                zone_mask["personal"].append(False)
-                zone_mask["social"].append(False)
-                continue
-
-            peds_frames += 1
-            dx_all = peds_arr[:, 0] - rx
-            dy_all = peds_arr[:, 1] - ry
-            dists = np.sqrt(dx_all**2 + dy_all**2)
-            min_dist = float(np.min(dists))
-            d_eff = min_dist - d_combined
-            min_clearances.append(float(d_eff))
-
-            z = band(d_eff)
-            time_zone[z] += dt[i]
-            zone_mask["intimate"].append(d_eff < self._INTIMATE_R)
-            zone_mask["personal"].append(self._INTIMATE_R <= d_eff < self._PERSONAL_R)
-            zone_mask["social"].append(self._PERSONAL_R <= d_eff < self._SOCIAL_R)
-            max_speed_zone[z] = max(max_speed_zone[z], float(rspeed[i]))
-
-            min_idx = int(np.argmin(dists))
-            r_to_ped = np.array([peds_arr[min_idx, 0] - rx, peds_arr[min_idx, 1] - ry])
-            v_robot = np.array([rvx[i], rvy[i]])
-            if np.dot(v_robot, r_to_ped) > 0:
-                approaching_count += 1
-
-            if d_eff < self._PERSONAL_R:
-                psii_sum += (self._PERSONAL_R - max(d_eff, 0.0)) * dt[i]
-
-            ped_vels = frame.select("vx", "vy").to_numpy()
-
-            for j in range(peds_arr.shape[0]):
-                p_rel = np.array([peds_arr[j, 0] - rx, peds_arr[j, 1] - ry])
-                d_ij = dists[j]
-                v_ped = ped_vels[j]
-                v_rel = v_ped - v_robot
-                rel_speed = float(np.linalg.norm(v_rel))
-                if rel_speed > 0.05 and np.dot(p_rel, v_rel) < 0:
-                    d_eff_j = d_ij - d_combined
-                    if d_eff_j > 0:
-                        tti_val = d_eff_j / rel_speed
-                        if 0 < tti_val < self._TTI_LOOKAHEAD:
-                            all_tti.append(float(tti_val))
-
-        def count_events(mask: list[bool]) -> int:
-            if not any(mask):
-                return 0
-            m = np.array(mask, dtype=bool)
-            padded = np.concatenate([[False], m, [False]])
-            edges = np.diff(padded.astype(np.int8))
-            starts = np.where(edges == 1)[0]
-            ends = np.where(edges == -1)[0]
-            gap_ns = int(self._EVENT_GAP_S * 1e9)
-            events = 0
-            prev_end_ns = 0
-            for s, e in zip(starts, ends, strict=True):
-                start_ns = int(peds_time_ns[s]) if s < len(peds_time_ns) else 0
-                # Blocks closer together than the gap belong to one interaction.
-                if events == 0 or start_ns - prev_end_ns >= gap_ns:
-                    events += 1
-                if e > 0 and e <= len(peds_time_ns):
-                    prev_end_ns = int(peds_time_ns[e - 1])
-            return events
-
-        if all_tti:
-            tti_min = float(np.min(all_tti))
-            tti_mean = float(np.mean(all_tti))
-        else:
-            tti_min = None
-            tti_mean = None
-
-        return {
-            "time_in_intimate_zone": float(time_zone["intimate"]),
-            "time_in_personal_zone": float(time_zone["personal"]),
-            "time_in_social_zone": float(time_zone["social"]),
-            "time_in_public_zone": float(time_zone["public"]),
-            "psi_intimate_events": count_events(zone_mask["intimate"]),
-            "psi_personal_events": count_events(zone_mask["personal"]),
-            "psi_social_events": count_events(zone_mask["social"]),
-            "max_speed_intimate_zone": float(max_speed_zone["intimate"]),
-            "max_speed_personal_zone": float(max_speed_zone["personal"]),
-            "max_speed_social_zone": float(max_speed_zone["social"]),
-            "max_speed_public_zone": float(max_speed_zone["public"]),
-            "movement_towards_peds_ratio": (float(approaching_count / peds_frames) if peds_frames > 0 else None),
-            "tti_min": tti_min,
-            "tti_mean": tti_mean,
-            "personal_space_intrusion_integral": float(psii_sum),
-            "timeseries_min_ped_clearance": min_clearances,
-        }
+    def series_table(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str = "",
+        robot_id: str = "",
+    ) -> pl.DataFrame:
+        """1NF per-frame clearance series: one row per pedestrian frame, null clearance where unresolved."""
+        geometry = self._geometry(episode)
+        if geometry.frames.height == 0:
+            return pl.DataFrame(schema=SERIES_SCHEMA)
+        first_t_ns = int(geometry.frames.select(pl.col("t_ns").min()).item())
+        clearances = nearest_pedestrian_frames(geometry).select(
+            "frame_ix", clearance_m=pl.col("distance_m") - self._combined_radius_m
+        )
+        resolved_robot = robot_id or (episode.robot_name or "robot")
+        return (
+            geometry.frames.join(clearances, on="frame_ix", how="left")
+            .sort("t_ns")
+            .select(
+                run_id=pl.lit(run_id, dtype=pl.String),
+                episode_id=pl.lit(int(episode.episode_id), dtype=pl.Int64),
+                robot_id=pl.lit(resolved_robot, dtype=pl.String),
+                t_ns=pl.col("t_ns"),
+                time_s=(pl.col("t_ns") - first_t_ns).cast(pl.Float64) / NS_PER_S,
+                min_ped_clearance_m=pl.col("clearance_m"),
+            )
+        )
