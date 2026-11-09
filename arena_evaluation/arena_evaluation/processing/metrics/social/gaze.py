@@ -78,7 +78,11 @@ def gaze_counts(robot: pl.DataFrame, peds: pl.DataFrame | None) -> pl.DataFrame:
             looking_at_peds=pl.col("looking_at").sum().cast(pl.Int64),
             looked_at_by_peds=pl.col("looked_at").sum().cast(pl.Int64),
         )
-        .select("time_ns", "looking_at_peds", "looked_at_by_peds")
+        .select(
+            t_ns=pl.col("time_ns"),
+            looking_at_peds=pl.col("looking_at_peds"),
+            looked_at_by_peds=pl.col("looked_at_by_peds"),
+        )
     )
 
 
