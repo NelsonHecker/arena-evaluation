@@ -1,5 +1,6 @@
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from arena_evaluation.processing.metrics.ecological.energy import EnergyMetricCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
@@ -32,11 +33,9 @@ def test_missing_power_and_battery_columns_give_null_metrics(calc):
         "power_peak_w",
         "battery_soc_final",
         "battery_soc_drop_pct",
-        "timeseries_power_total_w",
-        "timeseries_battery_soc",
     ):
         assert results[key] is None, key
-    assert results["timeseries_velocity_linear"] == pytest.approx([0.1, 0.2, 0.3])
+    assert set(results) == set(calc.output_keys())
 
 
 def test_all_null_power_column_gives_null_metrics(calc):
@@ -45,13 +44,11 @@ def test_all_null_power_column_gives_null_metrics(calc):
     assert results["energy_total_wh"] is None
     assert results["power_peak_w"] is None
     assert results["battery_soc_final"] is None
-    assert results["timeseries_power_total_w"] is None
 
 
 def test_leading_power_nulls_are_back_filled(calc):
     power = pl.Series([None, 36.0, 72.0], dtype=pl.Float64)
     results = calc.calculate(_episode(total_power_w=power), {})
-    assert results["timeseries_power_total_w"] == pytest.approx([36.0, 36.0, 72.0])
     assert results["energy_total_wh"] == pytest.approx((36.0 + 72.0) / 3600.0)
     assert results["power_peak_w"] == pytest.approx(72.0)
     assert results["energy_static_wh"] is None
@@ -61,3 +58,57 @@ def test_cumulative_energy_topic_wins_without_power(calc):
     results = calc.calculate(_episode(total_energy_consumed_wh=[1.0, 1.5, 2.25]), {})
     assert results["energy_total_wh"] == pytest.approx(1.25)
     assert results["power_peak_w"] is None
+
+
+def test_series_table_is_flat_one_row_per_sample(calc):
+    power = pl.Series([None, 36.0, 72.0], dtype=pl.Float64)
+    table = calc.series_table(_episode(total_power_w=power, vel_linear=[0.1, 0.2, 0.3]), run_id="run", robot_id="robot")
+    expected = pl.DataFrame(
+        {
+            "run_id": ["run"] * 3,
+            "episode_id": [1] * 3,
+            "robot_id": ["robot"] * 3,
+            "t_ns": [0, SEC, 2 * SEC],
+            "time_s": [0.0, 1.0, 2.0],
+            "power_total_w": [36.0, 36.0, 72.0],
+            "power_static_w": [None, None, None],
+            "power_mechanical_w": [None, None, None],
+            "power_thermal_w": [None, None, None],
+            "battery_soc_pct": [None, None, None],
+            "velocity_linear_mps": [0.1, 0.2, 0.3],
+        },
+        schema={
+            "run_id": pl.String,
+            "episode_id": pl.Int64,
+            "robot_id": pl.String,
+            "t_ns": pl.Int64,
+            "time_s": pl.Float64,
+            "power_total_w": pl.Float64,
+            "power_static_w": pl.Float64,
+            "power_mechanical_w": pl.Float64,
+            "power_thermal_w": pl.Float64,
+            "battery_soc_pct": pl.Float64,
+            "velocity_linear_mps": pl.Float64,
+        },
+    )
+    assert_frame_equal(table, expected, check_dtypes=True, rel_tol=1e-12)
+
+
+def test_series_table_without_data_keeps_the_schema(calc):
+    empty = AlignedEpisodeBundle(episode_id=1, data=None, start_pos=[], goal_pos=[])
+    assert len(calc.series_table(empty)) == 0
+    assert calc.series_table(empty).schema == pl.Schema(
+        {
+            "run_id": pl.String,
+            "episode_id": pl.Int64,
+            "robot_id": pl.String,
+            "t_ns": pl.Int64,
+            "time_s": pl.Float64,
+            "power_total_w": pl.Float64,
+            "power_static_w": pl.Float64,
+            "power_mechanical_w": pl.Float64,
+            "power_thermal_w": pl.Float64,
+            "battery_soc_pct": pl.Float64,
+            "velocity_linear_mps": pl.Float64,
+        }
+    )

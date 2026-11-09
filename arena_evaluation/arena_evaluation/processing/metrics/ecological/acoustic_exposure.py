@@ -110,7 +110,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         )
         return aligned["_rx"].to_numpy().astype(np.float64), aligned["_ry"].to_numpy().astype(np.float64)
 
-    def _compute(self, episode: AlignedEpisodeBundle) -> AcousticExposureResult | None:
+    def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult | None:
         """Scalar summaries and per-frame pedestrian exposure series, None when the episode cannot be evaluated."""
         null_result = AcousticExposureResult(
             scalars={key: None for key in self.output_keys()},
@@ -128,7 +128,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             logger.debug("No episode data for episode %s", episode.episode_id)
             return null_result
 
-        map_name = episode.map or self.world
+        map_name = prior_results.get("map") or episode.map or self.world
         if not map_name:
             logger.warning("No map name available for episode %s - skipping acoustics", episode.episode_id)
             return null_result
@@ -346,14 +346,13 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         )
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        del prior_results
-        result = self._compute(episode)
+        result = self._compute(episode, prior_results)
         assert result is not None
         return dict(result.scalars)
 
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat pedestrian acoustic exposure series, one row per (sample, pedestrian); empty with the same schema without data."""
-        result = self._compute(episode)
+        result = self._compute(episode, {})
         if result is None or not any(result.frame_exposure_dba):
             return pl.DataFrame(schema=SERIES_SCHEMA)
 

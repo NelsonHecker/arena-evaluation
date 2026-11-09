@@ -114,7 +114,7 @@ def load_acoustic_profile(model: str) -> AcousticProfile:
     return BUILTIN_ACOUSTIC_PROFILE
 
 
-def _leq_power(level_dba: pl.Expr) -> pl.Expr:
+def _leq_power(level_dba: pl.Series | pl.Expr) -> pl.Series | pl.Expr:
     """Linear acoustic power proxy 10^(L/10), L_Aeq = 10*log10(mean(x))."""
     return 10.0 ** (level_dba / 10.0)
 

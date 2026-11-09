@@ -143,11 +143,11 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
             return empty_int, empty, empty.copy(), empty.copy()
 
         pos_x, pos_y, _yaw, _odom_x, _odom_y, _odom_yaw = self.resolve_robot_pose(episode)
-        aligned_times_ns = episode.data["time_ns"].to_numpy().astype(np.int64)
-        if len(pos_x) != len(aligned_times_ns):
-            # resolve_robot_pose reports only the longest teleport-free ground-truth piece.
+        frame = self.resolve_robot_frame(episode)
+        if frame is None or len(frame) == 0 or len(pos_x) == 0:
             return np.array([], dtype=np.int64), np.array([], dtype=np.float64), np.array([], dtype=np.float64), np.array([], dtype=np.float64)
 
+        aligned_times_ns = frame["time_ns"].to_numpy().astype(np.int64)
         topic_scan = self.native_topics(episode).get("robot_scan_summary")
         peds_df = self.native_ped_frame(episode)
         obstacle, pedestrian = self._clearance_arrays(aligned_times_ns, pos_x, pos_y, topic_scan, peds_df)
