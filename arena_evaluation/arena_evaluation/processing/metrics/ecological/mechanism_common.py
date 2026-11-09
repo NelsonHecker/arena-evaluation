@@ -410,13 +410,13 @@ def robot_track(calc: BaseMetricCalculator, episode: AlignedEpisodeBundle) -> Ro
     """Resolved map-frame robot track, None when the episode has no usable pose or start pose."""
     if episode.data is None or len(episode.data) == 0 or not episode.start_pos:
         return None
-    pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
-    data = episode.data
-    if data is None or "time_ns" not in data.columns or len(pos_x) == 0 or len(data) != len(pos_x):
+    frame = calc.resolve_robot_frame(episode)
+    if frame is None or len(frame) == 0:
         return None
-    time_ns = data["time_ns"].to_numpy().astype(np.int64)
-    if "vel_linear" in data.columns:
-        speed = np.abs(np.nan_to_num(data["vel_linear"].to_numpy().astype(np.float64), nan=0.0))
+    pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
+    time_ns = frame["time_ns"].to_numpy().astype(np.int64)
+    if "vel_linear" in frame.columns:
+        speed = np.abs(np.nan_to_num(frame["vel_linear"].to_numpy().astype(np.float64), nan=0.0))
     else:
         speed = calc.speed_from_pose(pos_x, pos_y, time_ns)
     return RobotTrack(time_ns, np.asarray(pos_x, dtype=np.float64), np.asarray(pos_y, dtype=np.float64), speed, hold_dt(time_ns))

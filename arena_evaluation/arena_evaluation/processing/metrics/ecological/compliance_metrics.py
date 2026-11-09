@@ -187,7 +187,7 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
 
     str_val = (
         pl.when(pl.col("field_kind") == "predicate")
-        .then(pl.when(pl.col("value_bool")).then(pl.lit("true")).otherwise(pl.lit("false")))
+        .then(pl.when(pl.col("value_bool").cast(pl.Boolean, strict=False).fill_null(False)).then(pl.lit("true")).otherwise(pl.lit("false")))
         .when(pl.col("field_kind") == "continuous")
         .then(pl.col("value_num").cast(pl.String))
         .otherwise(pl.col("value_str").fill_null(""))

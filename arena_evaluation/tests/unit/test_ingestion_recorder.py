@@ -91,6 +91,7 @@ def _bare_node(**overrides) -> DataRecorderNode:
     node.current_episode_id = None
     node.current_episode_dir = None
     node.current_sim_episode_id = None
+    node.crowd_condition = "visible"
     node.is_shutting_down = False
     node.recorded_topics = set()
     node.latched_topic_names = set()
