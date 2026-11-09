@@ -255,9 +255,7 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
                 "power_w": power_w,
                 "dt_s": dt,
             }
-        ).with_columns(
-            (pl.col("stationary") != pl.col("stationary").shift(1)).fill_null(True).cum_sum().alias("block_id")
-        )
+        ).with_columns((pl.col("stationary") != pl.col("stationary").shift(1)).fill_null(True).cum_sum().alias("block_id"))
         block_energy = (
             blocks.filter(pl.col("stationary"))
             .group_by("block_id")

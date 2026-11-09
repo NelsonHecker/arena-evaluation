@@ -59,9 +59,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     REQUIRED_TOPICS = ["collision_events", ("robot_tracks", "robot_odom")]
 
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset(
-        {MetricScope.EPISODE, MetricScope.ENCOUNTER, MetricScope.CONTACT}
-    )
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER, MetricScope.CONTACT})
 
     UNITS = {
         "collision_amount": "",
@@ -200,12 +198,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         if events is None:
             return None
         active = (pl.col(_NATIVE_COUNT_COLUMNS[column]).cast(pl.Float64).fill_null(0.0) > 0.0).alias("active")
-        onsets = (
-            events.select(pl.col("t_ns").cast(pl.Int64), active)
-            .sort("t_ns")
-            .filter(pl.col("active") & ~pl.col("active").shift(1, fill_value=False))
-            .get_column("t_ns")
-        )
+        onsets = events.select(pl.col("t_ns").cast(pl.Int64), active).sort("t_ns").filter(pl.col("active") & ~pl.col("active").shift(1, fill_value=False)).get_column("t_ns")
         inside = (onsets >= scope_slice.t_start_ns) & (onsets <= scope_slice.t_end_ns)
         return int(inside.sum())
 

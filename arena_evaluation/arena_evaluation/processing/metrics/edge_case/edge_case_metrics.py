@@ -41,6 +41,7 @@ def _bare_ped_name_expression() -> pl.Expr:
     """Recorded pedestrian name with the env prefix and the trailing entity path removed."""
     return pl.col("ped_name").cast(pl.String).str.replace(_ENV_PREFIX.pattern, "").str.split("/").list.first()
 
+
 def episode_provenance(episode: AlignedEpisodeBundle, world: str | None) -> Provenance | None:
     """The provenance of the scenario the episode ran, None when it has none."""
     world = episode.map or world
@@ -217,7 +218,6 @@ class EdgeCaseCriticalityCalculator(BaseMetricCalculator):
         )
         return results
 
-
     def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
@@ -228,6 +228,7 @@ class EdgeCaseCriticalityCalculator(BaseMetricCalculator):
         if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
             return dict.fromkeys(self.output_keys())
         return self.calculate(episode, prior_results)
+
 
 class EdgeCaseFormationCalculator(BaseMetricCalculator):
     """Whether the formation a case's D step owns formed around its center, how long it held and when it broke."""

@@ -34,19 +34,12 @@ PERSONAL_SPACE_SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
 )
 
 
-def personal_space_counts(
-    robot_frame: pl.DataFrame, peds: pl.DataFrame, radius_m: float
-) -> pl.DataFrame:
+def personal_space_counts(robot_frame: pl.DataFrame, peds: pl.DataFrame, radius_m: float) -> pl.DataFrame:
     """One row per robot ground-truth sample with the number of pedestrians inside ``radius_m`` of it."""
     time_ns = robot_frame.get_column("time_ns").to_numpy().astype(np.int64)
     pos_x = robot_frame.get_column("pos_x_gt").to_numpy().astype(np.float64)
     pos_y = robot_frame.get_column("pos_y_gt").to_numpy().astype(np.float64)
-    within = (
-        distances_to_pedestrians(time_ns, pos_x, pos_y, peds)
-        .filter(pl.col("distance") < radius_m)
-        .group_by("row")
-        .len()
-    )
+    within = distances_to_pedestrians(time_ns, pos_x, pos_y, peds).filter(pl.col("distance") < radius_m).group_by("row").len()
     counts = np.zeros(len(time_ns), dtype=np.int64)
     counts[within["row"].to_numpy()] = within["len"].to_numpy()
     return pl.DataFrame(
@@ -86,9 +79,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
             "avg_velocity_in_personal_space",
         ]
 
-    def calculate(
-        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         """Dwell of the robot inside its personal space, and the mean velocity while inside."""
         robot_frame = self.resolve_robot_frame(episode)
         peds_df = self.native_ped_frame(episode)
@@ -128,15 +119,11 @@ class ProxemicsCalculator(BaseMetricCalculator):
         occupancy = counts.get_column("count").to_numpy()
         step_s = np.append(np.diff(time_ns) / 1e9, 0.0)
         inside = occupancy > 0
-        speed_mps = np.hypot(
-            robot.get_column("vx").to_numpy(), robot.get_column("vy").to_numpy()
-        )
+        speed_mps = np.hypot(robot.get_column("vx").to_numpy(), robot.get_column("vy").to_numpy())
         return {
             "num_pedestrians": int(peds.get_column("ped_id").n_unique()),
             "total_time_in_personal_space": float(step_s[inside].sum()),
-            "avg_velocity_in_personal_space": float(speed_mps[inside].mean())
-            if bool(inside.any())
-            else 0.0,
+            "avg_velocity_in_personal_space": float(speed_mps[inside].mean()) if bool(inside.any()) else 0.0,
         }
 
     def calculate_for_scope(
@@ -165,12 +152,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
         """1NF per-sample personal-space occupancy, one row per robot sample."""
         robot_frame = self.resolve_robot_frame(episode)
         peds_df = self.native_ped_frame(episode)
-        if (
-            robot_frame is None
-            or robot_frame.height == 0
-            or peds_df is None
-            or peds_df.height == 0
-        ):
+        if robot_frame is None or robot_frame.height == 0 or peds_df is None or peds_df.height == 0:
             return pl.DataFrame(schema=PERSONAL_SPACE_SERIES_SCHEMA)
         counts = personal_space_counts(robot_frame, peds_df, self.PERSONAL_SPACE_RADIUS)
         first_t_ns = int(counts.select(pl.col("t_ns").min()).item())

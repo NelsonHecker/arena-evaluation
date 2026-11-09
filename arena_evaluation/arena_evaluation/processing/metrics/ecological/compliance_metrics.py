@@ -185,13 +185,7 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
     if not {"t_ns", "entity_name", "kind", "field_name"} <= set(snapshot.columns):
         return empty
 
-    str_val = (
-        pl.when(pl.col("field_kind") == "predicate")
-        .then(pl.when(pl.col("value_bool").cast(pl.Boolean, strict=False).fill_null(False)).then(pl.lit("true")).otherwise(pl.lit("false")))
-        .when(pl.col("field_kind") == "continuous")
-        .then(pl.col("value_num").cast(pl.String))
-        .otherwise(pl.col("value_str").fill_null(""))
-    )
+    str_val = pl.when(pl.col("field_kind") == "predicate").then(pl.when(pl.col("value_bool").cast(pl.Boolean, strict=False).fill_null(False)).then(pl.lit("true")).otherwise(pl.lit("false"))).when(pl.col("field_kind") == "continuous").then(pl.col("value_num").cast(pl.String)).otherwise(pl.col("value_str").fill_null(""))
 
     group_keys = ["entity_name", "kind", "field_name"]
     return (
@@ -200,9 +194,7 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
         .with_columns(
             prev_raw=pl.col("current").shift(1).over(group_keys),
         )
-        .filter(
-            pl.col("prev_raw").is_null() | (pl.col("current") != pl.col("prev_raw"))
-        )
+        .filter(pl.col("prev_raw").is_null() | (pl.col("current") != pl.col("prev_raw")))
         .select(
             time_ns=pl.col("t_ns"),
             entity=pl.col("entity_name"),
@@ -366,11 +358,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
             if episode.data is None or len(episode.data) == 0:
                 return None
             pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
-            t_odom = (
-                episode.data["time_ns"].to_numpy().astype(np.int64)
-                if "time_ns" in episode.data.columns
-                else np.arange(len(pos_x), dtype=np.int64)
-            )
+            t_odom = episode.data["time_ns"].to_numpy().astype(np.int64) if "time_ns" in episode.data.columns else np.arange(len(pos_x), dtype=np.int64)
 
         if len(pos_x) < 2:
             return None
@@ -402,20 +390,8 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         has_vx = "vx" in peds_df.columns
         has_vy = "vy" in peds_df.columns
         peds_with_vel = peds_lf.with_columns(
-            vx=(
-                pl.when(pl.col("vx").is_null() | pl.col("vx").is_nan())
-                .then(pl.col("x").diff().over("ped_id") / dt_ped_safe)
-                .otherwise(pl.col("vx"))
-                if has_vx
-                else pl.col("x").diff().over("ped_id") / dt_ped_safe
-            ),
-            vy=(
-                pl.when(pl.col("vy").is_null() | pl.col("vy").is_nan())
-                .then(pl.col("y").diff().over("ped_id") / dt_ped_safe)
-                .otherwise(pl.col("vy"))
-                if has_vy
-                else pl.col("y").diff().over("ped_id") / dt_ped_safe
-            ),
+            vx=(pl.when(pl.col("vx").is_null() | pl.col("vx").is_nan()).then(pl.col("x").diff().over("ped_id") / dt_ped_safe).otherwise(pl.col("vx")) if has_vx else pl.col("x").diff().over("ped_id") / dt_ped_safe),
+            vy=(pl.when(pl.col("vy").is_null() | pl.col("vy").is_nan()).then(pl.col("y").diff().over("ped_id") / dt_ped_safe).otherwise(pl.col("vy")) if has_vy else pl.col("y").diff().over("ped_id") / dt_ped_safe),
         ).with_columns(
             vx=pl.col("vx").fill_null(0.0),
             vy=pl.col("vy").fill_null(0.0),

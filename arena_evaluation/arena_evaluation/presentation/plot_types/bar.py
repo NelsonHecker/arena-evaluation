@@ -5,8 +5,8 @@ import pathlib
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.express as px
-from plotly.graph_objects import Figure
 import polars as pl
+from plotly.graph_objects import Figure
 
 from arena_evaluation.presentation.color_utils import get_color_palette
 

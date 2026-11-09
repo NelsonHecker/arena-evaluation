@@ -265,7 +265,6 @@ class AcousticDoseCalculator(BaseMetricCalculator):
         return ("robot_acoustics",)
 
     @classmethod
-
     @classmethod
     def output_keys(cls) -> list[str]:
         return [

@@ -200,6 +200,7 @@ def _flat_points(path_value: object) -> list[tuple[float, float]]:
 def _string_or_none(value: object) -> str | None:
     return str(value) if value is not None else None
 
+
 class TrajectoryRenderer(BasePlotRenderer):
     """Robot paths over the world map."""
 
@@ -354,11 +355,50 @@ class TrajectoryRenderer(BasePlotRenderer):
     @staticmethod
     def _add_marker_traces(fig: go.Figure, planner_name: str, agent: int, markers: dict[str, list[list[float]]], indices: dict[str, list[list[int]]]) -> None:
         if markers["start_x"][agent]:
-            fig.add_trace(go.Scatter(x=markers["start_x"][agent], y=markers["start_y"][agent], mode="markers", marker=dict(symbol="circle", size=8, color="#10b981", line=dict(width=1, color="#065f46")), name=f"{planner_name} Starts", legendgroup=planner_name, showlegend=False, opacity=0.9, hovertemplate=f"<b>{planner_name}</b><br>Start<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>", customdata=indices["start_idx"][agent]))
+            fig.add_trace(
+                go.Scatter(
+                    x=markers["start_x"][agent],
+                    y=markers["start_y"][agent],
+                    mode="markers",
+                    marker=dict(symbol="circle", size=8, color="#10b981", line=dict(width=1, color="#065f46")),
+                    name=f"{planner_name} Starts",
+                    legendgroup=planner_name,
+                    showlegend=False,
+                    opacity=0.9,
+                    hovertemplate=f"<b>{planner_name}</b><br>Start<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                    customdata=indices["start_idx"][agent],
+                )
+            )
         if markers["goal_x"][agent]:
-            fig.add_trace(go.Scatter(x=markers["goal_x"][agent], y=markers["goal_y"][agent], mode="markers", marker=dict(symbol="star", size=12, color="#ffc845"), name=f"{planner_name} Goals", legendgroup=planner_name, showlegend=False, opacity=0.9, hovertemplate=f"<b>{planner_name}</b><br>Goal<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>", customdata=indices["goal_idx"][agent]))
+            fig.add_trace(
+                go.Scatter(
+                    x=markers["goal_x"][agent],
+                    y=markers["goal_y"][agent],
+                    mode="markers",
+                    marker=dict(symbol="star", size=12, color="#ffc845"),
+                    name=f"{planner_name} Goals",
+                    legendgroup=planner_name,
+                    showlegend=False,
+                    opacity=0.9,
+                    hovertemplate=f"<b>{planner_name}</b><br>Goal<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                    customdata=indices["goal_idx"][agent],
+                )
+            )
         if markers["col_x"][agent]:
-            fig.add_trace(go.Scatter(x=markers["col_x"][agent], y=markers["col_y"][agent], mode="markers", marker=dict(symbol="x", size=10, color="#d3273e", line=dict(width=2)), name=f"{planner_name} Collisions", legendgroup=planner_name, showlegend=False, opacity=1.0, hovertemplate=f"<b>{planner_name}</b><br>Collision<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>", customdata=indices["col_idx"][agent]))
+            fig.add_trace(
+                go.Scatter(
+                    x=markers["col_x"][agent],
+                    y=markers["col_y"][agent],
+                    mode="markers",
+                    marker=dict(symbol="x", size=10, color="#d3273e", line=dict(width=2)),
+                    name=f"{planner_name} Collisions",
+                    legendgroup=planner_name,
+                    showlegend=False,
+                    opacity=1.0,
+                    hovertemplate=f"<b>{planner_name}</b><br>Collision<br>X: %{{x:.2f}}<br>Y: %{{y:.2f}}<extra></extra>",
+                    customdata=indices["col_idx"][agent],
+                )
+            )
 
     @staticmethod
     def _with_map_image(fig: go.Figure, map_meta: dict, map_name: str | None, layout_args: dict[str, object]) -> dict[str, object]:
@@ -377,6 +417,7 @@ class TrajectoryRenderer(BasePlotRenderer):
         except OSError as e:
             print(f"Failed to overlay map {map_name}: {e}")
         return layout_args
+
     def _add_theta_star_overlay(self, fig: go.Figure, evaluated: _Frame, map_name: str | None, run_dir: pathlib.Path | None) -> None:
         if not (self.spec.options.get("overlay_theta_star", False) or self.spec.options.get("show_theta_star", False) or (self.spec.data_key and "theta" in self.spec.data_key)):
             return
@@ -478,6 +519,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                     )
                 )
                 rendered = True
+
     def _inject_slider_js(self, fig: go.Figure) -> str:
         import uuid
 
@@ -553,6 +595,7 @@ class TrajectoryRenderer(BasePlotRenderer):
         </script>
         """
         return fig_html + custom_js
+
     def render_plotly(self, df: pl.DataFrame) -> str | list[str] | None:
         df_filtered = self._apply_filters(df)
         data_key = self.resolve_channel("x", fallback=self.spec.data_key or "path")
@@ -718,6 +761,7 @@ class TrajectoryRenderer(BasePlotRenderer):
             ax.imshow(image, extent=(ox, ox + map_meta["width"] * resolution, oy, oy + map_meta["height"] * resolution), alpha=0.5, origin="upper", zorder=0)
         except (OSError, SyntaxError) as e:
             print(f"Failed to overlay map: {e}")
+
     def _draw_static(self, ax: Axes, panel: _Panel, world: MechanismWorld | None, map_name: str | None, run_dir: pathlib.Path | None) -> None:
         x0, x1, y0, y1 = panel.limits
         ax.set_xlim(x0, x1)
@@ -850,6 +894,7 @@ class TrajectoryRenderer(BasePlotRenderer):
             print(f"Failed to save GIF {out_path}: {e}")
         finally:
             clock.remove()
+
 
 def _group_map_name(valid_groups: list[str], name: object, frame: _Frame) -> str | None:
     if "map" in valid_groups:

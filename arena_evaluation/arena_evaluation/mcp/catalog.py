@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import attrs
 import pydantic
-
 from arena_mcp.core import ToolError
 from arena_mcp.core.msgs import jsonable
 

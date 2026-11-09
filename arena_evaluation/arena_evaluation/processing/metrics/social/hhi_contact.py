@@ -160,9 +160,7 @@ def pair_track(held: pl.DataFrame, time_ns: np.ndarray, ped_id: str) -> np.ndarr
     if rows.height == 0:
         return positions
     held_times = rows.get_column("time_ns").to_numpy().astype(np.int64)
-    positions[np.searchsorted(time_ns.astype(np.int64), held_times)] = rows.select(
-        "x", "y"
-    ).to_numpy().astype(np.float64)
+    positions[np.searchsorted(time_ns.astype(np.int64), held_times)] = rows.select("x", "y").to_numpy().astype(np.float64)
     return positions
 
 
@@ -220,9 +218,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         first = activated.row(0, named=True)
         interaction_id = first["interaction_id"]
         mine = contact.filter(pl.col("interaction_id") == interaction_id)
-        same_event = mine.filter(
-            (pl.col("t_ns") == first["t_ns"]) & (pl.col("event_name") == first["event_name"])
-        )
+        same_event = mine.filter((pl.col("t_ns") == first["t_ns"]) & (pl.col("event_name") == first["event_name"]))
         participants = same_event.get_column("ped_id").drop_nulls().to_list()
 
         def at(name: str) -> float | None:
@@ -231,9 +227,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
 
         return int(first["interaction_type"]), participants, at(EVENT_HOLD_ONSET), at(EVENT_RELEASED)
 
-    def _robot_time_axis(
-        self, episode: AlignedEpisodeBundle
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
+    def _robot_time_axis(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
         """Times, x, y and the offset of the episode view's robot samples, none when it has fewer than two."""
         data = episode.data
         if data is None or data.height < 2:
@@ -278,9 +272,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         out: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
 
         topics = episode.topics or {}
-        interaction_type, participants, hold_onset, release = self._contact_edges(
-            topics.get("pedestrian_interaction_events"), int(t0_ns)
-        )
+        interaction_type, participants, hold_onset, release = self._contact_edges(topics.get("pedestrian_interaction_events"), int(t0_ns))
         out["hhi_interaction"] = CONTACT_TYPES.get(interaction_type) if interaction_type is not None else None
         out["hhi_hold_onset_s"] = hold_onset
         out["hhi_release_s"] = release
@@ -308,21 +300,13 @@ class ContactInteractionCalculator(BaseMetricCalculator):
                 hold_start_s, hold_end_s = windows["hold"]
                 in_hold = (t_s >= hold_start_s) & (t_s <= hold_end_s) & present
                 if len(in_hold) > 1:
-                    out["hhi_passes_between"] = int(
-                        np.sum(segment_crossings(robot, pair_a, pair_b) & in_hold[:-1] & in_hold[1:])
-                    )
+                    out["hhi_passes_between"] = int(np.sum(segment_crossings(robot, pair_a, pair_b) & in_hold[:-1] & in_hold[1:]))
                 if in_hold.any():
-                    out["hhi_min_pair_clearance"] = float(
-                        np.min(point_segment_distance(robot[in_hold], pair_a[in_hold], pair_b[in_hold]))
-                    )
-                    out["hhi_pair_gap_hold"] = float(
-                        np.median(np.linalg.norm(pair_a[in_hold] - pair_b[in_hold], axis=1))
-                    )
+                    out["hhi_min_pair_clearance"] = float(np.min(point_segment_distance(robot[in_hold], pair_a[in_hold], pair_b[in_hold])))
+                    out["hhi_pair_gap_hold"] = float(np.median(np.linalg.norm(pair_a[in_hold] - pair_b[in_hold], axis=1)))
         return out
 
-    def _native_axis(
-        self, window: AlignedEpisodeBundle
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
+    def _native_axis(self, window: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
         """The window's own robot time axis and planar positions, none when it has fewer than two samples."""
         frame = native_robot_frame(window)
         if frame is None or frame.height < 2:
@@ -395,12 +379,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         resolved_robot = robot_id or (episode.robot_name or "robot")
         window_of = {
             onset: next(
-                (
-                    window
-                    for window in WINDOWS
-                    if windows[window][0] <= onset < windows[window][1]
-                    or (window == last_window and onset == windows[window][1])
-                ),
+                (window for window in WINDOWS if windows[window][0] <= onset < windows[window][1] or (window == last_window and onset == windows[window][1])),
                 None,
             )
             for onset, _end in stalls

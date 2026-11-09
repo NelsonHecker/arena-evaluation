@@ -102,9 +102,7 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
         ]
 
     @staticmethod
-    def compute_orthogonal_deviation(
-        points: object, reference_polyline: object
-    ) -> tuple[float, float]:
+    def compute_orthogonal_deviation(points: object, reference_polyline: object) -> tuple[float, float]:
         """(max, mean) orthogonal deviation of planar points from a reference polyline, 0 when either is unusable."""
         point_matrix = _point_matrix(points)
         reference_matrix = _point_matrix(reference_polyline)
@@ -116,17 +114,13 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
         segment_length_m2 = np.einsum("ij,ij->i", segment_delta, segment_delta)
         usable = segment_length_m2 > DEGENERATE_SEGMENT_M2
         if not np.any(usable):
-            distances_m = np.linalg.norm(
-                point_matrix[:, None, :] - segment_start[None, 0, :], axis=2
-            )
+            distances_m = np.linalg.norm(point_matrix[:, None, :] - segment_start[None, 0, :], axis=2)
         else:
             start = segment_start[usable]
             delta = segment_delta[usable]
             length_m2 = segment_length_m2[usable]
             offset = point_matrix[:, None, :] - start[None, :, :]
-            projection = np.clip(
-                np.einsum("nmk,mk->nm", offset, delta) / length_m2, 0.0, 1.0
-            )
+            projection = np.clip(np.einsum("nmk,mk->nm", offset, delta) / length_m2, 0.0, 1.0)
             projected = start[None, :, :] + projection[..., None] * delta[None, :, :]
             distances_m = np.linalg.norm(point_matrix[:, None, :] - projected, axis=2)
         nearest_m = distances_m.min(axis=1)
@@ -153,13 +147,9 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
             if len(actual_matrix) < 2 or len(reference_matrix) < 2:
                 continue
             if len(actual_matrix) > DTW_MAX_POINTS:
-                actual_matrix = actual_matrix[
-                    np.linspace(0, len(actual_matrix) - 1, DTW_MAX_POINTS, dtype=int)
-                ]
+                actual_matrix = actual_matrix[np.linspace(0, len(actual_matrix) - 1, DTW_MAX_POINTS, dtype=int)]
             if len(reference_matrix) > DTW_MAX_POINTS:
-                reference_matrix = reference_matrix[
-                    np.linspace(0, len(reference_matrix) - 1, DTW_MAX_POINTS, dtype=int)
-                ]
+                reference_matrix = reference_matrix[np.linspace(0, len(reference_matrix) - 1, DTW_MAX_POINTS, dtype=int)]
             distance_m = np.hypot(
                 actual_matrix[:, None, 0] - reference_matrix[None, :, 0],
                 actual_matrix[:, None, 1] - reference_matrix[None, :, 1],
@@ -208,9 +198,7 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
             actual_ped_points = _stack_paths(actual_ped_paths)
             reference_ped_points = _stack_paths(reference_ped_paths)
             if actual_ped_points is not None and reference_ped_points is not None:
-                deflection = PedestrianDisturbanceCalculator._compute_trajectory_deflection(
-                    actual_ped_points, reference_ped_points
-                )
+                deflection = PedestrianDisturbanceCalculator._compute_trajectory_deflection(actual_ped_points, reference_ped_points)
                 results["ped_path_deflection_m"] = round(float(deflection), 3)
 
         if ref_robot_row is None:
@@ -221,50 +209,32 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
         actual_robot_points = _point_matrix(actual_robot_path)
         reference_robot_points = _point_matrix(reference_robot_path)
         if actual_robot_points is not None and reference_robot_points is not None:
-            maximum_m, _ = cls.compute_orthogonal_deviation(
-                actual_robot_points, reference_robot_points
-            )
+            maximum_m, _ = cls.compute_orthogonal_deviation(actual_robot_points, reference_robot_points)
             robot_deviation_m = float(maximum_m)
             results["robot_path_deviation_m"] = round(robot_deviation_m, 3)
 
         if interference is not None:
             if robot_deviation_m is not None and robot_deviation_m > 0.0:
-                results["mar"] = round(
-                    float(interference / max(robot_deviation_m, MIN_ROBOT_DEVIATION_M)), 4
-                )
-            elif (
-                dynamic_row.get("path_length") is not None
-                and ref_robot_row.get("path_length") is not None
-            ):
+                results["mar"] = round(float(interference / max(robot_deviation_m, MIN_ROBOT_DEVIATION_M)), 4)
+            elif dynamic_row.get("path_length") is not None and ref_robot_row.get("path_length") is not None:
                 path_deviation_m = max(
-                    float(dynamic_row["path_length"])
-                    - float(ref_robot_row["path_length"]),
+                    float(dynamic_row["path_length"]) - float(ref_robot_row["path_length"]),
                     MIN_PATH_DEVIATION_M,
                 )
                 results["mar"] = round(float(interference / path_deviation_m), 4)
 
         reference_time_s = ref_robot_row.get("time_to_goal")
         episode_time_s = dynamic_row.get("time_to_goal")
-        if (
-            reference_time_s is not None
-            and episode_time_s is not None
-            and float(episode_time_s) > 0.0
-        ):
-            results["relative_throughput"] = round(
-                float(reference_time_s) / float(episode_time_s), 4
-            )
+        if reference_time_s is not None and episode_time_s is not None and float(episode_time_s) > 0.0:
+            results["relative_throughput"] = round(float(reference_time_s) / float(episode_time_s), 4)
 
         reference_energy_wh = ref_robot_row.get("energy_total_wh")
         episode_energy_wh = dynamic_row.get("energy_total_wh")
         if reference_energy_wh is not None and episode_energy_wh is not None:
-            results["kcsc_wh"] = round(
-                max(float(episode_energy_wh) - float(reference_energy_wh), 0.0), 4
-            )
+            results["kcsc_wh"] = round(max(float(episode_energy_wh) - float(reference_energy_wh), 0.0), 4)
         return results
 
-    def calculate(
-        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         """EPISODE scope: every reference-twin output is null until the pipeline reconciles the stage's references."""
         del episode, prior_results
         return dict.fromkeys(self.output_keys())

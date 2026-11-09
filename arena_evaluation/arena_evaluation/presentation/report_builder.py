@@ -13,8 +13,8 @@ from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.presentation.checks import PlotDiagnostics
 from arena_evaluation.presentation.manifest_registry import resolve_manifest
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
-from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.presentation.resolver import DataResolver
+from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.presentation.viz_manifest import VizManifest
 from arena_evaluation.processing.metrics.registry import MetricRegistry
 

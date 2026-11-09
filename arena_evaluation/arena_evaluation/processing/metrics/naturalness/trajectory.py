@@ -8,6 +8,7 @@ from scipy.spatial.distance import cdist
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.path.theta_star import (
+    ThetaStarResult,
     compute_theta_star_for_episode,
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
@@ -70,14 +71,7 @@ def _topological_complexity(peds_df: pl.DataFrame | None, pos_x: np.ndarray, pos
     angle = pl.arctan2(rel_y, rel_x)
     delta_angle = angle.diff().over("ped_id")
     wrapped = ((delta_angle + pl.lit(np.pi)) % pl.lit(_TWO_PI)) - pl.lit(np.pi)
-    winding = (
-        pedestrians.join_asof(robot, on="t_ns", strategy="backward")
-        .with_columns(wrapped_d_angle=wrapped)
-        .group_by("ped_id")
-        .agg(net_winding=pl.col("wrapped_d_angle").drop_nulls().sum().abs() / pl.lit(_TWO_PI))
-        .select(total_winding=pl.col("net_winding").sum())
-        .collect()
-    )
+    winding = pedestrians.join_asof(robot, on="t_ns", strategy="backward").with_columns(wrapped_d_angle=wrapped).group_by("ped_id").agg(net_winding=pl.col("wrapped_d_angle").drop_nulls().sum().abs() / pl.lit(_TWO_PI)).select(total_winding=pl.col("net_winding").sum()).collect()
     if len(winding) == 0 or winding["total_winding"][0] is None:
         return 0.0
     return float(winding["total_winding"][0])
@@ -187,7 +181,7 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         return results
 
     @staticmethod
-    def _reference_metrics(pos_x: np.ndarray, pos_y: np.ndarray, goal_pt: tuple[float, float] | None, reference: typing.Any) -> dict[str, float | None]:
+    def _reference_metrics(pos_x: np.ndarray, pos_y: np.ndarray, goal_pt: tuple[float, float] | None, reference: ThetaStarResult) -> dict[str, float | None]:
         """ADE/FDE/MHD/Frechet/ADTW against the geometric Theta* reference path."""
         ref_x, ref_y = reference.path_x, reference.path_y
         metrics: dict[str, float | None] = {

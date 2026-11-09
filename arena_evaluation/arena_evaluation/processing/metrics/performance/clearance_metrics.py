@@ -95,11 +95,7 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
         if "range_max_m" in scan_df.columns:
             columns.append("range_max_m")
         scan = scan_df.select([pl.col("t_ns").cast(pl.Int64), *[pl.col(name).cast(pl.Float64) for name in columns[1:]]]).drop_nulls("t_ns").sort("t_ns")
-        joined = (
-            pl.DataFrame({"t_ns": time_ns.astype(np.int64)})
-            .join_asof(scan, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
-            .sort("t_ns")
-        )
+        joined = pl.DataFrame({"t_ns": time_ns.astype(np.int64)}).join_asof(scan, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS).sort("t_ns")
         scan_min = joined["scan_min_m"].to_numpy().astype(np.float64)
         scan_max = joined["range_max_m"].to_numpy().astype(np.float64) if "range_max_m" in joined.columns else np.full(len(time_ns), np.nan)
         return scan_min, scan_max
