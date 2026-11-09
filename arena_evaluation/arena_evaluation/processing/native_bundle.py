@@ -1,4 +1,9 @@
-"""Aligns the flat telemetry tables onto the odometry time axis under the aligned column names the metrics read."""
+"""The single canonical telemetry bundle: the robot's ground-truth track is the clock.
+
+Every metric reads one flat frame whose time axis is the recorded `/tf` track, on native
+nanosecond stamps. Odometry is not a clock, is not a trajectory, and its absence never drops
+an episode: a recording with ground truth but no wheel odometry evaluates normally.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +15,17 @@ if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import TopicBundle
 
 TIME_COLUMN = "time_ns"
-_ODOMETRY = {"odom_x": "pos_x", "odom_y": "pos_y", "odom_yaw": "yaw", "odom_vx": "vel_linear", "odom_wz": "vel_angular"}
-_GROUND_TRUTH = {"x": "pos_x_gt", "y": "pos_y_gt", "yaw": "yaw_gt"}
+
+# The ground-truth track is both the trajectory and the reference it is compared against, so the
+# legacy `pos_x`/`pos_y`/`yaw` names carry ground truth and the `_gt` aliases mirror it.
+_PRIMARY = {
+    "x": "pos_x",
+    "y": "pos_y",
+    "yaw": "yaw",
+    "speed_mps": "vel_linear",
+    "omega_z": "vel_angular",
+}
+_GROUND_TRUTH_ALIASES = {"x": "pos_x_gt", "y": "pos_y_gt", "yaw": "yaw_gt"}
 _SCAN = {"scan_min_m": "scan_min", "range_max_m": "scan_range_max", "n_valid_rays": "n_rays"}
 _CMD_VEL = {"linear_x": "linear_x", "linear_y": "linear_y", "linear_z": "linear_z", "angular_x": "angular_x", "angular_y": "angular_y", "angular_z": "angular_z"}
 _COLLISIONS = {"event_count": "collision_event", "wall_count": "collision_wall", "static_count": "collision_static", "ped_count": "collision_pedestrian"}
@@ -29,10 +43,10 @@ _ACOUSTICS = {
 _MARKERS = {"label": "label"}
 
 
-class TopicAligner:
-    """Aligns the flat telemetry tables onto the odometry time axis with backward asof joins."""
+class NativeBundle:
+    """Aligns the flat telemetry tables onto the robot's ground-truth track on native timestamps."""
 
-    def __init__(self, tolerance_ns: int = 100_000_000):
+    def __init__(self, tolerance_ns: int = 100_000_000) -> None:
         self.tolerance_ns = tolerance_ns
 
     def align(
@@ -41,24 +55,21 @@ class TopicAligner:
         start_time_ns: int | None = None,
         end_time_ns: int | None = None,
     ) -> pl.DataFrame | pl.LazyFrame | None:
-        """Align the robot's tables onto its odometry time axis, optionally filtered to [start_time_ns, end_time_ns]."""
-        if bundle.robot_odom is None or _is_empty(bundle.robot_odom):
+        """Align the robot's tables onto its ground-truth track, optionally filtered to [start_time_ns, end_time_ns]."""
+        if bundle.robot_tracks is None or _is_empty(bundle.robot_tracks):
             return None
-        primary = _window(_lazy(bundle.robot_odom), "t_ns", start_time_ns, end_time_ns)
-        if _is_empty(primary):
+        track = _window(_lazy(bundle.robot_tracks), "t_ns", start_time_ns, end_time_ns)
+        if _is_empty(track):
             return None
-        df = _select_aligned(primary, _ODOMETRY).sort(TIME_COLUMN)
-
+        frame = _primary(track)
         for table, renames in _secondary_tables(bundle):
-            df = self._join(df, table, renames, start_time_ns, end_time_ns)
-
+            frame = self._join(frame, table, renames, start_time_ns, end_time_ns)
         if bundle.robot_characterization_phase is not None and not _is_empty(bundle.robot_characterization_phase):
             markers = _select_aligned(_lazy(bundle.robot_characterization_phase), _MARKERS).sort(TIME_COLUMN)
-            df = df.join_asof(markers, on=TIME_COLUMN, strategy="backward")
-
-        if isinstance(bundle.robot_odom, pl.LazyFrame):
-            return df
-        return df.collect()
+            frame = frame.join_asof(markers, on=TIME_COLUMN, strategy="backward")
+        if isinstance(bundle.robot_tracks, pl.LazyFrame):
+            return frame
+        return frame.collect()
 
     def _join(
         self,
@@ -78,9 +89,16 @@ class TopicAligner:
         return primary.join_asof(secondary, on=TIME_COLUMN, strategy="backward", tolerance=tolerance)
 
 
+def _primary(track: pl.LazyFrame) -> pl.LazyFrame:
+    """The ground-truth track in the aligned column names the metrics read."""
+    columns = [pl.col("t_ns").alias(TIME_COLUMN)]
+    columns.extend(pl.col(source).alias(target) for source, target in _PRIMARY.items())
+    columns.extend(pl.col(source).alias(target) for source, target in _GROUND_TRUTH_ALIASES.items())
+    return track.select(columns).sort(TIME_COLUMN)
+
+
 def _secondary_tables(bundle: TopicBundle) -> tuple[tuple[pl.DataFrame | pl.LazyFrame | None, dict[str, str]], ...]:
     return (
-        (bundle.robot_tracks, _GROUND_TRUTH),
         (bundle.robot_scan_summary, _SCAN),
         (bundle.robot_cmd_vel, _CMD_VEL),
         (bundle.collision_events, _COLLISIONS),

@@ -7,7 +7,7 @@ import yaml
 
 from arena_evaluation.processing.mcap_reader import anchor_at
 from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, peak_pedestrian_count
-from arena_evaluation.processing.topic_aligner import TopicAligner
+from arena_evaluation.processing.native_bundle import NativeBundle
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, TopicBundle
 
 
@@ -104,7 +104,7 @@ class EpisodeSplitter:
     Splits continuous topic data into discrete episodes using EpisodeRecord messages.
     """
 
-    def __init__(self, aligner: TopicAligner, min_episode_frames: int = 5):
+    def __init__(self, aligner: NativeBundle, min_episode_frames: int = 5):
         self.aligner = aligner
         self.min_episode_frames = min_episode_frames
 

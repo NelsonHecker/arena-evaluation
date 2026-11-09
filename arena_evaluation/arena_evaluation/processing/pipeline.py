@@ -286,7 +286,7 @@ from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS as 
 from arena_evaluation.processing.pedestrian_frames import peak_pedestrian_count
 from arena_evaluation.processing.pose_anchor import resolve_pose_source
 from arena_evaluation.processing.pose_segments import ride_arrival_times
-from arena_evaluation.processing.topic_aligner import TopicAligner
+from arena_evaluation.processing.native_bundle import NativeBundle
 from arena_evaluation.storage.manifest import MetadataWriter
 
 # Columns whose values are all-None (no kind in the recording) or all-empty
@@ -670,12 +670,12 @@ class ProcessingPipeline:
 
                 available_topics = bundle.available()
 
-                aligned_df = TopicAligner().align(bundle, *window)
+                aligned_df = NativeBundle().align(bundle, *window)
                 if isinstance(aligned_df, pl.LazyFrame):
                     aligned_df = aligned_df.collect()
 
                 if aligned_df is None or len(aligned_df) < 5:
-                    reason = f"{0 if aligned_df is None else len(aligned_df)} odom rows inside the episode window"
+                    reason = f"{0 if aligned_df is None else len(aligned_df)} ground-truth rows inside the episode window"
                     _log.warning(f"episode_{ep.episode_id:03d} [{robot_name}]: {reason}")
                     all_results.append(_status_row(ep, metadata, robot_name, "no_trajectory", reason, bundle.episode_lifecycle, bundle.episode_integrity))
                     continue
