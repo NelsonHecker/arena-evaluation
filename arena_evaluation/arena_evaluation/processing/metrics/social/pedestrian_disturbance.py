@@ -93,7 +93,7 @@ def pedestrian_geometry_frame(peds: pl.DataFrame | None) -> pl.DataFrame:
         .then(lateral_m.mean())
         .otherwise(None)
         .alias("lateral_deviation_m"),
-    ).select(PEDESTRIAN_GEOMETRY_SCHEMA)
+    ).select("ped_id", "n_points", "first_t_ns", "last_t_ns", "path_length_m", "chord_m", "max_displacement_m", "lateral_deviation_m")
 
 
 def lateral_deflection_sums(geometry: pl.DataFrame) -> tuple[float, int]:
