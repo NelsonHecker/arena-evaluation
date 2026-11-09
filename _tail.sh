@@ -1,1 +1,0 @@
-head -40 /tmp/pytest_social_disturb.txt
