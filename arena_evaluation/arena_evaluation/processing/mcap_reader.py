@@ -328,7 +328,9 @@ def _robot_bundle(tables: _Tables, env_id: str, robot_id: str) -> TopicBundle:
     legacy_tracks = frames.get("pedestrian_tracks")
     legacy_physics = frames.get("pedestrian_tracks_physics")
     physics = _first_present(pedestrians, legacy_physics)
-    frames["pedestrian_tracks"] = _first_present(physics, arena_peds, legacy_tracks)
+    # arena_peds shares the robot-track frame; the engine table is offset by the env anchor and would
+    # place every pedestrian a full map offset away from the robot, so encounter detection finds nothing.
+    frames["pedestrian_tracks"] = _first_present(arena_peds, physics, legacy_tracks)
     frames["pedestrian_tracks_physics"] = physics
     return TopicBundle(**tables.global_frames, **frames)
 
