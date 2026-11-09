@@ -8,8 +8,6 @@ import polars as pl
 
 def _handle_acoustic(args: argparse.Namespace) -> None:
     """Handle 'evaluation acoustic' subcommands."""
-    from arena_evaluation.processing.parquet_store import ParquetStore
-
     benchmark_dir = args.benchmark_dir
     if isinstance(benchmark_dir, list):
         benchmark_dir = benchmark_dir[0]
@@ -19,143 +17,110 @@ def _handle_acoustic(args: argparse.Namespace) -> None:
         print(f"Error: benchmark directory does not exist: {benchmark_dir}")
         sys.exit(1)
 
-    metrics_path = benchmark_dir / "combined_metrics.parquet"
-    if not metrics_path.exists():
-        metrics_path = benchmark_dir / "metrics.parquet"
-    if not metrics_path.exists():
-        print(f"Error: no metrics.parquet or combined_metrics.parquet found in {benchmark_dir}")
+    df = _load_episode_summary(benchmark_dir)
+
+    match args.acoustic_command:
+        case "list":
+            _acoustic_list(df)
+        case "animate":
+            _acoustic_animate(df, args)
+        case "snapshot":
+            _acoustic_snapshot(df, args)
+
+
+def _load_episode_summary(benchmark_dir: pathlib.Path) -> pl.DataFrame:
+    """Canonical Star Schema episode summary of a benchmark, exiting when it was never processed."""
+    from arena_evaluation.analytics.catalog import BenchmarkCatalog
+
+    if not (benchmark_dir / "dim_episodes.parquet").is_file():
+        print(f"Error: no Star Schema episode summary found in {benchmark_dir}")
         print("Run 'evaluation process --benchmark-dir ...' first.")
         sys.exit(1)
+    return BenchmarkCatalog.from_directory(benchmark_dir).get_table("v_episode_summary").collect()
 
-    df, _ = ParquetStore.read(metrics_path)
 
-    if args.acoustic_command == "list":
-        _acoustic_list(df)
-    elif args.acoustic_command == "animate":
-        _acoustic_animate(df, args)
-    elif args.acoustic_command == "snapshot":
-        _acoustic_snapshot(df, args)
+def _map_for_episode(df: pl.DataFrame, episode_id: str) -> str | None:
+    """World of one resolved episode from the canonical episode summary."""
+    rows = df.filter(pl.col("episode_id") == _episode_number(episode_id))
+    if rows.is_empty():
+        return None
+    world = rows["world"][0]
+    return str(world) if world is not None else None
+
+
+def _episode_number(episode_id: str) -> int:
+    return int(episode_id.split("_")[-1])
 
 
 def _acoustic_list(df: pl.DataFrame) -> None:
-    """Print a table of episodes with acoustic metrics."""
-    import polars as pl
+    """Print one row per episode with its cumulative acoustic dose and success."""
+    work = df.filter(pl.col("total_acoustic_dose_pa2s").is_not_null()).sort("total_acoustic_dose_pa2s", descending=True)
 
-    cols = []
-    if "episode" in df.columns:
-        cols.append("episode")
-    if "ped_max_exposure_dba" in df.columns:
-        cols.append("ped_max_exposure_dba")
-    if "ped_leq_exposure_dba" in df.columns:
-        cols.append("ped_leq_exposure_dba")
-
-    if not cols:
-        print("No acoustic metric columns found in metrics file.")
-        return
-
-    work = df.select(cols).sort("ped_max_exposure_dba", descending=True) if "ped_max_exposure_dba" in df.columns else df.select(cols)
-
-    # Compute total exposure if timeseries available
-    has_total = "timeseries_acoustic_exposure_dba" in df.columns
-
-    print(f"{'EPISODE':<16} {'MAX_DBA':>10} {'LEQ_DBA':>10}", end="")
-    if has_total:
-        print(f" {'TOTAL_EXP':>12}", end="")
-    print()
-    print("-" * (16 + 10 + 10 + (12 if has_total else 0)))
-
+    print(f"{'EPISODE':<16} {'DOSE_PA2S':>14} {'SUCCESS':>8}")
+    print("-" * 38)
     for row in work.iter_rows(named=True):
-        ep = str(row.get("episode", "?"))
-        mx = row.get("ped_max_exposure_dba")
-        leq = row.get("ped_leq_exposure_dba")
-        mx_str = f"{mx:.1f}" if mx is not None else "N/A"
-        leq_str = f"{leq:.1f}" if leq is not None else "N/A"
-        print(f"{ep:<16} {mx_str:>10} {leq_str:>10}", end="")
-        if has_total:
-            ts = df.filter(pl.col("episode") == row.get("episode")).select("timeseries_acoustic_exposure_dba").row(0)[0] if "episode" in df.columns else None
-            if ts is not None:
-                total = sum(sum(f) for f in ts if f)
-                print(f" {total:>12.1f}", end="")
-            else:
-                print(f" {'N/A':>12}", end="")
-        print()
+        dose = row["total_acoustic_dose_pa2s"]
+        print(f"{'episode_' + format(row['episode_id'], '03d'):<16} {dose:>14.2f} {str(row['success']):>8}")
 
 
-def _resolve_episode(df: pl.DataFrame, episode_spec: str) -> str | None:
+def _resolve_episode(df: pl.DataFrame, episode_spec: str, benchmark_dir: pathlib.Path) -> str | None:
     """Resolve an episode specifier ('worst', 'loudest-source', 'max-total', or 'episode_NNN')."""
-    import polars as pl
-
-    if episode_spec.startswith("episode_"):
-        ep_str = episode_spec
-        if "episode" in df.columns:
-            ep_int = int(episode_spec.split("_")[-1])
-            if df.filter(pl.col("episode") == ep_int).is_empty():
-                print(f"Error: {episode_spec} not found in metrics.")
+    match episode_spec:
+        case str() if episode_spec.startswith("episode_"):
+            episode = _episode_number(episode_spec)
+            if df.filter(pl.col("episode_id") == episode).is_empty():
+                print(f"Error: {episode_spec} not found in the episode summary.")
                 return None
-        return ep_str
+            return episode_spec
+        case "worst" | "max-total":
+            return _episode_of_max_dose(df, episode_spec)
+        case "loudest-source":
+            return _loudest_source_episode(df, benchmark_dir)
+        case _:
+            print(f"Error: unknown episode specifier '{episode_spec}'.")
+            return None
 
-    if "ped_max_exposure_dba" not in df.columns:
-        print("Error: ped_max_exposure_dba not found in metrics. Cannot resolve episode by metric.")
+
+def _episode_of_max_dose(df: pl.DataFrame, label: str) -> str | None:
+    """Episode with the largest cumulative acoustic dose."""
+    measured = df.filter(pl.col("total_acoustic_dose_pa2s").is_not_null())
+    if measured.is_empty():
+        print("Error: total_acoustic_dose_pa2s has no values. Cannot resolve the episode.")
+        return None
+    best = measured.sort("total_acoustic_dose_pa2s", descending=True).row(0, named=True)
+    episode = int(best["episode_id"])
+    print(f"Using {label} episode: episode_{episode:03d} (dose={best['total_acoustic_dose_pa2s']:.2f} Pa2s)")
+    return f"episode_{episode:03d}"
+
+
+def _loudest_source_episode(df: pl.DataFrame, benchmark_dir: pathlib.Path) -> str | None:
+    """Episode holding the loudest instantaneous source level, read from its recorded acoustic field."""
+    from arena_evaluation.presentation.plot_types.acoustic_field import AcousticFieldRenderer
+
+    measured = df.filter(pl.col("total_acoustic_dose_pa2s").is_not_null())
+    if measured.is_empty():
+        print("Error: no episode has acoustic field data.")
         return None
 
-    if episode_spec == "worst":
-        measured = df.filter(pl.col("ped_max_exposure_dba").is_not_null())
-        if measured.is_empty():
-            print("Error: ped_max_exposure_dba has no values. Cannot resolve the worst episode.")
-            return None
-        best = measured.sort("ped_max_exposure_dba", descending=True).row(0, named=True)
-        ep = int(best.get("episode", 0))
-        print(f"Using worst episode: episode_{ep:03d} (max={best['ped_max_exposure_dba']:.1f} dBA)")
-        return f"episode_{ep:03d}"
-
-    if episode_spec == "loudest-source":
-        if "worst_case_acoustic_frame" not in df.columns:
-            print("Error: worst_case_acoustic_frame not in metrics.")
-            return None
-        best_source = -1.0
-        best_ep = 0
-        for row in df.iter_rows(named=True):
-            wf = row.get("worst_case_acoustic_frame")
-            if wf is None:
-                continue
-            if isinstance(wf, str):
-                import json
-
-                try:
-                    wf = json.loads(wf)
-                except Exception:
-                    continue
-            src = float(wf.get("source_dba", 0))
-            if src > best_source:
-                best_source = src
-                best_ep = int(row.get("episode", 0))
-        print(f"Using loudest-source episode: episode_{best_ep:03d} (source={best_source:.1f} dBA)")
-        return f"episode_{best_ep:03d}"
-
-    if episode_spec == "max-total":
-        if "timeseries_acoustic_exposure_dba" not in df.columns:
-            print("Error: timeseries_acoustic_exposure_dba not in metrics.")
-            return None
-        best_total = -1.0
-        best_ep = 0
-        for row in df.iter_rows(named=True):
-            ts = row.get("timeseries_acoustic_exposure_dba")
-            if ts is None:
-                continue
-            total = sum(sum(f) for f in ts if f)
-            if total > best_total:
-                best_total = total
-                best_ep = int(row.get("episode", 0))
-        print(f"Using max-total episode: episode_{best_ep:03d} (total={best_total:.1f})")
-        return f"episode_{best_ep:03d}"
-
-    print(f"Error: unknown episode specifier '{episode_spec}'.")
-    return None
+    best_source = float("-inf")
+    best_episode: int | None = None
+    for episode in measured["episode_id"]:
+        field = AcousticFieldRenderer._load_episode_data(benchmark_dir, f"episode_{int(episode):03d}")
+        if field is None or field.is_empty():
+            continue
+        peak = field["source_dba"].max()
+        if peak is not None and float(peak) > best_source:
+            best_source, best_episode = float(peak), int(episode)
+    if best_episode is None:
+        print("Error: no recorded acoustic field frame found.")
+        return None
+    print(f"Using loudest-source episode: episode_{best_episode:03d} (source={best_source:.1f} dBA)")
+    return f"episode_{best_episode:03d}"
 
 
 def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
     """Generate an animated acoustic field visualization."""
-    episode_id = _resolve_episode(df, args.episode)
+    episode_id = _resolve_episode(df, args.episode, args.benchmark_dir)
     if episode_id is None:
         sys.exit(1)
 
@@ -168,20 +133,9 @@ def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
     renderer = AcousticFieldRenderer(PlotSpec(id="acoustic_field", type="acoustic_field", title="", data_key=""))
     renderer.run_dir = args.benchmark_dir
 
-    # Load map
-    map_name = None
-    metrics_path = args.benchmark_dir / "combined_metrics.parquet"
-    if not metrics_path.exists():
-        metrics_path = args.benchmark_dir / "metrics.parquet"
-    if metrics_path.exists():
-        from arena_evaluation.processing.parquet_store import ParquetStore
-
-        metrics_df, _ = ParquetStore.read(metrics_path)
-        if "map" in metrics_df.columns and len(metrics_df) > 0:
-            map_name = metrics_df["map"][0]
-
+    map_name = _map_for_episode(df, episode_id)
     if not map_name:
-        print("Error: could not determine map name from metrics.")
+        print("Error: could not determine the episode's world from the episode summary.")
         sys.exit(1)
 
     result = renderer._load_grid_and_meta(map_name, run_dir=args.benchmark_dir)
@@ -257,7 +211,7 @@ def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
 
 def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     """Render a single acoustic field frame."""
-    episode_id = _resolve_episode(df, args.episode)
+    episode_id = _resolve_episode(df, args.episode, args.benchmark_dir)
     if episode_id is None:
         sys.exit(1)
 
@@ -270,19 +224,9 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     renderer = AcousticFieldRenderer(PlotSpec(id="acoustic_field", type="acoustic_field", title="", data_key=""))
     renderer.run_dir = args.benchmark_dir
 
-    map_name = None
-    metrics_path = args.benchmark_dir / "combined_metrics.parquet"
-    if not metrics_path.exists():
-        metrics_path = args.benchmark_dir / "metrics.parquet"
-    if metrics_path.exists():
-        from arena_evaluation.processing.parquet_store import ParquetStore
-
-        metrics_df, _ = ParquetStore.read(metrics_path)
-        if "map" in metrics_df.columns and len(metrics_df) > 0:
-            map_name = metrics_df["map"][0]
-
+    map_name = _map_for_episode(df, episode_id)
     if not map_name:
-        print("Error: could not determine map name.")
+        print("Error: could not determine the episode's world from the episode summary.")
         sys.exit(1)
 
     result = renderer._load_grid_and_meta(map_name, run_dir=args.benchmark_dir)
