@@ -61,3 +61,4 @@ def runner_log() -> Iterator[list[str]]:
     yield handler.messages
     runner._log.removeHandler(handler)
 
+
