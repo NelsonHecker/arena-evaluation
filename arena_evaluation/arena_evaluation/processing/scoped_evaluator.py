@@ -218,10 +218,10 @@ def _null_reason_expression(nullable: tuple[str, ...]) -> pl.Expr:
     parts = [
         pl.when(pl.col(name).is_null())
         .then(pl.lit(f"{name}:{NO_SAMPLES}", dtype=pl.String))
-        .otherwise(pl.lit("", dtype=pl.String))
+        .otherwise(pl.lit(None, dtype=pl.String))
         for name in nullable
     ]
-    return pl.concat_str(parts, separator=";", ignore_nulls=True)
+    return pl.concat_str(parts, separator=";", ignore_nulls=True).fill_null("")
 
 
 def _merge_provenance_reasons(
