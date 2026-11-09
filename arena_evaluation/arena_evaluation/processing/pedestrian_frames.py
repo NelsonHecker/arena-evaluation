@@ -283,3 +283,4 @@ def pedestrians_at(time_ns: pl.Series, peds: pl.DataFrame, tolerance_ns: int = A
     robot_times = pl.DataFrame({"time_ns": time_ns.cast(pl.Int64)}).sort("time_ns")
     matched = robot_times.join_asof(frames, left_on="time_ns", right_on="frame_ns", strategy="backward", tolerance=tolerance_ns)
     return matched.drop_nulls("frame_ns").join(peds, left_on="frame_ns", right_on="t_ns", how="inner")
+

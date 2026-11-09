@@ -1,6 +1,14 @@
+"""Personal-space occupancy of the robot, and per-pedestrian zone-intrusion counts.
+
+The robot sample axis carries the count of pedestrians inside the personal-space radius, from
+the vectorized robot-time to pedestrian-frame alignment. The count series is a 1NF table
+(:meth:`ProxemicsCalculator.series_table`), never a list column inside the metrics row.
+"""
+
 from __future__ import annotations
 
 import typing
+from typing import Final
 
 import numpy as np
 import polars as pl
@@ -10,8 +18,40 @@ from arena_evaluation.processing.pedestrian_frames import distances_to_pedestria
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, pedestrian_pairs_lf
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
-INTIMATE_CLEARANCE_M: typing.Final[float] = 0.45
-PERSONAL_CLEARANCE_M: typing.Final[float] = 1.20
+INTIMATE_CLEARANCE_M: Final[float] = 0.45
+PERSONAL_CLEARANCE_M: Final[float] = 1.20
+
+PERSONAL_SPACE_SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "run_id": pl.String,
+        "episode_id": pl.Int64,
+        "robot_id": pl.String,
+        "t_ns": pl.Int64,
+        "time_s": pl.Float64,
+        "peds_in_personal_space": pl.Int64,
+    }
+)
+
+
+def personal_space_counts(
+    robot_frame: pl.DataFrame, peds: pl.DataFrame, radius_m: float
+) -> pl.DataFrame:
+    """One row per robot ground-truth sample with the number of pedestrians inside ``radius_m`` of it."""
+    time_ns = robot_frame.get_column("time_ns").to_numpy().astype(np.int64)
+    pos_x = robot_frame.get_column("pos_x_gt").to_numpy().astype(np.float64)
+    pos_y = robot_frame.get_column("pos_y_gt").to_numpy().astype(np.float64)
+    within = (
+        distances_to_pedestrians(time_ns, pos_x, pos_y, peds)
+        .filter(pl.col("distance") < radius_m)
+        .group_by("row")
+        .len()
+    )
+    counts = np.zeros(len(time_ns), dtype=np.int64)
+    counts[within["row"].to_numpy()] = within["len"].to_numpy()
+    return pl.DataFrame(
+        {"t_ns": time_ns, "count": counts},
+        schema={"t_ns": pl.Int64, "count": pl.Int64},
+    )
 
 
 class ProxemicsCalculator(BaseMetricCalculator):
@@ -19,13 +59,14 @@ class ProxemicsCalculator(BaseMetricCalculator):
 
     NAME = "proxemics"
     CATEGORY = "social"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
 
     UNITS = {
         "num_pedestrians": "",
-        "time_in_personal_space": "",
         "total_time_in_personal_space": "s",
         "avg_velocity_in_personal_space": "m/s",
     }
@@ -40,53 +81,72 @@ class ProxemicsCalculator(BaseMetricCalculator):
     def output_keys(cls) -> list[str]:
         return [
             "num_pedestrians",
-            "time_in_personal_space",
             "total_time_in_personal_space",
             "avg_velocity_in_personal_space",
         ]
 
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-
+    def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
+    ) -> dict[str, typing.Any]:
+        """Dwell of the robot inside its personal space, and the mean velocity while inside."""
+        robot_frame = self.resolve_robot_frame(episode)
         peds_df = self.native_ped_frame(episode)
-        if episode.data is None or "pos_x" not in episode.data.columns or peds_df is None:
-            return {k: None for k in self.output_keys()}
-
-        pos_x, pos_y, _, _, _, _ = self.resolve_robot_pose(episode)
-        time_ns = episode.data["time_ns"].to_numpy()
-
-        velocity = prior_results.get("velocity", [])
-
-        N = len(pos_x)
-        if N == 0:
-            return {
-                "num_pedestrians": 0,
-                "time_in_personal_space": [],
-                "total_time_in_personal_space": 0.0,
-                "avg_velocity_in_personal_space": 0.0,
-            }
-
-        within = distances_to_pedestrians(time_ns, pos_x, pos_y, peds_df).filter(pl.col("distance") < self.PERSONAL_SPACE_RADIUS).group_by("row").len()
-        counts = np.zeros(N, dtype=int)
-        counts[within["row"].to_numpy()] = within["len"].to_numpy()
-        in_personal_space_steps = counts.tolist()
-
+        if robot_frame is None or robot_frame.height == 0 or peds_df is None or peds_df.height == 0:
+            return dict.fromkeys(self.output_keys())
+        counts = personal_space_counts(robot_frame, peds_df, self.PERSONAL_SPACE_RADIUS)
+        time_ns = counts.get_column("t_ns").to_numpy()
+        occupancy = counts.get_column("count").to_numpy()
         dt = np.append(np.diff(time_ns) / 1e9, 0.0)
-        inside = np.flatnonzero(counts > 0)
-        in_personal_space_time_s = float(dt[inside].sum())
-        vel_in_space = [velocity[i] for i in inside if velocity and i < len(velocity)]
-
-        if vel_in_space:
-            avg_vel = float(np.nanmean(vel_in_space))
-            if np.isnan(avg_vel) or np.isinf(avg_vel):
-                avg_vel = 0.0
-        else:
-            avg_vel = 0.0
+        inside = np.flatnonzero(occupancy > 0)
+        total_time_s = float(dt[inside].sum()) if len(inside) > 0 else 0.0
+        velocity = prior_results.get("velocity", [])
+        velocities = [velocity[i] for i in inside if velocity and i < len(velocity)]
+        avg_velocity = float(np.mean(velocities)) if velocities else 0.0
         return {
             "num_pedestrians": episode.num_pedestrians,
-            "time_in_personal_space": in_personal_space_steps,
-            "total_time_in_personal_space": in_personal_space_time_s,
-            "avg_velocity_in_personal_space": avg_vel,
+            "total_time_in_personal_space": total_time_s,
+            "avg_velocity_in_personal_space": avg_velocity,
         }
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """EPISODE scope only: the slice's own robot samples and pedestrian set are the population."""
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self.calculate(episode, prior_results)
+
+    def series_table(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str = "",
+        robot_id: str = "",
+    ) -> pl.DataFrame:
+        """1NF per-sample personal-space occupancy, one row per robot sample."""
+        robot_frame = self.resolve_robot_frame(episode)
+        peds_df = self.native_ped_frame(episode)
+        if (
+            robot_frame is None
+            or robot_frame.height == 0
+            or peds_df is None
+            or peds_df.height == 0
+        ):
+            return pl.DataFrame(schema=PERSONAL_SPACE_SERIES_SCHEMA)
+        counts = personal_space_counts(robot_frame, peds_df, self.PERSONAL_SPACE_RADIUS)
+        first_t_ns = int(counts.select(pl.col("t_ns").min()).item())
+        resolved_robot = robot_id or (episode.robot_name or "robot")
+        return counts.select(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode.episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(resolved_robot, dtype=pl.String),
+            t_ns=pl.col("t_ns"),
+            time_s=(pl.col("t_ns") - first_t_ns).cast(pl.Float64) / 1e9,
+            peds_in_personal_space=pl.col("count"),
+        )
 
 
 def pedestrian_intrusion_counts_frame(episode: AlignedEpisodeBundle, robot_radius_m: float) -> pl.DataFrame:
@@ -157,9 +217,9 @@ class PedestrianIntrusionCalculator(BaseMetricCalculator):
         robot_tracks = topics.get("robot_tracks")
         ped_tracks = topics.get("pedestrian_tracks")
 
-        if robot_tracks is not None and isinstance(robot_tracks, pl.LazyFrame):
+        if isinstance(robot_tracks, pl.LazyFrame):
             robot_tracks = robot_tracks.collect()
-        if ped_tracks is not None and isinstance(ped_tracks, pl.LazyFrame):
+        if isinstance(ped_tracks, pl.LazyFrame):
             ped_tracks = ped_tracks.collect()
 
         if robot_tracks is None or len(robot_tracks) == 0 or ped_tracks is None or len(ped_tracks) == 0:
