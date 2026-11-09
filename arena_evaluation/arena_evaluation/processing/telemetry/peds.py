@@ -173,14 +173,14 @@ def _agent_frame_columns(envelope: Envelope[AgentFrame], meta: AgentMeta) -> dic
     humans = np.frombuffer(bytes(frame.kind), dtype=np.uint8) == HUMAN_KIND
     agent_ids = np.asarray(frame.agent_id, dtype=np.int64)[humans].tolist()
     count = len(agent_ids)
-    policy_indices = _per_human(frame.policy_idx, humans, int, missing=None)
-    animation = _per_human(_byte_values(frame.animation_state), humans, int, missing=NO_ANIMATION)
-    interaction_ids = _per_human(frame.interaction_id, humans, int, missing=NO_INTERACTION_ID)
-    interaction_types = _per_human(_byte_values(frame.interaction_type), humans, int, missing=NO_INTERACTION_TYPE)
-    radii = _per_human(frame.radius, humans, float, missing=None)
-    desired = _per_human(frame.desired_velocity, humans, float, missing=None)
-    phases = _per_human(frame.gait_phase, humans, float, missing=None)
-    cadences = _per_human(frame.gait_cadence, humans, float, missing=None)
+    policy_indices = _per_human(_frame_attr(frame, "policy_idx"), humans, int, missing=None)
+    animation = _per_human(_bytes_field(frame, "animation_state"), humans, int, missing=NO_ANIMATION)
+    interaction_ids = _per_human(_frame_attr(frame, "interaction_id"), humans, int, missing=NO_INTERACTION_ID)
+    interaction_types = _per_human(_bytes_field(frame, "interaction_type"), humans, int, missing=NO_INTERACTION_TYPE)
+    radii = _per_human(_frame_attr(frame, "radius"), humans, float, missing=None)
+    desired = _per_human(_frame_attr(frame, "desired_velocity"), humans, float, missing=None)
+    phases = _per_human(_frame_attr(frame, "gait_phase"), humans, float, missing=None)
+    cadences = _per_human(_frame_attr(frame, "gait_cadence"), humans, float, missing=None)
     return {
         "number": agent_ids,
         "name": [str(agent_id) for agent_id in agent_ids],
@@ -257,6 +257,19 @@ def _gesture_rows(envelope: Envelope) -> list[dict[str, Any]]:
         # agent-contracts: ignore MCAP schema evolution
         for gesture in getattr(ped, "gestures", ())
     ]
+
+
+def _frame_attr(frame: AgentFrame, name: str) -> Sequence[Any] | np.ndarray | None:
+    """Recorded parallel array of the frame, None on recordings that predate the field."""
+    # agent-contracts: ignore MCAP schema evolution
+    return getattr(frame, name, None)
+
+
+def _bytes_field(frame: AgentFrame, name: str) -> np.ndarray | None:
+    """Byte-packed parallel array of the frame, None on recordings that predate the field."""
+    # agent-contracts: ignore MCAP schema evolution
+    raw = getattr(frame, name, None)
+    return None if raw is None else _byte_values(raw)
 
 
 def _per_human(values: Sequence[Any] | np.ndarray | None, humans: np.ndarray, cast: Callable[[Any], Any], missing: object) -> list[Any]:
