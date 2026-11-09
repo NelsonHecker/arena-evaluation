@@ -448,7 +448,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             return {key: None for key in self.output_keys()}
 
         series, phase_coverage = self._series_frame(episode)
-        energy_total_j = (series["_p_total"] * series["_dt"]).sum()
+        energy_total_j = None if series["_p_total"].null_count() == len(series) else float((series["_p_total"] * series["_dt"]).sum())
         mean_efficiency = series["_efficiency"].mean()
         mean_intensity = series["_energy_intensity"].mean()
         dba = series["_dba"].drop_nulls()
@@ -456,7 +456,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
 
         return {
             "char_phase_coverage": phase_coverage,
-            "char_total_energy_j": None if energy_total_j is None else float(energy_total_j),
+            "char_total_energy_j": energy_total_j,
             "char_mean_efficiency": None if mean_efficiency is None else float(mean_efficiency),
             "char_leq_dba": leq_dba,
             "char_mean_energy_intensity_j_m": None if mean_intensity is None else float(mean_intensity),
