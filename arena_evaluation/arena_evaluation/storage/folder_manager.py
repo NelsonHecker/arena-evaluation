@@ -29,16 +29,27 @@ class FolderManager:
             raise ValueError(f"Path {resolved} is outside data_root {self.data_root}") from None
         return resolved
 
+    def benchmark_dir(self, benchmark_id: str) -> pathlib.Path:
+        """Return the root directory for a benchmark."""
+        for cand in [
+            self.data_root / "benchmarks" / benchmark_id,
+            self.data_root / benchmark_id,
+            self.data_root / "runs" / benchmark_id,
+        ]:
+            if cand.is_dir():
+                return self._safe_resolve(cand)
+        return self._safe_resolve(self.data_root / "benchmarks" / benchmark_id)
+
     def episodes_dir(self, benchmark_id: str) -> pathlib.Path:
         """Return the episodes directory for a benchmark or run."""
         for cand in [
+            self.data_root / "benchmarks" / benchmark_id / "episodes",
             self.data_root / benchmark_id / "episodes",
             self.data_root / "runs" / benchmark_id / "episodes",
-            self.data_root / "benchmarks" / benchmark_id / "episodes",
         ]:
-            if cand.exists():
+            if cand.is_dir():
                 return self._safe_resolve(cand)
-        return self._safe_resolve(self.data_root / benchmark_id / "episodes")
+        return self._safe_resolve(self.benchmark_dir(benchmark_id) / "episodes")
 
     def episode_dir(self, benchmark_id: str, episode_id: int) -> pathlib.Path:
         """Return the directory for a specific episode."""
@@ -103,12 +114,6 @@ class FolderManager:
         return self._safe_resolve(episode_dir / "topics")
 
     def combined_metrics_path(self, benchmark_id: str) -> pathlib.Path:
-        """Get path for combined benchmark metrics Parquet file."""
-        for cand in [
-            self.data_root / benchmark_id / "combined_metrics.parquet",
-            self.data_root / "runs" / benchmark_id / "combined_metrics.parquet",
-            self.data_root / "benchmarks" / benchmark_id / "combined_metrics.parquet",
-        ]:
-            if cand.parent.exists():
-                return self._safe_resolve(cand)
-        return self._safe_resolve(self.data_root / benchmark_id / "combined_metrics.parquet")
+        """Get path for combined benchmark metrics Parquet file (deprecated)."""
+        b_dir = self.benchmark_dir(benchmark_id)
+        return self._safe_resolve(b_dir / "combined_metrics.parquet")
