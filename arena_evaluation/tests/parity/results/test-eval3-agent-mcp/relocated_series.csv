@@ -1,0 +1,31 @@
+metric_key,reason
+timeseries_char_time_s,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_power_total_w,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_power_mech_w,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_dba,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vx_achieved,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vy_achieved,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_wz_achieved,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_speed_achieved,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_accel_achieved,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_accel_target,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_efficiency,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_phase_kind,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vx_target,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vy_target,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_wz_target,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_speed_target,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_turn_radius_m,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_energy_intensity,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_energy_per_rad,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_leq_power,characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_total_w,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_static_w,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_mechanical_w,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_thermal_w,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_battery_soc,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_velocity_linear,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_time_s,energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_acoustic_exposure_dba,acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended
+timeseries_acoustic_attenuation_db,acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended
+clearance_timeseries,clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended

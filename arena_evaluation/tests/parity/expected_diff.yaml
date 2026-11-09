@@ -1,0 +1,250 @@
+# Reviewed allowlist of legitimate legacy-to-star differences.
+#
+# An `entries` item is consulted only when the observed values differ; a listed metric
+# that still matches stays EXACT. Every entry needs a reason. The kinds:
+#
+#   unit_scale    star = legacy * factor. Verified before it is accepted; the default
+#                 bound is 1e-9 relative (override with max_rel).
+#   derived       a reviewed relationship that is not a single factor, verified inside
+#                 a reviewed relative bound (`max_rel` is mandatory).
+#   ground_truth  the value may change freely because the port moved from wheel
+#                 odometry to /tf ground truth or retired an in-place mutation;
+#                 accepted without a numeric bound.
+#   null_fill     the legacy fill_null(0.0) masking was replaced by null plus a
+#                 null_reason; accepted only for star-null rows.
+#   dtype         the star column stores a different dtype; the comparison casts.
+#
+# `star_table`/`star_column` may be omitted on an entry that applies to every mapping
+# of `metric_key`; such an entry is "pending" until the star producer lands.
+#
+# `relocated_series` lists legacy list/timeseries keys whose per-sample data moved to
+# 1NF series tables; they are reported with the RELOCATED_SERIES status, not as gaps.
+# `structural_replacements` lists new star keys that are not parity keys.
+# `list_violations` lists legacy list columns that are knowingly still not in 1NF.
+version: 1
+entries:
+  # --- unit conversions and derived aggregates already produced by the port --------
+  - metric_key: energy_per_meter
+    star_table: fact_episodes
+    star_column: energy_per_meter_j_m
+    kind: unit_scale
+    factor: 3600.0
+    max_rel: 1.0e-9
+    reason: "wh_per_metre -> joules_per_metre: _episode_fact_row multiplies by METRES_PER_WH_J = 3600"
+  - metric_key: energy_mechanical_wh
+    star_table: fact_robots
+    star_column: mechanical_work_j
+    kind: unit_scale
+    factor: 3600.0
+    max_rel: 1.0e-9
+    reason: "mechanical energy is stored in SI joules in fact_robots, Wh in the legacy frame"
+  - metric_key: energy_thermal_wh
+    star_table: fact_robots
+    star_column: thermal_energy_j
+    kind: unit_scale
+    factor: 3600.0
+    max_rel: 1.0e-9
+    reason: "thermal energy is stored in SI joules in fact_robots, Wh in the legacy frame"
+
+  # --- port-eco: characterization (native robot_tracks GT, no probe/odom fallback) --
+  - metric_key: char_phase_coverage
+    kind: ground_truth
+    reason: "characterization distance/energy now use native robot_tracks GT only; no pos_x_gt/x/pos_x probe and no odom fallback, so samples without GT change the coverage"
+  - metric_key: timeseries_char_efficiency
+    kind: null_fill
+    reason: "characterization efficiency is null when total_power_w <= 0.1 (was 0.0); missing total_power_w is null (was 0.0 W)"
+  - metric_key: timeseries_char_energy_intensity
+    kind: null_fill
+    reason: "characterization energy intensity is null for samples without GT step distance (was a filled 0.0)"
+  - metric_key: timeseries_char_leq_power
+    kind: null_fill
+    reason: "characterization radiated-power level is null where total_power_w is missing (was a filled 0.0)"
+
+  # --- port-eco: acoustic exposure (no forward-fill, GT fix required) --------------
+  - metric_key: ped_max_exposure_dba
+    kind: ground_truth
+    reason: "acoustic exposure no longer forward-fills the robot position; frames without a GT fix produce no exposure (was fill_null then odom)"
+  - metric_key: ped_leq_exposure_dba
+    kind: ground_truth
+    reason: "acoustic exposure no longer forward-fills the robot position; frames without a GT fix produce no exposure (was fill_null then odom)"
+  - metric_key: ped_max_startle_factor
+    kind: ground_truth
+    reason: "acoustic exposure no longer forward-fills the robot position; frames without a GT fix produce no exposure (was fill_null then odom)"
+  - metric_key: worst_case_acoustic_frame
+    kind: ground_truth
+    reason: "worst-case acoustic frame index changes because frames without a GT fix no longer receive forward-filled exposure"
+
+  # --- port-eco: motion metrics (all-null input -> null, not 0.0) ------------------
+  - metric_key: velocity_mean
+    kind: null_fill
+    reason: "motion_metrics: an all-null vel_linear stream gives null velocity_mean/velocity_max (was fill_null(0.0))"
+  - metric_key: velocity_max
+    kind: null_fill
+    reason: "motion_metrics: an all-null vel_linear stream gives null velocity_mean/velocity_max (was fill_null(0.0))"
+  - metric_key: acceleration_mean
+    kind: ground_truth
+    reason: "motion_metrics no longer relies on the removed in-place episode-bundle mutation; the derived series is recomputed from the resolved GT frame"
+  - metric_key: acceleration_max
+    kind: ground_truth
+    reason: "motion_metrics no longer relies on the removed in-place episode-bundle mutation; the derived series is recomputed from the resolved GT frame"
+  - metric_key: jerk_mean
+    kind: ground_truth
+    reason: "motion_metrics no longer relies on the removed in-place episode-bundle mutation; the derived series is recomputed from the resolved GT frame"
+  - metric_key: jerk_max
+    kind: ground_truth
+    reason: "motion_metrics no longer relies on the removed in-place episode-bundle mutation; the derived series is recomputed from the resolved GT frame"
+
+  # --- port-eco: energy_extended (scoped power/velocity instead of list priors) ----
+  - metric_key: specific_cost_of_transport
+    kind: derived
+    max_rel: 0.25
+    reason: "energy_extended reads the scoped power and velocity series instead of the removed list priors; bound to be tightened after the first port measurements"
+  - metric_key: peak_to_mean_power_ratio
+    kind: derived
+    max_rel: 0.25
+    reason: "energy_extended reads the scoped power series instead of the removed list priors; bound to be tightened after the first port measurements"
+  - metric_key: standstill_energy_penalty_wh
+    kind: derived
+    max_rel: 0.25
+    reason: "energy_extended reads the scoped power/velocity series instead of the removed list priors; bound to be tightened after the first port measurements"
+  - metric_key: kinetic_energy_demand_j
+    kind: derived
+    max_rel: 0.25
+    reason: "energy_extended reads the scoped velocity series instead of the removed list priors; bound to be tightened after the first port measurements"
+  - metric_key: friction_dissipation_j
+    kind: derived
+    max_rel: 0.25
+    reason: "energy_extended reads the scoped power/velocity series instead of the removed list priors; bound to be tightened after the first port measurements"
+
+  # --- port-eco: collision metrics (absent stream -> null, verdict still 0) -------
+  - metric_key: collision_amount
+    kind: null_fill
+    reason: "collision_metrics ENCOUNTER: an absent collision stream yields null collision_amount (the episode-level success verdict still coerces to 0)"
+  - metric_key: collision_amount_wall
+    kind: null_fill
+    reason: "collision_metrics ENCOUNTER: an absent collision stream yields null collision counts (the episode-level success verdict still coerces to 0)"
+  - metric_key: collision_amount_static
+    kind: null_fill
+    reason: "collision_metrics ENCOUNTER: an absent collision stream yields null collision counts (the episode-level success verdict still coerces to 0)"
+  - metric_key: collision_amount_pedestrian
+    kind: null_fill
+    reason: "collision_metrics ENCOUNTER: an absent collision stream yields null collision counts (the episode-level success verdict still coerces to 0)"
+
+  # --- port-eco: clearance metrics (teleport-free GT time base) --------------------
+  - metric_key: min_obstacle_clearance
+    kind: ground_truth
+    reason: "clearance_metrics uses the teleport-free GT segment as time base, so a teleport yields values instead of all-null; min/mean unchanged on normal tracks"
+  - metric_key: mean_obstacle_clearance
+    kind: ground_truth
+    reason: "clearance_metrics uses the teleport-free GT segment as time base, so a teleport yields values instead of all-null; min/mean unchanged on normal tracks"
+  - metric_key: min_pedestrian_clearance
+    kind: ground_truth
+    reason: "clearance_metrics uses the teleport-free GT segment as time base, so a teleport yields values instead of all-null; min/mean unchanged on normal tracks"
+  - metric_key: mean_pedestrian_clearance
+    kind: ground_truth
+    reason: "clearance_metrics uses the teleport-free GT segment as time base, so a teleport yields values instead of all-null; min/mean unchanged on normal tracks"
+
+  # --- port-social: semantic interaction metrics (in-place mutation retired) ------
+  - metric_key: time_waiting_at_doors
+    kind: ground_truth
+    reason: "semantic_metrics no longer depends on the removed in-place episode-bundle mutation; values may change where the mutation leaked"
+  - metric_key: time_waiting_at_doors_robot
+    kind: ground_truth
+    reason: "semantic_metrics no longer depends on the removed in-place episode-bundle mutation; values may change where the mutation leaked"
+  - metric_key: elevator_rides
+    kind: ground_truth
+    reason: "semantic_metrics no longer depends on the removed in-place episode-bundle mutation; values may change where the mutation leaked"
+  - metric_key: elevator_rides_robot
+    kind: ground_truth
+    reason: "semantic_metrics no longer depends on the removed in-place episode-bundle mutation; values may change where the mutation leaked"
+
+relocated_series:
+  - reason: "characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror"
+    metric_keys:
+      - timeseries_char_time_s
+      - timeseries_char_power_total_w
+      - timeseries_char_power_mech_w
+      - timeseries_char_dba
+      - timeseries_char_vx_achieved
+      - timeseries_char_vy_achieved
+      - timeseries_char_wz_achieved
+      - timeseries_char_speed_achieved
+      - timeseries_char_accel_achieved
+      - timeseries_char_accel_target
+      - timeseries_char_efficiency
+      - timeseries_char_phase_kind
+      - timeseries_char_vx_target
+      - timeseries_char_vy_target
+      - timeseries_char_wz_target
+      - timeseries_char_speed_target
+      - timeseries_char_turn_radius_m
+      - timeseries_char_energy_intensity
+      - timeseries_char_energy_per_rad
+      - timeseries_char_leq_power
+  - reason: "energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror"
+    metric_keys:
+      - timeseries_power_total_w
+      - timeseries_power_static_w
+      - timeseries_power_mechanical_w
+      - timeseries_power_thermal_w
+      - timeseries_battery_soc
+      - timeseries_velocity_linear
+      - timeseries_time_s
+  - reason: "acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended"
+    metric_keys:
+      - timeseries_acoustic_exposure_dba
+      - timeseries_acoustic_attenuation_db
+  - reason: "clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended"
+    metric_keys:
+      - clearance_timeseries
+
+structural_replacements:
+  - metric_key: char_total_energy_j
+    reason: "new 1NF characterization total, replaces the legacy list-endpoint convention; not a parity key"
+  - metric_key: char_mean_efficiency
+    reason: "new characterization aggregate over the 1NF series; not a parity key"
+  - metric_key: char_leq_dba
+    reason: "new characterization radiated-power level over the 1NF series; not a parity key"
+  - metric_key: char_mean_energy_intensity_j_m
+    reason: "new characterization energy intensity over the 1NF series; not a parity key"
+  - metric_key: char_sample_count
+    reason: "new sample-count provenance for the 1NF characterization series; not a parity key"
+
+list_violations:
+  - reason: "per-sample arrays still carried in combined_metrics; the 1NF relocation is pending"
+    metric_keys:
+      - velocity
+      - acceleration
+      - jerk
+  - reason: "trajectory arrays still carried in combined_metrics; the 1NF relocation is pending"
+    metric_keys:
+      - path
+      - path_odom
+      - path_length_values
+      - curvature
+      - normalized_curvature
+      - roughness
+  - reason: "pedestrian trajectory array still carried in combined_metrics; the 1NF relocation is pending"
+    metric_keys:
+      - pedestrian_path
+  - reason: "collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending"
+    metric_keys:
+      - collision_obstacles
+      - collisions
+
+notes:
+  - topic: crowd_condition
+    change: nullability
+    reason: "dim_episodes.crowd_condition is null when the episode recorded neither humansim.robots_visible nor a run-level condition; it is not a metric mismatch."
+  - topic: fill_null
+    change: "0.0 -> null"
+    reason: "the scoped producers replaced the legacy fill_null(0.0) masking with null plus a null_reason; the harness reports that as NULL_REASON when the null_reason is non-empty."
+  - topic: odometry_to_tf
+    change: "value source"
+    reason: "the port computes trajectory metrics from /tf ground truth (pose_source = tf_gt), the legacy frame from pre-anchor wheel odometry; only metrics actually affected are listed here as ground_truth entries."
+  - topic: dtype
+    change: "column dtype"
+    reason: "count-like legacy columns are Int64 and their star counterparts Int64; a dtype-only change is accepted only with an explicit dtype entry."
+  - topic: port_eco_input
+    change: "reviewed expected changes"
+    reason: "the port-eco expected-change list (characterization GT, acoustic exposure forward-fill, motion nulls, energy_extended priors, collision nulls, clearance time base, semantic mutation removal) is folded into entries above."

@@ -1,0 +1,153 @@
+# Reviewed correspondence map: legacy combined_metrics column -> star-schema column.
+#
+# Every entry is one certificate row. A metric key may appear once per star target
+# (a single legacy value can feed two fact tables, e.g. path_length feeds both
+# fact_episodes and fact_robots).
+#
+# Fields:
+#   metric_key        inventory key; the legacy column of the same name unless
+#                     legacy_columns overrides it
+#   star_table        one of dim_episodes, fact_episodes, fact_encounters,
+#                     fact_contacts, fact_pedestrians, fact_robots
+#   star_column       the star column the port writes
+#   legacy_columns    the legacy column(s) the star value is derived from
+#   legacy_combine    first (default) or sum over legacy_columns
+#   legacy_reduction  identity (default) or a list reduction for timeseries columns:
+#                     list_mean, list_min, list_max, list_sum, list_len
+#   star_reduction    identity (default, one row per key) or mean, min, max, sum,
+#                     count for multi-row fact tables
+#   note              short human-readable provenance; the scoped producer function
+#                     that writes the star value
+#
+# Only identity-grain targets (one fact row per episode and robot) are claimed in this
+# first revision. The encounter/contact/pedestrian tables need a reviewed reduction
+# per legacy aggregate before they can be claimed; until then they surface in
+# star_coverage.csv as unmapped star columns.
+version: 1
+mappings:
+  # --- fact_episodes: written by ScopedEvaluator._episode_fact_row -----------------
+  - metric_key: result
+    star_table: fact_episodes
+    star_column: result
+    legacy_columns: [result]
+    note: "_episode_fact_row copies the recorded verdict verbatim"
+  - metric_key: success
+    star_table: fact_episodes
+    star_column: success
+    legacy_columns: [success]
+    note: "_episode_fact_row copies the boolean success flag"
+  - metric_key: time_to_goal
+    star_table: fact_episodes
+    star_column: time_to_goal_s
+    legacy_columns: [time_to_goal]
+    note: "_episode_fact_row time_to_goal -> time_to_goal_s"
+  - metric_key: path_length
+    star_table: fact_episodes
+    star_column: path_length_m
+    legacy_columns: [path_length]
+    note: "_episode_fact_row path_length -> path_length_m"
+  - metric_key: path_efficiency
+    star_table: fact_episodes
+    star_column: path_efficiency
+    legacy_columns: [path_efficiency]
+    note: "_episode_fact_row copies path_efficiency"
+  - metric_key: energy_total_wh
+    star_table: fact_episodes
+    star_column: total_energy_wh
+    legacy_columns: [energy_total_wh]
+    note: "_episode_fact_row energy_total_wh -> total_energy_wh"
+  - metric_key: energy_per_meter
+    star_table: fact_episodes
+    star_column: energy_per_meter_j_m
+    legacy_columns: [energy_per_meter]
+    note: "_episode_fact_row scales Wh/m to J/m (METRES_PER_WH_J = 3600)"
+  - metric_key: velocity_mean
+    star_table: fact_episodes
+    star_column: mean_velocity_mps
+    legacy_columns: [velocity_mean]
+    note: "_episode_fact_row velocity_mean -> mean_velocity_mps"
+  - metric_key: acceleration_max
+    star_table: fact_episodes
+    star_column: max_acceleration_mps2
+    legacy_columns: [acceleration_max]
+    note: "_episode_fact_row acceleration_max -> max_acceleration_mps2"
+  - metric_key: jerk_max
+    star_table: fact_episodes
+    star_column: jerk_max_mps3
+    legacy_columns: [jerk_max]
+    note: "_episode_fact_row jerk_max -> jerk_max_mps3"
+  - metric_key: min_obstacle_clearance
+    star_table: fact_episodes
+    star_column: min_obstacle_clearance_m
+    legacy_columns: [min_obstacle_clearance]
+    note: "_episode_fact_row min_obstacle_clearance -> min_obstacle_clearance_m"
+  - metric_key: min_pedestrian_clearance
+    star_table: fact_episodes
+    star_column: min_ped_clearance_m
+    legacy_columns: [min_pedestrian_clearance]
+    note: "_episode_fact_row min_pedestrian_clearance -> min_ped_clearance_m"
+  - metric_key: collision_amount_pedestrian
+    star_table: fact_episodes
+    star_column: total_collisions_ped
+    legacy_columns: [collision_amount_pedestrian]
+    note: "_episode_fact_row collision_amount_pedestrian -> total_collisions_ped"
+  - metric_key: collision_amount_static
+    star_table: fact_episodes
+    star_column: total_collisions_static
+    legacy_columns: [collision_amount_wall, collision_amount_static]
+    legacy_combine: sum
+    note: "_episode_fact_row sums wall and static collisions into total_collisions_static"
+  - metric_key: mar
+    star_table: fact_episodes
+    star_column: mar
+    legacy_columns: [mar]
+    note: "episode-scope mutual accommodation ratio copied by _episode_fact_row"
+  - metric_key: pfi
+    star_table: fact_episodes
+    star_column: pfi
+    legacy_columns: [pfi]
+    note: "episode-scope pedestrian frustration index copied by _episode_fact_row"
+  - metric_key: robot_path_deviation_m
+    star_table: fact_episodes
+    star_column: robot_path_dev_m
+    legacy_columns: [robot_path_deviation_m]
+    note: "_episode_fact_row robot_path_deviation_m -> robot_path_dev_m"
+
+
+  # --- fact_robots: written by ScopedEvaluator._robot_fact_frame --------------------
+  - metric_key: path_length
+    star_table: fact_robots
+    star_column: path_length_m
+    legacy_columns: [path_length]
+    note: "_robot_fact_frame falls back to the episode metrics' path_length"
+  - metric_key: velocity_mean
+    star_table: fact_robots
+    star_column: mean_speed_mps
+    legacy_columns: [velocity_mean]
+    note: "_robot_fact_frame falls back to the episode metrics' velocity_mean"
+  - metric_key: velocity_max
+    star_table: fact_robots
+    star_column: max_speed_mps
+    legacy_columns: [velocity_max]
+    note: "_robot_fact_frame falls back to the episode metrics' velocity_max"
+  - metric_key: power_peak_w
+    star_table: fact_robots
+    star_column: peak_power_w
+    legacy_columns: [power_peak_w]
+    note: "_robot_fact_frame peak power from the ROBOT-scope powertrain calculator"
+  - metric_key: energy_total_wh
+    star_table: fact_robots
+    star_column: electrical_energy_wh
+    legacy_columns: [energy_total_wh]
+    note: "_robot_fact_frame battery energy in Wh"
+  - metric_key: energy_mechanical_wh
+    star_table: fact_robots
+    star_column: mechanical_work_j
+    legacy_columns: [energy_mechanical_wh]
+    note: "_robot_fact_frame converts mechanical Wh to J"
+  - metric_key: energy_thermal_wh
+    star_table: fact_robots
+    star_column: thermal_energy_j
+    legacy_columns: [energy_thermal_wh]
+    note: "_robot_fact_frame converts thermal Wh to J"
+
