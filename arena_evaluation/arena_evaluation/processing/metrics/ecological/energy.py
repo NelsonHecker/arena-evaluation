@@ -229,6 +229,8 @@ class EnergyMetricCalculator(BaseMetricCalculator):
             return self._summarize(self._native_series(episode))
         raise ValueError(f"energy does not serve the {scope_slice.scope.value} scope")
 
+    SERIES_TABLE_STEM = "energy"
+
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat series table of the power/energy/velocity timeseries, one row per sample."""
         series = self._aligned_series(episode)

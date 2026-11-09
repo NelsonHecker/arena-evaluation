@@ -74,6 +74,7 @@ class BaseMetricCalculator(ABC):
     """Abstract Base Class for all metric calculators."""
 
     NAME: str = ""
+    SERIES_TABLE_STEM: typing.ClassVar[str] = ""
     CATEGORY: str = "general"
     SCOPE: MetricScope = MetricScope.EPISODE
     SCOPES: typing.ClassVar[frozenset[MetricScope] | set[MetricScope | str]] = (

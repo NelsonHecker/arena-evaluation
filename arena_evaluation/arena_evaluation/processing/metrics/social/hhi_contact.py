@@ -326,6 +326,8 @@ class ContactInteractionCalculator(BaseMetricCalculator):
             return dict.fromkeys(self.output_keys())
         return self.calculate(episode, prior_results)
 
+    SERIES_TABLE_STEM = "hhi_contact"
+
     def series_table(
         self,
         episode: AlignedEpisodeBundle,

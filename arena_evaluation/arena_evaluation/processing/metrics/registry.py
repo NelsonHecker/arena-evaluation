@@ -113,7 +113,7 @@ class MetricRegistry:
         """Registered calculators publishing a 1NF series table, with their table stem, ordered by stem."""
         return sorted(
             (
-                (_series_table_stem(type(calc).__name__), calc)
+                (calc.SERIES_TABLE_STEM or _series_table_stem(type(calc).__name__), calc)
                 for calc in self.calculators.values()
                 if type(calc).series_table is not BaseMetricCalculator.series_table
             ),

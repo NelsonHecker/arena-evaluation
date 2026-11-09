@@ -194,6 +194,8 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
             return _summaries(obstacle, pedestrian)
         raise ValueError(f"clearance_metrics does not serve the {scope_slice.scope.value} scope")
 
+    SERIES_TABLE_STEM = "clearance"
+
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat clearance series, one row per sample, explicit nulls where a source has no valid sample."""
         times_ns, combined, obstacle, pedestrian = self._episode_arrays(episode)

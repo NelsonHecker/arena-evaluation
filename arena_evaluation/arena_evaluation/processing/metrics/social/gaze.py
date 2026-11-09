@@ -195,6 +195,8 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             return dict.fromkeys(self.output_keys())
         return self._episode_metrics(episode)
 
+    SERIES_TABLE_STEM = "gaze"
+
     def series_table(
         self,
         episode: AlignedEpisodeBundle,
