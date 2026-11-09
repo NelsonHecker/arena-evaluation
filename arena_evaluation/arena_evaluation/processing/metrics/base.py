@@ -119,6 +119,38 @@ class BaseMetricCalculator(ABC):
         del scope
         return tuple(cls.output_keys())
 
+    def _consistent_ground_truth(
+        self, episode: AlignedEpisodeBundle
+    ) -> tuple[pl.DataFrame, int, int] | None:
+        """Ground-truth rows and the bounds of the longest teleport-free segment, None when no sample is usable."""
+        if episode.data is None or "pos_x_gt" not in episode.data.columns:
+            return None
+        frame = episode.data.filter(
+            pl.col("pos_x_gt").is_not_null()
+            & ~pl.col("pos_x_gt").is_nan()
+            & pl.col("pos_y_gt").is_not_null()
+            & ~pl.col("pos_y_gt").is_nan()
+            & pl.col("yaw_gt").is_not_null()
+            & ~pl.col("yaw_gt").is_nan()
+        )
+        if len(frame) == 0:
+            return None
+        start, end = consistent_segment(
+            frame["pos_x_gt"].to_numpy().copy(),
+            frame["pos_y_gt"].to_numpy().copy(),
+            frame["time_ns"].to_numpy(),
+            self._ride_arrivals(episode),
+        )
+        return frame, start, end
+
+    def resolve_robot_frame(self, episode: AlignedEpisodeBundle) -> pl.DataFrame | None:
+        """The teleport-free ground-truth piece of the episode, sliced consistently with resolve_robot_pose."""
+        resolved = self._consistent_ground_truth(episode)
+        if resolved is None:
+            return None
+        frame, start, end = resolved
+        return frame.slice(start, end - start)
+
     def resolve_robot_pose(
         self, episode: AlignedEpisodeBundle
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -128,18 +160,10 @@ class BaseMetricCalculator(ABC):
         Without ground truth both are empty, because odometry never stands in for the trajectory.
         """
         empty = np.array([], dtype=np.float64)
-        if episode.data is None or "pos_x_gt" not in episode.data.columns:
+        resolved = self._consistent_ground_truth(episode)
+        if resolved is None:
             return empty, empty, empty, empty, empty, empty
-        df = episode.data.filter(
-            pl.col("pos_x_gt").is_not_null()
-            & ~pl.col("pos_x_gt").is_nan()
-            & pl.col("pos_y_gt").is_not_null()
-            & ~pl.col("pos_y_gt").is_nan()
-            & pl.col("yaw_gt").is_not_null()
-            & ~pl.col("yaw_gt").is_nan()
-        )
-        if len(df) == 0:
-            return empty, empty, empty, empty, empty, empty
+        df, start, end = resolved
 
         track_x = df["pos_x_gt"].to_numpy().copy()
         track_y = df["pos_y_gt"].to_numpy().copy()
@@ -154,12 +178,6 @@ class BaseMetricCalculator(ABC):
             else (0.0, 0.0, 0.0)
         )
 
-        start, end = consistent_segment(
-            track_x,
-            track_y,
-            df["time_ns"].to_numpy(),
-            self._ride_arrivals(episode),
-        )
         odom_x_trans, odom_y_trans, odom_yaw_trans = _anchored_odometry(
             odom_x[start:end],
             odom_y[start:end],
