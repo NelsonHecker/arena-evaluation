@@ -41,6 +41,7 @@ PEDESTRIAN_FRAME_SCHEMA: Final[pl.Schema] = pl.Schema(
         "ped_yaw_rad": pl.Float64,
         "ped_vx_mps": pl.Float64,
         "ped_vy_mps": pl.Float64,
+        "robot_yaw_rad": pl.Float64,
         "dx_m": pl.Float64,
         "dy_m": pl.Float64,
         "distance_m": pl.Float64,
@@ -182,7 +183,7 @@ def frame_geometry(
             distance_m=(pl.col("dx_m").pow(2) + pl.col("dy_m").pow(2)).sqrt(),
             rel_speed_mps=(pl.col("rel_vx_mps").pow(2) + pl.col("rel_vy_mps").pow(2)).sqrt(),
         )
-        .select("frame_ix", "t_ns", "ped_id", "ped_x_m", "ped_y_m", "ped_yaw_rad", "ped_vx_mps", "ped_vy_mps", "dx_m", "dy_m", "distance_m", "rel_vx_mps", "rel_vy_mps", "rel_speed_mps")
+        .select("frame_ix", "t_ns", "ped_id", "ped_x_m", "ped_y_m", "ped_yaw_rad", "ped_vx_mps", "ped_vy_mps", "robot_yaw_rad", "dx_m", "dy_m", "distance_m", "rel_vx_mps", "rel_vy_mps", "rel_speed_mps")
     )
     return FrameGeometry(frames=sampled.select("frame_ix", "t_ns", "dt_s", "robot_x_m", "robot_y_m", "robot_yaw_rad", "robot_vx_mps", "robot_vy_mps", "robot_speed_mps"), pedestrians=pedestrians)
 
