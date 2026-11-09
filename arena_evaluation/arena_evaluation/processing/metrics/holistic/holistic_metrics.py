@@ -1,13 +1,13 @@
 """Holistic cross-domain metrics: acoustic exposure inside personal space, and the effective cost of transport.
 
-Both are genuine integrals over the resolved episode view: the personal-space mask comes from
-the vectorized robot-time to pedestrian-frame alignment, and every undefined input leaves its
-output null instead of substituting a nominal 45 dBA floor or a zero integral.
+AEPS integrates the recorded level over the frames whose nearest pedestrian is inside the
+personal-space band. Its clearance series comes from the proxemics calculator when available,
+otherwise from the same vectorized pedestrian-frame geometry; a missing level source and a
+missing time axis leave the output null instead of substituting the historical 45 dBA floor.
 """
 
 from __future__ import annotations
 
-import math
 import typing
 from typing import Final
 
@@ -16,79 +16,43 @@ import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.social.interaction_common import DEFAULT_PED_RADIUS_M
-from arena_evaluation.processing.pedestrian_frames import nearest_pedestrian_distance
+from arena_evaluation.processing.pedestrian_frames import (
+    ALIGN_TOLERANCE_NS,
+    frame_geometry,
+    nearest_pedestrian_frames,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 PERSONAL_SPACE_CLEARANCE_M: Final[float] = 1.2
 COLLISION_PENALTY: Final[float] = 2.0
 INTRUSION_WEIGHT: Final[float] = 0.5
 COT_DECIMALS: Final[int] = 6
+MIN_EPISODE_TIME_S: Final[float] = 0.01
 
 
-def _decibel_levels(series: object) -> pl.DataFrame | None:
-    """Per-frame dBA series from the recorded exposure series, null on frames that observed nothing."""
+def _level_values(series: object) -> np.ndarray | None:
+    """Per-frame dBA values of a nested or flat exposure series, NaN for frames without a level."""
     if not isinstance(series, (list, tuple)) or len(series) == 0:
         return None
-    levels: list[float | None] = []
-    for frame in series:
+    values = np.full(len(series), np.nan, dtype=np.float64)
+    for index, frame in enumerate(series):
         if isinstance(frame, (list, tuple, np.ndarray)):
-            levels.append(float(max(frame)) if len(frame) > 0 else None)
-        else:
-            levels.append(float(frame))  # pyright: ignore[reportArgumentType]
-    return pl.DataFrame(
-        {"frame_ix": np.arange(len(levels), dtype=np.int64), "level_dba": levels},
-        schema={"frame_ix": pl.Int64, "level_dba": pl.Float64},
-    )
+            if len(frame) > 0:
+                values[index] = float(np.max(np.asarray(frame, dtype=np.float64)))
+        elif frame is not None:
+            values[index] = float(frame)  # pyright: ignore[reportArgumentType]
+    return values
 
 
-def acoustic_exposure_in_personal_space_pa2s(
-    robot_times_ns: np.ndarray,
-    robot_x_m: np.ndarray,
-    robot_y_m: np.ndarray,
-    peds: pl.DataFrame | None,
-    combined_radius_m: float,
-    exposure_dba: pl.DataFrame | None,
-) -> float | None:
-    """Integral of the linear acoustic pressure while a pedestrian stayed inside the personal space."""
-    if peds is None or peds.height == 0 or exposure_dba is None or len(robot_times_ns) == 0:
+def _clearance_values(clearance: object) -> np.ndarray | None:
+    """Per-frame edge clearances of a recorded series, NaN for frames without a measurement."""
+    if not isinstance(clearance, (list, tuple)):
         return None
-    distances_m = nearest_pedestrian_distance(
-        robot_times_ns, robot_x_m, robot_y_m, peds
-    )
-    clearance_m = distances_m - combined_radius_m
-    frames = pl.DataFrame(
-        {
-            "frame_ix": np.arange(len(robot_times_ns), dtype=np.int64),
-            "time_ns": robot_times_ns.astype(np.int64),
-            "clearance_m": clearance_m,
-        },
-        schema={
-            "frame_ix": pl.Int64,
-            "time_ns": pl.Int64,
-            "clearance_m": pl.Float64,
-        },
-    ).join(exposure_dba, on="frame_ix", how="left")
-    step_s = (pl.col("time_ns") - pl.col("time_ns").shift(1)).cast(pl.Float64) / 1e9
-    integrated = frames.select(
-        (
-            pl.when(
-                (pl.col("clearance_m") < PERSONAL_SPACE_CLEARANCE_M)
-                & pl.col("level_dba").is_not_null()
-                & (step_s > 0.0)
-            )
-            .then(
-                pl.col("level_dba").truediv(10.0).pow(10.0)
-                * step_s
-            )
-            .otherwise(0.0)
-        )
-        .sum()
-        .alias("exposure_pa2s"),
-        pl.col("level_dba").is_not_null().sum().alias("scored_frames"),
-    ).row(0, named=True)
-    if int(integrated["scored_frames"]) == 0:
-        return None
-    return float(integrated["exposure_pa2s"])
+    values = np.full(len(clearance), np.nan, dtype=np.float64)
+    for index, value in enumerate(clearance):
+        if value is not None:
+            values[index] = float(value)  # pyright: ignore[reportArgumentType]
+    return values
 
 
 class HolisticMetricsCalculator(BaseMetricCalculator):
@@ -125,68 +89,97 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
         """Robot radius plus the nominal pedestrian radius of the personal-space band."""
         return float(self.robot_params.robot_radius) + DEFAULT_PED_RADIUS_M
 
-    def _robot_samples(
-        self, episode: AlignedEpisodeBundle
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-        """Ground-truth robot samples of the episode view: times, x and y, none without a resolved pose."""
-        frame = self.resolve_robot_frame(episode)
-        if frame is None or frame.height == 0:
+    def _clearance_series(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: typing.Mapping[str, typing.Any],
+    ) -> np.ndarray | None:
+        """Edge clearance of the nearest pedestrian per frame: the proxemics series, else the frame geometry."""
+        recorded = _clearance_values(prior_results.get("timeseries_min_ped_clearance"))
+        if recorded is not None:
+            return recorded
+        geometry = frame_geometry(
+            self.native_ped_frame(episode),
+            self.native_topics(episode).get("robot_tracks"),
+            tolerance_ns=ALIGN_TOLERANCE_NS,
+        )
+        nearest = nearest_pedestrian_frames(geometry)
+        if nearest.height == 0:
             return None
         return (
-            frame.get_column("time_ns").to_numpy().astype(np.int64),
-            frame.get_column("pos_x_gt").to_numpy().astype(np.float64),
-            frame.get_column("pos_y_gt").to_numpy().astype(np.float64),
+            nearest.select((pl.col("distance_m") - self._combined_radius_m).alias("clearance_m"))
+            .get_column("clearance_m")
+            .to_numpy()
+            .astype(np.float64)
         )
 
+    @staticmethod
+    def _level_series(
+        prior_results: typing.Mapping[str, typing.Any],
+    ) -> np.ndarray | None:
+        """Per-frame dBA values: the pedestrian exposure series, then the total level series."""
+        for key in ("timeseries_acoustic_exposure_dba", "timeseries_total_level_dba"):
+            recorded = _level_values(prior_results.get(key))
+            if recorded is not None:
+                return recorded
+        return None
+
+    @staticmethod
+    def _time_ns(episode: AlignedEpisodeBundle) -> np.ndarray | None:
+        """Aligned sample timestamps of the episode view, none without aligned rows."""
+        if episode.data is None or episode.data.height == 0:
+            return None
+        return episode.data.get_column("time_ns").to_numpy().astype(np.int64)
+
     def _aeps(
-        self, episode: AlignedEpisodeBundle, prior_results: typing.Mapping[str, typing.Any]
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: typing.Mapping[str, typing.Any],
     ) -> float | None:
-        """Acoustic exposure in personal space, null while the exposure series or the pose is missing."""
-        samples = self._robot_samples(episode)
-        if samples is None:
+        """Integral of the linear pressure while a pedestrian stayed inside the personal space."""
+        clearance = self._clearance_series(episode, prior_results)
+        levels = self._level_series(prior_results)
+        time_ns = self._time_ns(episode)
+        if clearance is None or levels is None or time_ns is None:
             return None
-        exposure = prior_results.get("timeseries_acoustic_exposure_dba")
-        if exposure is None:
-            exposure = prior_results.get("timeseries_total_level_dba")
-        levels = _decibel_levels(exposure)
-        if levels is None:
+        length = min(len(clearance), len(levels), len(time_ns))
+        if length == 0:
             return None
-        time_ns, x_m, y_m = samples
-        return acoustic_exposure_in_personal_space_pa2s(
-            time_ns,
-            x_m,
-            y_m,
-            self.native_ped_frame(episode),
-            self._combined_radius_m,
-            levels,
-        )
+        clearance = clearance[:length]
+        levels = levels[:length]
+        timestamps = time_ns[:length]
+        step_s = np.diff(timestamps, prepend=timestamps[0]) / 1e9
+        step_s[step_s < 0.0] = 0.0
+        intruded = (clearance < PERSONAL_SPACE_CLEARANCE_M) & np.isfinite(levels)
+        if not np.any(intruded):
+            return 0.0
+        return float(np.sum(np.power(10.0, levels[intruded] / 10.0) * step_s[intruded]))
 
     @staticmethod
     def _effective_cost_of_transport(
         prior_results: typing.Mapping[str, typing.Any],
     ) -> float | None:
-        """Cost of transport inflated by collision and personal-space-intrusion penalties."""
+        """Cost of transport inflated by the collision count and the personal-space intrusion rate."""
         cost_of_transport = prior_results.get("specific_cost_of_transport")
-        intrusion_integral = prior_results.get("personal_space_intrusion_integral")
-        time_to_goal_s = prior_results.get("time_to_goal")
-        if (
-            cost_of_transport is None
-            or intrusion_integral is None
-            or time_to_goal_s is None
-        ):
+        if cost_of_transport is None or float(cost_of_transport) <= 0.0:
             return None
-        collisions = prior_results.get("collision_amount", 0)
+        collisions = prior_results.get("collision_amount")
         collision_count = 0 if collisions is None else int(collisions)
-        duration_s = max(float(time_to_goal_s), 0.01)
+        intrusion_integral = prior_results.get("personal_space_intrusion_integral")
+        intrusion_m_s = 0.0 if intrusion_integral is None else float(intrusion_integral)
+        time_to_goal = prior_results.get("time_to_goal")
+        duration_s = max(float(time_to_goal), MIN_EPISODE_TIME_S) if time_to_goal else MIN_EPISODE_TIME_S
         value = float(cost_of_transport) * (
             1.0
             + COLLISION_PENALTY * collision_count
-            + INTRUSION_WEIGHT * float(intrusion_integral) / duration_s
+            + INTRUSION_WEIGHT * intrusion_m_s / duration_s
         )
-        return round(value, COT_DECIMALS) if math.isfinite(value) else None
+        return round(value, COT_DECIMALS)
 
     def _episode_metrics(
-        self, episode: AlignedEpisodeBundle, prior_results: typing.Mapping[str, typing.Any]
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: typing.Mapping[str, typing.Any],
     ) -> dict[str, typing.Any]:
         """Both holistic outputs over the given episode view."""
         return {
