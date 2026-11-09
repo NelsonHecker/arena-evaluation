@@ -144,16 +144,20 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 "present" if state_timeline is not None else "ABSENT (doors default closed)",
             )
 
-        if "pos_x_gt" not in df.columns or "pos_y_gt" not in df.columns:
+        # Prefer /tf ground truth from native robot_tracks
+        pos_x_native, pos_y_native, _, _ = self.resolve_native_pose(episode)
+        if len(pos_x_native) > 0 and len(pos_x_native) == len(df):
+            rx_m = pos_x_native
+            ry_m = pos_y_native
+        elif "pos_x_gt" in df.columns and "pos_y_gt" in df.columns:
+            rx_m = df["pos_x_gt"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+            ry_m = df["pos_y_gt"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+        elif "pos_x" in df.columns and "pos_y" in df.columns:
+            rx_m = df["pos_x"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+            ry_m = df["pos_y"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
+        else:
             logger.warning("Ground-truth position columns missing for episode %s", episode.episode_id)
             return nulls
-
-        # tf_gt publishes at ~10 Hz with jitter, so ~40% of aligned frames have
-        # null ground-truth pose (aligner tolerance = 100 ms == tf_gt period).
-        # Forward-fill so the solver never sees NaN positions (which caused
-        # all-inf fields / blank visualizations).
-        rx_m = df["pos_x_gt"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
-        ry_m = df["pos_y_gt"].cast(pl.Float64).fill_null(strategy="forward").fill_null(0.0).to_numpy()
 
         # Source level (from acoustics topic, or fallback)
         if "total_level_af_dba" in df.columns:
@@ -342,7 +346,11 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         # Re-parse the pedestrians for the worst-case frame
         worst_frame_peds = peds_at_time.get(int(time_ns[max_idx]))
-        worst_pts = [(float(x), float(y)) for x, y in worst_frame_peds.select("x", "y").iter_rows()] if worst_frame_peds is not None else []
+        worst_pts = (
+            list(zip(worst_frame_peds["x"].cast(pl.Float64).to_list(), worst_frame_peds["y"].cast(pl.Float64).to_list(), strict=True))
+            if worst_frame_peds is not None and len(worst_frame_peds) > 0
+            else []
+        )
         worst_frame = {
             "robot_x": float(rx_m[max_idx]),
             "robot_y": float(ry_m[max_idx]),
@@ -366,4 +374,62 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             "timeseries_acoustic_exposure_dba": ts_exposure,
             "timeseries_acoustic_attenuation_db": ts_attenuation,
             "worst_case_acoustic_frame": worst_frame,
+            "worst_case_acoustic_t_ns": int(time_ns[max_idx]),
         }
+
+    def series_table(
+        self,
+        episode: AlignedEpisodeBundle,
+        run_id: str = "",
+    ) -> pl.DataFrame:
+        """1NF flat series table of pedestrian acoustic exposure."""
+        out_keys = self.calculate(episode, {})
+        exposures = out_keys.get("timeseries_acoustic_exposure_dba")
+        attenuations = out_keys.get("timeseries_acoustic_attenuation_db")
+        if not exposures or episode.data is None:
+            return pl.DataFrame(
+                schema={
+                    "run_id": pl.String,
+                    "episode_id": pl.Int64,
+                    "t_ns": pl.Int64,
+                    "ped_id": pl.String,
+                    "exposure_dba": pl.Float64,
+                    "attenuation_db": pl.Float64,
+                }
+            )
+
+        time_ns = episode.data["time_ns"].to_numpy()
+        peds_df = self.native_ped_frame(episode)
+        peds_at_time = pedestrians_by_time(time_ns, peds_df) if peds_df is not None else {}
+
+        rec_run: list[str] = []
+        rec_ep: list[int] = []
+        rec_t: list[int] = []
+        rec_ped: list[str] = []
+        rec_exp: list[float] = []
+        rec_att: list[float] = []
+
+        ep_id = int(episode.episode_id)
+        for i, t in enumerate(time_ns):
+            t_int = int(t)
+            frame_peds = peds_at_time.get(t_int)
+            ped_ids = frame_peds["ped_id"].to_list() if frame_peds is not None and "ped_id" in frame_peds.columns else [f"ped_{j}" for j in range(len(exposures[i]))]
+            for j, exp_val in enumerate(exposures[i]):
+                att_val = attenuations[i][j] if i < len(attenuations) and j < len(attenuations[i]) else 0.0
+                rec_run.append(run_id)
+                rec_ep.append(ep_id)
+                rec_t.append(t_int)
+                rec_ped.append(str(ped_ids[j]) if j < len(ped_ids) else f"ped_{j}")
+                rec_exp.append(float(exp_val))
+                rec_att.append(float(att_val))
+
+        return pl.DataFrame(
+            {
+                "run_id": rec_run,
+                "episode_id": rec_ep,
+                "t_ns": rec_t,
+                "ped_id": rec_ped,
+                "exposure_dba": rec_exp,
+                "attenuation_db": rec_att,
+            }
+        )

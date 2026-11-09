@@ -9,7 +9,6 @@ import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name, robot_env_snapshot
-from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 if typing.TYPE_CHECKING:
@@ -186,43 +185,34 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
     if not {"t_ns", "entity_name", "kind", "field_name"} <= set(snapshot.columns):
         return empty
 
-    rows = snapshot.sort("t_ns")
-    if len(rows) == 0:
-        return empty
+    str_val = (
+        pl.when(pl.col("field_kind") == "predicate")
+        .then(pl.when(pl.col("value_bool")).then(pl.lit("true")).otherwise(pl.lit("false")))
+        .when(pl.col("field_kind") == "continuous")
+        .then(pl.col("value_num").cast(pl.String))
+        .otherwise(pl.col("value_str").fill_null(""))
+    )
 
-    out_time: list[int] = []
-    out_entity: list[str] = []
-    out_kind: list[str] = []
-    out_field: list[str] = []
-    out_previous: list[str] = []
-    out_current: list[str] = []
-
-    for (entity, kind, field), group in rows.group_by(["entity_name", "kind", "field_name"]):
-        previous: str | None = None
-        for row in group.sort("t_ns").iter_rows(named=True):
-            current = _stringify_snapshot_value(row)
-            if current != previous:
-                out_time.append(row["t_ns"])
-                out_entity.append(entity)
-                out_kind.append(kind)
-                out_field.append(field)
-                out_previous.append(previous if previous is not None else "")
-                out_current.append(current)
-                previous = current
-
-    if not out_time:
-        return empty
-
-    return pl.DataFrame(
-        {
-            "time_ns": out_time,
-            "entity": out_entity,
-            "kind": out_kind,
-            "field": out_field,
-            "previous": out_previous,
-            "current": out_current,
-        }
-    ).sort("time_ns")
+    group_keys = ["entity_name", "kind", "field_name"]
+    return (
+        snapshot.sort([*group_keys, "t_ns"])
+        .with_columns(current=str_val)
+        .with_columns(
+            prev_raw=pl.col("current").shift(1).over(group_keys),
+        )
+        .filter(
+            pl.col("prev_raw").is_null() | (pl.col("current") != pl.col("prev_raw"))
+        )
+        .select(
+            time_ns=pl.col("t_ns"),
+            entity=pl.col("entity_name"),
+            kind=pl.col("kind"),
+            field=pl.col("field_name"),
+            previous=pl.col("prev_raw").fill_null(""),
+            current=pl.col("current"),
+        )
+        .sort("time_ns")
+    )
 
 
 def _door_open_series(events: pl.DataFrame) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -373,10 +363,19 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
 
         pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
         if len(pos_x) == 0:
+            if episode.data is None or len(episode.data) == 0:
+                return None
+            pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
+            t_odom = (
+                episode.data["time_ns"].to_numpy().astype(np.int64)
+                if "time_ns" in episode.data.columns
+                else np.arange(len(pos_x), dtype=np.int64)
+            )
+
+        if len(pos_x) < 2:
             return None
 
-        frames = frames_of(peds_df)
-        peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
+        peds_time_ns = peds_df["t_ns"].unique().sort().to_numpy()
         N = len(peds_time_ns)
         if N == 0:
             return None
@@ -385,84 +384,93 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         rvx = self.values_at_times(vx_full, t_odom, peds_time_ns)
         rvy = self.values_at_times(vy_full, t_odom, peds_time_ns)
         rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom)
-        dt = np.diff(peds_time_ns, prepend=peds_time_ns[0]) / 1e9
 
-        in_encounter = False
-        min_dist = float('inf')
-        lat_offset_at_min = 0.0
+        robot_interp_lf = pl.LazyFrame(
+            {
+                "t_ns": peds_time_ns,
+                "rx": rpx,
+                "ry": rpy,
+                "rvx": rvx,
+                "rvy": rvy,
+            }
+        ).sort("t_ns")
 
-        encounters_total = 0
-        encounters_compliant = 0
-        prev_peds_arr: np.ndarray | None = None
+        peds_lf = peds_df.lazy().sort(["ped_id", "t_ns"])
+        dt_ped_s = pl.col("t_ns").diff().over("ped_id") * 1e-9
+        dt_ped_safe = pl.when(dt_ped_s > 0).then(dt_ped_s).otherwise(1e-3)
 
-        for i, frame in enumerate(frames):
-            peds_arr = frame.select("x", "y").to_numpy()
-            if peds_arr.shape[0] == 0:
-                prev_peds_arr = None
-                continue
+        has_vx = "vx" in peds_df.columns
+        has_vy = "vy" in peds_df.columns
+        peds_with_vel = peds_lf.with_columns(
+            vx=(
+                pl.when(pl.col("vx").is_null() | pl.col("vx").is_nan())
+                .then(pl.col("x").diff().over("ped_id") / dt_ped_safe)
+                .otherwise(pl.col("vx"))
+                if has_vx
+                else pl.col("x").diff().over("ped_id") / dt_ped_safe
+            ),
+            vy=(
+                pl.when(pl.col("vy").is_null() | pl.col("vy").is_nan())
+                .then(pl.col("y").diff().over("ped_id") / dt_ped_safe)
+                .otherwise(pl.col("vy"))
+                if has_vy
+                else pl.col("y").diff().over("ped_id") / dt_ped_safe
+            ),
+        ).with_columns(
+            vx=pl.col("vx").fill_null(0.0),
+            vy=pl.col("vy").fill_null(0.0),
+        )
 
-            ped_vels = frame.select("vx", "vy").to_numpy()
-            if np.isnan(ped_vels).any():
-                ped_vels = None
+        joined = peds_with_vel.join(robot_interp_lf, on="t_ns", how="inner")
 
-            if ped_vels is None and prev_peds_arr is not None and prev_peds_arr.shape == peds_arr.shape:
-                dt_i = max(float(dt[i]), 1e-3)
-                ped_vels = (peds_arr - prev_peds_arr) / dt_i
-            prev_peds_arr = peds_arr
+        dx = pl.col("x") - pl.col("rx")
+        dy = pl.col("y") - pl.col("ry")
+        dist = (dx.pow(2) + dy.pow(2)).sqrt()
+        speed_r = (pl.col("rvx").pow(2) + pl.col("rvy").pow(2)).sqrt()
+        speed_p = (pl.col("vx").pow(2) + pl.col("vy").pow(2)).sqrt()
+        denom = speed_r * speed_p
+        cos_angle = pl.when(denom > 1e-6).then((pl.col("rvx") * pl.col("vx") + pl.col("rvy") * pl.col("vy")) / denom).otherwise(0.0)
 
-            rx, ry = float(rpx[i]), float(rpy[i])
-            vr_x, vr_y = float(rvx[i]), float(rvy[i])
-            speed_r = np.hypot(vr_x, vr_y)
+        is_head_on = (dist <= 4.0) & (speed_r > 0.05) & (speed_p > 0.05) & (cos_angle < -0.3)
+        lat_offset = pl.col("rvx") * dy - pl.col("rvy") * dx
 
-            head_on_found = False
-            curr_min_dist = float('inf')
-            curr_lat = 0.0
+        pairs_analyzed = (
+            joined.with_columns(
+                dist=dist,
+                is_head_on=is_head_on,
+                lat_offset=lat_offset,
+            )
+            .group_by("t_ns")
+            .agg(
+                head_on_found=pl.col("is_head_on").any(),
+                curr_min_dist=pl.col("dist").filter(pl.col("is_head_on")).min(),
+                curr_lat=pl.col("lat_offset").filter(pl.col("is_head_on")).sort_by(pl.col("dist").filter(pl.col("is_head_on"))).first(),
+            )
+            .sort("t_ns")
+            .with_columns(
+                head_on_found=pl.col("head_on_found").fill_null(False),
+            )
+            .with_columns(
+                bout_id=pl.col("head_on_found").rle_id(),
+            )
+            .collect()
+        )
 
-            for j in range(peds_arr.shape[0]):
-                vp_x, vp_y = 0.0, 0.0
-                if ped_vels is not None and j < ped_vels.shape[0]:
-                    vp_x, vp_y = float(ped_vels[j, 0]), float(ped_vels[j, 1])
-                speed_p = np.hypot(vp_x, vp_y)
-
-                px, py = float(peds_arr[j, 0]), float(peds_arr[j, 1])
-                dist = np.hypot(px - rx, py - ry)
-
-                if dist <= 4.0 and speed_r > 0.05 and speed_p > 0.05:
-                    cos_angle = (vr_x * vp_x + vr_y * vp_y) / (speed_r * speed_p)
-                    # Opposing direction: approaching each other within 120 degrees
-                    if cos_angle < -0.3:
-                        head_on_found = True
-                        if dist < curr_min_dist:
-                            curr_min_dist = dist
-                            # Positive when pedestrian is to the robot's left (robot passes on right)
-                            curr_lat = vr_x * (py - ry) - vr_y * (px - rx)
-
-            if head_on_found:
-                if not in_encounter:
-                    in_encounter = True
-                    min_dist = float('inf')
-
-                if curr_min_dist < min_dist:
-                    min_dist = curr_min_dist
-                    lat_offset_at_min = curr_lat
-            else:
-                if in_encounter:
-                    in_encounter = False
-                    encounters_total += 1
-                    if self.passing_convention == "right" and lat_offset_at_min >= 0.0:
-                        encounters_compliant += 1
-                    elif self.passing_convention == "left" and lat_offset_at_min <= 0.0:
-                        encounters_compliant += 1
-
-        if in_encounter:
-            encounters_total += 1
-            if self.passing_convention == "right" and lat_offset_at_min >= 0.0:
-                encounters_compliant += 1
-            elif self.passing_convention == "left" and lat_offset_at_min <= 0.0:
-                encounters_compliant += 1
-
-        if encounters_total == 0:
+        bouts = pairs_analyzed.filter(pl.col("head_on_found")).partition_by("bout_id", maintain_order=True)
+        if not bouts:
             return 1.0
+
+        encounters_total = len(bouts)
+        encounters_compliant = 0
+
+        for bout in bouts:
+            min_idx = bout["curr_min_dist"].arg_min()
+            lat_at_min = bout["curr_lat"][min_idx]
+            if self.passing_convention == "right" and lat_at_min >= 0.0:
+                encounters_compliant += 1
+            elif self.passing_convention == "left" and lat_at_min <= 0.0:
+                encounters_compliant += 1
+
         return float(encounters_compliant) / encounters_total
 
     def calculate(

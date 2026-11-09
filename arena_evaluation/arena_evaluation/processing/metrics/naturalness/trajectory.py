@@ -3,13 +3,13 @@ from __future__ import annotations
 import typing
 
 import numpy as np
+import polars as pl
 from scipy.spatial.distance import cdist
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.path.theta_star import (
     compute_theta_star_for_episode,
 )
-from arena_evaluation.processing.pedestrian_frames import frames_of
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -90,7 +90,16 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
         del prior_results
-        pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
+        pos_x, pos_y, yaw, time_ns = self.resolve_native_pose(episode)
+        if len(pos_x) == 0:
+            if episode.data is None or len(episode.data) == 0:
+                return {k: None for k in self.output_keys()}
+            pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
+            time_ns = (
+                episode.data["time_ns"].to_numpy().astype(np.int64)
+                if "time_ns" in episode.data.columns
+                else np.arange(len(pos_x), dtype=np.int64)
+            )
 
         if len(pos_x) == 0:
             return {k: None for k in self.output_keys()}
@@ -119,33 +128,38 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
                 pi_val = (sum_abs_dyaw - delta_theta_min) / L
                 results["path_irregularity"] = float(pi_val)
 
-        # 2. Topological Complexity (Signed net winding loop W = 1/(2*pi) * sum_j |sum Delta theta_rel_j|)
+        # 2. Topological Complexity (Vectorized Polars Signed net winding loop)
         total_winding = 0.0
         peds_df = self.native_ped_frame(episode)
-        if peds_df is not None and "x" in peds_df.columns and len(pos_x) > 1:
-            try:
-                frames = frames_of(peds_df)
-                peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
-                _, _, _, t_odom_base = self.resolve_native_pose(episode)
-                rpx, rpy, _ = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom_base)
+        required_cols = {"t_ns", "ped_id", "x", "y"}
+        if (
+            peds_df is not None
+            and required_cols <= set(peds_df.columns)
+            and peds_df["x"].dtype.is_numeric()
+            and peds_df["y"].dtype.is_numeric()
+            and len(pos_x) > 1
+            and len(time_ns) > 1
+        ):
+            robot_lf = pl.LazyFrame({"t_ns": time_ns, "rx": pos_x, "ry": pos_y}).sort("t_ns")
+            peds_lf = peds_df.lazy().select("t_ns", "ped_id", "x", "y").drop_nulls(["t_ns", "ped_id", "x", "y"]).sort("t_ns")
+            two_pi = 2.0 * np.pi
+            pi = np.pi
+            rel_x = pl.col("rx") - pl.col("x")
+            rel_y = pl.col("ry") - pl.col("y")
+            angle = pl.arctan2(rel_y, rel_x)
+            d_angle = angle.diff().over("ped_id")
+            wrapped_d_angle = ((d_angle + pl.lit(pi)) % pl.lit(two_pi)) - pl.lit(pi)
 
-                ped_series: dict[str, list[tuple[float, float, float, float]]] = {}
-                for i, frame in enumerate(frames):
-                    for ped_id, x, y in frame.select("ped_id", "x", "y").iter_rows():
-                        ped_series.setdefault(ped_id, []).append((float(rpx[i]), float(rpy[i]), float(x), float(y)))
-
-                for samples in ped_series.values():
-                    if len(samples) > 1:
-                        s_arr = np.array(samples)
-                        rel_x = s_arr[:, 0] - s_arr[:, 2]
-                        rel_y = s_arr[:, 1] - s_arr[:, 3]
-                        angles = np.arctan2(rel_y, rel_x)
-                        d_angles = np.diff(angles)
-                        d_angles = (d_angles + np.pi) % (2 * np.pi) - np.pi
-                        net_ped_winding = np.abs(np.sum(d_angles)) / (2.0 * np.pi)
-                        total_winding += float(net_ped_winding)
-            except Exception:
-                pass
+            winding_df = (
+                peds_lf.join_asof(robot_lf, on="t_ns", strategy="backward")
+                .with_columns(wrapped_d_angle=wrapped_d_angle)
+                .group_by("ped_id")
+                .agg(net_winding=pl.col("wrapped_d_angle").drop_nulls().sum().abs() / pl.lit(two_pi))
+                .select(total_winding=pl.col("net_winding").sum())
+                .collect()
+            )
+            if len(winding_df) > 0 and winding_df["total_winding"][0] is not None:
+                total_winding = float(winding_df["total_winding"][0])
         results["topological_complexity"] = float(total_winding)
 
         # 3. Reference Path Computation using Geometric Theta* (Synthetic Human Demonstration)
