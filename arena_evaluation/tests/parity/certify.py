@@ -77,6 +77,7 @@ class ParityStatus(enum.StrEnum):
     MISSING_STAR = "MISSING_STAR"
     MISSING_LEGACY = "MISSING_LEGACY"
     NULL_REASON = "NULL_REASON"
+    RELOCATED_SERIES = "RELOCATED_SERIES"
     MISMATCH = "MISMATCH"
 
 
@@ -88,6 +89,7 @@ _ACCEPTED_STATUSES: frozenset[ParityStatus] = frozenset(
         ParityStatus.MISSING_STAR,
         ParityStatus.MISSING_LEGACY,
         ParityStatus.NULL_REASON,
+        ParityStatus.RELOCATED_SERIES,
     }
 )
 
@@ -181,16 +183,68 @@ class MetricMapping:
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class ExpectedDiff:
-    """Reviewed explanation of why one mapping may legitimately disagree in value."""
+    """Reviewed explanation of why a legacy value may legitimately differ in the star.
+
+    An entry with an empty ``star_table``/``star_column`` applies to every mapping of
+    ``metric_key``; a pending entry documents a reviewed change whose star producer has
+    not landed yet.
+    """
 
     metric_key: str
-    star_table: str
-    star_column: str
     kind: DiffKind
     reason: str
+    star_table: str = ""
+    star_column: str = ""
     factor: float | None = None
     max_rel: float | None = None
     allows_null: bool = False
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class SeriesRelocation:
+    """A legacy list/timeseries column whose per-sample data moved to a 1NF series table."""
+
+    metric_key: str
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class StructuralReplacement:
+    """A new star key that replaces a removed legacy column; it is not a parity key."""
+
+    metric_key: str
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class ListViolation:
+    """A legacy list column that is still not in 1NF and is knowingly left as a gap."""
+
+    metric_key: str
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class ExpectedManifest:
+    """The reviewed expected-difference manifest with its routing sections."""
+
+    entries: tuple[ExpectedDiff, ...]
+    relocated_series: tuple[SeriesRelocation, ...]
+    structural_replacements: tuple[StructuralReplacement, ...]
+    list_violations: tuple[ListViolation, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class ExpectedIndex:
+    """Lookup of the reviewed entries, exact target first, metric-key-only second."""
+
+    exact: Mapping[tuple[str, str, str], ExpectedDiff]
+    by_key: Mapping[str, ExpectedDiff]
+
+    def for_mapping(self, mapping: MetricMapping) -> ExpectedDiff | None:
+        """Reviewed entry for a concrete mapping, or a metric-key-only entry."""
+        found = self.exact.get((mapping.metric_key, mapping.star_table, mapping.star_column))
+        return found if found is not None else self.by_key.get(mapping.metric_key)
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -249,11 +303,15 @@ class Certificate:
     rows: tuple[CertificateRow, ...]
     gaps: tuple[GapRow, ...]
     unmapped_star_columns: tuple[UnmappedStarColumn, ...]
+    relocated_series: tuple[SeriesRelocation, ...]
+    structural_replacements: tuple[StructuralReplacement, ...]
+    list_violations: tuple[ListViolation, ...]
     run_ids: tuple[str, ...]
     inventory_keys: int
     comparison_rows: int
     mapped_keys: int
     expected_diff_count: int
+    expected_diff_pending: int
     legacy_episodes: int
     star_episodes: int
 
@@ -375,8 +433,41 @@ def load_mappings(path: pathlib.Path) -> tuple[MetricMapping, ...]:
     return tuple(mappings)
 
 
-def load_expected_diffs(path: pathlib.Path) -> tuple[ExpectedDiff, ...]:
-    """Read the reviewed allowlist of legitimate legacy-to-star changes."""
+def _group_metric_keys(group: Mapping[str, object], *, where: str) -> tuple[str, ...]:
+    """Keys of one group: either a `metric_keys` list or a single `metric_key`."""
+    raw_list = group.get("metric_keys")
+    if raw_list is not None:
+        return tuple(_string_item(key, where=f"{where}.metric_keys") for key in _as_sequence(raw_list, where=f"{where}.metric_keys"))
+    raw_single = group.get("metric_key")
+    if isinstance(raw_single, str) and raw_single:
+        return (raw_single,)
+    raise ParitySchemaError(f"{where}: expected metric_keys or metric_key")
+
+
+def _load_grouped_keys(document: Mapping[str, object], *, section: str, where: str) -> tuple[tuple[str, str], ...]:
+    """(metric_key, reason) pairs of a manifest section that groups keys under a reason."""
+    groups = _as_sequence(document.get(section), where=f"{where}.{section}")
+    pairs: list[tuple[str, str]] = []
+    for index, raw in enumerate(groups):
+        group_where = f"{where}.{section}[{index}]"
+        group = _as_mapping(raw, where=group_where)
+        reason = _text(group, "reason", where=group_where)
+        for key in _group_metric_keys(group, where=group_where):
+            pairs.append((key, reason))
+    return tuple(pairs)
+
+
+def _unique_pairs(pairs: tuple[tuple[str, str], ...], *, section: str) -> Mapping[str, str]:
+    grouped: dict[str, str] = {}
+    for metric_key, reason in pairs:
+        if metric_key in grouped:
+            raise ParitySchemaError(f"duplicate {section} key {metric_key}")
+        grouped[metric_key] = reason
+    return grouped
+
+
+def load_expected_manifest(path: pathlib.Path) -> ExpectedManifest:
+    """Read the reviewed allowlist plus its relocation, replacement and violation sections."""
     document = _as_mapping(_load_yaml(path), where=path.name)
     entries = _as_sequence(document.get("entries"), where=f"{path.name}.entries")
     expected: list[ExpectedDiff] = []
@@ -393,17 +484,25 @@ def load_expected_diffs(path: pathlib.Path) -> tuple[ExpectedDiff, ...]:
         expected.append(
             ExpectedDiff(
                 metric_key=_text(entry, "metric_key", where=where),
-                star_table=_text(entry, "star_table", where=where),
-                star_column=_text(entry, "star_column", where=where),
                 kind=kind,
                 reason=_text(entry, "reason", where=where),
+                star_table=_optional_text(entry, "star_table", where=where),
+                star_column=_optional_text(entry, "star_column", where=where),
                 factor=factor,
                 max_rel=max_rel,
                 allows_null=_optional_bool(entry, "allows_null", where=where),
             )
         )
     _validate_expected_diffs(tuple(expected))
-    return tuple(expected)
+    relocated = _unique_pairs(_load_grouped_keys(document, section="relocated_series", where=path.name), section="relocated_series")
+    structural = _unique_pairs(_load_grouped_keys(document, section="structural_replacements", where=path.name), section="structural_replacements")
+    violations = _unique_pairs(_load_grouped_keys(document, section="list_violations", where=path.name), section="list_violations")
+    return ExpectedManifest(
+        entries=tuple(expected),
+        relocated_series=tuple(SeriesRelocation(metric_key=key, reason=reason) for key, reason in relocated.items()),
+        structural_replacements=tuple(StructuralReplacement(metric_key=key, reason=reason) for key, reason in structural.items()),
+        list_violations=tuple(ListViolation(metric_key=key, reason=reason) for key, reason in violations.items()),
+    )
 
 
 def _load_yaml(path: pathlib.Path) -> object:
@@ -825,8 +924,17 @@ def _compare_mapping(
 # ---------------------------------------------------------------------------
 
 
-def _expected_index(expected: tuple[ExpectedDiff, ...]) -> Mapping[tuple[str, str, str], ExpectedDiff]:
-    return {(entry.metric_key, entry.star_table, entry.star_column): entry for entry in expected}
+def _expected_index(expected: tuple[ExpectedDiff, ...]) -> ExpectedIndex:
+    exact: dict[tuple[str, str, str], ExpectedDiff] = {}
+    by_key: dict[str, ExpectedDiff] = {}
+    for entry in expected:
+        if entry.star_table and entry.star_column:
+            exact[(entry.metric_key, entry.star_table, entry.star_column)] = entry
+        elif not entry.star_table and not entry.star_column:
+            by_key[entry.metric_key] = entry
+        else:
+            raise ParitySchemaError(f"expected diff {entry.metric_key}: star_table and star_column must both be set or both empty")
+    return ExpectedIndex(exact=exact, by_key=by_key)
 
 
 def _legacy_dtype(artifacts: BenchmarkArtifacts, metric_key: str) -> pl.DataType | None:
@@ -841,12 +949,22 @@ def _triaged_owner(row: InventoryRow, *, dtype: pl.DataType | None) -> str:
     return _TEAM_OWNER_BY_CATEGORY.get(row.category, _G1_OWNER)
 
 
-def _gap_rows(*, artifacts: BenchmarkArtifacts, inventory: tuple[InventoryRow, ...], mapped_keys: frozenset[str]) -> tuple[GapRow, ...]:
+def _gap_rows(
+    *,
+    artifacts: BenchmarkArtifacts,
+    inventory: tuple[InventoryRow, ...],
+    mapped_keys: frozenset[str],
+    relocated_keys: frozenset[str],
+    list_violations: Mapping[str, str],
+) -> tuple[GapRow, ...]:
     gaps: list[GapRow] = []
     for row in inventory:
-        if row.metric_key in mapped_keys:
+        if row.metric_key in mapped_keys or row.metric_key in relocated_keys:
             continue
         dtype = _legacy_dtype(artifacts, row.metric_key)
+        note = "no reviewed star mapping: no scoped producer in this pipeline revision"
+        if row.metric_key in list_violations:
+            note = f"known remaining 1NF list violation: {list_violations[row.metric_key]}"
         gaps.append(
             GapRow(
                 metric_key=row.metric_key,
@@ -857,7 +975,7 @@ def _gap_rows(*, artifacts: BenchmarkArtifacts, inventory: tuple[InventoryRow, .
                 target_scope=row.target_scope,
                 target_table=row.target_table,
                 legacy_dtype=str(dtype) if dtype is not None else "absent_in_run",
-                note="no reviewed star mapping: no scoped producer in this pipeline revision",
+                note=note,
             )
         )
     return tuple(gaps)
@@ -871,8 +989,32 @@ def _unmapped_star_columns(*, artifacts: BenchmarkArtifacts, mappings: tuple[Met
         for column, dtype in schema.items():
             if column in _KEY_COLUMNS or column.endswith(("_ns", "_id")) or (table, column) in mapped or not _is_numeric(dtype):
                 continue
-            rows.append(UnmappedStarColumn(star_table=table, star_column=column, dtype=str(dtype), note="numeric star metric with no reviewed legacy counterpart mapping"))
+            rows.append(UnmappedStarColumn(star_table=table, star_column=column, dtype=str(dtype), note="numeric star column not claimed by any reviewed inventory mapping"))
     return tuple(rows)
+
+
+def _validate_review_sections(
+    *,
+    inventory_keys: frozenset[str],
+    mapped_keys: frozenset[str],
+    relocated_series: tuple[SeriesRelocation, ...],
+    list_violations: tuple[ListViolation, ...],
+    structural_replacements: tuple[StructuralReplacement, ...],
+) -> None:
+    """The reviewed routing sections must agree with the inventory and the map."""
+    relocated_keys = [entry.metric_key for entry in relocated_series]
+    unknown_relocated = sorted(set(relocated_keys) - inventory_keys)
+    if unknown_relocated:
+        raise ParitySchemaError(f"relocated_series references keys absent from the inventory: {unknown_relocated}")
+    overlap = sorted(set(relocated_keys) & mapped_keys)
+    if overlap:
+        raise ParitySchemaError(f"keys cannot be both mapped and relocated to a series table: {overlap}")
+    unknown_violations = sorted(entry.metric_key for entry in list_violations if entry.metric_key not in inventory_keys)
+    if unknown_violations:
+        raise ParitySchemaError(f"list_violations references keys absent from the inventory: {unknown_violations}")
+    inventory_structural = sorted(entry.metric_key for entry in structural_replacements if entry.metric_key in inventory_keys)
+    if inventory_structural:
+        raise ParitySchemaError(f"structural_replacements must not be inventory keys: {inventory_structural}")
 
 
 def certify(
@@ -880,7 +1022,10 @@ def certify(
     artifacts: BenchmarkArtifacts,
     inventory: tuple[InventoryRow, ...],
     mappings: tuple[MetricMapping, ...],
-    expected_diffs: tuple[ExpectedDiff, ...],
+    expected_diffs: tuple[ExpectedDiff, ...] = (),
+    relocated_series: tuple[SeriesRelocation, ...] = (),
+    structural_replacements: tuple[StructuralReplacement, ...] = (),
+    list_violations: tuple[ListViolation, ...] = (),
     rel_tol: float = REL_TOL,
 ) -> Certificate:
     """Compare every inventory key and every mapping, returning the certificate bundle."""
@@ -888,15 +1033,44 @@ def certify(
     unknown = sorted({mapping.metric_key for mapping in mappings if mapping.metric_key not in inventory_keys})
     if unknown:
         raise ParitySchemaError(f"mappings reference keys absent from the inventory: {unknown}")
-    expected = _expected_index(expected_diffs)
     mapped_keys = frozenset(mapping.metric_key for mapping in mappings)
+    _validate_review_sections(
+        inventory_keys=inventory_keys,
+        mapped_keys=mapped_keys,
+        relocated_series=relocated_series,
+        list_violations=list_violations,
+        structural_replacements=structural_replacements,
+    )
+    expected = _expected_index(expected_diffs)
+    relocated_keys = frozenset(entry.metric_key for entry in relocated_series)
+    violation_reasons = {entry.metric_key: entry.reason for entry in list_violations}
     rows: list[CertificateRow] = []
     for mapping in mappings:
-        entry = expected.get((mapping.metric_key, mapping.star_table, mapping.star_column))
-        rows.append(_compare_mapping(artifacts=artifacts, mapping=mapping, expected=entry, rel_tol=rel_tol))
+        rows.append(_compare_mapping(artifacts=artifacts, mapping=mapping, expected=expected.for_mapping(mapping), rel_tol=rel_tol))
+    relocated_by_key = {entry.metric_key: entry for entry in relocated_series}
     for row in inventory:
         if row.metric_key in mapped_keys:
             continue
+        dtype = _legacy_dtype(artifacts, row.metric_key)
+        if row.metric_key in relocated_by_key:
+            relocation = relocated_by_key[row.metric_key]
+            rows.append(
+                CertificateRow(
+                    metric_key=row.metric_key,
+                    legacy_column=row.metric_key if dtype is not None else "",
+                    star_table=row.target_table,
+                    star_column="",
+                    status=ParityStatus.RELOCATED_SERIES,
+                    episodes_compared=0,
+                    max_abs_diff=None,
+                    max_rel_diff=None,
+                    detail=f"per-sample data moved to a 1NF series table: {relocation.reason}",
+                )
+            )
+            continue
+        detail = "no reviewed star mapping: no scoped producer in this pipeline revision"
+        if row.metric_key in violation_reasons:
+            detail = f"known remaining 1NF list violation: {violation_reasons[row.metric_key]}"
         rows.append(
             CertificateRow(
                 metric_key=row.metric_key,
@@ -907,21 +1081,33 @@ def certify(
                 episodes_compared=0,
                 max_abs_diff=None,
                 max_rel_diff=None,
-                detail="no reviewed star mapping: no scoped producer in this pipeline revision",
+                detail=detail,
             )
         )
+    referenced = {entry.metric_key for entry in expected_diffs if entry.metric_key in mapped_keys}
+    pending = sum(1 for entry in expected_diffs if entry.metric_key not in referenced)
     dim = artifacts.star["dim_episodes"]
     dim_names = _schema_names(dim)
     run_ids = tuple(sorted(str(value) for value in dim["run_id"].unique().to_list())) if "run_id" in dim_names else ()
     return Certificate(
         rows=tuple(sorted(rows, key=lambda row: (row.metric_key, row.star_table, row.star_column))),
-        gaps=_gap_rows(artifacts=artifacts, inventory=inventory, mapped_keys=mapped_keys),
+        gaps=_gap_rows(
+            artifacts=artifacts,
+            inventory=inventory,
+            mapped_keys=mapped_keys,
+            relocated_keys=relocated_keys,
+            list_violations=violation_reasons,
+        ),
         unmapped_star_columns=_unmapped_star_columns(artifacts=artifacts, mappings=mappings),
+        relocated_series=relocated_series,
+        structural_replacements=structural_replacements,
+        list_violations=list_violations,
         run_ids=run_ids,
         inventory_keys=len(inventory),
         comparison_rows=len(mappings),
         mapped_keys=len(mapped_keys),
         expected_diff_count=len(expected_diffs),
+        expected_diff_pending=pending,
         legacy_episodes=artifacts.legacy.height,
         star_episodes=dim.height,
     )
@@ -982,6 +1168,7 @@ def write_star_coverage_csv(path: pathlib.Path, certificate: Certificate) -> Non
             writer.writerow([row.star_table, row.star_column, row.dtype, row.note])
 
 
+
 def write_summary_yaml(path: pathlib.Path, certificate: Certificate, *, benchmark_dir: pathlib.Path) -> None:
     """Write the machine-readable certificate summary."""
     import yaml
@@ -996,9 +1183,13 @@ def write_summary_yaml(path: pathlib.Path, certificate: Certificate, *, benchmar
         "benchmark_dir": str(benchmark_dir),
         "run_ids": list(certificate.run_ids),
         "inventory_keys": certificate.inventory_keys,
-        "comparison_rows": certificate.comparison_rows,
+        "compared_metric_mappings": certificate.comparison_rows,
         "mapped_keys": certificate.mapped_keys,
         "expected_diff_entries": certificate.expected_diff_count,
+        "expected_diff_pending": certificate.expected_diff_pending,
+        "relocated_series_keys": len(certificate.relocated_series),
+        "structural_replacements": len(certificate.structural_replacements),
+        "list_violation_keys": len(certificate.list_violations),
         "legacy_episode_rows": certificate.legacy_episodes,
         "star_episode_rows": certificate.star_episodes,
         "status_counts": {status.value: count for status, count in counts.items()},
@@ -1011,6 +1202,26 @@ def write_summary_yaml(path: pathlib.Path, certificate: Certificate, *, benchmar
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+
+def write_review_csvs(path: pathlib.Path, certificate: Certificate) -> None:
+    """Write the relocation, structural-replacement and remaining-violation lists."""
+    path.mkdir(parents=True, exist_ok=True)
+    with (path / "relocated_series.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["metric_key", "reason"])
+        for entry in certificate.relocated_series:
+            writer.writerow([entry.metric_key, entry.reason])
+    with (path / "structural_replacements.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["metric_key", "reason"])
+        for entry in certificate.structural_replacements:
+            writer.writerow([entry.metric_key, entry.reason])
+    with (path / "list_violations.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["metric_key", "reason"])
+        for entry in certificate.list_violations:
+            writer.writerow([entry.metric_key, entry.reason])
 
 
 def write_gap_summary_markdown(path: pathlib.Path, certificate: Certificate, *, benchmark_dir: pathlib.Path) -> None:
@@ -1030,19 +1241,28 @@ def write_gap_summary_markdown(path: pathlib.Path, certificate: Certificate, *, 
         f"- inventory keys: {certificate.inventory_keys}",
         f"- compared metric mappings: {certificate.comparison_rows}",
         f"- keys with a reviewed star mapping: {certificate.mapped_keys}",
-        f"- keys without a scoped producer: {len(certificate.gaps)}",
-        f"- numeric star columns without a legacy counterpart: {len(certificate.unmapped_star_columns)}",
+        f"- keys without a scoped producer (port gaps): {len(certificate.gaps)}",
+        f"- relocated series keys (not gaps): {len(certificate.relocated_series)}",
+        f"- known remaining 1NF list violations: {len(certificate.list_violations)}",
+        f"- structural replacement keys (not parity keys): {len(certificate.structural_replacements)}",
+        f"- numeric star columns not claimed by any reviewed inventory mapping: {len(certificate.unmapped_star_columns)}",
         "",
-        "## Gaps by owner",
+        "## Port gaps by owner",
         "",
         "| owner | keys |",
         "| --- | ---: |",
     ]
     lines.extend(f"| {owner} | {count} |" for owner, count in sorted(by_owner.items()))
-    lines.extend(["", "## Gaps by calculator", "", "| calculator | keys |", "| --- | ---: |"])
+    lines.extend(["", "## Port gaps by calculator", "", "| calculator | keys |", "| --- | ---: |"])
     lines.extend(f"| {calculator} | {count} |" for calculator, count in sorted(by_calculator.items(), key=lambda item: (-item[1], item[0])))
-    lines.extend(["", "## Gaps by category", "", "| category | keys |", "| --- | ---: |"])
+    lines.extend(["", "## Port gaps by category", "", "| category | keys |", "| --- | ---: |"])
     lines.extend(f"| {category} | {count} |" for category, count in sorted(by_category.items(), key=lambda item: (-item[1], item[0])))
+    if certificate.list_violations:
+        lines.extend(["", "## Known remaining 1NF list violations", "", "| metric_key | reason |", "| --- | --- |"])
+        lines.extend(f"| {entry.metric_key} | {entry.reason} |" for entry in certificate.list_violations)
+    if certificate.relocated_series:
+        lines.extend(["", "## Relocated series (no longer scalar columns)", "", "| metric_key | reason |", "| --- | --- |"])
+        lines.extend(f"| {entry.metric_key} | {entry.reason} |" for entry in certificate.relocated_series)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1052,6 +1272,7 @@ def write_outputs(path: pathlib.Path, certificate: Certificate, *, benchmark_dir
     write_certificate_csv(path / "certificate.csv", certificate)
     write_gaps_csv(path / "gaps.csv", certificate)
     write_star_coverage_csv(path / "star_coverage.csv", certificate)
+    write_review_csvs(path, certificate)
     write_summary_yaml(path / "summary.yaml", certificate, benchmark_dir=benchmark_dir)
     write_gap_summary_markdown(path / "gap_summary.md", certificate, benchmark_dir=benchmark_dir)
 
@@ -1109,6 +1330,7 @@ def self_check() -> int:
         InventoryRow(metric_key="listy", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="wall", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="absent", calculator="c", category="social", inventory_owner="Agent 4 (parity)", target_scope="contacts", target_table="fact_contacts", test_file="t", port_status="PENDING_PORT"),
+        InventoryRow(metric_key="series", calculator="c", category="ecological", inventory_owner="Agent 7 (perf)", target_scope="robots", target_table="fact_robots", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="zero", calculator="c", category="social", inventory_owner="Agent 4 (parity)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="derived", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="scaled", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
@@ -1126,7 +1348,14 @@ def self_check() -> int:
         ExpectedDiff(metric_key="derived", star_table="fact_episodes", star_column="derived_star", kind=DiffKind.DERIVED, max_rel=0.10, reason="synthetic derived"),
         ExpectedDiff(metric_key="scaled", star_table="fact_episodes", star_column="scaled", kind=DiffKind.UNIT_SCALE, factor=2.0, max_rel=1.0e-9, reason="synthetic scale"),
     )
-    certificate = certify(artifacts=artifacts, inventory=inventory, mappings=mappings, expected_diffs=expected, rel_tol=REL_TOL)
+    certificate = certify(
+        artifacts=artifacts,
+        inventory=inventory,
+        mappings=mappings,
+        expected_diffs=expected,
+        relocated_series=(SeriesRelocation(metric_key="series", reason="synthetic relocation"),),
+        rel_tol=REL_TOL,
+    )
     rows = {row.metric_key: row for row in certificate.rows}
     failures: list[str] = []
     expected_status = {
@@ -1137,6 +1366,7 @@ def self_check() -> int:
         "derived": ParityStatus.EXPECTED_DIFF,
         "scaled": ParityStatus.EXACT,
         "absent": ParityStatus.MISSING_STAR,
+        "series": ParityStatus.RELOCATED_SERIES,
     }
     for metric_key, status in expected_status.items():
         if rows[metric_key].status is not status:
@@ -1178,9 +1408,18 @@ def main(argv: Sequence[str]) -> int:
     try:
         inventory = load_inventory(args.inventory)
         mappings = load_mappings(args.mappings)
-        expected_diffs = load_expected_diffs(args.expected_diffs)
+        manifest = load_expected_manifest(args.expected_diffs)
         artifacts = load_benchmark_artifacts(args.benchmark_dir)
-        certificate = certify(artifacts=artifacts, inventory=inventory, mappings=mappings, expected_diffs=expected_diffs, rel_tol=args.rel_tol)
+        certificate = certify(
+            artifacts=artifacts,
+            inventory=inventory,
+            mappings=mappings,
+            expected_diffs=manifest.entries,
+            relocated_series=manifest.relocated_series,
+            structural_replacements=manifest.structural_replacements,
+            list_violations=manifest.list_violations,
+            rel_tol=args.rel_tol,
+        )
     except ParityInputError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

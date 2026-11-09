@@ -150,9 +150,4 @@ mappings:
     star_column: thermal_energy_j
     legacy_columns: [energy_thermal_wh]
     note: "_robot_fact_frame converts thermal Wh to J"
-  - metric_key: timeseries_power_total_w
-    star_table: fact_robots
-    star_column: mean_power_w
-    legacy_columns: [timeseries_power_total_w]
-    legacy_reduction: list_mean
-    note: "_robot_fact_frame mean power; compared as the legacy series mean"
+
