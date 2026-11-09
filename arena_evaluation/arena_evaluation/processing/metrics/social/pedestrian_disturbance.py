@@ -1,18 +1,163 @@
+"""Pedestrian deflection, velocity delay and patrol rounds, per pedestrian and across the episode.
+
+The per-pedestrian geometry is one Polars group-by over the flat track (path length, straight
+chord, lateral deviation, displacement extremes); the two scopes share that frame and differ
+only in the population they reduce: the slice's own pedestrian for PEDESTRIAN, the pedestrian
+mean for EPISODE (the historical episode-wide value).
+"""
+
 from __future__ import annotations
 
 import typing
+from typing import Final
 
 import numpy as np
+import polars as pl
+from scipy.spatial import cKDTree
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.social.pedestrian_activity import (
+    pedestrian_round_trips_frame,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+PEDESTRIAN_MIN_POINTS: Final[int] = 5
+ROUND_TRIP_MIN_DISPLACEMENT_M: Final[float] = 0.5
+DEFLECTION_MIN_CHORD_M: Final[float] = 0.5
+NOMINAL_DESIRED_SPEED_MPS: Final[float] = 1.2
+VALID_POSITION_LIMIT_M: Final[float] = 1.0e6
+SUMMED_VALUE_DECIMALS: Final[int] = 3
+
+PEDESTRIAN_GEOMETRY_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "ped_id": pl.String,
+        "n_points": pl.UInt32,
+        "first_t_ns": pl.Int64,
+        "last_t_ns": pl.Int64,
+        "path_length_m": pl.Float64,
+        "chord_m": pl.Float64,
+        "max_displacement_m": pl.Float64,
+        "lateral_deviation_m": pl.Float64,
+    }
+)
+
+
+def _track_frame(peds: pl.DataFrame) -> pl.DataFrame:
+    """Finite, plausibly located pedestrian rows sorted by pedestrian and time."""
+    return (
+        peds.select(
+            t_ns=pl.col("t_ns").cast(pl.Int64),
+            ped_id=pl.col("ped_id").cast(pl.String),
+            x_m=pl.col("x").cast(pl.Float64),
+            y_m=pl.col("y").cast(pl.Float64),
+        )
+        .filter(
+            pl.col("x_m").is_finite()
+            & pl.col("y_m").is_finite()
+            & (pl.col("x_m").abs() < VALID_POSITION_LIMIT_M)
+            & (pl.col("y_m").abs() < VALID_POSITION_LIMIT_M)
+        )
+        .sort("ped_id", "t_ns")
+    )
+
+
+def pedestrian_geometry_frame(peds: pl.DataFrame | None) -> pl.DataFrame:
+    """Per-pedestrian path length, straight chord, farthest displacement and mean lateral deviation."""
+    if peds is None or peds.height == 0:
+        return pl.DataFrame(schema=PEDESTRIAN_GEOMETRY_SCHEMA)
+    track = _track_frame(peds)
+    if track.height == 0:
+        return pl.DataFrame(schema=PEDESTRIAN_GEOMETRY_SCHEMA)
+
+    first_x_m = pl.col("x_m").first()
+    first_y_m = pl.col("y_m").first()
+    chord_x_m = pl.col("x_m").last() - first_x_m
+    chord_y_m = pl.col("y_m").last() - first_y_m
+    chord_m = (chord_x_m.pow(2) + chord_y_m.pow(2)).sqrt()
+    lateral_m = (
+        (pl.col("x_m") - first_x_m) * (chord_y_m / chord_m)
+        - (pl.col("y_m") - first_y_m) * (chord_x_m / chord_m)
+    ).abs()
+    return track.group_by("ped_id").agg(
+        n_points=pl.len(),
+        first_t_ns=pl.col("t_ns").first(),
+        last_t_ns=pl.col("t_ns").last(),
+        path_length_m=(pl.col("x_m").diff().pow(2) + pl.col("y_m").diff().pow(2)).sqrt().sum(),
+        chord_m=chord_m,
+        max_displacement_m=(
+            (pl.col("x_m") - first_x_m).pow(2) + (pl.col("y_m") - first_y_m).pow(2)
+        )
+        .sqrt()
+        .max(),
+        lateral_deviation_m=pl.when(chord_m > DEFLECTION_MIN_CHORD_M)
+        .then(lateral_m.mean())
+        .otherwise(None)
+        .alias("lateral_deviation_m"),
+    ).select(PEDESTRIAN_GEOMETRY_SCHEMA)
+
+
+def lateral_deflection_sums(geometry: pl.DataFrame) -> tuple[float, int]:
+    """Sum of the per-pedestrian mean lateral deviations and the number of pedestrians they average over."""
+    if geometry.height == 0:
+        return 0.0, 0
+    qualifying = geometry.filter(
+        (pl.col("n_points") >= PEDESTRIAN_MIN_POINTS)
+        & pl.col("lateral_deviation_m").is_not_null()
+    )
+    total = (
+        0.0
+        if qualifying.height == 0
+        else float(qualifying.select(pl.col("lateral_deviation_m").sum()).item())
+    )
+    return total, geometry.height
+
+
+def velocity_delay_value(geometry: pl.DataFrame, duration_s: float | None) -> float:
+    """Relative slowdown of the mean traveled distance against the nominal desired speed, 0 when undefined."""
+    if duration_s is None or duration_s <= 0.0:
+        return 0.0
+    traveled = geometry.filter(pl.col("n_points") > 1)
+    if traveled.height == 0:
+        return 0.0
+    mean_distance_m = float(traveled.select(pl.col("path_length_m").mean()).item())
+    mean_speed_mps = mean_distance_m / duration_s
+    if mean_speed_mps <= 0.0:
+        return 0.0
+    return max(0.0, 1.0 - mean_speed_mps / NOMINAL_DESIRED_SPEED_MPS)
+
+
+def round_trips_completed(geometry: pl.DataFrame, peds: pl.DataFrame) -> int:
+    """Completed away-and-return rounds of the pedestrians with enough samples to define one."""
+    if geometry.height == 0:
+        return 0
+    qualifying_ids = geometry.filter(
+        (pl.col("n_points") >= PEDESTRIAN_MIN_POINTS)
+        & (pl.col("max_displacement_m") > ROUND_TRIP_MIN_DISPLACEMENT_M)
+    ).get_column("ped_id")
+    if len(qualifying_ids) == 0:
+        return 0
+    displacement_m = (
+        (pl.col("x_m") - pl.col("x_m").first()).pow(2)
+        + (pl.col("y_m") - pl.col("y_m").first()).pow(2)
+    ).sqrt().over("ped_id")
+    trajectory = _track_frame(peds).filter(pl.col("ped_id").is_in(qualifying_ids)).with_columns(
+        displacement_m=displacement_m
+    )
+    completed = pedestrian_round_trips_frame(trajectory)
+    if completed.height == 0:
+        return 0
+    return int(completed.select(pl.col("round_trips_completed").sum()).item())
 
 
 class PedestrianDisturbanceCalculator(BaseMetricCalculator):
-    """Computes pedestrian deflection and slowdown metrics against baseline trajectories."""
+    """Per-pedestrian deflection and patrol rounds, and their pedestrian mean at EPISODE scope."""
 
     NAME = "pedestrian_disturbance"
     CATEGORY = "social"
+    SCOPE = MetricScope.PEDESTRIAN
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset(
+        {MetricScope.PEDESTRIAN, MetricScope.EPISODE}
+    )
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["proxemics"]
     REQUIRED_TOPICS = ["pedestrian_tracks"]
@@ -24,7 +169,6 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
     }
 
     PRIMARY_OUTPUTS = ["ped_path_deflection_m"]
-
     OUTPUT_DIRECTIONS = {"ped_path_deflection_m": "lower"}
 
     @classmethod
@@ -36,124 +180,107 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         ]
 
     @staticmethod
-    def _compute_trajectory_deflection(actual_coords: np.ndarray, reference_coords: np.ndarray) -> float:
-        """
-        Compute mean distance between actual trajectory points and nearest reference trajectory points.
-        actual_coords: (N, 2) or (N, 3)
-        reference_coords: (M, 2) or (M, 3)
-        """
+    def _compute_trajectory_deflection(
+        actual_coords: np.ndarray, reference_coords: np.ndarray
+    ) -> float:
+        """Mean distance of the recorded points to their nearest reference point, ignoring non-finite rows."""
         if len(actual_coords) == 0 or len(reference_coords) == 0:
             return 0.0
-
-        valid_act = actual_coords[~np.isnan(actual_coords).any(axis=1)]
-        valid_ref = reference_coords[~np.isnan(reference_coords).any(axis=1)]
-        if len(valid_act) == 0 or len(valid_ref) == 0:
+        valid_actual = actual_coords[~np.isnan(actual_coords).any(axis=1)]
+        valid_reference = reference_coords[~np.isnan(reference_coords).any(axis=1)]
+        if len(valid_actual) == 0 or len(valid_reference) == 0:
             return 0.0
+        actual_m = np.ascontiguousarray(valid_actual[:, :2], dtype=np.float64)
+        reference_m = np.ascontiguousarray(valid_reference[:, :2], dtype=np.float64)
+        if np.isfinite(reference_m).all() and np.isfinite(actual_m).all():
+            distances, _ = cKDTree(reference_m).query(actual_m, k=1)
+            return float(np.mean(distances))
+        dense = np.hypot(
+            actual_m[:, None, 0] - reference_m[None, :, 0],
+            actual_m[:, None, 1] - reference_m[None, :, 1],
+        )
+        return float(np.mean(np.min(dense, axis=1)))
 
-        valid_act = np.ascontiguousarray(valid_act[:, :2], dtype=np.float64)
-        valid_ref = np.ascontiguousarray(valid_ref[:, :2], dtype=np.float64)
-
-        try:
-            from scipy.spatial import cKDTree  # pyright: ignore[reportAttributeAccessIssue]
-
-            tree = cKDTree(valid_ref)
-            dists, _ = tree.query(valid_act, k=1)
-            return float(np.mean(dists))
-        except Exception:
-            from scipy.spatial.distance import cdist
-
-            dists = cdist(valid_act, valid_ref)
-            return float(np.mean(np.min(dists, axis=1)))
-
-    @staticmethod
-    def _count_round_trips(dists_from_start: np.ndarray, max_disp: float) -> int:
-        """Counts returns to within a quarter of the farthest reach, each after passing three quarters of it."""
-        trips = 0
-        away = False
-        for dist in dists_from_start:
-            if not away and dist >= 0.75 * max_disp:
-                away = True
-            elif away and dist <= 0.25 * max_disp:
-                trips += 1
-                away = False
-        return trips
-
-    def calculate(
+    def _pedestrian_outputs(
         self,
         episode: AlignedEpisodeBundle,
-        prior_results: dict[str, typing.Any],
+        prior_results: typing.Mapping[str, typing.Any],
     ) -> dict[str, typing.Any]:
-        peds_df = self.native_ped_frame(episode)
-        if episode.data is None or peds_df is None or len(peds_df) == 0:
-            return {k: None for k in self.output_keys()}
-
-        # Extract pedestrian positions per agent, identified by ped_id and kept in time order
-        agent_paths: dict[str, list[tuple[float, float]]] = {}
-        for ped_id, x, y in peds_df.select("ped_id", "x", "y").iter_rows():
-            if not (np.isfinite(x) and np.isfinite(y) and abs(x) < 1e6 and abs(y) < 1e6):
-                continue
-            agent_paths.setdefault(ped_id, []).append((float(x), float(y)))
-
-        if not agent_paths:
+        """Deflection, delay ratio and rounds of the single pedestrian of a PEDESTRIAN slice."""
+        peds = self.native_ped_frame(episode)
+        if peds is None or peds.height == 0:
+            return dict.fromkeys(self.output_keys())
+        geometry = pedestrian_geometry_frame(peds)
+        if geometry.height == 0:
             return {
                 "ped_path_deflection_m": 0.0,
                 "ped_velocity_delay_ratio": 0.0,
                 "ped_round_trips_completed": 0,
             }
-
-        round_trips = 0
-        total_deflection = 0.0
-        num_agents = len(agent_paths)
-
-        for coords in agent_paths.values():
-            arr = np.array(coords)
-            if len(arr) < 5:
-                continue
-
-            diffs = arr - arr[0]
-            dists_from_start = np.hypot(diffs[:, 0], diffs[:, 1])
-            max_disp = float(np.max(dists_from_start))
-
-            if max_disp > 0.5:
-                round_trips += self._count_round_trips(dists_from_start, max_disp)
-
-            # Standalone geometric lateral deflection against straight-line start-to-end vector
-            p_start, p_end = arr[0], arr[-1]
-            seg_vec = p_end - p_start
-            seg_len = float(np.hypot(seg_vec[0], seg_vec[1]))
-            if np.isfinite(seg_len) and seg_len > 0.5:
-                u_vec = seg_vec / seg_len
-                # Cross-product magnitude gives perpendicular distance in 2D
-                rel_pos = arr - p_start
-                lateral_dists = np.abs(rel_pos[:, 0] * u_vec[1] - rel_pos[:, 1] * u_vec[0])
-                finite_lat = lateral_dists[np.isfinite(lateral_dists)]
-                total_deflection += float(np.mean(finite_lat))
-
-        # Velocity delay: compare actual mean speed to baseline desired speed (~1.2 m/s)
-        time_ns = episode.data["time_ns"].to_numpy() if "time_ns" in episode.data.columns else None
-        avg_speed = 0.0
-        if time_ns is not None and len(time_ns) > 1:
-            dt_s = (time_ns[-1] - time_ns[0]) / 1e9
-            if dt_s > 0:
-                all_dists = []
-                for pts in agent_paths.values():
-                    if len(pts) > 1:
-                        p_arr = np.array(pts)
-                        step_dists = np.hypot(np.diff(p_arr[:, 0]), np.diff(p_arr[:, 1]))
-                        finite_d = step_dists[np.isfinite(step_dists)]
-                        all_dists.append(float(np.sum(finite_d)))
-                if all_dists:
-                    avg_speed = float(np.mean(all_dists)) / dt_s
-
-        desired_speed = 1.2  # Nominal pedsim desired speed
-        velocity_delay_ratio = max(0.0, float(1.0 - (avg_speed / desired_speed))) if avg_speed > 0 and np.isfinite(avg_speed) else 0.0
-
-        deflection_val = round(total_deflection / num_agents, 3) if num_agents > 0 and np.isfinite(total_deflection) else 0.0
-        delay_val = round(velocity_delay_ratio, 3) if np.isfinite(velocity_delay_ratio) else 0.0
-        trips_val = round_trips / num_agents if num_agents > 0 and np.isfinite(round_trips) else 0
-
+        span_ns = int(geometry.select(pl.col("last_t_ns").max()).item()) - int(
+            geometry.select(pl.col("first_t_ns").min()).item()
+        )
+        prior_deflection = prior_results.get("ped_path_deflection_m")
+        total_m, num_agents = lateral_deflection_sums(geometry)
+        computed_deflection = round(total_m / num_agents, SUMMED_VALUE_DECIMALS)
         return {
-            "ped_path_deflection_m": deflection_val,
-            "ped_velocity_delay_ratio": delay_val,
-            "ped_round_trips_completed": trips_val,
+            "ped_path_deflection_m": float(prior_deflection)
+            if prior_deflection is not None
+            else computed_deflection,
+            "ped_velocity_delay_ratio": round(
+                velocity_delay_value(geometry, span_ns / 1e9), SUMMED_VALUE_DECIMALS
+            ),
+            "ped_round_trips_completed": round_trips_completed(geometry, peds),
         }
+
+    def _episode_outputs(self, episode: AlignedEpisodeBundle) -> dict[str, typing.Any]:
+        """Pedestrian mean of the disturbance geometry, the historical episode-wide value."""
+        peds = self.native_ped_frame(episode)
+        if peds is None or peds.height == 0:
+            return dict.fromkeys(self.output_keys())
+        geometry = pedestrian_geometry_frame(peds)
+        if geometry.height == 0:
+            return {
+                "ped_path_deflection_m": 0.0,
+                "ped_velocity_delay_ratio": 0.0,
+                "ped_round_trips_completed": 0,
+            }
+        total_m, num_agents = lateral_deflection_sums(geometry)
+        return {
+            "ped_path_deflection_m": round(total_m / num_agents, SUMMED_VALUE_DECIMALS),
+            "ped_velocity_delay_ratio": round(
+                velocity_delay_value(geometry, self._episode_duration_s(episode)),
+                SUMMED_VALUE_DECIMALS,
+            ),
+            "ped_round_trips_completed": round_trips_completed(geometry, peds) / num_agents,
+        }
+
+    @staticmethod
+    def _episode_duration_s(episode: AlignedEpisodeBundle) -> float | None:
+        """Wall seconds the episode's aligned rows cover, the denominator the delay ratio used."""
+        if episode.data is None or episode.data.height < 2:
+            return None
+        span_ns = episode.data.select(pl.col("time_ns").max() - pl.col("time_ns").min()).item()
+        duration_s = float(span_ns) / 1e9
+        return duration_s if duration_s > 0.0 else None
+
+    def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: typing.Mapping[str, typing.Any]
+    ) -> dict[str, typing.Any]:
+        """EPISODE scope: the pedestrian mean of the per-pedestrian geometry."""
+        del prior_results
+        return self._episode_outputs(episode)
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: typing.Mapping[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """PEDESTRIAN computes the slice's own pedestrian; EPISODE reduces them to their mean."""
+        scope = MetricScope.EPISODE if scope_slice is None else scope_slice.scope
+        if scope == MetricScope.PEDESTRIAN:
+            return self._pedestrian_outputs(episode, prior_results)
+        if scope == MetricScope.EPISODE:
+            return self._episode_outputs(episode)
+        return dict.fromkeys(self.output_keys())

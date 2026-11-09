@@ -1,27 +1,117 @@
+"""Mutual gaze cone metrics on the robot sample axis, with the per-sample counts as a 1NF series.
+
+The pedestrian state at each robot sample comes from one backward asof join
+(:func:`~arena_evaluation.processing.pedestrian_frames.pedestrians_at`) matched with the
+ground-truth robot row at the same timestamp; the cone tests are Polars expressions over that
+frame x pedestrian table, reduced per robot sample. The thresholds and the robot sample axis
+are the historical ones, so the totals stay comparable.
+"""
+
 from __future__ import annotations
 
+import math
 import typing
+from typing import Final
 
-import numpy as np
+import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.processing.pedestrian_frames import pedestrians_by_time
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+GAZE_CONE_RAD: Final[float] = math.radians(5.0)
+FULL_TURN_RAD: Final[float] = math.pi
+SAMPLE_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "t_ns": pl.Int64,
+        "looking_at_peds": pl.Int64,
+        "looked_at_by_peds": pl.Int64,
+    }
+)
+
+SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "run_id": pl.String,
+        "episode_id": pl.Int64,
+        "robot_id": pl.String,
+        "t_ns": pl.Int64,
+        "time_s": pl.Float64,
+        "looking_at_peds": pl.Int64,
+        "looked_at_by_peds": pl.Int64,
+    }
+)
+
+
+def _angle_difference(left_rad: pl.Expr, right_rad: pl.Expr) -> pl.Expr:
+    """Absolute angular distance of two headings in [0, pi]."""
+    return FULL_TURN_RAD - ((left_rad - right_rad).abs() - FULL_TURN_RAD).abs()
+
+
+
+def gaze_counts(robot: pl.DataFrame, peds: pl.DataFrame | None) -> pl.DataFrame:
+    """Per robot sample: how many pedestrians it looks at, and how many look back."""
+    if peds is None or peds.height == 0 or robot.height == 0:
+        return pl.DataFrame(schema=SAMPLE_SCHEMA)
+    matched = pedestrians_at(robot.get_column("time_ns"), peds).join(
+        robot, on="time_ns", how="inner"
+    )
+    if matched.height == 0:
+        return pl.DataFrame(schema=SAMPLE_SCHEMA)
+    directions = matched.with_columns(
+        dx_m=pl.col("x").cast(pl.Float64) - pl.col("robot_x_m"),
+        dy_m=pl.col("y").cast(pl.Float64) - pl.col("robot_y_m"),
+    ).with_columns(
+        angle_to_ped_rad=pl.arctan2(pl.col("dy_m"), pl.col("dx_m")),
+        angle_to_robot_rad=pl.arctan2(-pl.col("dy_m"), -pl.col("dx_m")),
+    )
+    looking_at = _angle_difference(
+        pl.col("robot_yaw_rad"), pl.col("angle_to_ped_rad")
+    ) <= GAZE_CONE_RAD
+    looked_at = pl.col("yaw").is_not_null() & (
+        _angle_difference(pl.col("yaw").cast(pl.Float64), pl.col("angle_to_robot_rad"))
+        <= GAZE_CONE_RAD
+    )
+    return (
+        directions.with_columns(looking_at=looking_at, looked_at=looked_at)
+        .group_by("time_ns")
+        .agg(
+            looking_at_peds=pl.col("looking_at").sum().cast(pl.Int64),
+            looked_at_by_peds=pl.col("looked_at").sum().cast(pl.Int64),
+        )
+        .select("time_ns", "looking_at_peds", "looked_at_by_peds")
+    )
+
+
+def time_with_cone_contact_s(samples: pl.DataFrame, column: str) -> float | None:
+    """Seconds of robot time whose count in ``column`` is positive, over the forward sample steps."""
+    if samples.height == 0:
+        return None
+    steps = samples.sort("t_ns").with_columns(
+        step_s=(pl.col("t_ns").shift(-1) - pl.col("t_ns")).cast(pl.Float64) / 1e9
+    )
+    return float(
+        steps.select(
+            pl.when((pl.col(column) > 0) & pl.col("step_s").is_not_null())
+            .then(pl.col("step_s"))
+            .otherwise(0.0)
+            .sum()
+        ).item()
+    )
 
 
 class GazeMetricsCalculator(BaseMetricCalculator):
-    """Calculates mutual and directional gaze metrics between robot and pedestrians."""
+    """Robot-to-pedestrian and pedestrian-to-robot gaze cone dwell."""
 
     NAME = "gaze_metrics"
     CATEGORY = "social"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks"]
 
     UNITS = {
-        "time_looking_at_pedestrians": "",
         "total_time_looking_at_pedestrians": "s",
-        "time_looked_at_by_pedestrians": "",
         "total_time_looked_at_by_pedestrians": "s",
     }
 
@@ -30,86 +120,96 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         "total_time_looked_at_by_pedestrians",
     ]
 
-    GAZE_CONE_DEG = 5.0
-
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
-            "time_looking_at_pedestrians",
             "total_time_looking_at_pedestrians",
-            "time_looked_at_by_pedestrians",
             "total_time_looked_at_by_pedestrians",
         ]
 
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+    def _robot_rows(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
+        """Ground-truth robot rows of the episode view, one per aligned sample."""
+        frame = self.resolve_robot_frame(episode)
+        if frame is None or frame.height == 0:
+            return pl.DataFrame(
+                schema={
+                    "time_ns": pl.Int64,
+                    "robot_x_m": pl.Float64,
+                    "robot_y_m": pl.Float64,
+                    "robot_yaw_rad": pl.Float64,
+                }
+            )
+        return frame.select(
+            time_ns=pl.col("time_ns").cast(pl.Int64),
+            robot_x_m=pl.col("pos_x_gt").cast(pl.Float64),
+            robot_y_m=pl.col("pos_y_gt").cast(pl.Float64),
+            robot_yaw_rad=pl.col("yaw_gt").cast(pl.Float64),
+        ).drop_nulls(["time_ns", "robot_x_m", "robot_y_m", "robot_yaw_rad"])
 
-        peds_df = self.native_ped_frame(episode)
-        if episode.data is None or "pos_x" not in episode.data.columns or peds_df is None:
-            return {k: None for k in self.output_keys()}
+    def _samples(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
+        """Per robot sample gaze counts over the episode view's own pedestrian stream."""
+        robot = self._robot_rows(episode)
+        if robot.height == 0:
+            return pl.DataFrame(schema=SAMPLE_SCHEMA)
+        counts = gaze_counts(robot, self.native_ped_frame(episode))
+        return robot.select("time_ns").join(counts, on="time_ns", how="left").select(
+            t_ns=pl.col("time_ns"),
+            looking_at_peds=pl.col("looking_at_peds").fill_null(0).cast(pl.Int64),
+            looked_at_by_peds=pl.col("looked_at_by_peds").fill_null(0).cast(pl.Int64),
+        )
 
-        pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
-        time_ns = episode.data["time_ns"].to_numpy()
-        peds_at_time = pedestrians_by_time(time_ns, peds_df)
-
-        N = len(pos_x)
-
-        dt = np.diff(time_ns) / 1e9
-        dt = np.append(dt, 0.0)
-
-        looking_at = []
-        looking_at_time = 0.0
-
-        looked_at = []
-        looked_at_time = 0.0
-
-        cone_rad = np.radians(self.GAZE_CONE_DEG)
-
-        def angle_diff(a1: float | np.ndarray, a2: np.ndarray) -> np.ndarray:
-            return np.pi - np.abs(np.abs(a1 - a2) - np.pi)
-
-        for i in range(N):
-            frame = peds_at_time.get(int(time_ns[i]))
-
-            if frame is None or len(frame) == 0:
-                looking_at.append(0)
-                looked_at.append(0)
-                continue
-
-            rx, ry, ryaw = pos_x[i], pos_y[i], yaw[i]
-
-            peds_arr = frame.select("x", "y").to_numpy()
-            n_resolved_peds = peds_arr.shape[0]
-            head_arr = frame["yaw"].to_numpy()
-
-            if peds_arr.ndim != 2 or peds_arr.shape[1] < 2:
-                looking_at.append(0)
-                looked_at.append(0)
-                continue
-
-            dx = peds_arr[:, 0] - rx
-            dy = peds_arr[:, 1] - ry
-
-            angle_to_ped = np.arctan2(dy, dx)
-            diff_robot_to_ped = angle_diff(ryaw, angle_to_ped)
-
-            is_looking = np.sum(diff_robot_to_ped <= cone_rad)
-            looking_at.append(int(is_looking))
-            if is_looking > 0:
-                looking_at_time += dt[i]
-
-            angle_to_robot = np.arctan2(-dy, -dx)
-            if len(head_arr) == len(peds_arr):
-                diff_ped_to_robot = angle_diff(head_arr, angle_to_robot)
-                is_looked_at = np.sum(diff_ped_to_robot <= cone_rad)
-                looked_at.append(int(is_looked_at))
-                if is_looked_at > 0:
-                    looked_at_time += dt[i]
-            else:
-                looked_at.append(0)
-
+    def _episode_metrics(self, episode: AlignedEpisodeBundle) -> dict[str, typing.Any]:
+        """Total gaze dwell of both directions over the given episode view."""
+        samples = self._samples(episode)
+        if samples.height == 0:
+            return dict.fromkeys(self.output_keys())
         return {
-            "time_looking_at_pedestrians": looking_at,
-            "total_time_looking_at_pedestrians": looking_at_time,
-            "time_looked_at_by_pedestrians": looked_at,
-            "total_time_looked_at_by_pedestrians": looked_at_time,
+            "total_time_looking_at_pedestrians": time_with_cone_contact_s(
+                samples, "looking_at_peds"
+            ),
+            "total_time_looked_at_by_pedestrians": time_with_cone_contact_s(
+                samples, "looked_at_by_peds"
+            ),
         }
+
+    def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
+    ) -> dict[str, typing.Any]:
+        """Compute the episode-scope gaze dwell over the bundle's own pedestrian frames."""
+        del prior_results
+        return self._episode_metrics(episode)
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """EPISODE scope only: the slice's own window and pedestrian set are the population."""
+        del prior_results
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self._episode_metrics(episode)
+
+    def series_table(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str = "",
+        robot_id: str = "",
+    ) -> pl.DataFrame:
+        """1NF per-sample gaze counts, zero where the robot had no pedestrian frame."""
+        samples = self._samples(episode)
+        if samples.height == 0:
+            return pl.DataFrame(schema=SERIES_SCHEMA)
+        first_t_ns = int(samples.select(pl.col("t_ns").min()).item())
+        resolved_robot = robot_id or (episode.robot_name or "robot")
+        return samples.select(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode.episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(resolved_robot, dtype=pl.String),
+            t_ns=pl.col("t_ns"),
+            time_s=(pl.col("t_ns") - first_t_ns).cast(pl.Float64) / 1e9,
+            looking_at_peds=pl.col("looking_at_peds"),
+            looked_at_by_peds=pl.col("looked_at_by_peds"),
+        )
