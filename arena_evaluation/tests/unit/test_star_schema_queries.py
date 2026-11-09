@@ -43,7 +43,6 @@ from arena_evaluation.analytics import (
     paired_treatment_diff,
     rank_swap_matrix,
     split_discovery_verification_seeds,
-    synthesize_star_schema_from_combined,
 )
 from arena_evaluation.processing.metrics.ecological.compliance_metrics import _ZoneGeometry
 from arena_evaluation.processing.metrics.ecological.condition_metrics import _world_cache

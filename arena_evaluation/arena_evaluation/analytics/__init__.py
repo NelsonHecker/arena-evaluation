@@ -13,7 +13,6 @@ from .catalog import (
     TELEMETRY_TABLE_SCHEMAS,
     BenchmarkCatalog,
     StarCatalog,
-    synthesize_star_schema_from_combined,
 )
 from .evidence import (
     EVIDENCE_INDEX_SCHEMA,
@@ -105,6 +104,5 @@ __all__ = [
     "seed_split_rank_stability",
     "split_discovery_verification_cohorts",
     "split_discovery_verification_seeds",
-    "synthesize_star_schema_from_combined",
     "validate_readonly_sql",
 ]
