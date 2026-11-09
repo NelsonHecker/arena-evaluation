@@ -23,7 +23,6 @@ pytest.importorskip("rclpy")
 
 import yaml
 from arena_runtime.env.task_layer import encode_modes
-from arena_evaluation_msgs.srv import RecordEpisode
 from mcap.reader import make_reader
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import Parameter as RclParameter
@@ -285,8 +284,7 @@ def test_constructor_data_root_creates_runs_uuid(tmp_path, fake_share, monkeypat
         node.destroy_node()
 
 
-def test_constructor_registers_subscriptions_and_service(tmp_path, full_node):
-    assert full_node._start_service is not None
+def test_constructor_registers_subscriptions(tmp_path, full_node):
     assert len(full_node.subs) == 13
     # /tf, humans/tf and /tf_static are subscribed once, at construction
     assert full_node.latched_topic_names == {"state/episode", "state/robots", "state/semantics", "agent_meta", "interactions", "map", "door_mask", "tf_static"}
@@ -903,45 +901,6 @@ def test_stop_episode_metadata_write_failure_still_closes(tmp_path):
     node._stop_episode(3, outcome_state=2)
     assert node.writer is None
     assert any("Failed to write outcome metadata" in e for e in _log(node, "ERROR"))
-
-
-def _service_request(**fields) -> RecordEpisode.Request:
-    return RecordEpisode.Request(**{"episode_id": 9, "command": RecordEpisode.Request.COMMAND_START, **fields})
-
-
-def test_service_callback_start_command(tmp_path):
-    node = _recording_node(tmp_path)
-    resp = RecordEpisode.Response()
-    node._start_episode_service_callback(_service_request(), resp)
-    assert resp.success is True
-    assert resp.message == "recording episode 0"
-    assert node.current_sim_episode_id == 9
-    node._close_current_writer()
-
-
-def test_service_callback_stop_command(tmp_path):
-    node = _bare_node(
-        current_sim_episode_id=9,
-        current_metadata=_make_run_metadata(),
-        current_metadata_path=tmp_path / "episode_009.yaml",
-    )
-    _bag(node, tmp_path / "bag")
-    resp = RecordEpisode.Response()
-    node._start_episode_service_callback(_service_request(command=RecordEpisode.Request.COMMAND_STOP, outcome_state=3, outcome_info="collision"), resp)
-    assert resp.success is True
-    assert resp.message == "stopped"
-    assert node.writer is None
-    data = yaml.safe_load((tmp_path / "episode_009.yaml").read_text())
-    assert data["outcome_state"] == 3
-    assert data["outcome_info"] == "collision"
-
-
-def test_service_callback_unknown_command():
-    node = _bare_node()
-    resp = RecordEpisode.Response()
-    node._start_episode_service_callback(_service_request(command=7), resp)
-    assert resp.success is False
-    assert resp.message == "unknown command 7"
 
 
 # ---------------------------------------------------------------------------
@@ -1684,33 +1643,3 @@ def test_bind_to_parent_tolerates_ctypes_failure(monkeypatch):
     monkeypatch.setattr(recorder.os, "getppid", lambda: 42)
     recorder._bind_to_parent()
     assert exits == []
-
-
-# ---------------------------------------------------------------------------
-# End-to-end service flow on a fully constructed node
-# ---------------------------------------------------------------------------
-
-
-def test_start_stop_episode_service_end_to_end(tmp_path, full_node):
-    start_resp = RecordEpisode.Response()
-    full_node._start_episode_service_callback(_service_request(episode_id=11), start_resp)
-
-    assert start_resp.success is True
-    assert start_resp.message == "recording episode 0"
-    assert full_node.current_episode_id == 0
-    assert full_node.current_sim_episode_id == 11
-    ep_dir = full_node.episodes_root / "episode_000"
-    assert (ep_dir / "episode_000.yaml").exists()
-    assert full_node.writer is not None
-
-    stop_resp = RecordEpisode.Response()
-    full_node._start_episode_service_callback(_service_request(episode_id=11, command=RecordEpisode.Request.COMMAND_STOP, outcome_state=2, outcome_info="ok"), stop_resp)
-
-    assert stop_resp.success is True
-    assert stop_resp.message == "stopped"
-    assert full_node.writer is None
-    assert (ep_dir / "episode_000.mcap").exists()
-    data = yaml.safe_load((ep_dir / "episode_000.yaml").read_text())
-    assert data["outcome_state"] == 2
-    assert data["outcome_info"] == "ok"
-    assert data["recording_ended_at"] is not None
