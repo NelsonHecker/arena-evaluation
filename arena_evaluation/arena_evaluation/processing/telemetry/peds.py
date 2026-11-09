@@ -112,7 +112,8 @@ class PedestrianRecorder:
 def _agent_meta(envelope: Envelope[RosAgentMeta]) -> AgentMeta:
     meta = envelope.body
     policies = tuple(str(policy) for policy in meta.policies)
-    agent_type = meta.agent_type
+    # agent-contracts: ignore MCAP schema evolution
+    agent_type = getattr(meta, "agent_type", ())
     typed = len(meta.agent_id) == len(agent_type)
     types = {int(agent_id): _agent_type(t) for agent_id, t in zip(meta.agent_id, agent_type, strict=True)} if typed else {}
     return AgentMeta(policies=policies, types_by_id=types)
