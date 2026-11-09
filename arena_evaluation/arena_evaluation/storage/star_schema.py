@@ -488,18 +488,18 @@ class StarSchemaBuilder:
             "max_linear_vel": _opt_float(meta_params.get("robot.mobile.max_linear_vel"))
             or _opt_float(meta_params.get("max_linear_vel"))
             or (
-                float(self._robot_params.max_linear_velocity)
-                if self._robot_params and self._robot_params.max_linear_velocity > 0.0
+                float(self.robot_params.max_linear_velocity)
+                if self.robot_params and self.robot_params.max_linear_velocity > 0.0
                 else None
             ),
             "max_angular_vel": _opt_float(meta_params.get("max_angular_vel")),
             "linear_acc": _opt_float(meta_params.get("linear_acc")),
             "linear_decel": _opt_float(meta_params.get("linear_decel")),
-            "robot_mass_kg": float(self._robot_params.total_mass)
-            if self._robot_params
+            "robot_mass_kg": float(self.robot_params.total_mass)
+            if self.robot_params
             else None,
-            "robot_radius_m": float(self._robot_params.robot_radius)
-            if self._robot_params
+            "robot_radius_m": float(self.robot_params.robot_radius)
+            if self.robot_params
             else None,
             "static_power_w": _opt_float(meta_params.get("static_power_w")),
             "start_x": None,

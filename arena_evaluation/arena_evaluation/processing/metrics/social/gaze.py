@@ -152,8 +152,8 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         if robot.height == 0:
             return pl.DataFrame(schema=SAMPLE_SCHEMA)
         counts = gaze_counts(robot, self.native_ped_frame(episode))
-        return robot.select("time_ns").join(counts, on="time_ns", how="left").select(
-            t_ns=pl.col("time_ns"),
+        return robot.select(pl.col("time_ns").alias("t_ns")).join(counts, on="t_ns", how="left").select(
+            t_ns=pl.col("t_ns"),
             looking_at_peds=pl.col("looking_at_peds").fill_null(0).cast(pl.Int64),
             looked_at_by_peds=pl.col("looked_at_by_peds").fill_null(0).cast(pl.Int64),
         )
