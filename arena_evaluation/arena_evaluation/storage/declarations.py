@@ -66,12 +66,6 @@ def resolve_crowd_condition(
         if visible is not None:
             return "visible" if bool(visible) else "blind"
 
-    # Check episode metadata descriptor if available
-    if hasattr(episode, "run") and episode.run is not None:
-        meta_cond = getattr(episode.run, "crowd_condition", None)
-        if meta_cond in ("blind", "visible"):
-            return "blind" if meta_cond == "blind" else "visible"
-
     params = getattr(episode, "human_params", None)
     if isinstance(params, dict):
         val = params.get(ROBOT_VISIBILITY_PARAM)
@@ -81,6 +75,10 @@ def resolve_crowd_condition(
         for name, parameter in params.items():
             if name.rsplit(".", maxsplit=1)[-1] == vis_leaf:
                 return "visible" if bool(parameter) else "blind"
+
+    run = episode.run
+    if run is not None and run.crowd_condition is not None:
+        return run.crowd_condition
     return "visible"
 
 
