@@ -177,6 +177,13 @@ not port gaps. Keys in `list_violations` stay gaps but their note names the know
 
 ## Current results
 
-See `results/test-eval3-agent-mcp/` and `results/parity-g1-roster-ped6/`. The
-`MISSING_STAR` counts are the size of the remaining port, not a harness failure;
-the `MISMATCH` count must be zero for the gate to pass.
+| run | input | EXACT | RELOCATED_SERIES | MISSING_STAR | MISMATCH |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `test-eval3-agent-mcp` | existing dual-path run, 5 episodes | 24 | 30 | 216 | 0 |
+| `parity-g1-roster-ped6` | 6 ped6 episodes reprocessed by the current branch | 24 | 30 | 216 | 0 |
+
+Porting gaps on the reprocessed run: 216 keys without a scoped producer, triaged into
+`port-eco` 102 / `port-social` 94 / `parity-g1` 20, plus 12 known remaining 1NF list
+violations and 5 structural replacements. The `MISSING_STAR` count is the size of the
+remaining port, not a harness failure; the `MISMATCH` count must be zero for the gate
+to pass. Per-run provenance is in `results/<run>/PROVENANCE.md`.
