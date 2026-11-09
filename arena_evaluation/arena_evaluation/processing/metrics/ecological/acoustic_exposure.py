@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import pathlib
 import typing
 
 import numpy as np

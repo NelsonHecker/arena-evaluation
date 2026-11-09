@@ -226,10 +226,10 @@ def _semantic(rows: list[tuple[int, str, bool]]) -> pl.DataFrame:
             "t_ns": [r[0] for r in rows],
             "kind": ["door"] * len(rows),
             "entity_name": [r[1] for r in rows],
-            "field_name": ["open"] * len(rows),
-            "value_bool": [r[2] for r in rows],
+            "field_name": ["progress"] * len(rows),
+            "value_bool": [None] * len(rows),
             "value_str": [None] * len(rows),
-            "value_num": [None] * len(rows),
+            "value_num": [1.0 if r[2] else 0.0 for r in rows],
         },
         schema={"t_ns": pl.Int64, "kind": pl.Utf8, "entity_name": pl.Utf8, "field_name": pl.Utf8, "value_bool": pl.Boolean, "value_str": pl.Utf8, "value_num": pl.Float64},
     )
