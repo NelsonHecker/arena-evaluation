@@ -21,12 +21,14 @@
 #
 # Only identity-grain targets (one fact row per episode and robot) are claimed for the
 # pre-port columns. Windowed social metrics (ENCOUNTER/CONTACT scopes) are now produced per
-# window, but their legacy keys are episode aggregates that no window reduction reproduces:
-# an encounter window is restricted to its own actor and to the 3 m detection radius, and a
-# contact window to [onset - 0.5 s, onset + 0.5 s], so the windows neither partition the
-# episode telemetry nor reproduce its population. The reviewed natural reductions are
-# listed here for review but deliberately not claimed (the certificate would report
-# MISMATCH); the star columns exist and surface as UNMAPPED:
+# window; a window is restricted to its own actor and to the 3 m detection radius (contact:
+# [onset - 0.5 s, onset + 0.5 s]), so most legacy episode aggregates do not reduce back to
+# the episode value. Three do, verified on parity-g1-window-social: ci_max and
+# max_speed_intimate_zone are the episode max of the per-window max (the extreme occurs at
+# the closest-approach frame, which always lies inside that actor's encounter window) and
+# tti_min is the episode min of the per-window min. Those three are claimed below. The
+# remaining reviewed natural reductions are listed for review but deliberately not claimed
+# (the certificate would report MISMATCH); their star columns exist and surface as UNMAPPED:
 #   sum:  sfm_cumulative_force, esfm_cumulative_force, esfm_ped_cumulative_force,
 #         time_in_intimate_zone, time_in_personal_zone, time_in_social_zone,
 #         time_in_public_zone, psi_intimate_events, psi_personal_events,
@@ -36,17 +38,21 @@
 #         hhi_stalls_approach, hhi_stalls_hold, hhi_stalls_post, hhi_stalls_rest,
 #         hhi_passes_between
 #   max:  sfm_peak_force, esfm_peak_force, esfm_ped_peak_force, social_force_max,
-#         social_force_ped_max, ci_max, max_speed_intimate_zone,
-#         max_speed_personal_zone, max_speed_social_zone, max_speed_public_zone
+#         social_force_ped_max, max_speed_personal_zone, max_speed_social_zone,
+#         max_speed_public_zone (a 3 m encounter window never reaches the public zone,
+#         so max_speed_public_zone is structurally null there)
 #   mean: sfm_mean_force, esfm_mean_force, esfm_ped_mean_force, social_force_mean,
 #         social_force_ped_mean, ci_mean, tti_mean, avg_velocity_in_personal_space,
 #         movement_towards_peds_ratio, hhi_share_approach, hhi_share_hold,
 #         hhi_share_post, hhi_share_rest, hhi_pair_gap_hold
-#   min:  tti_min, hhi_min_pair_clearance
+#   min:  hhi_min_pair_clearance
 #   no reducible aggregate: hhi_interaction, hhi_hold_onset_s, hhi_release_s,
 #         hhi_episode_s (window duration), num_pedestrians (episode peak vs one actor).
 # The three contact-scope performance columns ARE claimed below: collision_metrics writes
 # the window's own onset count and the parent episode's SPL, and contact intervals are disjoint.
+# Verified on parity-g1-window-social (6 episodes): the claimed encounter reductions reproduce
+# the legacy value exactly; every unclaimed reduction above is the natural one but differs
+# (e.g. sfm_cumulative_force sum by 0.026 N s, num_pedestrians max by 329 pedestrians).
 #
 # The "ported producers" section below claims the columns added by the port-boundary
 # work. fact_episodes and fact_robots carry one row per episode and robot, so their
@@ -525,3 +531,22 @@ mappings:
     legacy_columns: [spl]
     star_reduction: mean
     note: "window-eco collision_metrics CONTACT: every contact row of an episode carries the parent episode's success-weighted path length, so the mean reproduces the episode SPL"
+  # --- windowed encounter producers: extremes reproduce the episode aggregate -----------
+  - metric_key: ci_max
+    star_table: fact_encounters
+    star_column: ci_max
+    legacy_columns: [ci_max]
+    star_reduction: max
+    note: "social_forces ENCOUNTER: the episode personal-space-index maximum occurs at the closest-approach frame, which lies inside that actor's encounter window, so the max of the per-window maxima is the legacy value"
+  - metric_key: tti_min
+    star_table: fact_encounters
+    star_column: tti_min
+    legacy_columns: [tti_min]
+    star_reduction: min
+    note: "proxemics_extended ENCOUNTER: the episode minimum closing time occurs inside the encounter window of the closing actor, so the min of the per-window minima is the legacy value"
+  - metric_key: max_speed_intimate_zone
+    star_table: fact_encounters
+    star_column: max_speed_intimate_zone
+    legacy_columns: [max_speed_intimate_zone]
+    star_reduction: max
+    note: "proxemics_extended ENCOUNTER: the intimate zone is inside the 3 m encounter radius, so the fastest intimate-zone frame lies in an encounter window and the max of the per-window maxima is the legacy value"

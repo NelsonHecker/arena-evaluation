@@ -1,0 +1,59 @@
+benchmark_dir: /opt/arena_ws/data/benchmarks/parity-g1-window-social
+run_ids:
+- parity-g1-window-social
+inventory_keys: 267
+compared_metric_mappings: 82
+mapped_keys: 79
+expected_diff_entries: 34
+expected_diff_pending: 10
+relocated_series_keys: 37
+structural_replacements: 5
+list_violation_keys: 12
+min_nonnull_episodes: 3
+legacy_episode_rows: 24
+star_episode_rows: 6
+status_counts:
+  EXACT: 77
+  WITHIN_TOL: 1
+  EXPECTED_DIFF: 0
+  UNMAPPED: 125
+  NO_PRODUCER: 26
+  MISSING_LEGACY: 0
+  NULL_REASON: 0
+  RELOCATED_SERIES: 37
+  CERT_NULL_ONLY: 4
+  INSUFFICIENT_EVIDENCE: 0
+  MISMATCH: 0
+unmapped_count: 125
+no_producer_count: 26
+gap_owner_counts:
+  parity-g1: 4
+  port-eco: 16
+  port-social: 6
+gap_calculator_counts:
+  path_metrics: 6
+  acoustic_exposure: 4
+  edge_case_criticality: 4
+  motion_metrics: 3
+  collision_metrics: 2
+  edge_case_formation: 2
+  task_replay: 2
+  mechanism_states: 1
+  pedestrian_path_metrics: 1
+  time_metrics: 1
+unmapped_star_columns: 138
+accepted_statuses:
+- EXACT
+- EXPECTED_DIFF
+- MISSING_LEGACY
+- NO_PRODUCER
+- NULL_REASON
+- RELOCATED_SERIES
+- UNMAPPED
+- WITHIN_TOL
+failing_statuses:
+- CERT_NULL_ONLY
+- INSUFFICIENT_EVIDENCE
+- MISMATCH
+hard_failure_count: 4
+gate_passed: false
