@@ -1,271 +1,271 @@
-metric_key,legacy_column,star_table,star_column,status,episodes_compared,max_abs_diff,max_rel_diff,detail
-acceleration,,fact_robots,,MISSING_STAR,0,,,known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
-acceleration_max,acceleration_max,fact_episodes,max_acceleration_mps2,EXACT,6,0,0,reviewed entry not exercised (ground_truth)
-acceleration_mean,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-acoustic_cost,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-acoustic_startle_factor,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-acoustic_surge_index,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ade,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-adtw,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-aeps_linear_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-alarm_egress_blocking_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-angle_over_length,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-avg_velocity_in_personal_space,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_collided,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_optimal_time,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_score,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_success,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_time,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_timeout,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-battery_soc_drop_pct,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-battery_soc_final,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-blocked_closing_door,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-blocked_closing_door_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-boarded_before_exit,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-cabin_door_blocking_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-char_phase_coverage,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ci_max,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ci_mean,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_failed,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_passed,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_total,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_unknown,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-clearance_timeseries,clearance_timeseries,fact_episodes,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended
-collision_amount,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-collision_amount_pedestrian,collision_amount_pedestrian,fact_episodes,total_collisions_ped,EXACT,6,0,0,reviewed entry not exercised (null_fill)
-collision_amount_static,"collision_amount_wall, collision_amount_static",fact_episodes,total_collisions_static,EXACT,6,0,0,reviewed entry not exercised (null_fill)
-collision_amount_wall,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-collision_obstacles,,fact_contacts,,MISSING_STAR,0,,,known remaining 1NF list violation: collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending
-collisions,,fact_contacts,,MISSING_STAR,0,,,known remaining 1NF list violation: collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending
-condition_success,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-curvature,,fact_episodes,,MISSING_STAR,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-curvature_max,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-curvature_mean,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-door_freeze_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-door_oscillations,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-door_yield_violations,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-doorway_blocking_time,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-e_cot,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_agents,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collided,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_fault,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_ped_closing,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_robot_closing,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_with,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_absent,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_arrived,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_break_fired_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_broke_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_form_fired_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_formed_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_held_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_members,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_seen,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_variant,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_freeze_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_id,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_intrusion_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_clearance_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_clearance_m,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_clearance_with,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_ttc_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_ttc_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_ttc_with,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_missing,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_pet_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_pet_with,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_played,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_scope,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_steps,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_triggered_at,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_unplayed,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_missed_cycles,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_queue_jumps,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_rides,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_rides_robot,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_unnecessary_calls,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_wait_to_board_s,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-energy_mechanical_wh,energy_mechanical_wh,fact_robots,mechanical_work_j,EXACT,6,0,0,reviewed entry not exercised (unit_scale)
-energy_per_meter,energy_per_meter,fact_episodes,energy_per_meter_j_m,EXACT,6,0,0,reviewed entry not exercised (unit_scale)
-energy_static_wh,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-energy_thermal_wh,energy_thermal_wh,fact_robots,thermal_energy_j,EXACT,6,0,0,reviewed entry not exercised (unit_scale)
-energy_total_wh,energy_total_wh,fact_episodes,total_energy_wh,EXACT,6,0,0,_episode_fact_row energy_total_wh -> total_energy_wh
-energy_total_wh,energy_total_wh,fact_robots,electrical_energy_wh,EXACT,6,0,0,_robot_fact_frame battery energy in Wh
-entered_full_cabin,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-entered_over_cap_zone,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_cumulative_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_mean_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_peak_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_ped_cumulative_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_ped_mean_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_ped_peak_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-fde,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-frechet_distance,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-friction_dissipation_j,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-goal_condition_rate,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-goal_inputs,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_episode_s,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_hold_onset_s,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_interaction,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_min_pair_clearance,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_pair_gap_hold,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_passes_between,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_release_s,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_approach,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_hold,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_post,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_rest,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stall_count,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stall_onsets_s,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stall_time_s,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_approach,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_hold,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_post,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_rest,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-idling_time,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-jerk,,fact_robots,,MISSING_STAR,0,,,known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
-jerk_max,jerk_max,fact_episodes,jerk_max_mps3,EXACT,6,0,0,reviewed entry not exercised (ground_truth)
-jerk_mean,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-judge_agrees,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-judge_disagreements,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-kcsc_wh,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-kinetic_energy_demand_j,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-l_a10,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-l_a50,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-l_a90,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-l_aeq_t,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mar,mar,fact_episodes,mar,EXACT,6,,,episode-scope mutual accommodation ratio copied by _episode_fact_row
-max_speed_intimate_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_personal_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_public_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_social_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mean_obstacle_clearance,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mean_pedestrian_clearance,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mechanism_components,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mechanism_score,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mechanism_states,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-mhd,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-min_obstacle_clearance,min_obstacle_clearance,fact_episodes,min_obstacle_clearance_m,EXACT,6,,,reviewed entry not exercised (ground_truth)
-min_pedestrian_clearance,min_pedestrian_clearance,fact_episodes,min_ped_clearance_m,EXACT,6,0,0,reviewed entry not exercised (ground_truth)
-movement_towards_peds_ratio,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ndtw,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ne,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-normalized_curvature,,fact_episodes,,MISSING_STAR,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-num_pedestrians,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-osr,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-passing_rule_compliance,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-path,,fact_episodes,,MISSING_STAR,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-path_efficiency,path_efficiency,fact_episodes,path_efficiency,EXACT,6,0,0,_episode_fact_row copies path_efficiency
-path_irregularity,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-path_length,path_length,fact_episodes,path_length_m,EXACT,6,0,0,_episode_fact_row path_length -> path_length_m
-path_length,path_length,fact_robots,path_length_m,EXACT,6,0,0,_robot_fact_frame falls back to the episode metrics' path_length
-path_length_values,,fact_episodes,,MISSING_STAR,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-path_odom,,fact_episodes,,MISSING_STAR,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-peak_to_mean_power_ratio,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_leq_exposure_dba,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_max_exposure_dba,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_max_startle_factor,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_mechanism_delay_seconds,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_path_deflection_m,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_round_trips_completed,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_velocity_delay_ratio,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-pedestrian_path,,fact_pedestrians,,MISSING_STAR,0,,,known remaining 1NF list violation: pedestrian trajectory array still carried in combined_metrics; the 1NF relocation is pending
-personal_space_intrusion_integral,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-pfi,pfi,fact_episodes,pfi,EXACT,6,,,episode-scope pedestrian frustration index copied by _episode_fact_row
-phase_outcomes,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_dropped,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_failed,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_met,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_total,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-power_peak_w,power_peak_w,fact_robots,peak_power_w,EXACT,6,0,0,_robot_fact_frame peak power from the ROBOT-scope powertrain calculator
-psi_intimate_events,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-psi_personal_events,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-psi_social_events,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-quiet_zone_dwell_seconds,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-ran_red_signal,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-relative_throughput,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-replan_latency_after_state_change_median,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-replan_latency_after_state_change_p95,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-restricted_zone_entries,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-result,result,fact_episodes,result,EXACT,6,,,_episode_fact_row copies the recorded verdict verbatim
-robot_path_deviation_m,robot_path_deviation_m,fact_episodes,robot_path_dev_m,EXACT,6,,,_episode_fact_row robot_path_deviation_m -> robot_path_dev_m
-roughness,,fact_episodes,,MISSING_STAR,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-roughness_max,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-roughness_mean,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-sdtw,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-sfm_cumulative_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-sfm_mean_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-sfm_peak_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_max,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_mean,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_ped_max,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_ped_mean,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-specific_cost_of_transport,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-speed_zone_violation_seconds,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-speed_zone_violations,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-spl,,fact_contacts,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-spl_geodesic,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-standstill_energy_penalty_wh,,fact_robots,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-stuck,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-success,success,fact_episodes,success,EXACT,6,,,_episode_fact_row copies the boolean success flag
-success_geodesic,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-theta_star_length,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_diff,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_intimate_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_personal_space,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_personal_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_public_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_social_zone,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_looked_at_by_pedestrians,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_looking_at_pedestrians,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_to_goal,time_to_goal,fact_episodes,time_to_goal_s,EXACT,6,0,0,_episode_fact_row time_to_goal -> time_to_goal_s
-time_waiting_at_doors,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-time_waiting_at_doors_robot,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_acoustic_attenuation_db,timeseries_acoustic_attenuation_db,fact_pedestrians,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended
-timeseries_acoustic_exposure_dba,timeseries_acoustic_exposure_dba,fact_pedestrians,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended
-timeseries_battery_soc,timeseries_battery_soc,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_accel_achieved,timeseries_char_accel_achieved,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_accel_target,timeseries_char_accel_target,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_dba,timeseries_char_dba,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_efficiency,timeseries_char_efficiency,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_energy_intensity,timeseries_char_energy_intensity,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_energy_per_rad,timeseries_char_energy_per_rad,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_leq_power,timeseries_char_leq_power,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_phase_kind,timeseries_char_phase_kind,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_power_mech_w,timeseries_char_power_mech_w,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_power_total_w,timeseries_char_power_total_w,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_speed_achieved,timeseries_char_speed_achieved,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_speed_target,timeseries_char_speed_target,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_time_s,timeseries_char_time_s,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_turn_radius_m,timeseries_char_turn_radius_m,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_vx_achieved,timeseries_char_vx_achieved,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_vx_target,timeseries_char_vx_target,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_vy_achieved,timeseries_char_vy_achieved,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_vy_target,timeseries_char_vy_target,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_wz_achieved,timeseries_char_wz_achieved,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_char_wz_target,timeseries_char_wz_target,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
-timeseries_ci,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_min_ped_clearance,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_power_mechanical_w,timeseries_power_mechanical_w,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-timeseries_power_static_w,timeseries_power_static_w,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-timeseries_power_thermal_w,timeseries_power_thermal_w,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-timeseries_power_total_w,timeseries_power_total_w,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-timeseries_sfm_force,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_time_s,timeseries_time_s,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-timeseries_velocity_linear,timeseries_velocity_linear,fact_robots,,RELOCATED_SERIES,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
-topological_complexity,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-total_time_in_personal_space,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-total_time_looked_at_by_pedestrians,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-total_time_looking_at_pedestrians,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-tti_mean,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-tti_min,,fact_encounters,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-unsafe,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-used_elevator_during_alarm,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-used_elevator_during_alarm_robot,,fact_episodes,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
-velocity,,fact_robots,,MISSING_STAR,0,,,known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
-velocity_max,velocity_max,fact_robots,max_speed_mps,EXACT,6,0,0,reviewed entry not exercised (null_fill)
-velocity_mean,velocity_mean,fact_episodes,mean_velocity_mps,EXACT,6,0,0,reviewed entry not exercised (null_fill)
-velocity_mean,velocity_mean,fact_robots,mean_speed_mps,EXACT,6,0,0,reviewed entry not exercised (null_fill)
-worst_case_acoustic_frame,,fact_pedestrians,,MISSING_STAR,0,,,no reviewed star mapping: no scoped producer in this pipeline revision
+metric_key,legacy_column,star_table,star_column,status,episodes_compared,null_compared,nonnull_compared,max_abs_diff,max_rel_diff,detail
+acceleration,,fact_robots,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
+acceleration_max,acceleration_max,fact_episodes,max_acceleration_mps2,EXACT,6,0,6,0,0,reviewed entry not exercised (ground_truth)
+acceleration_mean,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+acoustic_cost,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+acoustic_startle_factor,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+acoustic_surge_index,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ade,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+adtw,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+aeps_linear_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+alarm_egress_blocking_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+angle_over_length,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+avg_velocity_in_personal_space,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+barn_collided,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+barn_optimal_time,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+barn_score,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+barn_success,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+barn_time,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+barn_timeout,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+battery_soc_drop_pct,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+battery_soc_final,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+blocked_closing_door,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+blocked_closing_door_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+boarded_before_exit,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+cabin_door_blocking_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+char_phase_coverage,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ci_max,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ci_mean,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+clauses_failed,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+clauses_passed,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+clauses_total,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+clauses_unknown,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+clearance_timeseries,clearance_timeseries,fact_episodes,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended
+collision_amount,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+collision_amount_pedestrian,collision_amount_pedestrian,fact_episodes,total_collisions_ped,EXACT,6,0,6,0,0,reviewed entry not exercised (null_fill)
+collision_amount_static,"collision_amount_wall, collision_amount_static",fact_episodes,total_collisions_static,EXACT,6,0,6,0,0,reviewed entry not exercised (null_fill)
+collision_amount_wall,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+collision_obstacles,,fact_contacts,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending
+collisions,,fact_contacts,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending
+condition_success,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+curvature,,fact_episodes,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
+curvature_max,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+curvature_mean,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+door_freeze_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+door_oscillations,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+door_yield_violations,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+doorway_blocking_time,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+e_cot,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_agents,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collided,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_fault,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_ped_closing,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_robot_closing,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_with,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_absent,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_arrived,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_break_fired_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_broke_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_form_fired_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_formed_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_held_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_members,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_seen,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_variant,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_freeze_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_id,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_intrusion_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_clearance_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_clearance_m,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_clearance_with,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_ttc_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_ttc_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_ttc_with,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_missing,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_pet_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_pet_with,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_played,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_scope,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_steps,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_triggered_at,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_unplayed,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+elevator_missed_cycles,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+elevator_queue_jumps,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+elevator_rides,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+elevator_rides_robot,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+elevator_unnecessary_calls,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+elevator_wait_to_board_s,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+energy_mechanical_wh,energy_mechanical_wh,fact_robots,mechanical_work_j,EXACT,6,0,6,0,0,reviewed entry not exercised (unit_scale)
+energy_per_meter,energy_per_meter,fact_episodes,energy_per_meter_j_m,EXACT,6,0,6,0,0,reviewed entry not exercised (unit_scale)
+energy_static_wh,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+energy_thermal_wh,energy_thermal_wh,fact_robots,thermal_energy_j,EXACT,6,0,6,0,0,reviewed entry not exercised (unit_scale)
+energy_total_wh,energy_total_wh,fact_episodes,total_energy_wh,EXACT,6,0,6,0,0,_episode_fact_row energy_total_wh -> total_energy_wh
+energy_total_wh,energy_total_wh,fact_robots,electrical_energy_wh,EXACT,6,0,6,0,0,_robot_fact_frame battery energy in Wh
+entered_full_cabin,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+entered_over_cap_zone,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+esfm_cumulative_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+esfm_mean_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+esfm_peak_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+esfm_ped_cumulative_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+esfm_ped_mean_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+esfm_ped_peak_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+fde,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+frechet_distance,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+friction_dissipation_j,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+goal_condition_rate,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+goal_inputs,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_episode_s,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_hold_onset_s,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_interaction,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_min_pair_clearance,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_pair_gap_hold,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_passes_between,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_release_s,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_approach,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_hold,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_post,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_rest,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stall_count,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stall_onsets_s,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stall_time_s,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_approach,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_hold,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_post,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_rest,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+idling_time,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+jerk,,fact_robots,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
+jerk_max,jerk_max,fact_episodes,jerk_max_mps3,EXACT,6,0,6,0,0,reviewed entry not exercised (ground_truth)
+jerk_mean,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+judge_agrees,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+judge_disagreements,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+kcsc_wh,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+kinetic_energy_demand_j,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+l_a10,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+l_a50,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+l_a90,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+l_aeq_t,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mar,mar,fact_episodes,mar,CERT_NULL_ONLY,6,6,0,,,both sides null for all 6 compared episode(s): no real comparison
+max_speed_intimate_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_personal_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_public_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_social_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mean_obstacle_clearance,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mean_pedestrian_clearance,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mechanism_components,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mechanism_score,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mechanism_states,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+mhd,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+min_obstacle_clearance,min_obstacle_clearance,fact_episodes,min_obstacle_clearance_m,CERT_NULL_ONLY,6,6,0,,,both sides null for all 6 compared episode(s): no real comparison
+min_pedestrian_clearance,min_pedestrian_clearance,fact_episodes,min_ped_clearance_m,EXACT,6,0,6,0,0,reviewed entry not exercised (ground_truth)
+movement_towards_peds_ratio,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ndtw,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ne,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+normalized_curvature,,fact_episodes,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
+num_pedestrians,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+osr,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+passing_rule_compliance,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+path,,fact_episodes,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
+path_efficiency,path_efficiency,fact_episodes,path_efficiency,EXACT,6,0,6,0,0,_episode_fact_row copies path_efficiency
+path_irregularity,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+path_length,path_length,fact_episodes,path_length_m,EXACT,6,0,6,0,0,_episode_fact_row path_length -> path_length_m
+path_length,path_length,fact_robots,path_length_m,EXACT,6,0,6,0,0,_robot_fact_frame falls back to the episode metrics' path_length
+path_length_values,,fact_episodes,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
+path_odom,,fact_episodes,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
+peak_to_mean_power_ratio,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ped_leq_exposure_dba,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ped_max_exposure_dba,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ped_max_startle_factor,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ped_mechanism_delay_seconds,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ped_path_deflection_m,ped_path_deflection_m,fact_pedestrians,ped_path_deflection_m,UNMAPPED,0,0,0,,,"star column exists but has no reviewed mapping: manifest review, not a port"
+ped_round_trips_completed,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ped_velocity_delay_ratio,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+pedestrian_path,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: pedestrian trajectory array still carried in combined_metrics; the 1NF relocation is pending
+personal_space_intrusion_integral,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+pfi,pfi,fact_episodes,pfi,CERT_NULL_ONLY,6,6,0,,,both sides null for all 6 compared episode(s): no real comparison
+phase_outcomes,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+phases_dropped,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+phases_failed,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+phases_met,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+phases_total,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+power_peak_w,power_peak_w,fact_robots,peak_power_w,EXACT,6,0,6,0,0,_robot_fact_frame peak power from the ROBOT-scope powertrain calculator
+psi_intimate_events,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+psi_personal_events,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+psi_social_events,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+quiet_zone_dwell_seconds,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+ran_red_signal,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+relative_throughput,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+replan_latency_after_state_change_median,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+replan_latency_after_state_change_p95,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+restricted_zone_entries,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+result,result,fact_episodes,result,EXACT,6,0,6,,,_episode_fact_row copies the recorded verdict verbatim
+robot_path_deviation_m,robot_path_deviation_m,fact_episodes,robot_path_dev_m,CERT_NULL_ONLY,6,6,0,,,both sides null for all 6 compared episode(s): no real comparison
+roughness,,fact_episodes,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
+roughness_max,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+roughness_mean,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+sdtw,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+sfm_cumulative_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+sfm_mean_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+sfm_peak_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+social_force_max,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+social_force_mean,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+social_force_ped_max,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+social_force_ped_mean,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+specific_cost_of_transport,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+speed_zone_violation_seconds,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+speed_zone_violations,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+spl,,fact_contacts,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+spl_geodesic,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+standstill_energy_penalty_wh,,fact_robots,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+stuck,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+success,success,fact_episodes,success,EXACT,6,0,6,,,_episode_fact_row copies the boolean success flag
+success_geodesic,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+theta_star_length,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_diff,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_in_intimate_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_in_personal_space,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_in_personal_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_in_public_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_in_social_zone,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_looked_at_by_pedestrians,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_looking_at_pedestrians,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_to_goal,time_to_goal,fact_episodes,time_to_goal_s,EXACT,6,0,6,0,0,_episode_fact_row time_to_goal -> time_to_goal_s
+time_waiting_at_doors,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+time_waiting_at_doors_robot,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_acoustic_attenuation_db,timeseries_acoustic_attenuation_db,fact_pedestrians,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended
+timeseries_acoustic_exposure_dba,timeseries_acoustic_exposure_dba,fact_pedestrians,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: acoustic exposure per-frame arrays moved to the 1NF pedestrian/acoustic series tables; no scalar fact column is intended
+timeseries_battery_soc,timeseries_battery_soc,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_accel_achieved,timeseries_char_accel_achieved,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_accel_target,timeseries_char_accel_target,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_dba,timeseries_char_dba,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_efficiency,timeseries_char_efficiency,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_energy_intensity,timeseries_char_energy_intensity,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_energy_per_rad,timeseries_char_energy_per_rad,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_leq_power,timeseries_char_leq_power,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_phase_kind,timeseries_char_phase_kind,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_power_mech_w,timeseries_char_power_mech_w,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_power_total_w,timeseries_char_power_total_w,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_speed_achieved,timeseries_char_speed_achieved,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_speed_target,timeseries_char_speed_target,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_time_s,timeseries_char_time_s,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_turn_radius_m,timeseries_char_turn_radius_m,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vx_achieved,timeseries_char_vx_achieved,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vx_target,timeseries_char_vx_target,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vy_achieved,timeseries_char_vy_achieved,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_vy_target,timeseries_char_vy_target,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_wz_achieved,timeseries_char_wz_achieved,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_char_wz_target,timeseries_char_wz_target,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror
+timeseries_ci,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_min_ped_clearance,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_power_mechanical_w,timeseries_power_mechanical_w,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_static_w,timeseries_power_static_w,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_thermal_w,timeseries_power_thermal_w,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_power_total_w,timeseries_power_total_w,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_sfm_force,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_time_s,timeseries_time_s,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+timeseries_velocity_linear,timeseries_velocity_linear,fact_robots,,RELOCATED_SERIES,0,0,0,,,per-sample data moved to a 1NF series table: energy/power/velocity per-sample arrays moved to the 1NF robot series tables; the legacy combined_metrics list is the pre-port mirror
+topological_complexity,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+total_time_in_personal_space,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+total_time_looked_at_by_pedestrians,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+total_time_looking_at_pedestrians,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+tti_mean,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+tti_min,,fact_encounters,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+unsafe,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+used_elevator_during_alarm,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+used_elevator_during_alarm_robot,,fact_episodes,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap
+velocity,,fact_robots,,NO_PRODUCER,0,0,0,,,known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
+velocity_max,velocity_max,fact_robots,max_speed_mps,EXACT,6,0,6,0,0,reviewed entry not exercised (null_fill)
+velocity_mean,velocity_mean,fact_episodes,mean_velocity_mps,EXACT,6,0,6,0,0,reviewed entry not exercised (null_fill)
+velocity_mean,velocity_mean,fact_robots,mean_speed_mps,EXACT,6,0,6,0,0,reviewed entry not exercised (null_fill)
+worst_case_acoustic_frame,,fact_pedestrians,,NO_PRODUCER,0,0,0,,,no reviewed star mapping and no produced star column: a real porting gap

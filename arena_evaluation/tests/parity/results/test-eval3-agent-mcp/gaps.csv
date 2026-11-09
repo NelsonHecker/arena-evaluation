@@ -1,217 +1,216 @@
 metric_key,calculator,category,inventory_owner,owner,target_scope,target_table,legacy_dtype,note
-ped_max_exposure_dba,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_leq_exposure_dba,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_max_startle_factor,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-worst_case_acoustic_frame,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-l_aeq_t,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-l_a10,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-l_a50,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-l_a90,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-acoustic_startle_factor,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-acoustic_surge_index,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-acoustic_cost,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_score,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_optimal_time,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_time,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_success,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_collided,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-barn_timeout,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-char_phase_coverage,characterization,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-mean_obstacle_clearance,clearance_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-mean_pedestrian_clearance,clearance_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-collision_amount,collision_metrics,performance,Agent 7 (perf),port-eco,contacts,fact_contacts,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-collision_amount_wall,collision_metrics,performance,Agent 7 (perf),port-eco,contacts,fact_contacts,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
+ped_max_exposure_dba,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping and no produced star column: a real porting gap
+ped_leq_exposure_dba,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping and no produced star column: a real porting gap
+ped_max_startle_factor,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping and no produced star column: a real porting gap
+worst_case_acoustic_frame,acoustic_exposure,ecological,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,no reviewed star mapping and no produced star column: a real porting gap
+l_aeq_t,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+l_a10,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+l_a50,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+l_a90,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+acoustic_startle_factor,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+acoustic_surge_index,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+acoustic_cost,acoustics,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+barn_score,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+barn_optimal_time,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+barn_time,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+barn_success,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+barn_collided,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+barn_timeout,barn_score,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+char_phase_coverage,characterization,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+mean_obstacle_clearance,clearance_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+mean_pedestrian_clearance,clearance_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+collision_amount,collision_metrics,performance,Agent 7 (perf),port-eco,contacts,fact_contacts,Int64,no reviewed star mapping and no produced star column: a real porting gap
+collision_amount_wall,collision_metrics,performance,Agent 7 (perf),port-eco,contacts,fact_contacts,Int64,no reviewed star mapping and no produced star column: a real porting gap
 collision_obstacles,collision_metrics,performance,Agent 7 (perf),parity-g1,contacts,fact_contacts,List(String),known remaining 1NF list violation: collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending
 collisions,collision_metrics,performance,Agent 7 (perf),parity-g1,contacts,fact_contacts,List(Null),known remaining 1NF list violation: collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending
-spl,collision_metrics,performance,Agent 7 (perf),port-eco,contacts,fact_contacts,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-speed_zone_violations,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-speed_zone_violation_seconds,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-quiet_zone_dwell_seconds,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-restricted_zone_entries,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-doorway_blocking_time,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-passing_rule_compliance,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-condition_success,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_total,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_passed,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_failed,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-clauses_unknown,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_id,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_steps,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_scope,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_agents,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_missing,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_played,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_unplayed,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_triggered_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_ttc_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_ttc_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_ttc_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_clearance_m,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_clearance_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_min_clearance_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_pet_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_pet_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_freeze_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_intrusion_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collided,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_fault,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_robot_closing,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_collision_ped_closing,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_variant,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_members,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_absent,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_seen,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_formed_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_held_s,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_broke_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_form_fired_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_break_fired_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-edge_case_formation_arrived,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-energy_static_wh,energy,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-battery_soc_final,energy,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-battery_soc_drop_pct,energy,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-specific_cost_of_transport,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-peak_to_mean_power_ratio,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-standstill_energy_penalty_wh,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-kinetic_energy_demand_j,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-friction_dissipation_j,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_looking_at_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-total_time_looking_at_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_looked_at_by_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-total_time_looked_at_by_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_interaction,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_hold_onset_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_release_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_episode_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stall_count,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stall_time_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stall_onsets_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_approach,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_hold,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_post,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_stalls_rest,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_approach,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_hold,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_post,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_share_rest,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_passes_between,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_min_pair_clearance,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-hhi_pair_gap_hold,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-aeps_linear_s,holistic_metrics,holistic,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-e_cot,holistic_metrics,holistic,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-mechanism_score,mechanism_component,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-mechanism_components,mechanism_component,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-boarded_before_exit,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-blocked_closing_door,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-blocked_closing_door_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_mechanism_delay_seconds,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_wait_to_board_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_missed_cycles,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_unnecessary_calls,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-entered_full_cabin,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-cabin_door_blocking_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-door_yield_violations,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_queue_jumps,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-alarm_egress_blocking_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-door_freeze_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-door_oscillations,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-mechanism_states,mechanism_states,ecological,Agent 7 (perf),parity-g1,episodes,fact_episodes,"List(Struct({'entity': String, 'level': String, 'kind': String, 'progress': List(Float64), 'locked': List(Boolean)}))",no reviewed star mapping: no scoped producer in this pipeline revision
+spl,collision_metrics,performance,Agent 7 (perf),port-eco,contacts,fact_contacts,Float64,no reviewed star mapping and no produced star column: a real porting gap
+speed_zone_violations,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+speed_zone_violation_seconds,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+quiet_zone_dwell_seconds,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+restricted_zone_entries,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+doorway_blocking_time,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+passing_rule_compliance,compliance_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+condition_success,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+clauses_total,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+clauses_passed,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+clauses_failed,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+clauses_unknown,condition_compliance,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_id,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_steps,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_scope,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_agents,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_missing,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_played,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_unplayed,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_triggered_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_ttc_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_ttc_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_ttc_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_clearance_m,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_clearance_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_min_clearance_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_pet_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_pet_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_freeze_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_intrusion_s,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collided,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_fault,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_with,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_at,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_robot_closing,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_collision_ped_closing,edge_case_criticality,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_variant,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_members,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_absent,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_seen,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_formed_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_held_s,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_broke_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_form_fired_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_break_fired_at,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+edge_case_formation_arrived,edge_case_formation,edge_case,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+energy_static_wh,energy,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+battery_soc_final,energy,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+battery_soc_drop_pct,energy,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+specific_cost_of_transport,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Null,no reviewed star mapping and no produced star column: a real porting gap
+peak_to_mean_power_ratio,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+standstill_energy_penalty_wh,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+kinetic_energy_demand_j,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Null,no reviewed star mapping and no produced star column: a real porting gap
+friction_dissipation_j,energy_extended,ecological,Agent 7 (perf),port-eco,robots,fact_robots,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_looking_at_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+total_time_looking_at_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_looked_at_by_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+total_time_looked_at_by_pedestrians,gaze_metrics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_interaction,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_hold_onset_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_release_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_episode_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stall_count,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stall_time_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stall_onsets_s,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_approach,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_hold,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_post,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_stalls_rest,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_approach,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_hold,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_post,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_share_rest,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_passes_between,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_min_pair_clearance,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+hhi_pair_gap_hold,hhi_contact,social,Agent 4 (parity),port-social,contacts,fact_contacts,Null,no reviewed star mapping and no produced star column: a real porting gap
+aeps_linear_s,holistic_metrics,holistic,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+e_cot,holistic_metrics,holistic,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+mechanism_score,mechanism_component,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+mechanism_components,mechanism_component,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+boarded_before_exit,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+blocked_closing_door,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+blocked_closing_door_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+ped_mechanism_delay_seconds,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+elevator_wait_to_board_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+elevator_missed_cycles,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+elevator_unnecessary_calls,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+entered_full_cabin,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+cabin_door_blocking_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+door_yield_violations,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+elevator_queue_jumps,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+alarm_egress_blocking_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+door_freeze_s,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+door_oscillations,mechanism_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+mechanism_states,mechanism_states,ecological,Agent 7 (perf),parity-g1,episodes,fact_episodes,"List(Struct({'entity': String, 'level': String, 'kind': String, 'progress': List(Float64), 'locked': List(Boolean)}))",no reviewed star mapping and no produced star column: a real porting gap
 velocity,motion_metrics,performance,Agent 7 (perf),parity-g1,robots,fact_robots,List(Float64),known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
 acceleration,motion_metrics,performance,Agent 7 (perf),parity-g1,robots,fact_robots,List(Float64),known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
-acceleration_mean,motion_metrics,performance,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
+acceleration_mean,motion_metrics,performance,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
 jerk,motion_metrics,performance,Agent 7 (perf),parity-g1,robots,fact_robots,List(Float64),known remaining 1NF list violation: per-sample arrays still carried in combined_metrics; the 1NF relocation is pending
-jerk_mean,motion_metrics,performance,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-relative_throughput,mutual_accommodation,social,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-kcsc_wh,mutual_accommodation,social,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
+jerk_mean,motion_metrics,performance,Agent 7 (perf),port-eco,robots,fact_robots,Float64,no reviewed star mapping and no produced star column: a real porting gap
+relative_throughput,mutual_accommodation,social,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+kcsc_wh,mutual_accommodation,social,Agent 4 (parity),port-social,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
 path,path_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(List(Float64)),known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
 path_odom,path_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(List(Float64)),known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
 path_length_values,path_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Float64),known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
 curvature,path_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Float64),known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-curvature_mean,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-curvature_max,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
+curvature_mean,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+curvature_max,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
 normalized_curvature,path_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Float64),known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
 roughness,path_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Float64),known remaining 1NF list violation: trajectory arrays still carried in combined_metrics; the 1NF relocation is pending
-roughness_mean,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-roughness_max,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-angle_over_length,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_path_deflection_m,pedestrian_disturbance,social,Agent 4 (parity),port-social,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_velocity_delay_ratio,pedestrian_disturbance,social,Agent 4 (parity),port-social,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ped_round_trips_completed,pedestrian_disturbance,social,Agent 4 (parity),port-social,pedestrians,fact_pedestrians,Null,no reviewed star mapping: no scoped producer in this pipeline revision
+roughness_mean,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+roughness_max,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+angle_over_length,path_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+ped_velocity_delay_ratio,pedestrian_disturbance,social,Agent 4 (parity),port-social,pedestrians,fact_pedestrians,Null,no reviewed star mapping and no produced star column: a real porting gap
+ped_round_trips_completed,pedestrian_disturbance,social,Agent 4 (parity),port-social,pedestrians,fact_pedestrians,Null,no reviewed star mapping and no produced star column: a real porting gap
 pedestrian_path,pedestrian_path_metrics,performance,Agent 7 (perf),port-eco,pedestrians,fact_pedestrians,Null,known remaining 1NF list violation: pedestrian trajectory array still carried in combined_metrics; the 1NF relocation is pending
-num_pedestrians,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_personal_space,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-total_time_in_personal_space,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-avg_velocity_in_personal_space,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_intimate_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_personal_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_social_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_in_public_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-psi_intimate_events,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-psi_personal_events,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-psi_social_events,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_intimate_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_personal_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_social_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-max_speed_public_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-movement_towards_peds_ratio,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-tti_min,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-tti_mean,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-personal_space_intrusion_integral,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_min_ped_clearance,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-used_elevator_during_alarm,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-used_elevator_during_alarm_robot,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ran_red_signal,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-entered_over_cap_zone,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-replan_latency_after_state_change_median,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-replan_latency_after_state_change_p95,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-time_waiting_at_doors,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_rides,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-time_waiting_at_doors_robot,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-elevator_rides_robot,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-sfm_cumulative_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-sfm_peak_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-sfm_mean_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_cumulative_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_peak_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_mean_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_ped_cumulative_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_ped_peak_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-esfm_ped_mean_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_max,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_mean,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_ped_max,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-social_force_ped_mean,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ci_max,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-ci_mean,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_sfm_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-timeseries_ci,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_total,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_met,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_failed,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-phases_dropped,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-goal_condition_rate,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-phase_outcomes,task_replay,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(String),no reviewed star mapping: no scoped producer in this pipeline revision
-unsafe,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-judge_agrees,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping: no scoped producer in this pipeline revision
-judge_disagreements,task_replay,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Null),no reviewed star mapping: no scoped producer in this pipeline revision
-time,time_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Int64),no reviewed star mapping: no scoped producer in this pipeline revision
-time_diff,time_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping: no scoped producer in this pipeline revision
-idling_time,time_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-ade,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-fde,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-adtw,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-mhd,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-frechet_distance,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-path_irregularity,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-topological_complexity,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-theta_star_length,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-ne,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-osr,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping: no scoped producer in this pipeline revision
-success_geodesic,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping: no scoped producer in this pipeline revision
-spl_geodesic,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-ndtw,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-sdtw,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping: no scoped producer in this pipeline revision
-stuck,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping: no scoped producer in this pipeline revision
-goal_inputs,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,String,no reviewed star mapping: no scoped producer in this pipeline revision
+num_pedestrians,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_in_personal_space,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+total_time_in_personal_space,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+avg_velocity_in_personal_space,proxemics,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_in_intimate_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_in_personal_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_in_social_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_in_public_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+psi_intimate_events,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+psi_personal_events,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+psi_social_events,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_intimate_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_personal_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_social_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+max_speed_public_zone,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+movement_towards_peds_ratio,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+tti_min,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+tti_mean,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+personal_space_intrusion_integral,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_min_ped_clearance,proxemics_extended,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+used_elevator_during_alarm,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+used_elevator_during_alarm_robot,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+ran_red_signal,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+entered_over_cap_zone,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+replan_latency_after_state_change_median,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+replan_latency_after_state_change_p95,regime_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Null,no reviewed star mapping and no produced star column: a real porting gap
+time_waiting_at_doors,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+elevator_rides,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+time_waiting_at_doors_robot,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+elevator_rides_robot,semantic_interaction_metrics,ecological,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+sfm_cumulative_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+sfm_peak_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+sfm_mean_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+esfm_cumulative_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+esfm_peak_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+esfm_mean_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+esfm_ped_cumulative_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+esfm_ped_peak_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+esfm_ped_mean_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+social_force_max,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+social_force_mean,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+social_force_ped_max,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+social_force_ped_mean,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+ci_max,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+ci_mean,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_sfm_force,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+timeseries_ci,social_forces,social,Agent 4 (parity),port-social,encounters,fact_encounters,Null,no reviewed star mapping and no produced star column: a real porting gap
+phases_total,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+phases_met,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+phases_failed,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+phases_dropped,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+goal_condition_rate,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+phase_outcomes,task_replay,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(String),no reviewed star mapping and no produced star column: a real porting gap
+unsafe,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+judge_agrees,task_replay,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping and no produced star column: a real porting gap
+judge_disagreements,task_replay,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Null),no reviewed star mapping and no produced star column: a real porting gap
+time,time_metrics,performance,Agent 7 (perf),parity-g1,episodes,fact_episodes,List(Int64),no reviewed star mapping and no produced star column: a real porting gap
+time_diff,time_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Int64,no reviewed star mapping and no produced star column: a real porting gap
+idling_time,time_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+ade,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+fde,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+adtw,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+mhd,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+frechet_distance,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+path_irregularity,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+topological_complexity,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+theta_star_length,trajectory_naturalness,naturalness,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+ne,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+osr,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping and no produced star column: a real porting gap
+success_geodesic,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping and no produced star column: a real porting gap
+spl_geodesic,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+ndtw,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+sdtw,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Float64,no reviewed star mapping and no produced star column: a real porting gap
+stuck,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,Boolean,no reviewed star mapping and no produced star column: a real porting gap
+goal_inputs,vln_metrics,performance,Agent 7 (perf),port-eco,episodes,fact_episodes,String,no reviewed star mapping and no produced star column: a real porting gap

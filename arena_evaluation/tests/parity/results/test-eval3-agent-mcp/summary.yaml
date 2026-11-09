@@ -9,22 +9,27 @@ expected_diff_pending: 23
 relocated_series_keys: 30
 structural_replacements: 5
 list_violation_keys: 12
+min_nonnull_episodes: 3
 legacy_episode_rows: 5
 star_episode_rows: 5
 status_counts:
-  EXACT: 24
+  EXACT: 20
   WITHIN_TOL: 0
   EXPECTED_DIFF: 0
-  MISSING_STAR: 216
+  UNMAPPED: 1
+  NO_PRODUCER: 215
   MISSING_LEGACY: 0
   NULL_REASON: 0
   RELOCATED_SERIES: 30
+  CERT_NULL_ONLY: 4
+  INSUFFICIENT_EVIDENCE: 0
   MISMATCH: 0
-gap_count: 216
+unmapped_count: 1
+no_producer_count: 215
 gap_owner_counts:
   parity-g1: 15
   port-eco: 101
-  port-social: 100
+  port-social: 99
 gap_calculator_counts:
   edge_case_criticality: 24
   hhi_contact: 18
@@ -49,12 +54,12 @@ gap_calculator_counts:
   proxemics: 4
   semantic_interaction_metrics: 4
   energy: 3
-  pedestrian_disturbance: 3
   time_metrics: 3
   clearance_metrics: 2
   holistic_metrics: 2
   mechanism_component: 2
   mutual_accommodation: 2
+  pedestrian_disturbance: 2
   characterization: 1
   mechanism_states: 1
   pedestrian_path_metrics: 1
@@ -63,8 +68,14 @@ accepted_statuses:
 - EXACT
 - EXPECTED_DIFF
 - MISSING_LEGACY
-- MISSING_STAR
+- NO_PRODUCER
 - NULL_REASON
 - RELOCATED_SERIES
+- UNMAPPED
 - WITHIN_TOL
-mismatch_count: 0
+failing_statuses:
+- CERT_NULL_ONLY
+- INSUFFICIENT_EVIDENCE
+- MISMATCH
+hard_failure_count: 4
+gate_passed: false
