@@ -23,11 +23,14 @@ from arena_evaluation.storage.star_schema import (
 
 __all__ = [
     "CANONICAL_VIEW_NAMES",
+    "SERIES_TABLE_PREFIX",
     "TELEMETRY_TABLE_NAMES",
     "TELEMETRY_TABLE_SCHEMAS",
     "BenchmarkCatalog",
     "StarCatalog",
 ]
+
+SERIES_TABLE_PREFIX: Final[str] = "series_"
 
 CANONICAL_VIEW_NAMES: Final[tuple[str, ...]] = (
     "v_episode_summary",
@@ -214,10 +217,19 @@ class BenchmarkCatalog:
             self._load_empty_star_schema()
 
     def _load_from_directory(self, source_dir: pathlib.Path) -> None:
-        """Scan the canonical Star Schema Parquet tables, plus telemetry and evidence indices."""
+        """Scan the canonical Star Schema Parquet tables, plus series, telemetry and evidence tables."""
         self._tables.update(scan_star_schema(source_dir))
+        self._register_series_tables(source_dir)
         self._register_telemetry_views(source_dir)
         self._register_evidence_index(source_dir)
+
+    def _register_series_tables(self, benchmark_dir: pathlib.Path) -> None:
+        """Register the consolidated 1NF long-format ``series_*.parquet`` tables under ``benchmark_dir / metrics``."""
+        metrics_dir = benchmark_dir / "metrics"
+        if not metrics_dir.is_dir():
+            return
+        for path in sorted(metrics_dir.glob(f"{SERIES_TABLE_PREFIX}*.parquet")):
+            self._tables[path.stem] = pl.scan_parquet(path)
 
     def _load_from_mapping(self, source: Mapping[str, pl.LazyFrame | pl.DataFrame]) -> None:
         for name, schema in STAR_SCHEMA_SCHEMAS.items():

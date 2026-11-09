@@ -223,7 +223,7 @@ class ReportBuilder:
         table = data_source_table(manifest.data_source)
         frame = self._sources.frame(table)
         if frame is None:
-            print(f"Cannot generate report: data_source={manifest.data_source!r} names no Star Schema table or view.")
+            print(f"Cannot generate report: data_source={manifest.data_source!r} names no Star Schema table or view; a series data source needs the pipeline to write metrics/series_*.parquet.")
         return frame
 
     def _frame_for_spec(
