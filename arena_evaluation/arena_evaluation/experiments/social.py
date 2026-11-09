@@ -28,6 +28,7 @@ import polars as pl
 import yaml
 
 from arena_evaluation.experiments.group import formation_radius
+from arena_evaluation.experiments.source import episode_summary, robot_tracks
 from arena_evaluation.experiments.stats import DEFAULT_BOOT, cluster_bootstrap, holm
 
 WORLD = "hospital_1_bare"
@@ -174,33 +175,29 @@ def _stage(case: str, arm: str, mode: str, seed: int, episodes: int) -> dict:
 # -- analysis -----------------------------------------------------------------------------------
 
 CENTERS = {f"contact_{i}_{k}": v["center"] for i in CONTACT for k, v in LAYOUTS.items()} | {f"group_{k}": v["center"] for k, v in GROUP_LAYOUTS.items()}
-METRICS = ("min_pedestrian_clearance", "time_in_intimate_zone", "time_in_personal_zone", "path_length", "time_to_goal", "pierced", "success")
+METRICS = ("min_ped_clearance_m", "path_length_m", "time_to_goal_s", "pierced", "success")
 
 
 def load(run: pathlib.Path, arm: str) -> pl.DataFrame:
     """Episodes of one arm with the two route metrics, minus the ``UNRESOLVED`` ones whose environment disappeared mid-run."""
-    path = run / "combined_metrics.parquet"
-    if not path.is_file():
-        raise FileNotFoundError(f"{path} not found; process the run first")
-    df = pl.read_parquet(path)
-    if "result" in df.columns:
-        df = df.filter(pl.col("result") != "UNRESOLVED")
-    df = df.with_columns(
+    df = episode_summary(run).filter(pl.col("result") != "UNRESOLVED")
+    tracks = robot_tracks(run)
+    cases = df.with_columns(
         pl.col("stage").str.replace(r"_(on|off)$", "").alias("case"),
         pl.lit(arm).alias("arm"),
     )
-    pierced, closest = [], []
-    for row in df.iter_rows(named=True):
-        center = np.array(CENTERS.get(row["case"], (0.0, 0.0)))
-        pts = np.array([[float(p[0]), float(p[1])] for p in (row.get("path") or [])])
-        d = np.linalg.norm(pts - center, axis=1) if len(pts) else np.array([float("nan")])
-        radius = GROUP_RADIUS_M if row["case"].startswith("group") else 0.8
-        pierced.append(float(np.nansum(d < radius) > 0))
-        closest.append(float(np.nanmin(d)))
-    return df.with_columns(
-        pl.Series("pierced", pierced, dtype=pl.Float64),
-        pl.Series("closest_to_group_m", closest),
-        pl.col("success").cast(pl.Float64),
+    center_x = pl.col("case").replace_strict({case: value[0] for case, value in CENTERS.items()}, default=0.0, return_dtype=pl.Float64)
+    center_y = pl.col("case").replace_strict({case: value[1] for case, value in CENTERS.items()}, default=0.0, return_dtype=pl.Float64)
+    radius = pl.when(pl.col("case").str.starts_with("group")).then(GROUP_RADIUS_M).otherwise(0.8)
+    points = cases.select("episode_id", "case").join(tracks.select("episode_id", "x", "y"), on="episode_id", how="inner").with_columns(center_x, center_y, radius)
+    distance = ((pl.col("x") - pl.col("center_x")) ** 2 + (pl.col("y") - pl.col("center_y")) ** 2).sqrt()
+    per_episode = points.group_by("episode_id").agg(
+        pierced=(distance < pl.col("radius")).sum().cast(pl.Float64) > 0,
+        closest_to_group_m=distance.min(),
+    )
+    return cases.join(per_episode, on="episode_id", how="left").with_columns(
+        pierced=pl.col("pierced").fill_null(False).cast(pl.Float64),
+        success=pl.col("success").cast(pl.Float64),
     )
 
 
@@ -215,7 +212,7 @@ def matched(df: pl.DataFrame) -> pl.DataFrame:
             pl.col("case").n_unique().alias("cases"),
             pl.len().alias("n"),
             pl.col("pierced").mean().alias("pierce_rate"),
-            pl.col("min_pedestrian_clearance").median().alias("clearance_m"),
+            pl.col("min_ped_clearance_m").median().alias("clearance_m"),
             pl.col("success").mean().alias("success"),
         )
         .sort(["planner", "arm"])
@@ -224,7 +221,7 @@ def matched(df: pl.DataFrame) -> pl.DataFrame:
 
 def analyze(on: pathlib.Path, off: pathlib.Path, *, n_boot: int = DEFAULT_BOOT, out_dir: pathlib.Path | None = None) -> dict[str, pl.DataFrame]:
     df = pl.concat([load(on, "on"), load(off, "off")], how="diagonal")
-    df = df.with_columns((pl.col("episode").rank("ordinal").over(["planner", "stage"]) - 1).cast(pl.Int64).alias("seed"))
+    df = df.with_columns((pl.col("episode_id").rank("ordinal").over(["planner", "stage"]) - 1).cast(pl.Int64).alias("seed"))
 
     descriptive = (
         df.group_by(["case", "planner", "arm"], maintain_order=True)
@@ -232,11 +229,9 @@ def analyze(on: pathlib.Path, off: pathlib.Path, *, n_boot: int = DEFAULT_BOOT, 
             pl.len().alias("n"),
             pl.col("success").mean().alias("success"),
             pl.col("pierced").mean().alias("pierce_rate"),
-            pl.col("min_pedestrian_clearance").median().alias("clearance_m"),
-            pl.col("time_in_intimate_zone").median().alias("intimate_s"),
-            pl.col("time_in_personal_zone").median().alias("personal_s"),
-            pl.col("path_length").median().alias("path_m"),
-            pl.col("time_to_goal").median().alias("ttg_s"),
+            pl.col("min_ped_clearance_m").median().alias("clearance_m"),
+            pl.col("path_length_m").median().alias("path_m"),
+            pl.col("time_to_goal_s").median().alias("ttg_s"),
         )
         .sort(["case", "planner", "arm"])
     )

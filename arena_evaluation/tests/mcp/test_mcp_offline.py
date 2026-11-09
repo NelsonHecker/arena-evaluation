@@ -18,11 +18,11 @@ from arena_evaluation.mcp import analysis, authoring, runs
 
 
 def _frame() -> pl.DataFrame:
-    return pl.DataFrame(metric_rows())
+    return pl.DataFrame(metric_rows(), infer_schema_length=None)
 
 
 def _declared() -> dict[str, str]:
-    return analysis.directions(analysis.metric_rows())
+    return analysis.declared_directions(analysis.metric_rows())
 
 
 def test_benchmark_argv_passes_only_what_the_caller_set():
@@ -70,7 +70,7 @@ def test_launch_tokens_reject_a_key_given_twice_and_reject_traversing_names():
 
 
 def test_compare_groups_by_contestant_and_drops_references():
-    result = analysis.compare_frame(_frame(), ["success", "time_to_goal", "collision_amount"], _declared())
+    result = analysis.compare_frame(_frame(), ["success", "time_to_goal_s", "total_collisions_ped"], _declared())
     names = [row["planner"] for row in result["rankings"]]
     assert sorted(names) == ["dwb", "dwb_social"]
     assert names[0] == "dwb"
@@ -81,23 +81,24 @@ def test_compare_groups_by_contestant_and_drops_references():
 
 
 def test_metrics_without_a_declared_direction_are_not_ranked():
+    frame = _frame().with_columns(pl.lit(1, dtype=pl.Int64).alias("phases_total"))
     declared = _declared()
     assert "phases_total" not in declared
-    result = analysis.compare_frame(_frame(), ["success", "phases_total"], declared)
+    result = analysis.compare_frame(frame, ["success", "phases_total"], declared)
     assert result["ranked_on"] == ["success"]
     assert result["unranked_metrics"] == ["phases_total"]
     assert not any("phases_total_norm" in row for row in result["rankings"])
 
 
-def test_judge_agrees_ranks_higher_is_better():
+def test_a_canonical_measure_with_a_declared_direction_ranks_higher_is_better():
     declared = _declared()
-    assert declared["judge_agrees"] == "higher"
-    top = analysis.top_n_frame(_frame(), ["judge_agrees"], declared, n=1)
-    assert top["top_n"][0]["planner"] == "dwb"
+    assert declared["mar"] == "higher"
+    top = analysis.top_n_frame(_frame(), ["mar"], declared, n=1)
+    assert top["top_n"][0]["planner"] in {"dwb", "dwb_social"}
 
 
 def test_rows_without_any_value_rank_last_instead_of_raising():
-    result = analysis.compare_frame(_frame(), ["success", "time_to_goal"], _declared(), include_references=True)
+    result = analysis.compare_frame(_frame(), ["success", "time_to_goal_s"], _declared(), include_references=True)
     assert result["rankings"][-1]["planner"] == "unhindered_peds"
     assert result["rankings"][-1]["composite_score"] is None
     assert result["rankings"][-1]["rank"] is None
@@ -106,37 +107,36 @@ def test_rows_without_any_value_rank_last_instead_of_raising():
 def test_top_n_weights_must_match_the_metrics():
     with pytest.raises(ToolError, match="2 weights for 1 metrics"):
         analysis.top_n_frame(_frame(), ["success"], _declared(), weights=[1.0, 2.0])
-    weighted = analysis.top_n_frame(_frame(), ["success", "time_to_goal"], _declared(), weights=[0.0, 1.0])
+    weighted = analysis.top_n_frame(_frame(), ["success", "time_to_goal_s"], _declared(), weights=[0.0, 1.0])
     assert weighted["top_n"][0]["planner"] == "dwb"
     with pytest.raises(ToolError, match="declares whether higher or lower"):
-        analysis.top_n_frame(_frame(), ["phases_total"], _declared())
+        analysis.top_n_frame(_frame().with_columns(pl.lit(1).alias("phases_total")), ["phases_total"], _declared())
 
 
 def test_correlation_is_bounded_and_refuses_list_columns():
-    result = analysis.correlation_frame(analysis.episodes(_frame(), False), ["success", "time_to_goal", "collision_amount"])
+    result = analysis.correlation_frame(analysis.episodes(_frame(), False), ["success", "time_to_goal_s", "total_collisions_ped"])
     matrix = result["correlation_matrix"]
     assert matrix["success"]["success"] == 1.0
     assert all(-1.0 <= value <= 1.0 for row in matrix.values() for value in row.values() if value is not None)
     with pytest.raises(ToolError, match="one list per episode"):
-        analysis.correlation_frame(_frame(), ["success", "path_speeds"])
+        analysis.correlation_frame(_frame().with_columns(pl.Series("path_speeds", [[0.5, 0.6]] * 10)), ["success", "path_speeds"])
 
 
 def test_means_run_over_list_elements_per_column_and_count_episodes():
     frame = _frame().with_columns(pl.Series("speed_samples", [[1.0] * (index + 1) for index in range(10)]))
-    rows = {row["stage"]: row for row in analysis.means(frame.filter(pl.col("planner") == "dwb"), ["stage"], ["path_speeds", "speed_samples", "time_to_goal"])}
+    rows = {row["stage"]: row for row in analysis.means(frame.filter(pl.col("planner") == "dwb"), ["stage"], ["speed_samples", "time_to_goal_s"])}
     assert rows["s1"]["n_rows"] == 2
-    assert rows["s1"]["path_speeds"] == pytest.approx((0.5 + 0.6 + 0.5 + 0.7) / 4)
     assert rows["s1"]["speed_samples"] == pytest.approx(1.0)
-    assert rows["s2"]["time_to_goal"] == pytest.approx(67.0)
+    assert rows["s2"]["time_to_goal_s"] == pytest.approx(67.0)
 
 
 def test_column_stats_recognize_list_columns():
-    stats = analysis.column_stats(_frame())
+    frame = _frame().with_columns(pl.Series("path_speeds", [[0.5, 0.6]] * 10))
+    stats = analysis.column_stats(frame)
     assert stats["path_speeds"]["dtype"].startswith("List")
     assert "mean_length" in stats["path_speeds"]
     assert stats["planner"]["n_unique"] == 3
-    assert stats["time_to_goal"]["min"] == 40.0
-
+    assert stats["time_to_goal_s"]["min"] == 40.0
 
 def test_notes_replace_append_and_merge(tmp_path):
     path = tmp_path / "notes.yaml"

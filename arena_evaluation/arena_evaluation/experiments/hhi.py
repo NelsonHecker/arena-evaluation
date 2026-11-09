@@ -6,7 +6,7 @@ generate: L scenarios per contact kind on map_empty, each run in two arms that s
   In both arms the pair then separates to its exit points and stands.
 
 analyze: paired contact - locomotion differences per (planner, interaction, metric), cluster bootstrap over
-  scenarios, Holm within the family; plus the release-time window check (post-release stall share vs time share).
+  scenarios, Holm within the family. Window and manipulation checks need the HHI contact metrics, which the canonical Star Schema does not carry yet.
 
     python -m arena_evaluation.experiments.hhi generate --scenarios 15
     python -m arena_evaluation.experiments.hhi analyze --benchmark-dir <data_root>/<run_id>
@@ -25,7 +25,8 @@ import numpy as np
 import polars as pl
 import yaml
 
-from arena_evaluation.experiments.stats import DEFAULT_BOOT, cluster_bootstrap, holm, paired_differences, summarize_family
+from arena_evaluation.experiments.source import episode_summary
+from arena_evaluation.experiments.stats import DEFAULT_BOOT, paired_differences, summarize_family
 
 KINDS = {"hug": "HUG", "shake": "SHAKE_HAND"}
 ARMS = {"contact": "enabled", "loco": "locomotion_only"}
@@ -226,28 +227,21 @@ def generate(n_scenarios: int, *, seed: int = 0, scenarios_dir: pathlib.Path | N
 FAMILY_METRICS = {
     "success": "success",
     "ttg": "time_to_goal",
-    "stalls": "hhi_stall_count",
-    "passes_between": "hhi_passes_between",
 }
 
 
 def load_episodes(metrics: pl.DataFrame) -> pl.DataFrame:
     """Tag every HHI episode row with interaction / scenario / arm / seed index, dropping other stages."""
-    parsed = metrics.with_columns(pl.col("stage").str.extract_groups(STAGE_RE.pattern).alias("_m")).unnest("_m")
-    parsed = parsed.filter(pl.col("kind").is_not_null())
-    if "is_reference" in parsed.columns:
-        parsed = parsed.filter(~pl.col("is_reference").fill_null(False))
-    if "status" in parsed.columns:
-        parsed = parsed.filter(pl.col("status") == "evaluated")
-    parsed = parsed.sort("episode").with_columns((pl.col("episode").rank("ordinal").over(["planner", "stage"]) - 1).cast(pl.Int64).alias("seed"))
+    parsed = metrics.drop("scenario").with_columns(pl.col("stage").str.extract_groups(STAGE_RE.pattern).alias("_m")).unnest("_m")
+    parsed = parsed.filter(pl.col("kind").is_not_null() & ~pl.col("is_reference").fill_null(False) & pl.col("success").is_not_null())
+    parsed = parsed.sort("episode_id").with_columns((pl.col("episode_id").rank("ordinal").over(["planner", "stage"]) - 1).cast(pl.Int64).alias("seed"))
     return parsed.with_columns(pl.col("scenario").cast(pl.Int64), pl.col("kind").replace({"shake": "shake_hand"}).alias("interaction"))
 
 
 def paper_outcomes(df: pl.DataFrame) -> pl.DataFrame:
     """Success is the goal before the timeout with zero collisions, and time to goal is kept only over successes."""
-    success = pl.col("success").cast(pl.Float64).fill_null(0.0) > 0.5
-    if "collision_amount" in df.columns:
-        success = success & (pl.col("collision_amount").fill_null(0) == 0)
+    collisions = (pl.col("total_collisions_ped").fill_null(0) + pl.col("total_collisions_static").fill_null(0)) > 0
+    success = (pl.col("success").cast(pl.Float64).fill_null(0.0) > 0.5) & ~collisions
     return df.with_columns(success.alias("success"), pl.when(success).then(pl.col("time_to_goal")).otherwise(None).alias("time_to_goal"))
 
 
@@ -255,8 +249,6 @@ def family_table(df: pl.DataFrame, *, n_boot: int = DEFAULT_BOOT, seed: int = 0)
     """Study A hypotheses: contact - locomotion per (planner, interaction, metric), Holm-corrected across all of them."""
     parts = []
     for label, column in FAMILY_METRICS.items():
-        if column not in df.columns:
-            continue
         diffs = paired_differences(df.with_columns(pl.col(column).cast(pl.Float64)), cell=["planner", "interaction"], metric=column, arm="arm", treatment="contact", control="loco")
         if diffs.height:
             parts.append(diffs.with_columns(pl.lit(label).alias("metric")))
@@ -265,75 +257,10 @@ def family_table(df: pl.DataFrame, *, n_boot: int = DEFAULT_BOOT, seed: int = 0)
     return summarize_family(pl.concat(parts), cell=["planner", "interaction", "metric"], n_boot=n_boot, seed=seed)
 
 
-def window_table(df: pl.DataFrame, *, n_boot: int = DEFAULT_BOOT, seed: int = 0) -> pl.DataFrame:
-    """Contact arm, per planner: pooled post-release share of stall onsets minus pooled post-release share of time, resampled by scenario."""
-    need = {"hhi_stalls_post", "hhi_stall_count", "hhi_share_post", "hhi_episode_s"}
-    if not need <= set(df.columns):
-        return pl.DataFrame()
-    contact = df.filter((pl.col("arm") == "contact") & pl.col("hhi_release_s").is_not_null())
-    rows = []
-    rng = np.random.default_rng(seed)
-
-    def excess(drawn: list[np.ndarray]) -> float:
-        m = np.concatenate(drawn)
-        stalls = m[:, 1].sum()
-        return float(m[:, 0].sum() / stalls - m[:, 2].sum() / m[:, 3].sum()) if stalls > 0 else float("nan")
-
-    for (planner,), group in contact.group_by(["planner"], maintain_order=True):
-        clusters = []
-        for _, g in group.group_by(["interaction", "scenario"], maintain_order=True):
-            post_time = (g["hhi_share_post"] * g["hhi_episode_s"]).to_numpy()
-            clusters.append(np.column_stack([g["hhi_stalls_post"].to_numpy(), g["hhi_stall_count"].to_numpy(), post_time, g["hhi_episode_s"].to_numpy()]).astype(float))
-        res = cluster_bootstrap(clusters, excess, n_boot=n_boot, rng=rng)
-        m = np.concatenate(clusters) if clusters else np.zeros((0, 4))
-        rows.append(
-            {
-                "planner": planner,
-                "stall_share_post": float(m[:, 0].sum() / m[:, 1].sum()) if m[:, 1].sum() > 0 else None,
-                "time_share_post": float(m[:, 2].sum() / m[:, 3].sum()) if m[:, 3].sum() > 0 else None,
-                "excess": res.estimate,
-                "ci_low": res.ci_low,
-                "ci_high": res.ci_high,
-                "p": res.p,
-                "n_scenarios": res.n_scenarios,
-                "n_episodes": res.n_pairs,
-            }
-        )
-    out = pl.DataFrame(rows)
-    return out.with_columns(pl.Series("p_holm", holm(out["p"].to_list()))) if out.height else out
-
-
-def manipulation_check(df: pl.DataFrame) -> pl.DataFrame:
-    """Median rendered pair gap during the hold per arm and interaction: contact must sit near contact distance."""
-    if "hhi_pair_gap_hold" not in df.columns:
-        return pl.DataFrame()
-    return (
-        df.group_by(["interaction", "arm"])
-        .agg(
-            pl.col("hhi_pair_gap_hold").median().alias("pair_gap_median"),
-            pl.col("hhi_hold_onset_s").is_not_null().mean().alias("held_share"),
-            pl.col("hhi_release_s").is_not_null().mean().alias("released_share"),
-            pl.len().alias("episodes"),
-        )
-        .sort(["interaction", "arm"])
-    )
-
-
-def _metrics_path(benchmark_dir: pathlib.Path) -> pathlib.Path:
-    for candidate in (benchmark_dir / "combined_metrics.parquet", benchmark_dir / "metrics.parquet"):
-        if candidate.exists():
-            return candidate
-    found = sorted(benchmark_dir.rglob("combined_metrics.parquet"))
-    if not found:
-        raise FileNotFoundError(f"no combined_metrics.parquet under {benchmark_dir}, run `arena evaluation process --benchmark-dir {benchmark_dir}` first")
-    return found[0]
-
-
 def analyze(benchmark_dir: pathlib.Path, *, n_boot: int = DEFAULT_BOOT, out_dir: pathlib.Path | None = None) -> dict[str, pl.DataFrame]:
-    df = load_episodes(pl.read_parquet(_metrics_path(benchmark_dir)))
-    if "time_to_goal" in df.columns and "success" in df.columns:
-        df = paper_outcomes(df)
-    tables = {"family_a": family_table(df, n_boot=n_boot), "windows": window_table(df, n_boot=n_boot), "manipulation_check": manipulation_check(df)}
+    """Study A family comparison over the canonical episode summary."""
+    df = paper_outcomes(load_episodes(episode_summary(benchmark_dir)))
+    tables = {"family_a": family_table(df, n_boot=n_boot)}
     out_dir = out_dir or benchmark_dir / "hhi"
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, table in tables.items():

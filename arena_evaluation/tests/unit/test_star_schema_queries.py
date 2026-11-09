@@ -947,90 +947,15 @@ def test_polars_sql_engine_executes_query_with_scientific_notation(
     assert df.item(0, "duration_s") == pytest.approx(4.0)
 
 
-def test_star_schema_hydration_fallback_from_combined_metrics(tmp_path: pathlib.Path) -> None:
-    """When fact_episodes.parquet is missing, BenchmarkCatalog synthesizes fact_episodes, dim_episodes and scorecard from combined_metrics.parquet."""
-    bench_dir = tmp_path / "benchmarks" / "bench_fallback"
+def test_catalog_only_reads_the_canonical_star_schema(tmp_path: pathlib.Path) -> None:
+    """A legacy combined-metrics file produces no synthesized Star Schema: the catalog reads dim_* and fact_* only."""
+    bench_dir = tmp_path / "benchmarks" / "bench_legacy"
     bench_dir.mkdir(parents=True, exist_ok=True)
-
-    combined_df = pl.DataFrame(
-        [
-            {
-                "episode": 0,
-                "benchmark_id": "bench_fallback",
-                "planner": "dwb-standard",
-                "local_planner": "dwb-standard",
-                "inter_planner": "none",
-                "robot": "jackal",
-                "map": "hospital_1",
-                "stage": "corridor",
-                "success": True,
-                "time_to_goal": 24.5,
-                "path_length": 18.2,
-                "path_efficiency": 0.88,
-                "energy_total_wh": 12.4,
-                "velocity_mean": 0.74,
-                "acceleration_max": 1.2,
-                "jerk_max": 2.5,
-                "min_obstacle_clearance": 0.45,
-                "min_pedestrian_clearance": 0.65,
-                "collision_amount_pedestrian": 0,
-                "collision_amount_static": 0,
-                "result": "GOAL_REACHED",
-            },
-            {
-                "episode": 1,
-                "benchmark_id": "bench_fallback",
-                "planner": "mppi",
-                "local_planner": "mppi",
-                "inter_planner": "none",
-                "robot": "jackal",
-                "map": "hospital_1",
-                "stage": "corridor",
-                "success": False,
-                "time_to_goal": 45.0,
-                "path_length": 25.0,
-                "path_efficiency": 0.65,
-                "energy_total_wh": 18.6,
-                "velocity_mean": 0.60,
-                "acceleration_max": 1.5,
-                "jerk_max": 3.0,
-                "min_obstacle_clearance": 0.20,
-                "min_pedestrian_clearance": 0.30,
-                "collision_amount_pedestrian": 1,
-                "collision_amount_static": 0,
-                "result": "COLLISION",
-            },
-        ]
-    )
-    combined_df.write_parquet(bench_dir / "combined_metrics.parquet")
-
-    assert not (bench_dir / "fact_episodes.parquet").exists()
-    assert not (bench_dir / "metrics" / "fact_episodes.parquet").exists()
+    pl.DataFrame([{"episode": 0, "planner": "dwb", "success": True, "time_to_goal": 24.5}]).write_parquet(bench_dir / "combined_metrics.parquet")
 
     catalog = BenchmarkCatalog(bench_dir)
 
-    fact_df = catalog.get_table("fact_episodes").collect()
-    assert fact_df.height == 2
-    assert "time_to_goal_s" in fact_df.schema
-    assert "time_to_goal" in fact_df.schema
-    assert "path_length_m" in fact_df.schema
-    assert "path_length" in fact_df.schema
-    assert fact_df.item(0, "time_to_goal_s") == pytest.approx(24.5)
-    assert fact_df.item(0, "time_to_goal") == pytest.approx(24.5)
-
-    dim_df = catalog.get_table("dim_episodes").collect()
-    assert dim_df.height == 2
-    assert set(dim_df.get_column("planner").to_numpy()) == {"dwb-standard", "mppi"}
-    assert dim_df.item(0, "world") == "hospital_1"
-
-    summary_df = catalog.get_table("v_episode_summary").collect()
-    assert summary_df.height == 2
-
-    scorecard_df = catalog.get_table("v_planner_scorecard").collect()
-    assert scorecard_df.height == 2
-    dwb_row = scorecard_df.filter(pl.col("planner") == "dwb-standard")
-    assert dwb_row.height == 1
-    assert dwb_row.item(0, "episodes_count") == 1
-    assert dwb_row.item(0, "success_rate") == pytest.approx(1.0)
-    assert dwb_row.item(0, "mean_time_to_goal_s") == pytest.approx(24.5)
-    assert dwb_row.item(0, "mean_time_to_goal") == pytest.approx(24.5)
+    assert catalog.get_table("fact_episodes").collect().is_empty()
+    assert catalog.get_table("dim_episodes").collect().is_empty()
+    assert catalog.get_table("v_episode_summary").collect().is_empty()
+    assert "combined_metrics" not in catalog.table_names()

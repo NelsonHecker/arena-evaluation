@@ -42,20 +42,17 @@ def _has_values(df: pl.DataFrame, col: str) -> bool:
     return col in df.columns and bool(df[col].is_not_null().any())
 
 
-_STATUS_COLS = ("stage", "planner", "episode", "robot", "status", "status_reason", "result")
+_STATUS_COLS = ("stage", "planner", "episode_id", "robot_id", "result", "null_reason")
 
 
 def _status_table_html(df: pl.DataFrame) -> str:
-    """Rows the pipeline could not fully evaluate, empty when every row is evaluated."""
-    if "status" not in df.columns:
+    """Rows of the canonical episode summary that were never evaluated, empty when every row was."""
+    rows = df.filter(pl.col("success").is_null())
+    if rows.is_empty():
         return ""
-    rows = df.filter(pl.col("status").fill_null("evaluated") != "evaluated")
-    if len(rows) == 0:
-        return ""
-    cols = [c for c in _STATUS_COLS if c in rows.columns]
-    rows = rows.select(cols).sort([c for c in ("stage", "episode") if c in cols])
-    head = "".join(f"<th>{html_escape.escape(c.replace('_', ' '))}</th>" for c in cols)
-    body = "".join("<tr>" + "".join(f"<td>{html_escape.escape('' if v is None else str(v))}</td>" for v in row) + "</tr>" for row in rows.iter_rows())
+    rows = rows.select(*_STATUS_COLS).sort("stage", "episode_id")
+    head = "".join(f"<th>{html_escape.escape(name.replace('_', ' '))}</th>" for name in _STATUS_COLS)
+    body = "".join("<tr>" + "".join(f"<td>{html_escape.escape('' if value is None else str(value))}</td>" for value in row) + "</tr>" for row in rows.iter_rows())
     return f"<h3>Episodes not fully evaluated ({len(rows)} of {len(df)})</h3><table class=\"dataframe\"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
@@ -332,7 +329,8 @@ class ReportBuilder:
             summary_html = self._generate_summary_table_manifest(df, manifest)
         else:
             summary_html = self._generate_summary_table(df_contestants)
-        summary_html = _status_table_html(df_contestants) + summary_html
+        if data_source_table(manifest.data_source) == _EPISODE_TABLE:
+            summary_html = _status_table_html(df_contestants) + summary_html
 
         report_title = manifest.title or self.output_dir.name
 
