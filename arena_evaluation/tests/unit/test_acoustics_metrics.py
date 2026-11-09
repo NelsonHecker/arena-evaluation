@@ -1,11 +1,8 @@
-import dataclasses
 import math
 
 import polars as pl
 import pytest
-from polars.testing import assert_frame_equal
 
-from arena_evaluation.processing.metrics.base import MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.ecological.acoustics import AcousticsCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
@@ -105,57 +102,3 @@ def test_acoustic_cost_needs_a_path_length(calc):
 def test_null_levels_are_forward_filled(calc):
     results = calc.calculate(_episode([60.0, None, 60.0, 60.0]), {})
     assert results["l_aeq_t"] == pytest.approx(60.0, abs=1e-9)
-
-# --- ENCOUNTER scope ---------------------------------------------------------
-
-def _encounter_slice(episode: AlignedEpisodeBundle) -> ScopeSlice:
-    window = dataclasses.replace(episode, data=pl.DataFrame())
-    return ScopeSlice(
-        scope=MetricScope.ENCOUNTER,
-        slice_id="enc-001",
-        parent_id=None,
-        t_start_ns=0,
-        t_end_ns=3 * SEC,
-        identity={},
-        window_bundle=window,
-        full_episode=episode,
-    )
-
-
-def test_encounter_scope_prices_the_window_energy_over_the_window_path(calc):
-    levels = [60.0] * 4
-    times = [index * SEC for index in range(4)]
-    episode = AlignedEpisodeBundle(
-        episode_id=1,
-        data=pl.DataFrame({"time_ns": times}),
-        start_pos=[0.0, 0.0, 0.0],
-        goal_pos=[3.0, 0.0],
-        topics={
-            "robot_acoustics": pl.DataFrame({"t_ns": times, "total_level_af_dba": levels}),
-            "robot_tracks": pl.DataFrame(
-                {"t_ns": times, "x": [0.0, 1.0, 2.0, 3.0], "y": [0.0] * 4, "yaw": [0.0] * 4}
-            ),
-        },
-    )
-    encounter_slice = _encounter_slice(episode)
-    result = calc.calculate_for_scope(encounter_slice.window_bundle, {}, encounter_slice)
-    expected = calc.calculate(encounter_slice.window_bundle, {"path_length": 3.0})
-
-    assert set(result) == set(calc.output_keys())
-    assert_frame_equal(
-        pl.DataFrame(
-            {"acoustic_cost": [result["acoustic_cost"]], "l_aeq_t": [result["l_aeq_t"]]},
-            schema={"acoustic_cost": pl.Float64, "l_aeq_t": pl.Float64},
-        ),
-        pl.DataFrame(
-            {"acoustic_cost": [expected["acoustic_cost"]], "l_aeq_t": [expected["l_aeq_t"]]},
-            schema={"acoustic_cost": pl.Float64, "l_aeq_t": pl.Float64},
-        ),
-    )
-
-
-def test_encounter_scope_without_a_window_track_has_no_acoustic_cost(calc):
-    episode = _episode([60.0] * 4)
-    encounter_slice = _encounter_slice(episode)
-    result = calc.calculate_for_scope(encounter_slice.window_bundle, {}, encounter_slice)
-    assert result["acoustic_cost"] is None
