@@ -265,19 +265,19 @@ def test_psi_events_are_zero_without_intrusions(calc: ProxemicsExtendedCalculato
 
 def test_zone_entry_events_bridge_stays_within_the_merge_gap():
     """Two stays of one zone that resume inside the gap count as one event."""
-    cleared = pl.DataFrame(
+    merged = pl.DataFrame(
         {
-            "t_ns": [0, SEC, 2 * SEC, 5 * SEC],
+            "t_ns": [0, SEC // 2, 3 * SEC // 2, 2 * SEC],
             "zone": ["intimate", "personal", "intimate", "intimate"],
-            "dt_s": [1.0, 1.0, 1.0, 1e-6],
+            "dt_s": [0.5, 1.0, 0.5, 1e-6],
         }
     )
-    assert zone_entry_events(cleared, "intimate") == 1
+    assert zone_entry_events(merged, "intimate") == 1
     spread = pl.DataFrame(
         {
-            "t_ns": [0, SEC, ZONE_EVENT_MERGE_GAP_NS + 2 * SEC, ZONE_EVENT_MERGE_GAP_NS + 3 * SEC],
+            "t_ns": [0, SEC // 2, ZONE_EVENT_MERGE_GAP_NS, ZONE_EVENT_MERGE_GAP_NS + SEC],
             "zone": ["intimate", "personal", "intimate", "intimate"],
-            "dt_s": [1.0, 1.0, 1.0, 1e-6],
+            "dt_s": [0.5, 1.0, 1.0, 1e-6],
         }
     )
     assert zone_entry_events(spread, "intimate") == 2

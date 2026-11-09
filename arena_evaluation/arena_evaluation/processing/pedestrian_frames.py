@@ -124,7 +124,7 @@ def robot_track_state(robot_tracks: pl.DataFrame) -> pl.DataFrame:
             vy_mps=((pl.col("y_m") - pl.col("previous_y_m")) / safe_step_s).fill_null(0.0),
         )
         .with_columns(speed_mps=(pl.col("vx_mps").pow(2) + pl.col("vy_mps").pow(2)).sqrt())
-        .select(ROBOT_TRACK_SCHEMA)
+        .select("t_ns", "x_m", "y_m", "yaw_rad", "vx_mps", "vy_mps", "speed_mps")
     )
 
 
@@ -174,9 +174,9 @@ def frame_geometry(
             distance_m=(pl.col("dx_m").pow(2) + pl.col("dy_m").pow(2)).sqrt(),
             rel_speed_mps=(pl.col("rel_vx_mps").pow(2) + pl.col("rel_vy_mps").pow(2)).sqrt(),
         )
-        .select(PEDESTRIAN_FRAME_SCHEMA)
+        .select("frame_ix", "t_ns", "ped_id", "ped_x_m", "ped_y_m", "ped_yaw_rad", "ped_vx_mps", "ped_vy_mps", "dx_m", "dy_m", "distance_m", "rel_vx_mps", "rel_vy_mps", "rel_speed_mps")
     )
-    return FrameGeometry(frames=sampled.select(FRAME_SCHEMA), pedestrians=pedestrians)
+    return FrameGeometry(frames=sampled.select("frame_ix", "t_ns", "dt_s", "robot_x_m", "robot_y_m", "robot_yaw_rad", "robot_vx_mps", "robot_vy_mps", "robot_speed_mps"), pedestrians=pedestrians)
 
 
 def nearest_pedestrian_frames(geometry: FrameGeometry) -> pl.DataFrame:
