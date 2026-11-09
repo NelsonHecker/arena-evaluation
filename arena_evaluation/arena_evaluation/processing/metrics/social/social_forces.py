@@ -126,13 +126,13 @@ class SocialForcesCalculator(BaseMetricCalculator):
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
-        "sfm_cumulative_force": "NÂ·s",
+        "sfm_cumulative_force": "N·s",
         "sfm_peak_force": "N",
         "sfm_mean_force": "N",
-        "esfm_cumulative_force": "NÂ·s",
+        "esfm_cumulative_force": "N·s",
         "esfm_peak_force": "N",
         "esfm_mean_force": "N",
-        "esfm_ped_cumulative_force": "NÂ·s",
+        "esfm_ped_cumulative_force": "N·s",
         "esfm_ped_peak_force": "N",
         "esfm_ped_mean_force": "N",
         "social_force_max": "N",

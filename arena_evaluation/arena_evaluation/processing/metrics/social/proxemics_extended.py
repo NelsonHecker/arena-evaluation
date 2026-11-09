@@ -140,7 +140,7 @@ class ProxemicsExtendedCalculator(BaseMetricCalculator):
         "movement_towards_peds_ratio": "",
         "tti_min": "s",
         "tti_mean": "s",
-        "personal_space_intrusion_integral": "mÂ·s",
+        "personal_space_intrusion_integral": "m·s",
     }
 
     PRIMARY_OUTPUTS = [
