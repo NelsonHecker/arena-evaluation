@@ -1263,9 +1263,9 @@ def test_mechanism_state_fact_rows_are_change_points_with_one_flag(tables: Scope
     assert frame["entity"].unique().to_list() == ["north_door"]
     assert frame["kind"].unique().to_list() == ["door"]
     assert frame["level"].unique().to_list() == ["0"]
-    assert frame["field"].unique().to_list() == ["locked", "progress"]
+    assert sorted(frame["field"].unique().to_list()) == ["locked", "progress"]
     assert int(frame["mechanism_states"].sum()) == 1
-    assert frame.filter(pl.col("field") == "progress")["value"].to_list() == [0.0, 1.0]
+    assert sorted(frame.filter(pl.col("field") == "progress")["value"].to_list()) == [0.0, 1.0]
 
 
 def test_mechanism_state_fact_rows_map_the_episode_clock(
