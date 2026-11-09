@@ -74,19 +74,31 @@ class ParityStatus(enum.StrEnum):
     EXACT = "EXACT"
     WITHIN_TOL = "WITHIN_TOL"
     EXPECTED_DIFF = "EXPECTED_DIFF"
-    MISSING_STAR = "MISSING_STAR"
+    UNMAPPED = "UNMAPPED"
+    NO_PRODUCER = "NO_PRODUCER"
     MISSING_LEGACY = "MISSING_LEGACY"
     NULL_REASON = "NULL_REASON"
     RELOCATED_SERIES = "RELOCATED_SERIES"
+    CERT_NULL_ONLY = "CERT_NULL_ONLY"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
     MISMATCH = "MISMATCH"
 
+
+_FAILING_STATUSES: frozenset[ParityStatus] = frozenset(
+    {
+        ParityStatus.MISMATCH,
+        ParityStatus.CERT_NULL_ONLY,
+        ParityStatus.INSUFFICIENT_EVIDENCE,
+    }
+)
 
 _ACCEPTED_STATUSES: frozenset[ParityStatus] = frozenset(
     {
         ParityStatus.EXACT,
         ParityStatus.WITHIN_TOL,
         ParityStatus.EXPECTED_DIFF,
-        ParityStatus.MISSING_STAR,
+        ParityStatus.UNMAPPED,
+        ParityStatus.NO_PRODUCER,
         ParityStatus.MISSING_LEGACY,
         ParityStatus.NULL_REASON,
         ParityStatus.RELOCATED_SERIES,
@@ -266,6 +278,8 @@ class CertificateRow:
     star_column: str
     status: ParityStatus
     episodes_compared: int
+    null_compared: int
+    nonnull_compared: int
     max_abs_diff: float | None
     max_rel_diff: float | None
     detail: str
@@ -297,11 +311,27 @@ class UnmappedStarColumn:
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class UnmappedKey:
+    """An inventory key with no reviewed mapping whose star column does exist."""
+
+    metric_key: str
+    calculator: str
+    category: str
+    inventory_owner: str
+    target_table: str
+    star_table: str
+    star_column: str
+    legacy_dtype: str
+    note: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class Certificate:
     """The full G1 evidence bundle for one benchmark run."""
 
     rows: tuple[CertificateRow, ...]
     gaps: tuple[GapRow, ...]
+    unmapped: tuple[UnmappedKey, ...]
     unmapped_star_columns: tuple[UnmappedStarColumn, ...]
     relocated_series: tuple[SeriesRelocation, ...]
     structural_replacements: tuple[StructuralReplacement, ...]
@@ -312,6 +342,7 @@ class Certificate:
     mapped_keys: int
     expected_diff_count: int
     expected_diff_pending: int
+    min_nonnull_episodes: int
     legacy_episodes: int
     star_episodes: int
 
@@ -321,6 +352,8 @@ class ComparisonStats:
     """Per-mapping comparison outcome before it is folded into a status."""
 
     episodes_compared: int
+    null_compared: int
+    nonnull_compared: int
     max_abs_diff: float | None
     max_rel_diff: float | None
     hard_mismatch_count: int
@@ -547,11 +580,20 @@ def _validate_expected_diffs(expected: tuple[ExpectedDiff, ...]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _fact_table_path(root: pathlib.Path, table: str) -> pathlib.Path | None:
+    """A fact table lives under metrics/ in canonical runs, or at the benchmark root in OEC runs."""
+    for candidate in (root / "metrics" / f"{table}.parquet", root / f"{table}.parquet"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def load_benchmark_artifacts(benchmark_dir: pathlib.Path) -> BenchmarkArtifacts:
     """Read the legacy frame and all star tables of one processed benchmark run."""
     root = benchmark_dir.resolve()
     missing = [name for name in ("combined_metrics.parquet", "dim_episodes.parquet") if not (root / name).is_file()]
-    missing.extend(f"metrics/{name}.parquet" for name in _FACT_TABLES if not (root / "metrics" / f"{name}.parquet").is_file())
+    fact_paths = {name: _fact_table_path(root, name) for name in _FACT_TABLES}
+    missing.extend(name for name, path in fact_paths.items() if path is None)
     if missing:
         raise ParityInputError(
             f"{root} is not a dual-path benchmark: missing {', '.join(missing)}. "
@@ -559,8 +601,9 @@ def load_benchmark_artifacts(benchmark_dir: pathlib.Path) -> BenchmarkArtifacts:
             "`arena evaluation process --benchmark-dir <dir> --workers 1` so both artifacts are written in one pass."
         )
     star: dict[str, pl.DataFrame] = {"dim_episodes": pl.read_parquet(root / "dim_episodes.parquet")}
-    for name in _FACT_TABLES:
-        star[name] = pl.read_parquet(root / "metrics" / f"{name}.parquet")
+    for name, path in fact_paths.items():
+        assert path is not None
+        star[name] = pl.read_parquet(path)
     return BenchmarkArtifacts(benchmark_dir=root, legacy=pl.read_parquet(root / "combined_metrics.parquet"), star=star)
 
 
@@ -745,10 +788,13 @@ def _numeric_stats(joined: pl.DataFrame, *, expected: ExpectedDiff | None, rel_t
     )
     mismatch = enriched.filter(pl.col("_unexpected_value") | pl.col("_unexpected_null") | pl.col("_unexpected_legacy_null"))
     non_null = enriched.filter(both_present)
+    both_null = enriched.filter(legacy_value.is_null() & star_value.is_null())
     max_abs = None if non_null.is_empty() else float(non_null["_abs_diff"].max())
     max_rel = None if non_null.is_empty() else float(non_null["_rel_diff"].max())
     return ComparisonStats(
         episodes_compared=enriched.height,
+        null_compared=both_null.height,
+        nonnull_compared=non_null.height,
         max_abs_diff=max_abs,
         max_rel_diff=max_rel,
         hard_mismatch_count=mismatch.height,
@@ -766,6 +812,8 @@ def _non_numeric_stats(joined: pl.DataFrame, *, expected: ExpectedDiff | None) -
     if legacy_dtype != star_dtype and not dtype_allowed:
         return ComparisonStats(
             episodes_compared=joined.height,
+            null_compared=0,
+            nonnull_compared=0,
             max_abs_diff=None,
             max_rel_diff=None,
             hard_mismatch_count=joined.height,
@@ -791,8 +839,11 @@ def _non_numeric_stats(joined: pl.DataFrame, *, expected: ExpectedDiff | None) -
         mismatch.alias("_mismatch"),
     )
     mismatch_frame = enriched.filter(pl.col("_mismatch"))
+    both_null_frame = enriched.filter(both_null)
     return ComparisonStats(
         episodes_compared=enriched.height,
+        null_compared=both_null_frame.height,
+        nonnull_compared=enriched.height - both_null_frame.height - enriched.filter(unexpected_null | unexpected_legacy_null).height,
         max_abs_diff=None,
         max_rel_diff=None,
         hard_mismatch_count=mismatch_frame.height,
@@ -808,8 +859,11 @@ def _null_only_stats(joined: pl.DataFrame) -> ComparisonStats:
     legacy_is_null = joined["legacy_value"].is_null()
     star_is_null = joined["star_value"].is_null()
     mismatch = joined.filter(legacy_is_null != star_is_null)
+    both_null = joined.filter(legacy_is_null & star_is_null)
     return ComparisonStats(
         episodes_compared=joined.height,
+        null_compared=both_null.height,
+        nonnull_compared=0,
         max_abs_diff=None,
         max_rel_diff=None,
         hard_mismatch_count=mismatch.height,
@@ -830,13 +884,20 @@ def _comparable_stats(joined: pl.DataFrame, *, expected: ExpectedDiff | None, re
     return _non_numeric_stats(joined, expected=expected)
 
 
-def _status_for(stats: ComparisonStats) -> ParityStatus:
+def _status_for(stats: ComparisonStats, *, min_nonnull_episodes: int) -> ParityStatus:
+    """Verdict of one comparison; nulls alone never earn a green status."""
     if stats.hard_mismatch_count > 0:
         return ParityStatus.MISMATCH
+    if stats.episodes_compared > 0 and stats.null_compared == stats.episodes_compared:
+        return ParityStatus.CERT_NULL_ONLY
     if stats.expected_diff_count > 0:
+        if stats.nonnull_compared < min_nonnull_episodes and stats.nonnull_compared > 0:
+            return ParityStatus.INSUFFICIENT_EVIDENCE
         return ParityStatus.EXPECTED_DIFF
     if stats.null_reason_count > 0:
         return ParityStatus.NULL_REASON
+    if stats.nonnull_compared < min_nonnull_episodes:
+        return ParityStatus.INSUFFICIENT_EVIDENCE
     if stats.tolerance_count > 0:
         return ParityStatus.WITHIN_TOL
     return ParityStatus.EXACT
@@ -848,6 +909,7 @@ def _compare_mapping(
     mapping: MetricMapping,
     expected: ExpectedDiff | None,
     rel_tol: float,
+    min_nonnull_episodes: int,
 ) -> CertificateRow:
     legacy_columns = ", ".join(mapping.legacy_columns)
     legacy = _legacy_value_frame(artifacts, mapping)
@@ -859,6 +921,8 @@ def _compare_mapping(
             star_column=mapping.star_column,
             status=ParityStatus.MISSING_LEGACY,
             episodes_compared=0,
+            null_compared=0,
+            nonnull_compared=0,
             max_abs_diff=None,
             max_rel_diff=None,
             detail=f"legacy column absent from combined_metrics: {legacy_columns}",
@@ -870,8 +934,10 @@ def _compare_mapping(
             legacy_column=legacy_columns,
             star_table=mapping.star_table,
             star_column=mapping.star_column,
-            status=ParityStatus.MISSING_STAR,
+            status=ParityStatus.NO_PRODUCER,
             episodes_compared=0,
+            null_compared=0,
+            nonnull_compared=0,
             max_abs_diff=None,
             max_rel_diff=None,
             detail=f"mapped star column absent from {mapping.star_table}",
@@ -887,17 +953,23 @@ def _compare_mapping(
             star_column=mapping.star_column,
             status=ParityStatus.MISMATCH,
             episodes_compared=0,
+            null_compared=0,
+            nonnull_compared=0,
             max_abs_diff=None,
             max_rel_diff=None,
             detail="join on (run_id, episode_id[, robot_id]) produced no episodes",
         )
     joined = joined.with_columns(pl.lit(legacy_columns).alias("legacy_column"))
     stats = _comparable_stats(joined, expected=expected, rel_tol=rel_tol)
-    status = _status_for(stats)
+    status = _status_for(stats, min_nonnull_episodes=min_nonnull_episodes)
     if status is ParityStatus.MISMATCH:
         detail = f"{stats.hard_mismatch_count} unexplained episode(s)"
         if stats.example:
             detail = f"{detail}: {stats.example}"
+    elif status is ParityStatus.CERT_NULL_ONLY:
+        detail = f"both sides null for all {stats.episodes_compared} compared episode(s): no real comparison"
+    elif status is ParityStatus.INSUFFICIENT_EVIDENCE:
+        detail = f"{stats.nonnull_compared} non-null comparison(s), need at least {min_nonnull_episodes}; {stats.null_compared} episode(s) were null on both sides"
     elif status is ParityStatus.EXPECTED_DIFF and expected is not None:
         detail = f"{stats.expected_diff_count} reviewed episode(s): {expected.reason}"
     elif status is ParityStatus.NULL_REASON:
@@ -913,6 +985,8 @@ def _compare_mapping(
         star_column=mapping.star_column,
         status=status,
         episodes_compared=stats.episodes_compared,
+        null_compared=stats.null_compared,
+        nonnull_compared=stats.nonnull_compared,
         max_abs_diff=stats.max_abs_diff,
         max_rel_diff=stats.max_rel_diff,
         detail=detail,
@@ -953,16 +1027,15 @@ def _gap_rows(
     *,
     artifacts: BenchmarkArtifacts,
     inventory: tuple[InventoryRow, ...],
-    mapped_keys: frozenset[str],
-    relocated_keys: frozenset[str],
+    no_producer_keys: frozenset[str],
     list_violations: Mapping[str, str],
 ) -> tuple[GapRow, ...]:
     gaps: list[GapRow] = []
     for row in inventory:
-        if row.metric_key in mapped_keys or row.metric_key in relocated_keys:
+        if row.metric_key not in no_producer_keys:
             continue
         dtype = _legacy_dtype(artifacts, row.metric_key)
-        note = "no reviewed star mapping: no scoped producer in this pipeline revision"
+        note = "no reviewed star mapping and no produced star column: a real porting gap"
         if row.metric_key in list_violations:
             note = f"known remaining 1NF list violation: {list_violations[row.metric_key]}"
         gaps.append(
@@ -979,6 +1052,27 @@ def _gap_rows(
             )
         )
     return tuple(gaps)
+
+
+def _star_column_index(artifacts: BenchmarkArtifacts) -> Mapping[str, tuple[tuple[str, str], ...]]:
+    """Produced column name -> (star table, dtype) pairs across the dimension and all fact tables."""
+    index: dict[str, list[tuple[str, str]]] = {}
+    for table in ("dim_episodes", *_FACT_TABLES):
+        for column, dtype in artifacts.star[table].collect_schema().items():
+            index.setdefault(column, []).append((table, str(dtype)))
+    return {name: tuple(locations) for name, locations in index.items()}
+
+
+def _locate_star_column(*, index: Mapping[str, tuple[tuple[str, str], ...]], row: InventoryRow) -> tuple[str, str] | None:
+    """(star table, column) of a produced column matching the inventory key, preferring its intended table."""
+    locations = index.get(row.metric_key)
+    if not locations:
+        return None
+    for table, _ in locations:
+        if table == row.target_table:
+            return table, row.metric_key
+    table, _ = locations[0]
+    return table, row.metric_key
 
 
 def _unmapped_star_columns(*, artifacts: BenchmarkArtifacts, mappings: tuple[MetricMapping, ...]) -> tuple[UnmappedStarColumn, ...]:
@@ -1027,6 +1121,7 @@ def certify(
     structural_replacements: tuple[StructuralReplacement, ...] = (),
     list_violations: tuple[ListViolation, ...] = (),
     rel_tol: float = REL_TOL,
+    min_nonnull_episodes: int = 3,
 ) -> Certificate:
     """Compare every inventory key and every mapping, returning the certificate bundle."""
     inventory_keys = frozenset(row.metric_key for row in inventory)
@@ -1044,14 +1139,26 @@ def certify(
     expected = _expected_index(expected_diffs)
     relocated_keys = frozenset(entry.metric_key for entry in relocated_series)
     violation_reasons = {entry.metric_key: entry.reason for entry in list_violations}
+    column_index = _star_column_index(artifacts)
     rows: list[CertificateRow] = []
     for mapping in mappings:
-        rows.append(_compare_mapping(artifacts=artifacts, mapping=mapping, expected=expected.for_mapping(mapping), rel_tol=rel_tol))
+        rows.append(
+            _compare_mapping(
+                artifacts=artifacts,
+                mapping=mapping,
+                expected=expected.for_mapping(mapping),
+                rel_tol=rel_tol,
+                min_nonnull_episodes=min_nonnull_episodes,
+            )
+        )
     relocated_by_key = {entry.metric_key: entry for entry in relocated_series}
+    unmapped: list[UnmappedKey] = []
+    no_producer: list[str] = []
     for row in inventory:
         if row.metric_key in mapped_keys:
             continue
         dtype = _legacy_dtype(artifacts, row.metric_key)
+        legacy_dtype = str(dtype) if dtype is not None else "absent_in_run"
         if row.metric_key in relocated_by_key:
             relocation = relocated_by_key[row.metric_key]
             rows.append(
@@ -1062,13 +1169,49 @@ def certify(
                     star_column="",
                     status=ParityStatus.RELOCATED_SERIES,
                     episodes_compared=0,
+                    null_compared=0,
+                    nonnull_compared=0,
                     max_abs_diff=None,
                     max_rel_diff=None,
                     detail=f"per-sample data moved to a 1NF series table: {relocation.reason}",
                 )
             )
             continue
-        detail = "no reviewed star mapping: no scoped producer in this pipeline revision"
+        located = _locate_star_column(index=column_index, row=row)
+        if located is not None:
+            star_table, star_column = located
+            note = "star column exists but has no reviewed mapping: manifest review, not a port"
+            unmapped.append(
+                UnmappedKey(
+                    metric_key=row.metric_key,
+                    calculator=row.calculator,
+                    category=row.category,
+                    inventory_owner=row.inventory_owner,
+                    target_table=row.target_table,
+                    star_table=star_table,
+                    star_column=star_column,
+                    legacy_dtype=legacy_dtype,
+                    note=note,
+                )
+            )
+            rows.append(
+                CertificateRow(
+                    metric_key=row.metric_key,
+                    legacy_column=row.metric_key if dtype is not None else "",
+                    star_table=star_table,
+                    star_column=star_column,
+                    status=ParityStatus.UNMAPPED,
+                    episodes_compared=0,
+                    null_compared=0,
+                    nonnull_compared=0,
+                    max_abs_diff=None,
+                    max_rel_diff=None,
+                    detail=note,
+                )
+            )
+            continue
+        no_producer.append(row.metric_key)
+        detail = "no reviewed star mapping and no produced star column: a real porting gap"
         if row.metric_key in violation_reasons:
             detail = f"known remaining 1NF list violation: {violation_reasons[row.metric_key]}"
         rows.append(
@@ -1077,8 +1220,10 @@ def certify(
                 legacy_column="",
                 star_table=row.target_table,
                 star_column="",
-                status=ParityStatus.MISSING_STAR,
+                status=ParityStatus.NO_PRODUCER,
                 episodes_compared=0,
+                null_compared=0,
+                nonnull_compared=0,
                 max_abs_diff=None,
                 max_rel_diff=None,
                 detail=detail,
@@ -1094,10 +1239,10 @@ def certify(
         gaps=_gap_rows(
             artifacts=artifacts,
             inventory=inventory,
-            mapped_keys=mapped_keys,
-            relocated_keys=relocated_keys,
+            no_producer_keys=frozenset(no_producer),
             list_violations=violation_reasons,
         ),
+        unmapped=tuple(sorted(unmapped, key=lambda entry: entry.metric_key)),
         unmapped_star_columns=_unmapped_star_columns(artifacts=artifacts, mappings=mappings),
         relocated_series=relocated_series,
         structural_replacements=structural_replacements,
@@ -1108,6 +1253,7 @@ def certify(
         mapped_keys=len(mapped_keys),
         expected_diff_count=len(expected_diffs),
         expected_diff_pending=pending,
+        min_nonnull_episodes=min_nonnull_episodes,
         legacy_episodes=artifacts.legacy.height,
         star_episodes=dim.height,
     )
@@ -1131,7 +1277,7 @@ def write_certificate_csv(path: pathlib.Path, certificate: Certificate) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["metric_key", "legacy_column", "star_table", "star_column", "status", "episodes_compared", "max_abs_diff", "max_rel_diff", "detail"])
+        writer.writerow(["metric_key", "legacy_column", "star_table", "star_column", "status", "episodes_compared", "null_compared", "nonnull_compared", "max_abs_diff", "max_rel_diff", "detail"])
         for row in certificate.rows:
             writer.writerow(
                 [
@@ -1141,6 +1287,8 @@ def write_certificate_csv(path: pathlib.Path, certificate: Certificate) -> None:
                     row.star_column,
                     row.status.value,
                     row.episodes_compared,
+                    row.null_compared,
+                    row.nonnull_compared,
                     "" if row.max_abs_diff is None else f"{row.max_abs_diff:.12g}",
                     "" if row.max_rel_diff is None else f"{row.max_rel_diff:.12g}",
                     row.detail,
@@ -1156,6 +1304,16 @@ def write_gaps_csv(path: pathlib.Path, certificate: Certificate) -> None:
         writer.writerow(["metric_key", "calculator", "category", "inventory_owner", "owner", "target_scope", "target_table", "legacy_dtype", "note"])
         for row in certificate.gaps:
             writer.writerow([row.metric_key, row.calculator, row.category, row.inventory_owner, row.owner, row.target_scope, row.target_table, row.legacy_dtype, row.note])
+
+
+def write_unmapped_csv(path: pathlib.Path, certificate: Certificate) -> None:
+    """Write keys whose star column exists but whose legacy correspondence is unreviewed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["metric_key", "calculator", "category", "inventory_owner", "target_table", "star_table", "star_column", "legacy_dtype", "note"])
+        for row in certificate.unmapped:
+            writer.writerow([row.metric_key, row.calculator, row.category, row.inventory_owner, row.target_table, row.star_table, row.star_column, row.legacy_dtype, row.note])
 
 
 def write_star_coverage_csv(path: pathlib.Path, certificate: Certificate) -> None:
@@ -1190,15 +1348,19 @@ def write_summary_yaml(path: pathlib.Path, certificate: Certificate, *, benchmar
         "relocated_series_keys": len(certificate.relocated_series),
         "structural_replacements": len(certificate.structural_replacements),
         "list_violation_keys": len(certificate.list_violations),
+        "min_nonnull_episodes": certificate.min_nonnull_episodes,
         "legacy_episode_rows": certificate.legacy_episodes,
         "star_episode_rows": certificate.star_episodes,
         "status_counts": {status.value: count for status, count in counts.items()},
-        "gap_count": len(certificate.gaps),
+        "unmapped_count": len(certificate.unmapped),
+        "no_producer_count": len(certificate.gaps),
         "gap_owner_counts": dict(sorted(owner_counts.items())),
         "gap_calculator_counts": dict(sorted(calculator_counts.items(), key=lambda item: (-item[1], item[0]))),
         "unmapped_star_columns": len(certificate.unmapped_star_columns),
         "accepted_statuses": sorted(status.value for status in _ACCEPTED_STATUSES),
-        "mismatch_count": counts[ParityStatus.MISMATCH],
+        "failing_statuses": sorted(status.value for status in _FAILING_STATUSES),
+        "hard_failure_count": sum(counts[status] for status in _FAILING_STATUSES),
+        "gate_passed": all(counts[status] == 0 for status in _FAILING_STATUSES),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
@@ -1241,17 +1403,30 @@ def write_gap_summary_markdown(path: pathlib.Path, certificate: Certificate, *, 
         f"- inventory keys: {certificate.inventory_keys}",
         f"- compared metric mappings: {certificate.comparison_rows}",
         f"- keys with a reviewed star mapping: {certificate.mapped_keys}",
-        f"- keys without a scoped producer (port gaps): {len(certificate.gaps)}",
+        f"- keys without a reviewed mapping but with a produced star column (UNMAPPED, manifest review): {len(certificate.unmapped)}",
+        f"- keys without a produced star column (NO_PRODUCER, real porting gaps): {len(certificate.gaps)}",
         f"- relocated series keys (not gaps): {len(certificate.relocated_series)}",
         f"- known remaining 1NF list violations: {len(certificate.list_violations)}",
         f"- structural replacement keys (not parity keys): {len(certificate.structural_replacements)}",
         f"- numeric star columns not claimed by any reviewed inventory mapping: {len(certificate.unmapped_star_columns)}",
+        f"- minimum non-null comparisons per key: {certificate.min_nonnull_episodes}",
         "",
-        "## Port gaps by owner",
+        "## UNMAPPED (star column exists, manifest review needed)",
+        "",
+        "| calculator | keys |",
+        "| --- | ---: |",
+    ]
+    unmapped_by_calculator: dict[str, int] = {}
+    for entry in certificate.unmapped:
+        unmapped_by_calculator[entry.calculator] = unmapped_by_calculator.get(entry.calculator, 0) + 1
+    lines.extend(f"| {calculator} | {count} |" for calculator, count in sorted(unmapped_by_calculator.items(), key=lambda item: (-item[1], item[0])))
+    lines.extend([
+        "",
+        "## NO_PRODUCER port gaps by owner",
         "",
         "| owner | keys |",
         "| --- | ---: |",
-    ]
+    ])
     lines.extend(f"| {owner} | {count} |" for owner, count in sorted(by_owner.items()))
     lines.extend(["", "## Port gaps by calculator", "", "| calculator | keys |", "| --- | ---: |"])
     lines.extend(f"| {calculator} | {count} |" for calculator, count in sorted(by_calculator.items(), key=lambda item: (-item[1], item[0])))
@@ -1271,6 +1446,7 @@ def write_outputs(path: pathlib.Path, certificate: Certificate, *, benchmark_dir
     """Write every certificate artefact below ``path``."""
     write_certificate_csv(path / "certificate.csv", certificate)
     write_gaps_csv(path / "gaps.csv", certificate)
+    write_unmapped_csv(path / "unmapped.csv", certificate)
     write_star_coverage_csv(path / "star_coverage.csv", certificate)
     write_review_csvs(path, certificate)
     write_summary_yaml(path / "summary.yaml", certificate, benchmark_dir=benchmark_dir)
@@ -1294,6 +1470,8 @@ def _synthetic_artifacts() -> BenchmarkArtifacts:
             "zero_star": [1.0, 2.0, None, 4.0],
             "scaled": [2.0, 4.0, None, 8.0],
             "derived_star": [1.02, 2.04, None, 4.08],
+            "sparse": [1.0, 2.0, None, None],
+            "nullcol": pl.Series([None, None, None, None], dtype=pl.Float64),
             "null_reason": [None, None, "value:no_samples", None],
         }
     )
@@ -1309,6 +1487,8 @@ def _synthetic_artifacts() -> BenchmarkArtifacts:
             "zero": [1.0, 2.0, 0.0, 4.0],
             "scaled": [1.0, 2.0, None, 4.0],
             "derived": [1.0, 2.0, None, 4.0],
+            "sparse": [1.0, 2.0, None, None],
+            "nullcol": [None, None, None, None],
         }
     )
     star = {
@@ -1331,6 +1511,9 @@ def self_check() -> int:
         InventoryRow(metric_key="wall", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="absent", calculator="c", category="social", inventory_owner="Agent 4 (parity)", target_scope="contacts", target_table="fact_contacts", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="series", calculator="c", category="ecological", inventory_owner="Agent 7 (perf)", target_scope="robots", target_table="fact_robots", test_file="t", port_status="PENDING_PORT"),
+        InventoryRow(metric_key="mean", calculator="c", category="social", inventory_owner="Agent 4 (parity)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
+        InventoryRow(metric_key="sparse", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
+        InventoryRow(metric_key="nullcol", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="zero", calculator="c", category="social", inventory_owner="Agent 4 (parity)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="derived", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
         InventoryRow(metric_key="scaled", calculator="c", category="performance", inventory_owner="Agent 7 (perf)", target_scope="episodes", target_table="fact_episodes", test_file="t", port_status="PENDING_PORT"),
@@ -1342,6 +1525,8 @@ def self_check() -> int:
         MetricMapping(metric_key="zero", star_table="fact_episodes", star_column="zero_star", legacy_columns=("zero",)),
         MetricMapping(metric_key="derived", star_table="fact_episodes", star_column="derived_star", legacy_columns=("derived",)),
         MetricMapping(metric_key="scaled", star_table="fact_episodes", star_column="scaled", legacy_columns=("scaled",)),
+        MetricMapping(metric_key="sparse", star_table="fact_episodes", star_column="sparse", legacy_columns=("sparse",)),
+        MetricMapping(metric_key="nullcol", star_table="fact_episodes", star_column="nullcol", legacy_columns=("nullcol",)),
     )
     expected = (
         ExpectedDiff(metric_key="zero", star_table="fact_episodes", star_column="zero_star", kind=DiffKind.NULL_FILL, reason="synthetic null fill"),
@@ -1365,14 +1550,21 @@ def self_check() -> int:
         "zero": ParityStatus.NULL_REASON,
         "derived": ParityStatus.EXPECTED_DIFF,
         "scaled": ParityStatus.EXACT,
-        "absent": ParityStatus.MISSING_STAR,
+        "absent": ParityStatus.NO_PRODUCER,
+        "mean": ParityStatus.UNMAPPED,
+        "sparse": ParityStatus.INSUFFICIENT_EVIDENCE,
+        "nullcol": ParityStatus.CERT_NULL_ONLY,
         "series": ParityStatus.RELOCATED_SERIES,
     }
     for metric_key, status in expected_status.items():
         if rows[metric_key].status is not status:
             failures.append(f"{metric_key}: expected {status}, got {rows[metric_key].status}")
     if len(certificate.gaps) != 1:
-        failures.append(f"gap list must hold exactly the unmapped inventory key, got {len(certificate.gaps)}")
+        failures.append(f"gap list must hold exactly the no-producer inventory key, got {len(certificate.gaps)}")
+    if len(certificate.unmapped) != 1:
+        failures.append(f"unmapped list must hold exactly the produced-but-unreviewed key, got {len(certificate.unmapped)}")
+    if rows["value"].nonnull_compared != 3:
+        failures.append(f"value: expected 3 non-null comparisons, got {rows['value'].nonnull_compared}")
     for failure in failures:
         print(f"SELF-CHECK FAILED: {failure}", file=sys.stderr)
     if failures:
@@ -1394,6 +1586,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--mappings", type=pathlib.Path, default=_HERE / "metric_map.yaml", help="Reviewed metric_key -> star column map")
     parser.add_argument("--expected-diffs", type=pathlib.Path, default=_HERE / "expected_diff.yaml", help="Reviewed expected-difference manifest")
     parser.add_argument("--rel-tol", type=float, default=REL_TOL, help="Relative tolerance for WITHIN_TOL")
+    parser.add_argument("--min-nonnull-episodes", type=int, default=3, help="Minimum non-null comparisons for a green status")
     parser.add_argument("--self-check", action="store_true", help="Exercise the comparison engine on synthetic frames and exit")
     return parser.parse_args(argv)
 
@@ -1419,6 +1612,7 @@ def main(argv: Sequence[str]) -> int:
             structural_replacements=manifest.structural_replacements,
             list_violations=manifest.list_violations,
             rel_tol=args.rel_tol,
+            min_nonnull_episodes=args.min_nonnull_episodes,
         )
     except ParityInputError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -1430,9 +1624,9 @@ def main(argv: Sequence[str]) -> int:
     counts = status_counts(certificate)
     for status in ParityStatus:
         print(f"{status.value}: {counts[status]}")
-    print(f"gaps: {len(certificate.gaps)}")
+    print(f"unmapped: {len(certificate.unmapped)}  no_producer: {len(certificate.gaps)}")
     print(f"certificate written to {args.output_dir}")
-    return 1 if counts[ParityStatus.MISMATCH] else 0
+    return 1 if any(counts[status] for status in _FAILING_STATUSES) else 0
 
 
 if __name__ == "__main__":

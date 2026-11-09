@@ -34,11 +34,19 @@ with statuses
 | `EXACT` | every compared episode carries the same value in both tables |
 | `WITHIN_TOL` | numeric values agree within `--rel-tol` (default `1e-5`, relative per episode) |
 | `EXPECTED_DIFF` | a reviewed `expected_diff.yaml` entry explains the difference |
-| `MISSING_STAR` | the inventory key has no scoped producer in this pipeline revision |
+| `UNMAPPED` | no reviewed mapping, but a star column with that name exists in the run: manifest review needed |
+| `NO_PRODUCER` | no reviewed mapping and no produced star column: a real porting gap |
 | `MISSING_LEGACY` | a mapped legacy column is absent from this run's frame |
 | `NULL_REASON` | legacy value is `0.0`, star value is null and `null_reason` explains it |
 | `RELOCATED_SERIES` | legacy per-sample list moved to a 1NF series table; no scalar fact column is intended |
-| `MISMATCH` | unexplained difference; the certificate exits non-zero |
+| `CERT_NULL_ONLY` | every compared episode was null on both sides; no real comparison |
+| `INSUFFICIENT_EVIDENCE` | fewer than `--min-nonnull-episodes` non-null comparisons |
+| `MISMATCH` | unexplained difference |
+
+The certificate row also carries `null_compared` and `nonnull_compared`; `EXACT` and
+`WITHIN_TOL` are only issued when at least `--min-nonnull-episodes` (default 3) pairs
+were non-null on both sides. `CERT_NULL_ONLY`, `INSUFFICIENT_EVIDENCE` and `MISMATCH`
+are gate-failing statuses (exit code 1): a certificate cannot go green on null==null.
 
 `MISMATCH` is deliberately outside the accepted set: the gate fails even though the
 row is still reported, so a first certificate can be produced without hiding a
@@ -58,7 +66,8 @@ nullability changes are recorded as notes in `expected_diff.yaml`.
 | `metric_map.yaml` | reviewed correspondence: inventory key -> star table/column, list reduction, legacy combine |
 | `expected_diff.yaml` | reviewed allowlist of legitimate value changes, each with a reason |
 | `results/<run>/certificate.csv` | the certificate for one run |
-| `results/<run>/gaps.csv` | inventory keys without a scoped producer, with the triaged owner |
+| `results/<run>/gaps.csv` | NO_PRODUCER porting gaps, with the triaged owner |
+| `results/<run>/unmapped.csv` | keys whose star column exists but whose correspondence is unreviewed, with the candidate table/column |
 | `results/<run>/gap_summary.md` | the gap list grouped by owner, calculator and category |
 | `results/<run>/star_coverage.csv` | numeric star metric columns not claimed by any reviewed inventory mapping |
 | `results/<run>/summary.yaml` | machine-readable counts and provenance |
@@ -138,6 +147,11 @@ star tables, and the harness still refuses it (correctly).
 
 ## Reviewed manifest policy
 
+The `UNMAPPED`/`NO_PRODUCER` split is derived from the produced artefacts: a key is
+`UNMAPPED` when a column with its name exists in the run's `dim_episodes.parquet` or
+`metrics/fact_*.parquet`, `NO_PRODUCER` otherwise. Gap ownership is triaged from
+`NO_PRODUCER` only.
+
 `metric_map.yaml` claims a correspondence only where the dual-path producer itself
 documents it, e.g. `ScopedEvaluator._episode_fact_row` writes
 `energy_total_wh -> total_energy_wh` and
@@ -177,13 +191,26 @@ not port gaps. Keys in `list_violations` stay gaps but their note names the know
 
 ## Current results
 
-| run | input | EXACT | RELOCATED_SERIES | MISSING_STAR | MISMATCH |
-| --- | --- | ---: | ---: | ---: | ---: |
-| `test-eval3-agent-mcp` | existing dual-path run, 5 episodes | 24 | 30 | 216 | 0 |
-| `parity-g1-roster-ped6` | 6 ped6 episodes reprocessed by the current branch | 24 | 30 | 216 | 0 |
+| run | input | EXACT | CERT_NULL_ONLY | RELOCATED_SERIES | UNMAPPED | NO_PRODUCER | MISMATCH |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `parity-g1-merged` | 6 ped6 episodes reprocessed by the merged integration branch | 20 | 4 | 30 | 1 | 215 | 0 |
+| `parity-g1-roster-ped6` | 6 ped6 episodes reprocessed by this branch | 20 | 4 | 30 | 1 | 215 | 0 |
+| `test-eval3-agent-mcp` | existing dual-path run, 5 episodes | 20 | 4 | 30 | 1 | 215 | 0 |
 
-Porting gaps on the reprocessed run: 216 keys without a scoped producer, triaged into
-`port-eco` 102 / `port-social` 94 / `parity-g1` 20, plus 12 known remaining 1NF list
-violations and 5 structural replacements. The `MISSING_STAR` count is the size of the
-remaining port, not a harness failure; the `MISMATCH` count must be zero for the gate
-to pass. Per-run provenance is in `results/<run>/PROVENANCE.md`.
+The merged-run certificate **does not pass the gate**: four mapped keys
+(`mar`, `pfi`, `min_obstacle_clearance`, `robot_path_deviation_m` on this run) are
+null on both sides in all six evaluable episodes, so they report `CERT_NULL_ONLY`
+instead of `EXACT`. The other 20 mapped comparisons are `EXACT` with 6 non-null
+episodes each. No `MISMATCH`, no `INSUFFICIENT_EVIDENCE`.
+
+Finding behind the small `UNMAPPED` count: the merged run's star fact tables still
+carry exactly the pre-port column set (`fact_episodes` 23, `fact_encounters` 25,
+`fact_contacts` 18, `fact_pedestrians` 21, `fact_robots` 16). The port commits in the
+integration branch (`dcbae0e`, `00572e2`) changed calculators and the legacy
+`combined_metrics` frame (325 columns, new `char_*` keys, moved series) but did not
+change `storage/declarations.py` or the star row builders, so no ported key reaches a
+fact column yet. The one `UNMAPPED` key is `ped_path_deflection_m`, which does exist
+in `fact_pedestrians`. `NO_PRODUCER` (215) is therefore the honest porting gap at the
+star-schema boundary, not a mapping missing from `metric_map.yaml`.
+
+Per-run provenance is in `results/<run>/PROVENANCE.md`.
