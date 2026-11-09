@@ -281,12 +281,12 @@ def _collect_native_topics(bundle: TopicBundle) -> dict[str, pl.DataFrame]:
 from arena_evaluation.benchmark.profiler import PipelineProfiler
 from arena_evaluation.processing.mcap_reader import MCAPReader
 from arena_evaluation.processing.metrics.ecological.mechanism_common import robot_env_snapshot
+from arena_evaluation.processing.native_bundle import NativeBundle
 from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquetStore
 from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS as _ALIGN_TOLERANCE_NS
 from arena_evaluation.processing.pedestrian_frames import peak_pedestrian_count
 from arena_evaluation.processing.pose_anchor import resolve_pose_source
 from arena_evaluation.processing.pose_segments import ride_arrival_times
-from arena_evaluation.processing.native_bundle import NativeBundle
 from arena_evaluation.storage.manifest import MetadataWriter
 
 # Columns whose values are all-None (no kind in the recording) or all-empty

@@ -6,8 +6,8 @@ import polars as pl
 import yaml
 
 from arena_evaluation.processing.mcap_reader import anchor_at
-from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, peak_pedestrian_count
 from arena_evaluation.processing.native_bundle import NativeBundle
+from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS, peak_pedestrian_count
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, TopicBundle
 
 
