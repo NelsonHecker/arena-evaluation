@@ -58,6 +58,9 @@ class AcousticsCalculator(BaseMetricCalculator):
     DEPENDS_ON = ["path_metrics"]
     REQUIRED_TOPICS = ["robot_acoustics"]
 
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
+
     UNITS = {
         "l_aeq_t": "dBA",
         "l_a10": "dBA",
@@ -94,6 +97,22 @@ class AcousticsCalculator(BaseMetricCalculator):
             "acoustic_surge_index",
             "acoustic_cost",
         ]
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
+            return self.calculate(episode, prior_results)
+        if scope_slice.scope == MetricScope.ENCOUNTER:
+            # The window bundle carries only this encounter's acoustics samples, and no window path
+            # length exists, so the per-metre acoustic cost is explicitly unavailable here.
+            window_metrics = self.calculate(episode, {})
+            window_metrics["acoustic_cost"] = None
+            return window_metrics
+        raise ValueError(f"acoustics does not serve the {scope_slice.scope.value} scope")
 
     def calculate(
         self,

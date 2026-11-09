@@ -3,30 +3,55 @@ from __future__ import annotations
 import typing
 
 import numpy as np
+import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
+STANDSTILL_SPEED_MPS: typing.Final[float] = 0.01
+MIN_STANDSTILL_BLOCK_S: typing.Final[float] = 0.5
+MIN_PATH_LENGTH_M: typing.Final[float] = 0.1
+MIN_MEAN_POWER_W: typing.Final[float] = 0.01
+SECONDS_PER_HOUR: typing.Final[float] = 3600.0
+NANOSECONDS_PER_SECOND: typing.Final[float] = 1e9
+TRACK_ALIGN_TOLERANCE_NS: typing.Final[int] = 100_000_000
+_GRAVITY_MPS2: typing.Final[float] = 9.81
+_DEFAULT_ROLLING_RESISTANCE: typing.Final[float] = 0.015
 
-def _median_filter_window3(arr: np.ndarray) -> np.ndarray:
+
+def _median_filter_window3(values: np.ndarray) -> np.ndarray:
     """3-sample moving median, to reject single-frame outliers."""
-    n = len(arr)
-    if n < 3:
-        return arr.copy()
-    result = np.empty_like(arr)
-    result[0] = np.median(arr[:2])
-    for i in range(1, n - 1):
-        result[i] = np.median(arr[i - 1 : i + 2])
-    result[-1] = np.median(arr[-2:])
-    return result
+    length = len(values)
+    if length < 3:
+        return values.copy()
+    filtered = np.empty_like(values)
+    filtered[0] = np.median(values[:2])
+    for index in range(1, length - 1):
+        filtered[index] = np.median(values[index - 1 : index + 2])
+    filtered[-1] = np.median(values[-2:])
+    return filtered
+
+
+def _filled(values: np.ndarray) -> np.ndarray:
+    """Forward-fill NaN gaps then back-fill the leading ones; an all-NaN array is returned unchanged."""
+    missing = np.isnan(values)
+    if missing.all():
+        return values
+    indices = np.where(~missing, np.arange(missing.shape[0]), 0)
+    np.maximum.accumulate(indices, out=indices)
+    filled = values[indices]
+    remaining = np.isnan(filled)
+    if np.any(remaining):
+        filled[remaining] = values[np.flatnonzero(~missing)[0]]
+    return filled
 
 
 class EnergyExtendedCalculator(BaseMetricCalculator):
     """Extended ecological energy metrics.
 
     Computes Specific Cost of Transport, Energy per Meter, Peak-to-Mean Power
-    Ratio, and Standstill Energy Penalty from prior energy, path, and motion
-    results. All energy quantities are reported in watt-hours.
+    Ratio and Standstill Energy Penalty on the native telemetry of the scope.
+    All energy quantities are reported in watt-hours.
     """
 
     NAME = "energy_extended"
@@ -34,6 +59,9 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["energy", "path_metrics", "motion_metrics"]
     REQUIRED_TOPICS = [("robot_power", "robot_energy", "robot_odom")]
+
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
 
     UNITS = {
         "specific_cost_of_transport": "",
@@ -60,19 +88,18 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
 
     @staticmethod
     def _load_rolling_resistance(model: str) -> float:
-        import os
+        from pathlib import Path
 
         import yaml
 
         try:
             from ament_index_python.packages import get_package_share_directory
 
-            power_path = os.path.join(get_package_share_directory("arena_robots"), "robots", model, "telemetry", "power.yaml")
-            with open(power_path) as f:
-                data = yaml.safe_load(f)
-            return float(data.get("power_system", {}).get("rolling_resistance_crr", 0.015))
-        except Exception:
-            return 0.015
+            power_path = Path(get_package_share_directory("arena_robots")) / "robots" / model / "telemetry" / "power.yaml"
+            data = yaml.safe_load(power_path.read_text())
+            return float(data.get("power_system", {}).get("rolling_resistance_crr", _DEFAULT_ROLLING_RESISTANCE))
+        except (OSError, ImportError, ValueError, TypeError, AttributeError):
+            return _DEFAULT_ROLLING_RESISTANCE
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -85,116 +112,140 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
             "friction_dissipation_j",
         ]
 
-    def calculate(
+    def _episode_series(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Velocity (m/s), total power (W) and elapsed time (s) of the episode on the aligned clock."""
+        frame = episode.data
+        if frame is None or len(frame) == 0 or "time_ns" not in frame.columns:
+            return np.array([]), np.array([]), np.array([])
+        time_s = (frame["time_ns"].to_numpy().astype(np.float64) - float(frame["time_ns"][0])) / NANOSECONDS_PER_SECOND
+        power = _filled(frame["total_power_w"].cast(pl.Float64).to_numpy().astype(np.float64)) if "total_power_w" in frame.columns else np.full(len(frame), np.nan)
+        velocity = np.asarray(prior_results.get("velocity") or [], dtype=np.float64)
+        if len(velocity) != len(time_s):
+            velocity = np.abs(frame["vel_linear"].cast(pl.Float64).to_numpy().astype(np.float64)) if "vel_linear" in frame.columns else np.full(len(frame), np.nan)
+        return velocity, power, time_s
+
+    def _native_series(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Velocity (m/s), total power (W) and elapsed time (s) from the window's native telemetry topics."""
+        topics = self.native_topics(episode)
+        power_table = topics.get("robot_power")
+        if power_table is None or len(power_table) == 0 or "total_power_w" not in power_table.columns:
+            return np.array([]), np.array([]), np.array([])
+        power = power_table.select(pl.col("t_ns").cast(pl.Int64), pl.col("total_power_w").cast(pl.Float64)).drop_nulls("total_power_w").sort("t_ns")
+        tracks = topics.get("robot_tracks")
+        if tracks is not None and len(tracks) > 0 and "speed_mps" in tracks.columns:
+            reference = tracks.select(pl.col("t_ns").cast(pl.Int64), pl.col("speed_mps").cast(pl.Float64).abs()).drop_nulls().sort("t_ns")
+            power = power.join_asof(reference, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
+        else:
+            power = power.with_columns(pl.lit(None, dtype=pl.Float64).alias("speed_mps"))
+        time_ns = power["t_ns"].to_numpy().astype(np.int64)
+        power_w = power["total_power_w"].to_numpy().astype(np.float64)
+        velocity = _filled(power["speed_mps"].to_numpy().astype(np.float64))
+        time_s = (time_ns.astype(np.float64) - float(time_ns[0])) / NANOSECONDS_PER_SECOND
+        return velocity, power_w, time_s
+
+    def _summarize(
         self,
-        episode: AlignedEpisodeBundle,
+        velocity_mps: np.ndarray,
+        power_w: np.ndarray,
+        time_s: np.ndarray,
         prior_results: dict[str, typing.Any],
     ) -> dict[str, typing.Any]:
-        if episode.data is None:
-            return {k: None for k in self.output_keys()}
-
-        g = 9.81  # m/s^2
-        v_thresh = 0.01  # m/s, standstill threshold
+        """Extended energy metrics from the scoped velocity/power/time series and the parent-scope priors."""
         mass = self.robot_params.mass
-
-        path_length: float | None = prior_results.get("path_length")
-        energy_total_wh: float | None = prior_results.get("energy_total_wh")
-        velocity_list: list | None = prior_results.get("velocity")
-        power_ts: list | None = prior_results.get("timeseries_power_total_w")
-        time_ts: list | None = prior_results.get("timeseries_time_s")
+        path_length_m = prior_results.get("path_length")
+        energy_total_wh = prior_results.get("energy_total_wh")
 
         result: dict[str, typing.Any] = {}
 
-        # Cost of transport over total energy, i.e. the whole navigation
-        # task including static and compute overhead, not just locomotion.
-        # An undeclared mass leaves it unreported rather than guessed.
-        cot = None
-        if mass > 0 and energy_total_wh is not None and path_length is not None and path_length > 0.1 and energy_total_wh > 0:
-            e_total_j = float(energy_total_wh) * 3600.0
-            with np.errstate(divide="ignore", invalid="ignore"):
-                cot = e_total_j / (mass * g * float(path_length))
-                if not np.isfinite(cot):
-                    cot = None
-        result["specific_cost_of_transport"] = float(cot) if cot is not None else None
+        cost_of_transport = None
+        if mass > 0 and energy_total_wh is not None and path_length_m is not None and path_length_m > MIN_PATH_LENGTH_M and energy_total_wh > 0:
+            candidate = float(energy_total_wh) * SECONDS_PER_HOUR / (mass * _GRAVITY_MPS2 * float(path_length_m))
+            cost_of_transport = candidate if np.isfinite(candidate) else None
+        result["specific_cost_of_transport"] = cost_of_transport
 
-        epm = None
-        if energy_total_wh is not None and path_length is not None and path_length > 0.1 and energy_total_wh > 0:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                epm = float(energy_total_wh) / float(path_length)
-                if not np.isfinite(epm):
-                    epm = None
-        result["energy_per_meter"] = float(epm) if epm is not None else None
+        energy_per_meter = None
+        if energy_total_wh is not None and path_length_m is not None and path_length_m > MIN_PATH_LENGTH_M and energy_total_wh > 0:
+            candidate = float(energy_total_wh) / float(path_length_m)
+            energy_per_meter = candidate if np.isfinite(candidate) else None
+        result["energy_per_meter"] = energy_per_meter
 
-        pmpr = None
-        if power_ts is not None and len(power_ts) > 0:
-            p_arr = np.array(power_ts, dtype=float)
-            p_filt = _median_filter_window3(p_arr)
-            p_mean = float(np.mean(p_filt))
-            if p_mean > 0.01:
-                p_max = float(np.max(p_filt))
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    pmpr = p_max / p_mean
-                    if not np.isfinite(pmpr):
-                        pmpr = None
-        result["peak_to_mean_power_ratio"] = float(pmpr) if pmpr is not None else None
+        peak_to_mean = None
+        valid_power = power_w[~np.isnan(power_w)]
+        if len(valid_power) > 0:
+            filtered = _median_filter_window3(valid_power)
+            mean_power = float(np.mean(filtered))
+            if mean_power > MIN_MEAN_POWER_W:
+                candidate = float(np.max(filtered)) / mean_power
+                peak_to_mean = candidate if np.isfinite(candidate) else None
+        result["peak_to_mean_power_ratio"] = peak_to_mean
 
-        vel = np.array(velocity_list, dtype=float) if velocity_list is not None and len(velocity_list) > 0 else np.array([])
-        p_ts = np.array(power_ts, dtype=float) if power_ts is not None and len(power_ts) > 0 else np.array([])
-        t_ts = np.array(time_ts, dtype=float) if time_ts is not None and len(time_ts) > 0 else np.array([])
-
-        lengths = [len(vel), len(p_ts), len(t_ts)]
-        min_len = min(lengths) if lengths else 0
-
-        if min_len > 0:
-            vel_trim = vel[:min_len]
-            p_ts_trim = p_ts[:min_len]
-            t_ts_trim = t_ts[:min_len]
-
-            dt = np.diff(t_ts_trim, prepend=0.0)
-            dt[dt < 0] = 0.0
-
-            is_stationary = np.abs(vel_trim) < v_thresh
-            sep_wh = 0.0
-            if np.any(is_stationary):
-                padded = np.concatenate([[False], is_stationary, [False]])
-                edges = np.diff(padded.astype(np.int8))
-                starts = np.where(edges == 1)[0]
-                ends = np.where(edges == -1)[0]
-
-                for s, e in zip(starts, ends, strict=True):
-                    block_duration = float(np.sum(dt[s:e]))
-                    if block_duration >= 0.5:  # ignore micro-jitter blocks
-                        sep_wh += float(np.sum(p_ts_trim[s:e] * dt[s:e])) / 3600.0
-
-            result["standstill_energy_penalty_wh"] = float(sep_wh)
-        else:
+        if len(time_s) == 0:
             result["standstill_energy_penalty_wh"] = None
+            result["kinetic_energy_demand_j"] = None
+            result["friction_dissipation_j"] = None
+            return result
 
-        # Kinetic Energy Demand
-        ked = None
-        if mass > 0 and len(vel) > 1 and len(t_ts) > 1:
+        dt = np.diff(time_s, prepend=time_s[0])
+        dt[dt < 0.0] = 0.0
+        result["standstill_energy_penalty_wh"] = self._standstill_energy_wh(velocity_mps, power_w, dt)
+
+        kinetic_energy_demand = None
+        if mass > 0 and len(velocity_mps) > 1:
             inertia = 0.5 * mass * self.robot_params.robot_radius**2
-            omega = np.array(prior_results.get("angular_velocity", []), dtype=float)
-            if len(omega) == 0:
-                omega = np.zeros_like(vel)
-            min_n = min(len(vel), len(omega), len(t_ts))
-            vel_k = vel[:min_n]
-            omega_k = omega[:min_n]
-            t_k = t_ts[:min_n]
-            ke = 0.5 * mass * vel_k**2 + 0.5 * inertia * omega_k**2
-            dke = np.abs(np.diff(ke))
-            ked = float(np.sum(dke))
-        result["kinetic_energy_demand_j"] = ked
+            angular = np.asarray(prior_results.get("angular_velocity") or [], dtype=np.float64)
+            if len(angular) != len(velocity_mps):
+                angular = np.zeros_like(velocity_mps)
+            kinetic = 0.5 * mass * velocity_mps**2 + 0.5 * inertia * angular**2
+            kinetic_energy_demand = float(np.sum(np.abs(np.diff(kinetic))))
+        result["kinetic_energy_demand_j"] = kinetic_energy_demand
 
-        # Friction Dissipation
-        fd = None
-        if mass > 0 and len(vel) > 1 and len(t_ts) > 1:
-            min_n = min(len(vel), len(t_ts))
-            vel_f = vel[:min_n]
-            t_f = t_ts[:min_n]
-            dt_f = np.diff(t_f, prepend=0.0)
-            dt_f[dt_f < 0] = 0.0
-            fd = float(np.sum(self._rolling_resistance * mass * 9.81 * np.abs(vel_f) * dt_f))
-        result["friction_dissipation_j"] = fd
-
+        friction = None
+        if mass > 0 and len(velocity_mps) > 1:
+            friction = float(np.sum(self._rolling_resistance * mass * _GRAVITY_MPS2 * np.abs(velocity_mps) * dt))
+        result["friction_dissipation_j"] = friction
         return result
+
+    @staticmethod
+    def _standstill_energy_wh(velocity_mps: np.ndarray, power_w: np.ndarray, dt: np.ndarray) -> float | None:
+        """Energy drawn while standing still in blocks of at least half a second."""
+        if len(velocity_mps) == 0 or len(power_w) != len(velocity_mps):
+            return None
+        stationary = np.abs(velocity_mps) < STANDSTILL_SPEED_MPS
+        if not np.any(stationary):
+            return 0.0
+        blocks = pl.DataFrame(
+            {
+                "stationary": stationary,
+                "power_w": power_w,
+                "dt_s": dt,
+            }
+        ).with_columns(
+            (pl.col("stationary") != pl.col("stationary").shift(1)).fill_null(True).cum_sum().alias("block_id")
+        )
+        block_energy = (
+            blocks.filter(pl.col("stationary"))
+            .group_by("block_id")
+            .agg(
+                duration_s=pl.col("dt_s").sum(),
+                energy_wh=(pl.col("power_w") * pl.col("dt_s")).sum() / SECONDS_PER_HOUR,
+            )
+            .filter(pl.col("duration_s") >= MIN_STANDSTILL_BLOCK_S)
+        )
+        return float(block_energy["energy_wh"].sum()) if len(block_energy) > 0 else 0.0
+
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        velocity_mps, power_w, time_s = self._episode_series(episode, prior_results)
+        return self._summarize(velocity_mps, power_w, time_s, prior_results)
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
+            return self.calculate(episode, prior_results)
+        if scope_slice.scope == MetricScope.ENCOUNTER:
+            velocity_mps, power_w, time_s = self._native_series(episode)
+            return self._summarize(velocity_mps, power_w, time_s, prior_results)
+        raise ValueError(f"energy_extended does not serve the {scope_slice.scope.value} scope")

@@ -5,7 +5,7 @@ import typing
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 # arena_runtime_msgs/msg/EpisodeRecord outcome_state values.
@@ -22,6 +22,9 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     CATEGORY = "performance"
     DEPENDS_ON = ["time_metrics", "path_metrics", "trajectory_naturalness"]
     REQUIRED_TOPICS = ["collision_events", ("robot_tracks", "robot_odom")]
+
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
 
     UNITS = {
         "collision_amount": "",
@@ -90,7 +93,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         counts = frame[name].to_numpy().astype(float)
         if np.isnan(counts).all():
             return None
-        return cls._count_rising_edges(np.nan_to_num(counts, nan=0.0) > 0)
+        return cls._count_rising_edges(np.where(np.isnan(counts), 0.0, counts) > 0)
 
     @staticmethod
     def _hit_obstacles(episode: AlignedEpisodeBundle) -> list[str]:
@@ -98,6 +101,36 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         if contacts is None or "obstacle_id" not in contacts.columns:
             return []
         return sorted({obstacle for obstacle in contacts["obstacle_id"].drop_nulls().to_list() if obstacle})
+
+    @classmethod
+    def output_keys_for_scope(cls, scope: MetricScope) -> tuple[str, ...]:
+        if scope == MetricScope.ENCOUNTER:
+            return (
+                "collision_amount",
+                "collision_amount_wall",
+                "collision_amount_static",
+                "collision_amount_pedestrian",
+                "collision_obstacles",
+            )
+        return tuple(cls.output_keys())
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
+            return self.calculate(episode, prior_results)
+        if scope_slice.scope == MetricScope.ENCOUNTER:
+            return {
+                "collision_amount": self._column_rising_edges(episode, "collision_event") or 0,
+                "collision_amount_wall": self._column_rising_edges(episode, "collision_wall"),
+                "collision_amount_static": self._column_rising_edges(episode, "collision_static"),
+                "collision_amount_pedestrian": self._column_rising_edges(episode, "collision_pedestrian"),
+                "collision_obstacles": self._hit_obstacles(episode),
+            }
+        raise ValueError(f"collision_metrics does not serve the {scope_slice.scope.value} scope")
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
 
