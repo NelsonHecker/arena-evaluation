@@ -20,10 +20,33 @@
 #                     that writes the star value
 #
 # Only identity-grain targets (one fact row per episode and robot) are claimed for the
-# pre-port columns. The encounter/contact tables still need a reviewed reduction per
-# legacy aggregate: their remaining NO_PRODUCER keys are emitted only at EPISODE scope
-# by the calculators (hhi_contact, collision_metrics, gaze_metrics, proxemics,
-# proxemics_extended, social_forces), so no per-window value exists to reduce yet.
+# pre-port columns. Windowed social metrics (ENCOUNTER/CONTACT scopes) are now produced per
+# window, but their legacy keys are episode aggregates that no window reduction reproduces:
+# an encounter window is restricted to its own actor and to the 3 m detection radius, and a
+# contact window to [onset - 0.5 s, onset + 0.5 s], so the windows neither partition the
+# episode telemetry nor reproduce its population. The reviewed natural reductions are
+# listed here for review but deliberately not claimed (the certificate would report
+# MISMATCH); the star columns exist and surface as UNMAPPED:
+#   sum:  sfm_cumulative_force, esfm_cumulative_force, esfm_ped_cumulative_force,
+#         time_in_intimate_zone, time_in_personal_zone, time_in_social_zone,
+#         time_in_public_zone, psi_intimate_events, psi_personal_events,
+#         psi_social_events, personal_space_intrusion_integral,
+#         total_time_looking_at_pedestrians, total_time_looked_at_by_pedestrians,
+#         total_time_in_personal_space, hhi_stall_count, hhi_stall_time_s,
+#         hhi_stalls_approach, hhi_stalls_hold, hhi_stalls_post, hhi_stalls_rest,
+#         hhi_passes_between
+#   max:  sfm_peak_force, esfm_peak_force, esfm_ped_peak_force, social_force_max,
+#         social_force_ped_max, ci_max, max_speed_intimate_zone,
+#         max_speed_personal_zone, max_speed_social_zone, max_speed_public_zone
+#   mean: sfm_mean_force, esfm_mean_force, esfm_ped_mean_force, social_force_mean,
+#         social_force_ped_mean, ci_mean, tti_mean, avg_velocity_in_personal_space,
+#         movement_towards_peds_ratio, hhi_share_approach, hhi_share_hold,
+#         hhi_share_post, hhi_share_rest, hhi_pair_gap_hold
+#   min:  tti_min, hhi_min_pair_clearance
+#   no reducible aggregate: hhi_interaction, hhi_hold_onset_s, hhi_release_s,
+#         hhi_episode_s (window duration), num_pedestrians (episode peak vs one actor).
+# The three contact-scope performance columns ARE claimed below: collision_metrics writes
+# the window's own onset count and the parent episode's SPL, and contact intervals are disjoint.
 #
 # The "ported producers" section below claims the columns added by the port-boundary
 # work. fact_episodes and fact_robots carry one row per episode and robot, so their
@@ -482,3 +505,23 @@ mappings:
     star_column: stuck
     legacy_columns: [stuck]
     note: "ported vln_metrics output, published by the declaration registry"
+
+  # --- windowed contact producers: per-window facts reduced to the episode grain ----------
+  - metric_key: collision_amount
+    star_table: fact_contacts
+    star_column: collision_amount
+    legacy_columns: [collision_amount]
+    star_reduction: sum
+    note: "window-eco collision_metrics CONTACT: each contact row counts the collision onsets in its own interval; contact intervals are disjoint, so the sum reconstructs the episode count (ep32/38/42 = 1/1/1)"
+  - metric_key: collision_amount_wall
+    star_table: fact_contacts
+    star_column: collision_amount_wall
+    legacy_columns: [collision_amount_wall]
+    star_reduction: sum
+    note: "window-eco collision_metrics CONTACT: wall onsets inside each contact interval; disjoint intervals so the sum reconstructs the episode wall count"
+  - metric_key: spl
+    star_table: fact_contacts
+    star_column: spl
+    legacy_columns: [spl]
+    star_reduction: mean
+    note: "window-eco collision_metrics CONTACT: every contact row of an episode carries the parent episode's success-weighted path length, so the mean reproduces the episode SPL"

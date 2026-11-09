@@ -248,28 +248,42 @@ def test_series_table_is_empty_with_schema_without_pedestrians(calc: SocialForce
     assert_frame_equal(calc.series_table(episode), pl.DataFrame(schema=SERIES_SCHEMA))
 
 
-def test_episode_scope_recomputes_and_other_scopes_do_not_masquerade(
+def _slice(scope: MetricScope, bundle: AlignedEpisodeBundle) -> ScopeSlice:
+    """Scope slice over one bundle, used to prove which population a scope measures."""
+    return ScopeSlice(
+        scope=scope,
+        slice_id="slice",
+        t_start_ns=0,
+        t_end_ns=SEC,
+        identity={},
+        window_bundle=bundle,
+        full_episode=bundle,
+    )
+
+
+def test_episode_scope_recomputes_and_unserved_scopes_do_not_masquerade(
     calc: SocialForcesCalculator,
 ):
-    """The EPISODE scope is the calculator's own population; a non-episode slice yields typed nulls."""
+    """The EPISODE scope is the calculator's own population; a scope it does not serve yields typed nulls."""
     episode = _episode([0, SEC], [[1.0, 0.0]] * 2, [(0.0, 0.0)] * 2, [0.0, 0.0])
-    episode_slice = ScopeSlice(
-        scope=MetricScope.EPISODE,
-        slice_id="ep",
-        t_start_ns=0,
-        t_end_ns=SEC,
-        identity={},
-        window_bundle=episode,
-        full_episode=episode,
-    )
-    pedestrian_slice = ScopeSlice(
-        scope=MetricScope.PEDESTRIAN,
-        slice_id="Pedestrian_0",
-        t_start_ns=0,
-        t_end_ns=SEC,
-        identity={},
-        window_bundle=episode,
-        full_episode=episode,
-    )
-    assert calc.calculate_for_scope(episode, {}, episode_slice) == calc.calculate(episode, {})
+    assert calc.calculate_for_scope(episode, {}, _slice(MetricScope.EPISODE, episode)) == calc.calculate(episode, {})
+    pedestrian_slice = _slice(MetricScope.PEDESTRIAN, episode)
     assert all(value is None for value in calc.calculate_for_scope(episode, {}, pedestrian_slice).values())
+
+
+def test_encounter_scope_recomputes_the_window_telemetry(
+    calc: SocialForcesCalculator,
+):
+    """An ENCOUNTER slice measures its own window bundle, never the episode bundle passed alongside it."""
+    episode = _episode(
+        [0, SEC, 2 * SEC, 3 * SEC],
+        [[1.0, 0.0]] * 4,
+        [(0.0, 0.0)] * 4,
+        [0.0] * 4,
+    )
+    window = _episode([0, SEC], [[1.0, 0.0]] * 2, [(0.0, 0.0)] * 2, [0.0, 0.0])
+    encounter_slice = _slice(MetricScope.ENCOUNTER, window)
+    window_metrics = calc.calculate_for_scope(episode, {}, encounter_slice)
+    assert window_metrics == calc.calculate(window, {})
+    assert window_metrics["sfm_peak_force"] == pytest.approx(_sfm(1.0), rel=1e-9)
+    assert window_metrics["sfm_cumulative_force"] == pytest.approx(_sfm(1.0), rel=1e-4)
