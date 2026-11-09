@@ -11,6 +11,7 @@ from arena_evaluation.storage.declarations import (
     EPISODE_FACT_SCHEMA,
     FACT_SCHEMAS,
     FACT_TABLE_NAMES,
+    FactTable,
     PEDESTRIAN_FACT_SCHEMA,
     ROBOT_FACT_SCHEMA,
     MetricDeclaration,
@@ -88,22 +89,21 @@ def test_metric_declarations_neutral_module() -> None:
     decl = MetricDeclaration(
         name="detour_time_s",
         unit="s",
-        scopes=(MetricScope.ENCOUNTER,),
+        fact_table=FactTable.ENCOUNTERS,
         dtype=pl.Float64,
         description="Detour time during an encounter",
         direction="lower",
     )
     assert decl.name == "detour_time_s"
     assert decl.unit == "s"
-    assert decl.scopes == (MetricScope.ENCOUNTER,)
+    assert decl.fact_table is FactTable.ENCOUNTERS
     assert decl.direction == "lower"
 
     assert coerce_scope("episodes") == MetricScope.EPISODE
     assert coerce_scope("encounters") == MetricScope.ENCOUNTER
     assert coerce_scope(MetricScope.CONTACT) == MetricScope.CONTACT
 
-    for name in ("episodes", "encounters", "contacts", "pedestrians", "robots"):
-        assert name in FACT_TABLE_NAMES
+    for name in FACT_TABLE_NAMES:
         assert name in FACT_SCHEMAS
         assert isinstance(FACT_SCHEMAS[name], pl.Schema)
 
@@ -121,7 +121,7 @@ def test_metric_declarations_neutral_module() -> None:
         pedestrians=pl.DataFrame(schema=PEDESTRIAN_FACT_SCHEMA),
         robots=pl.DataFrame(schema=ROBOT_FACT_SCHEMA),
     )
-    assert len(tables.by_name()) == 5
+    assert len(tables.by_name()) == len(FACT_TABLE_NAMES)
 
 
 if __name__ == "__main__":

@@ -232,11 +232,9 @@ structural_replacements:
   - metric_key: char_sample_count
     reason: "new sample-count provenance for the 1NF characterization series; not a parity key"
 
-list_violations:
-  - reason: "collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending"
-    metric_keys:
-      - collision_obstacles
-      - collisions
+list_violations: []
+# collision_obstacles and collisions are no longer list violations: their provenance is
+# reshaped row-wise into fact_collisions (one row per hit obstacle).
 
 notes:
   - topic: crowd_condition

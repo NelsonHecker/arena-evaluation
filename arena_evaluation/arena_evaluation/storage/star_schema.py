@@ -1,7 +1,7 @@
 """Benchmark Star Schema Lakehouse (Layer 3).
 
 Defines the four dimension schemas (``dim_episodes``, ``dim_robots``,
-``dim_pedestrians``, ``dim_world_entities``), re-exports the five fact schemas
+``dim_pedestrians``, ``dim_world_entities``), re-exports the eleven fact schemas
 from :mod:`arena_evaluation.processing.scoped_evaluator`, and provides
 :class:`StarSchemaBuilder` plus Parquet write/scan utilities.
 """
@@ -18,13 +18,20 @@ from typing import Any, Final
 import polars as pl
 
 from arena_evaluation.storage.declarations import (
+    CHILD_FACT_TABLE_NAMES,
+    COLLISION_FACT_SCHEMA,
     CONTACT_FACT_SCHEMA,
+    EDGE_CASE_FACT_SCHEMA,
     ENCOUNTER_FACT_SCHEMA,
     EPISODE_FACT_SCHEMA,
     FACT_SCHEMAS,
     FACT_TABLE_NAMES,
+    FORMATION_FACT_SCHEMA,
+    JUDGE_DISAGREEMENT_FACT_SCHEMA,
+    MECHANISM_STATE_FACT_SCHEMA,
     PEDESTRIAN_FACT_SCHEMA,
     PEDESTRIAN_TRACKS_TOPIC,
+    PHASE_OUTCOME_FACT_SCHEMA,
     ROBOT_FACT_SCHEMA,
     ROBOT_TRACKS_TOPIC,
     ScopedFactTables,
@@ -40,7 +47,10 @@ from arena_evaluation.storage.schemas import (
 )
 
 __all__ = [
+    "CHILD_FACT_TABLE_NAMES",
+    "COLLISION_FACT_SCHEMA",
     "CONTACT_FACT_SCHEMA",
+    "EDGE_CASE_FACT_SCHEMA",
     "DIMENSION_SCHEMAS",
     "DIMENSION_TABLE_NAMES",
     "DIM_EPISODES_SCHEMA",
@@ -55,6 +65,10 @@ __all__ = [
     "FACT_PEDESTRIANS_SCHEMA",
     "FACT_ROBOTS_SCHEMA",
     "FACT_SCHEMAS",
+    "FORMATION_FACT_SCHEMA",
+    "JUDGE_DISAGREEMENT_FACT_SCHEMA",
+    "MECHANISM_STATE_FACT_SCHEMA",
+    "PHASE_OUTCOME_FACT_SCHEMA",
     "FACT_TABLE_NAMES",
     "PEDESTRIAN_FACT_SCHEMA",
     "ROBOT_FACT_SCHEMA",
@@ -73,6 +87,12 @@ FACT_ENCOUNTERS_SCHEMA: Final[pl.Schema] = ENCOUNTER_FACT_SCHEMA
 FACT_CONTACTS_SCHEMA: Final[pl.Schema] = CONTACT_FACT_SCHEMA
 FACT_PEDESTRIANS_SCHEMA: Final[pl.Schema] = PEDESTRIAN_FACT_SCHEMA
 FACT_ROBOTS_SCHEMA: Final[pl.Schema] = ROBOT_FACT_SCHEMA
+FACT_EDGE_CASES_SCHEMA: Final[pl.Schema] = EDGE_CASE_FACT_SCHEMA
+FACT_FORMATIONS_SCHEMA: Final[pl.Schema] = FORMATION_FACT_SCHEMA
+FACT_PHASE_OUTCOMES_SCHEMA: Final[pl.Schema] = PHASE_OUTCOME_FACT_SCHEMA
+FACT_JUDGE_DISAGREEMENTS_SCHEMA: Final[pl.Schema] = JUDGE_DISAGREEMENT_FACT_SCHEMA
+FACT_MECHANISM_STATES_SCHEMA: Final[pl.Schema] = MECHANISM_STATE_FACT_SCHEMA
+FACT_COLLISIONS_SCHEMA: Final[pl.Schema] = COLLISION_FACT_SCHEMA
 
 DIM_EPISODES_SCHEMA: Final[pl.Schema] = pl.Schema(
     {
@@ -175,24 +195,13 @@ DIMENSION_SCHEMAS: Final[dict[str, pl.Schema]] = {
 }
 
 STAR_TABLE_NAMES: Final[tuple[str, ...]] = (
-    "dim_episodes",
-    "dim_robots",
-    "dim_pedestrians",
-    "dim_world_entities",
-    "fact_episodes",
-    "fact_encounters",
-    "fact_contacts",
-    "fact_pedestrians",
-    "fact_robots",
+    *DIMENSION_TABLE_NAMES,
+    *(f"fact_{name}" for name in FACT_TABLE_NAMES),
 )
 
 STAR_SCHEMA_SCHEMAS: Final[dict[str, pl.Schema]] = {
     **DIMENSION_SCHEMAS,
-    "fact_episodes": EPISODE_FACT_SCHEMA,
-    "fact_encounters": ENCOUNTER_FACT_SCHEMA,
-    "fact_contacts": CONTACT_FACT_SCHEMA,
-    "fact_pedestrians": PEDESTRIAN_FACT_SCHEMA,
-    "fact_robots": ROBOT_FACT_SCHEMA,
+    **{f"fact_{name}": schema for name, schema in FACT_SCHEMAS.items()},
 }
 
 _ENV_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^(env_\d+)")
@@ -239,6 +248,14 @@ def _parse_lidar_variant(
     return None
 
 
+def _scoped_frames_by_table(
+    facts: ScopedFactTables,
+) -> dict[str, tuple[pl.DataFrame, pl.Schema]]:
+    """The scoped evaluator frames paired with their canonical schema, by short table name."""
+    frames = facts.by_name()
+    return {name: (frames[name], schema) for name, schema in FACT_SCHEMAS.items()}
+
+
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class StarSchemaTables:
     """Complete set of 4 dimension tables and 5 fact tables for a benchmark or episode."""
@@ -252,20 +269,33 @@ class StarSchemaTables:
     fact_contacts: pl.DataFrame
     fact_pedestrians: pl.DataFrame
     fact_robots: pl.DataFrame
+    fact_edge_cases: pl.DataFrame = dataclasses.field(
+        default_factory=lambda: pl.DataFrame(schema=EDGE_CASE_FACT_SCHEMA)
+    )
+    fact_formations: pl.DataFrame = dataclasses.field(
+        default_factory=lambda: pl.DataFrame(schema=FORMATION_FACT_SCHEMA)
+    )
+    fact_phase_outcomes: pl.DataFrame = dataclasses.field(
+        default_factory=lambda: pl.DataFrame(schema=PHASE_OUTCOME_FACT_SCHEMA)
+    )
+    fact_judge_disagreements: pl.DataFrame = dataclasses.field(
+        default_factory=lambda: pl.DataFrame(schema=JUDGE_DISAGREEMENT_FACT_SCHEMA)
+    )
+    fact_mechanism_states: pl.DataFrame = dataclasses.field(
+        default_factory=lambda: pl.DataFrame(schema=MECHANISM_STATE_FACT_SCHEMA)
+    )
+    fact_collisions: pl.DataFrame = dataclasses.field(
+        default_factory=lambda: pl.DataFrame(schema=COLLISION_FACT_SCHEMA)
+    )
 
     @classmethod
     def empty(cls) -> StarSchemaTables:
         """Construct an empty StarSchemaTables instance with canonical schemas."""
         return cls(
-            dim_episodes=pl.DataFrame(schema=DIM_EPISODES_SCHEMA),
-            dim_robots=pl.DataFrame(schema=DIM_ROBOTS_SCHEMA),
-            dim_pedestrians=pl.DataFrame(schema=DIM_PEDESTRIANS_SCHEMA),
-            dim_world_entities=pl.DataFrame(schema=DIM_WORLD_ENTITIES_SCHEMA),
-            fact_episodes=pl.DataFrame(schema=EPISODE_FACT_SCHEMA),
-            fact_encounters=pl.DataFrame(schema=ENCOUNTER_FACT_SCHEMA),
-            fact_contacts=pl.DataFrame(schema=CONTACT_FACT_SCHEMA),
-            fact_pedestrians=pl.DataFrame(schema=PEDESTRIAN_FACT_SCHEMA),
-            fact_robots=pl.DataFrame(schema=ROBOT_FACT_SCHEMA),
+            **{
+                name: pl.DataFrame(schema=schema)
+                for name, schema in STAR_SCHEMA_SCHEMAS.items()
+            }
         )
 
     def dimension_tables(self) -> dict[str, pl.DataFrame]:
@@ -278,24 +308,30 @@ class StarSchemaTables:
         }
 
     def fact_tables(self) -> dict[str, pl.DataFrame]:
-        """Return the five fact DataFrames keyed by ``fact_<name>``."""
+        """Return every fact DataFrame keyed by ``fact_<name>``."""
         return {
             "fact_episodes": self.fact_episodes,
             "fact_encounters": self.fact_encounters,
             "fact_contacts": self.fact_contacts,
             "fact_pedestrians": self.fact_pedestrians,
             "fact_robots": self.fact_robots,
+            "fact_edge_cases": self.fact_edge_cases,
+            "fact_formations": self.fact_formations,
+            "fact_phase_outcomes": self.fact_phase_outcomes,
+            "fact_judge_disagreements": self.fact_judge_disagreements,
+            "fact_mechanism_states": self.fact_mechanism_states,
+            "fact_collisions": self.fact_collisions,
         }
 
     def by_name(self) -> dict[str, pl.DataFrame]:
-        """Return all nine Star Schema DataFrames keyed by canonical table name."""
+        """Return every Star Schema DataFrame keyed by canonical table name."""
         return {
             **self.dimension_tables(),
             **self.fact_tables(),
         }
 
     def lazy_by_name(self) -> dict[str, pl.LazyFrame]:
-        """Return all nine Star Schema tables as LazyFrames."""
+        """Return every Star Schema table as a LazyFrame."""
         return {name: frame.lazy() for name, frame in self.by_name().items()}
 
 
@@ -378,21 +414,10 @@ class StarSchemaBuilder:
             dim_robots=dim_rob_df,
             dim_pedestrians=dim_ped_df,
             dim_world_entities=dim_world_df,
-            fact_episodes=facts.episodes.select(list(EPISODE_FACT_SCHEMA.names())).cast(
-                EPISODE_FACT_SCHEMA
-            ),
-            fact_encounters=facts.encounters.select(
-                list(ENCOUNTER_FACT_SCHEMA.names())
-            ).cast(ENCOUNTER_FACT_SCHEMA),
-            fact_contacts=facts.contacts.select(list(CONTACT_FACT_SCHEMA.names())).cast(
-                CONTACT_FACT_SCHEMA
-            ),
-            fact_pedestrians=facts.pedestrians.select(
-                list(PEDESTRIAN_FACT_SCHEMA.names())
-            ).cast(PEDESTRIAN_FACT_SCHEMA),
-            fact_robots=facts.robots.select(list(ROBOT_FACT_SCHEMA.names())).cast(
-                ROBOT_FACT_SCHEMA
-            ),
+            **{
+                f"fact_{name}": frame.select(list(schema.names())).cast(schema)
+                for name, (frame, schema) in _scoped_frames_by_table(facts).items()
+            },
         )
 
     def build_status_episode_tables(
@@ -523,29 +548,10 @@ class StarSchemaBuilder:
             return tables_seq[0]
 
         return StarSchemaTables(
-            dim_episodes=pl.concat(
-                [t.dim_episodes for t in tables_seq], how="vertical"
-            ),
-            dim_robots=pl.concat([t.dim_robots for t in tables_seq], how="vertical"),
-            dim_pedestrians=pl.concat(
-                [t.dim_pedestrians for t in tables_seq], how="vertical"
-            ),
-            dim_world_entities=pl.concat(
-                [t.dim_world_entities for t in tables_seq], how="vertical"
-            ),
-            fact_episodes=pl.concat(
-                [t.fact_episodes for t in tables_seq], how="vertical"
-            ),
-            fact_encounters=pl.concat(
-                [t.fact_encounters for t in tables_seq], how="vertical"
-            ),
-            fact_contacts=pl.concat(
-                [t.fact_contacts for t in tables_seq], how="vertical"
-            ),
-            fact_pedestrians=pl.concat(
-                [t.fact_pedestrians for t in tables_seq], how="vertical"
-            ),
-            fact_robots=pl.concat([t.fact_robots for t in tables_seq], how="vertical"),
+            **{
+                name: pl.concat([t.by_name()[name] for t in tables_seq], how="vertical")
+                for name in STAR_TABLE_NAMES
+            }
         )
 
     def build_benchmark(
@@ -1087,17 +1093,7 @@ def read_episode_star_tables(directory: pathlib.Path) -> StarSchemaTables | None
         else:
             loaded[name] = pl.DataFrame(schema=schema)
 
-    return StarSchemaTables(
-        dim_episodes=loaded["dim_episodes"],
-        dim_robots=loaded["dim_robots"],
-        dim_pedestrians=loaded["dim_pedestrians"],
-        dim_world_entities=loaded["dim_world_entities"],
-        fact_episodes=loaded["fact_episodes"],
-        fact_encounters=loaded["fact_encounters"],
-        fact_contacts=loaded["fact_contacts"],
-        fact_pedestrians=loaded["fact_pedestrians"],
-        fact_robots=loaded["fact_robots"],
-    )
+    return StarSchemaTables(**loaded)
 
 
 def write_star_schema(
@@ -1116,11 +1112,13 @@ def write_star_schema(
 
     write_fact_tables(
         ScopedFactTables(
-            episodes=tables.fact_episodes,
-            encounters=tables.fact_encounters,
-            contacts=tables.fact_contacts,
-            pedestrians=tables.fact_pedestrians,
-            robots=tables.fact_robots,
+            **{
+                name: frame
+                for name, frame in (
+                    (fact_name.removeprefix("fact_"), fact_frame)
+                    for fact_name, fact_frame in tables.fact_tables().items()
+                )
+            }
         ),
         metrics_dir,
     )

@@ -44,6 +44,7 @@ from arena_evaluation.processing.scoped_evaluator import (
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, DetectorParams
 from arena_evaluation.storage.declarations import (
     METRIC_DECLARATIONS,
+    FactTable,
     MetricDeclaration,
     declared_columns,
     declarations_for,
@@ -122,12 +123,34 @@ _SAMPLE_BY_DTYPE: typing.Final[Mapping[pl.DataType, object]] = {
 }
 
 
+_CHILD_EPISODE_LISTS: typing.Final[dict[str, object]] = {
+    "edge_case_steps": ["hold", "approach"],
+    "edge_case_agents": ["alice"],
+    "edge_case_missing": ["bob"],
+    "edge_case_unplayed": ["cara"],
+    "edge_case_formation_members": ["alice", "cara"],
+    "edge_case_formation_absent": ["bob"],
+    "phase_outcomes": ["met", "failed"],
+    "judge_disagreements": ["phase 1 recorded as met but not met in replay"],
+    "mechanism_states": [
+        {
+            "entity": "north_door",
+            "level": "0",
+            "kind": "door",
+            "progress": [0.0, 0.0, 1.0],
+            "locked": [False, False, True],
+        }
+    ],
+    "collision_obstacles": ["wall_north"],
+}
+
+
 def _complete_episode_metrics() -> dict[str, object]:
     """Fixture metrics plus one typed sample per declared EPISODE and ROBOT source key."""
-    metrics: dict[str, object] = dict(_EPISODE_METRICS)
+    metrics: dict[str, object] = {**_EPISODE_METRICS, **_CHILD_EPISODE_LISTS}
     for declaration in (
-        *declarations_for(MetricScope.EPISODE),
-        *declarations_for(MetricScope.ROBOT),
+        *declarations_for(FactTable.EPISODES),
+        *declarations_for(FactTable.ROBOTS),
     ):
         metrics.setdefault(declaration.name, _SAMPLE_BY_DTYPE[declaration.dtype])
     return metrics
@@ -475,7 +498,19 @@ def tables(episode: AlignedEpisodeBundle) -> ScopedFactTables:
 
 def test_evaluator_contract_constants() -> None:
     assert EVALUATOR_VERSION == "wp2-scoped-evaluator-v1"
-    assert FACT_TABLE_NAMES == ("episodes", "encounters", "contacts", "pedestrians", "robots")
+    assert FACT_TABLE_NAMES == (
+        "episodes",
+        "encounters",
+        "contacts",
+        "pedestrians",
+        "robots",
+        "edge_cases",
+        "formations",
+        "phase_outcomes",
+        "judge_disagreements",
+        "mechanism_states",
+        "collisions",
+    )
     assert tuple(FACT_SCHEMAS) == FACT_TABLE_NAMES
 
 
@@ -618,7 +653,7 @@ def test_encounter_null_reason_names_exactly_the_null_window_columns(tables: Sco
     """Every null declared window column names its star column; no non-null column is reported as missing."""
     row = _encounter_row(tables, "Pedestrian_1")
     codes = set(typing.cast(str, row["null_reason"]).split(";"))
-    for name in declared_columns(MetricScope.ENCOUNTER):
+    for name in declared_columns(FactTable.ENCOUNTERS):
         assert (f"{name}:no_samples" in codes) == (row[name] is None)
     # A 3 m encounter window never reaches the public zone, so its max speed is structurally null.
     assert row["max_speed_public_zone"] is None
@@ -759,7 +794,7 @@ def test_pedestrian_cumulative_sound_dose_equals_encounter_dose(tables: ScopedFa
     cara_encounter = _encounter_row(tables, "Pedestrian_3")
     assert cara["cumulative_sound_dose_pa2s"] == pytest.approx(cara_encounter["sound_exposure_dose_pa2s"])
     alice_codes = set(typing.cast(str, alice["null_reason"]).split(";"))
-    for name in declared_columns(MetricScope.PEDESTRIAN):
+    for name in declared_columns(FactTable.PEDESTRIANS):
         assert (f"{name}:no_samples" in alice_codes) == (alice[name] is None)
 
 
@@ -815,7 +850,7 @@ def test_robot_null_reason_empty(tables: ScopedFactTables) -> None:
     assert tables.robots.row(0, named=True)["null_reason"] == ""
 
 
-def test_write_fact_tables_writes_the_five_parquet_files(tables: ScopedFactTables, tmp_path: pathlib.Path) -> None:
+def test_write_fact_tables_writes_every_parquet_file(tables: ScopedFactTables, tmp_path: pathlib.Path) -> None:
     write_fact_tables(tables, tmp_path)
     written = {path.name for path in tmp_path.glob("fact_*.parquet")}
     assert written == {f"fact_{name}.parquet" for name in FACT_TABLE_NAMES}
@@ -1109,35 +1144,33 @@ def test_registry_provenance_records_topic_missing_no_samples_and_exception(epis
 
 @pytest.mark.parametrize("table_name", FACT_TABLE_NAMES)
 def test_declared_columns_are_typed_schema_columns(table_name: str) -> None:
-    scope = MetricScope(table_name)
+    table = FactTable(table_name)
     schema = FACT_SCHEMAS[table_name]
-    for declaration in declarations_for(scope):
+    for declaration in declarations_for(table):
         assert schema[declaration.name] == declaration.dtype
 
 
-def test_every_declaration_lands_in_its_scope_schema() -> None:
+def test_every_declaration_lands_in_its_table_schema() -> None:
     for declaration in METRIC_DECLARATIONS:
-        assert declaration.scopes
-        for scope in declaration.scopes:
-            assert FACT_SCHEMAS[scope.value][declaration.name] == declaration.dtype
+        assert FACT_SCHEMAS[declaration.fact_table.value][declaration.name] == declaration.dtype
 
 
-def test_declared_column_names_are_unique_within_each_scope() -> None:
-    for scope in MetricScope:
-        names = [declaration.name for declaration in declarations_for(scope)]
+def test_declared_column_names_are_unique_within_each_table() -> None:
+    for table in FactTable:
+        names = [declaration.name for declaration in declarations_for(table)]
         assert len(names) == len(set(names))
 
 
 @pytest.mark.parametrize("table_name", FACT_TABLE_NAMES)
 def test_declared_columns_keep_the_declaration_order(table_name: str) -> None:
     names = FACT_SCHEMAS[table_name].names()
-    indexes = [names.index(declaration.name) for declaration in declarations_for(MetricScope(table_name))]
+    indexes = [names.index(declaration.name) for declaration in declarations_for(FactTable(table_name))]
     assert indexes == sorted(indexes)
 
 
 @pytest.mark.parametrize(
     "declaration",
-    declarations_for(MetricScope.EPISODE),
+    declarations_for(FactTable.EPISODES),
     ids=lambda declaration: declaration.name,
 )
 def test_episode_fact_publishes_each_declared_metric(
@@ -1149,7 +1182,7 @@ def test_episode_fact_publishes_each_declared_metric(
 
 @pytest.mark.parametrize(
     "declaration",
-    declarations_for(MetricScope.ROBOT),
+    declarations_for(FactTable.ROBOTS),
     ids=lambda declaration: declaration.name,
 )
 def test_robot_fact_falls_back_to_the_declared_episode_metrics(
@@ -1175,3 +1208,97 @@ def test_declared_columns_stay_null_and_name_their_star_column(
     assert row["barn_score"] is None
     assert "barn_score:no_samples" in reason
     assert "barn_time:no_samples" in reason
+
+
+# ---------------------------------------------------------------------------
+# Child fact tables: the identity-grain list outputs reshaped into 1NF rows
+# ---------------------------------------------------------------------------
+
+
+def test_edge_case_fact_rows_reshape_each_case_list(tables: ScopedFactTables) -> None:
+    frame = tables.edge_cases
+    assert frame.height == 5
+    assert frame.schema == FACT_SCHEMAS["edge_cases"]
+    steps = frame.filter(pl.col("kind") == "step").sort("ordinal")
+    assert steps["edge_case_steps"].to_list() == ["hold", "approach"]
+    assert steps["ordinal"].to_list() == [0, 1]
+    assert frame.filter(pl.col("kind") == "agent")["edge_case_agents"].to_list() == ["alice"]
+    assert frame.filter(pl.col("kind") == "missing")["edge_case_missing"].to_list() == ["bob"]
+    assert frame.filter(pl.col("kind") == "unplayed")["edge_case_unplayed"].to_list() == ["cara"]
+    assert frame["case_idx"].unique().to_list() == [0]
+    assert frame["null_reason"].unique().to_list() == [""]
+
+
+def test_formation_fact_rows_carry_role_and_member(tables: ScopedFactTables) -> None:
+    frame = tables.formations
+    assert frame.height == 3
+    members = frame.filter(pl.col("role") == "member").sort("edge_case_formation_members")
+    assert members["edge_case_formation_members"].to_list() == ["alice", "cara"]
+    absent = frame.filter(pl.col("role") == "absent")
+    assert absent["edge_case_formation_absent"].to_list() == ["bob"]
+    assert frame["formation_idx"].unique().to_list() == [0]
+
+
+def test_phase_outcome_fact_rows_follow_the_outcome_list(tables: ScopedFactTables) -> None:
+    frame = tables.phase_outcomes
+    assert frame.height == 2
+    assert frame["phase_idx"].to_list() == [0, 1]
+    assert frame["phase_outcomes"].to_list() == ["met", "failed"]
+    assert frame["met"].to_list() == [True, False]
+
+
+def test_judge_disagreement_fact_rows_carry_the_text(tables: ScopedFactTables) -> None:
+    frame = tables.judge_disagreements
+    assert frame.height == 1
+    assert frame["judge_disagreements"].to_list() == [
+        "phase 1 recorded as met but not met in replay"
+    ]
+    assert frame["disagreement_idx"].to_list() == [0]
+
+
+def test_mechanism_state_fact_rows_are_change_points_with_one_flag(tables: ScopedFactTables) -> None:
+    frame = tables.mechanism_states
+    # progress [0, 0, 1] and locked [False, False, True] change at samples 0 and 2, two fields each.
+    assert frame.height == 4
+    assert frame["entity"].unique().to_list() == ["north_door"]
+    assert frame["kind"].unique().to_list() == ["door"]
+    assert frame["level"].unique().to_list() == ["0"]
+    assert frame["field"].unique().to_list() == ["locked", "progress"]
+    assert int(frame["mechanism_states"].sum()) == 1
+    assert frame.filter(pl.col("field") == "progress")["value"].to_list() == [1.0, 1.0]
+
+
+def test_mechanism_state_fact_rows_map_the_episode_clock(
+    episode: AlignedEpisodeBundle,
+) -> None:
+    t_ns, _ = _time_axis()
+    timed = dataclasses.replace(episode, data=pl.DataFrame({"time_ns": t_ns}))
+    tables = _evaluate(timed)
+    frame = tables.mechanism_states
+    assert frame["t_ns"].drop_nulls().to_list() == [0, 2 * (NS_PER_S // SAMPLE_RATE_HZ)]
+    assert frame["null_reason"].unique().to_list() == [""]
+
+
+def test_collision_fact_rows_carry_the_first_contact_of_each_obstacle(
+    tables: ScopedFactTables,
+) -> None:
+    frame = tables.collisions
+    assert frame.height == 1
+    row = _single_row(frame, "collision_obstacles", "wall_north")
+    assert row["collision_idx"] == 0
+    assert row["obstacle_kind"] == "wall"
+    assert row["t_ns"] == WALL_CONTACT_NS
+    assert row["x_m"] == pytest.approx(1.0)
+    assert row["y_m"] == pytest.approx(0.3)
+    assert row["collisions"] == 1
+    assert row["null_reason"] == ""
+
+
+def test_child_fact_tables_are_empty_without_their_episode_lists(
+    episode: AlignedEpisodeBundle,
+) -> None:
+    tables = _evaluate(episode, episode_metrics={"success": True})
+    for name in ("edge_cases", "formations", "phase_outcomes", "judge_disagreements", "mechanism_states", "collisions"):
+        frame = tables.by_name()[name]
+        assert frame.height == 0
+        assert frame.schema == FACT_SCHEMAS[name]
