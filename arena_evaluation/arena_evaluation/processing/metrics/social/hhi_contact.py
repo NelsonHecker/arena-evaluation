@@ -15,6 +15,10 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.social.interaction_common import (
+    ROBOT_TRACKS_TOPIC,
+    native_robot_frame,
+)
 from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
@@ -168,7 +172,7 @@ class ContactInteractionCalculator(BaseMetricCalculator):
     NAME = "hhi_contact"
     CATEGORY = "social"
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.CONTACT})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = ["robot_tracks", "pedestrian_tracks", "pedestrian_interaction_events"]
@@ -262,15 +266,16 @@ class ContactInteractionCalculator(BaseMetricCalculator):
             dist_to_goal = np.hypot(pos_x - episode.goal_pos[0], pos_y - episode.goal_pos[1])
         return stall_intervals(t_s, smoothed_speed(t_s, pos_x, pos_y), dist_to_goal)
 
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        del prior_results
-        out: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
-        axis = self._robot_time_axis(episode)
-        if axis is None:
-            return out
+    def _metrics_for_axis(
+        self,
+        episode: AlignedEpisodeBundle,
+        axis: tuple[np.ndarray, np.ndarray, np.ndarray, float],
+    ) -> dict[str, typing.Any]:
+        """Every hhi output over one robot time axis and the episode view's own interaction stream."""
         time_ns, pos_x, pos_y, t0_ns = axis
         t_s = (time_ns - t0_ns) / 1e9
         t_end = float(t_s[-1])
+        out: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
 
         topics = episode.topics or {}
         interaction_type, participants, hold_onset, release = self._contact_edges(
@@ -315,16 +320,53 @@ class ContactInteractionCalculator(BaseMetricCalculator):
                     )
         return out
 
+    def _native_axis(
+        self, window: AlignedEpisodeBundle
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
+        """The window's own robot time axis and planar positions, none when it has fewer than two samples."""
+        frame = native_robot_frame(window)
+        if frame is None or frame.height < 2:
+            return None
+        time_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
+        return (
+            time_ns,
+            frame.get_column("x").to_numpy().astype(np.float64),
+            frame.get_column("y").to_numpy().astype(np.float64),
+            float(time_ns[0]),
+        )
+
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        del prior_results
+        axis = self._robot_time_axis(episode)
+        if axis is None:
+            return dict.fromkeys(self.output_keys())
+        return self._metrics_for_axis(episode, axis)
+
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        """A contact window only requires the robot axis; its interaction stream and pair may be absent."""
+        if scope == MetricScope.CONTACT:
+            return (ROBOT_TRACKS_TOPIC,)
+        return super().required_topics_for_scope(scope)
+
     def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
         scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        """EPISODE scope only: the pair lifecycle and the window split are episode-level records."""
-        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
-            return dict.fromkeys(self.output_keys())
-        return self.calculate(episode, prior_results)
+        """EPISODE measures the aligned ground truth; a CONTACT slice measures its own window telemetry."""
+        scope = MetricScope.EPISODE if scope_slice is None else scope_slice.scope
+        match scope:
+            case MetricScope.EPISODE:
+                return self.calculate(episode, prior_results)
+            case MetricScope.CONTACT:
+                axis = self._native_axis(scope_slice.window_bundle)
+                if axis is None:
+                    return dict.fromkeys(self.output_keys())
+                return self._metrics_for_axis(scope_slice.window_bundle, axis)
+            case _:
+                return dict.fromkeys(self.output_keys())
 
     SERIES_TABLE_STEM = "hhi_contact"
 

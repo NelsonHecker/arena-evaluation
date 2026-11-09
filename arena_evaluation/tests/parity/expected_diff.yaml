@@ -197,6 +197,15 @@ relocated_series:
   - reason: "clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended"
     metric_keys:
       - clearance_timeseries
+  - reason: "social per-sample/per-stall arrays moved to the 1NF series tables (social_forces sfm_force_n/ci, proxemics_extended min_ped_clearance_m, proxemics peds_in_personal_space, gaze looking_at_peds/looked_at_by_peds, hhi_contact stall onsets); no scalar fact column is intended"
+    metric_keys:
+      - timeseries_sfm_force
+      - timeseries_ci
+      - timeseries_min_ped_clearance
+      - time_looking_at_pedestrians
+      - time_looked_at_by_pedestrians
+      - time_in_personal_space
+      - hhi_stall_onsets_s
 
 structural_replacements:
   - metric_key: char_total_energy_j

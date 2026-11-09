@@ -45,6 +45,7 @@ from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, Detecto
 from arena_evaluation.storage.declarations import (
     METRIC_DECLARATIONS,
     MetricDeclaration,
+    declared_columns,
     declarations_for,
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
@@ -613,11 +614,45 @@ def test_encounter_probst_shares_are_present_and_sum_to_one(tables: ScopedFactTa
     assert isinstance(row["probst_E_actor2"], float)
 
 
-def test_encounter_null_reason_empty_for_complete_window(tables: ScopedFactTables) -> None:
+def test_encounter_null_reason_names_exactly_the_null_window_columns(tables: ScopedFactTables) -> None:
+    """Every null declared window column names its star column; no non-null column is reported as missing."""
     row = _encounter_row(tables, "Pedestrian_1")
-    assert row["null_reason"] == ""
+    codes = set(typing.cast(str, row["null_reason"]).split(";"))
+    for name in declared_columns(MetricScope.ENCOUNTER):
+        assert (f"{name}:no_samples" in codes) == (row[name] is None)
+    # A 3 m encounter window never reaches the public zone, so its max speed is structurally null.
+    assert row["max_speed_public_zone"] is None
+    assert "max_speed_public_zone:no_samples" in codes
     assert row["detour_time_s"] == pytest.approx(0.0)
     assert row["path_deviation_m"] == pytest.approx(0.0)
+
+
+def test_encounter_fact_publishes_the_windowed_social_columns(tables: ScopedFactTables) -> None:
+    """The windowed social metrics land in fact_encounters from the encounter's own telemetry."""
+    row = _encounter_row(tables, "Pedestrian_1")
+    assert row["num_pedestrians"] == 1  # the encounter window's population is its own actor
+    peak_force = row["sfm_peak_force"]
+    assert isinstance(peak_force, float)
+    assert peak_force > 0.0
+    assert row["max_speed_intimate_zone"] == pytest.approx(1.0)
+    assert row["time_in_public_zone"] == pytest.approx(0.0)
+    intrusion = row["personal_space_intrusion_integral"]
+    assert isinstance(intrusion, float)
+    assert intrusion > 0.0
+    assert row["total_time_looking_at_pedestrians"] is not None
+
+
+def test_contact_fact_publishes_the_windowed_hhi_columns(tables: ScopedFactTables) -> None:
+    """The hhi metrics are the slice's own pre/post-contact window: one second around the 10 Hz contact sample."""
+    pedestrian_contact = _single_row(tables.contacts, "obstacle_id", "Pedestrian_1")
+    assert pedestrian_contact["hhi_episode_s"] == pytest.approx(1.0)
+    assert pedestrian_contact["hhi_share_approach"] == pytest.approx(1.0)
+    assert pedestrian_contact["hhi_share_hold"] == pytest.approx(0.0)
+    assert pedestrian_contact["hhi_stall_count"] == 0
+    assert pedestrian_contact["hhi_interaction"] is None
+    wall_contact = _single_row(tables.contacts, "obstacle_id", "wall_north")
+    assert wall_contact["hhi_episode_s"] == pytest.approx(1.0)
+    assert wall_contact["hhi_share_approach"] == pytest.approx(1.0)
 
 
 def test_no_reference_episode_nulls_detour_facts(episode: AlignedEpisodeBundle) -> None:
@@ -723,7 +758,9 @@ def test_pedestrian_cumulative_sound_dose_equals_encounter_dose(tables: ScopedFa
     cara = _pedestrian_row(tables, "Pedestrian_3")
     cara_encounter = _encounter_row(tables, "Pedestrian_3")
     assert cara["cumulative_sound_dose_pa2s"] == pytest.approx(cara_encounter["sound_exposure_dose_pa2s"])
-    assert alice["null_reason"] == ""
+    alice_codes = set(typing.cast(str, alice["null_reason"]).split(";"))
+    for name in declared_columns(MetricScope.PEDESTRIAN):
+        assert (f"{name}:no_samples" in alice_codes) == (alice[name] is None)
 
 
 def test_pedestrian_intrusion_counts(tables: ScopedFactTables) -> None:
