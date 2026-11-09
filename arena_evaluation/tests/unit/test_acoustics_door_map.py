@@ -171,18 +171,29 @@ def test_load_level_cached(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_load_barrier_map_no_world_is_none(tmp_path):
-    assert load_barrier_map("ae_nonesuch_map", run_dir=tmp_path / "run") is None
+def test_load_barrier_map_no_world_raises_and_names_the_search(tmp_path):
+    with pytest.raises(FileNotFoundError, match="ae_nonesuch_map") as error:
+        load_barrier_map("ae_nonesuch_map", run_dir=tmp_path / "run")
+    assert "run directory" in str(error.value)
 
 
-def test_load_barrier_map_corrupt_world_yaml_is_none(tmp_path):
+def test_load_barrier_map_unusable_ament_is_named_in_the_error(tmp_path, monkeypatch):
+    monkeypatch.delenv("AMENT_PREFIX_PATH", raising=False)
+    monkeypatch.delenv("ARENA_DIR", raising=False)
+    with pytest.raises(FileNotFoundError, match="installed package unavailable"):
+        load_barrier_map("ae_nonesuch_map", run_dir=tmp_path / "run")
+
+
+def test_load_barrier_map_corrupt_world_yaml_raises(tmp_path):
     _write_world(tmp_path / "run" / "worlds" / "m1", corrupt=True)
-    assert load_barrier_map("m1", run_dir=tmp_path / "run") is None
+    with pytest.raises(yaml.YAMLError):
+        load_barrier_map("m1", run_dir=tmp_path / "run")
 
 
-def test_load_barrier_map_world_without_walls_or_doors_is_none(tmp_path):
+def test_load_barrier_map_world_without_walls_or_doors_raises(tmp_path):
     _write_world(tmp_path / "run" / "worlds" / "m1", levels=[_level("0", [], zones=False)])
-    assert load_barrier_map("m1", run_dir=tmp_path / "run") is None
+    with pytest.raises(ValueError, match="no walls, doors or extent"):
+        load_barrier_map("m1", run_dir=tmp_path / "run")
 
 
 def test_load_barrier_map_needs_walls_and_doors_not_zones(tmp_path):

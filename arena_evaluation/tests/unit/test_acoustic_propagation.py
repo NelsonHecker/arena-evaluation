@@ -253,6 +253,18 @@ def test_touching_walls_pay_for_each_wall_crossed():
     assert np.isclose(att, _los_db(start, target) + 2 * WALL_TL, atol=0.5), f"two touching walls must cost twice: {att:.1f}"
 
 
+def test_line_of_sight_cannot_squeeze_past_touching_barriers():
+    # A closed door and a wall touch at a corner. The free cells on the other diagonal must not see each other for free.
+    grid = np.zeros((3, 3), dtype=np.uint8)
+    grid[1, 0] = 1
+    pixel_tl = np.where(grid == 1, WALL_TL, 0.0).astype(np.float32)
+    pixel_tl[0, 1] = DOOR_TL
+
+    att = _solve(grid, (0.0, 0.0), (RES, RES), pixel_tl=pixel_tl)
+
+    assert att == pytest.approx(DOOR_TL, abs=0.5), f"the squeeze must pay the door's TL, not pass free: {att:.2f}"
+
+
 def test_world_door_in_a_derived_wall_blocks_when_closed_and_opens_the_path(tmp_path):
     """A door in a wall derived from the world model blocks when closed and is free when open."""
     import yaml

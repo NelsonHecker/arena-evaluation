@@ -176,8 +176,16 @@ static inline bool line_of_sight(
         if (is_acoustic_barrier(grid, pixel_tl, idx)) return false;
         if (x == x1 && y == y1) break;
         int e2 = 2 * err;
-        if (e2 > -ddy) { err -= ddy; x += sx; }
-        if (e2 <  ddx) { err += ddx; y += sy; }
+        int nx = x, ny = y;
+        if (e2 > -ddy) { err -= ddy; nx += sx; }
+        if (e2 <  ddx) { err += ddx; ny += sy; }
+        // A diagonal step may not squeeze between two barrier cells that touch at a corner, as in the Dijkstra step.
+        if (nx != x && ny != y && is_acoustic_barrier(grid, pixel_tl, y * width + nx) &&
+            is_acoustic_barrier(grid, pixel_tl, ny * width + x)) {
+            return false;
+        }
+        x = nx;
+        y = ny;
     }
     return true;
 }

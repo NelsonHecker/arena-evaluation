@@ -18,6 +18,7 @@ import typing
 import numpy as np
 
 from arena_evaluation.processing.acoustics.barrier_map import BarrierMap, DoorOpening, WallSegment, derive_barrier_map
+from arena_evaluation.processing.world_lookup import installed_world_dir
 
 if typing.TYPE_CHECKING:
     from arena_simulation_setup.shared import Level
@@ -40,23 +41,31 @@ def _load_level(world_dir: str) -> Level:
     return world.compact_world(origins)
 
 
-def _world_dirs(map_name: str, run_dir: pathlib.Path | str | None = None) -> list[pathlib.Path]:
-    """Candidate world directories for a map: run_dir/worlds/<map>, the arena_simulation_setup package, then ARENA_DIR."""
-    candidates: list[pathlib.Path] = []
+def _world_candidates(
+    map_name: str, run_dir: pathlib.Path | str | None = None
+) -> list[tuple[str, pathlib.Path | None]]:
+    """Where a map's world may live, in lookup order, labelled for error messages.
+
+    A path of None marks a location that cannot be used; its label says why.
+    """
+    candidates: list[tuple[str, pathlib.Path | None]] = []
     if run_dir is not None:
-        candidates.append(pathlib.Path(run_dir) / "worlds" / map_name)
+        candidates.append(("run directory", pathlib.Path(run_dir) / "worlds" / map_name))
 
-    try:
-        from ament_index_python.packages import get_package_share_directory
-
-        candidates.append(pathlib.Path(get_package_share_directory("arena_simulation_setup")) / "worlds" / map_name)
-    except Exception:
-        pass
+    installed = installed_world_dir(map_name)
+    if installed is None:
+        candidates.append(("installed package unavailable (AMENT_PREFIX_PATH unset or package missing)", None))
+    else:
+        candidates.append(("installed package", installed))
 
     if arena_dir := os.environ.get("ARENA_DIR"):
-        candidates.append(pathlib.Path(arena_dir) / "arena_simulation_setup" / "worlds" / map_name)
+        candidates.append(("ARENA_DIR source tree", pathlib.Path(arena_dir) / "arena_simulation_setup" / "worlds" / map_name))
+    return candidates
 
-    return [cand for cand in candidates if cand.is_dir()]
+
+def _world_dirs(map_name: str, run_dir: pathlib.Path | str | None = None) -> list[pathlib.Path]:
+    """The candidate locations that exist as directories, in lookup order."""
+    return [path for _label, path in _world_candidates(map_name, run_dir=run_dir) if path is not None and path.is_dir()]
 
 
 def _find_world_level(map_name: str, run_dir: pathlib.Path | str | None = None) -> tuple[pathlib.Path, Level] | None:
@@ -86,18 +95,20 @@ def load_barrier_map(
     map_name: str,
     run_dir: pathlib.Path | str | None = None,
     resolution: float = DEFAULT_RESOLUTION_M,
-) -> BarrierMap | None:
-    """The barrier grid of a world, derived from its zones, walls and doors; None when no world is found."""
-    try:
-        found = _find_world_level(map_name, run_dir=run_dir)
-        if found is None:
-            logger.debug("No world found for map %r, no barrier map", map_name)
-            return None
-        world_dir, _level = found
-        return _barrier_map_for_world(str(world_dir), float(resolution))
-    except Exception:
-        logger.warning("Could not derive a barrier map for %r", map_name, exc_info=True)
-        return None
+) -> BarrierMap:
+    """The barrier grid of a world, derived from its zones, walls and doors.
+
+    Raises FileNotFoundError, naming every location searched, when no world declares the map. A world that is found
+    but cannot be read or derived raises its own error.
+    """
+    found = _find_world_level(map_name, run_dir=run_dir)
+    if found is None:
+        searched = "; ".join(
+            label if path is None else f"{label} at {path}" for label, path in _world_candidates(map_name, run_dir=run_dir)
+        )
+        raise FileNotFoundError(f"no world declares map {map_name!r}; searched {searched}")
+    world_dir, _level = found
+    return _barrier_map_for_world(str(world_dir), float(resolution))
 
 
 def barrier_door_tl(barrier: BarrierMap) -> dict[str, tuple[np.ndarray, float]]:

@@ -162,8 +162,10 @@ def derived_map(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
     """
     registry: dict[str, BarrierMap] = {}
 
-    def load(map_name: str, run_dir=None, resolution=None) -> BarrierMap | None:  # noqa: ARG001
-        return registry.get(map_name)
+    def load(map_name: str, run_dir=None, resolution=None) -> BarrierMap:  # noqa: ARG001
+        if map_name not in registry:
+            raise FileNotFoundError(f"no world declares map {map_name!r}")
+        return registry[map_name]
 
     monkeypatch.setattr(acoustic_exposure_module, "load_barrier_map", load)
 
@@ -299,9 +301,10 @@ def test_parse_returns_nothing_for_unusable_rows(row):
     assert AcousticExposureCalculator._parse_pedestrian_positions(row) == []
 
 
-def test_metric_yields_nulls_when_no_barrier_map_exists(calc, derived_map):
+def test_metric_raises_when_no_barrier_map_exists(calc, derived_map):
     data = _frames([(1.0, 1.0)], [[(4.0, 1.0)]])
-    assert calc.calculate(_episode(data, "unknown"), {}) == NULLS
+    with pytest.raises(FileNotFoundError, match="unknown"):
+        calc.calculate(_episode(data, "unknown"), {})
 
 
 def test_reference_run_yields_nulls(calc, derived_map):
@@ -319,8 +322,9 @@ def test_missing_map_name_yields_nulls():
     assert _calc().calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), None), {}) == NULLS
 
 
-def test_unloadable_map_yields_nulls():
-    assert _calc().calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {}) == NULLS
+def test_unknown_map_raises_instead_of_nulls():
+    with pytest.raises(FileNotFoundError, match="unknown"):
+        _calc().calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {})
 
 
 @pytest.mark.parametrize("dropped", ["pos_x_gt", "pos_y_gt", "peds_positions"])

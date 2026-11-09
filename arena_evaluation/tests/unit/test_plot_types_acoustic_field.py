@@ -18,6 +18,18 @@ from arena_evaluation.storage.schemas import PlotSpec
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
+def test_grid_extent_starts_half_a_source_cell_below_the_origin():
+    assert af_mod._cell_extent(origin_m=1.0, cells=10, cell_m=0.05, source_res_m=0.05) == pytest.approx((0.975, 1.475))
+
+
+def test_downsampled_grid_still_starts_half_a_source_cell_below_the_origin():
+    assert af_mod._cell_extent(origin_m=0.0, cells=5, cell_m=0.1, source_res_m=0.05) == pytest.approx((-0.025, 0.475))
+
+
+def test_contour_centres_sit_in_the_middle_of_each_cell():
+    assert af_mod._cell_centres(lower_m=0.975, cells=4, cell_m=0.05) == pytest.approx([1.0, 1.05, 1.1, 1.15])
+
+
 def _grid(n: int = 20) -> np.ndarray:
     grid = np.zeros((n, n), dtype=np.uint8)
     grid[0, :] = 1

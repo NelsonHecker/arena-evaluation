@@ -108,10 +108,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             run_dir = episode.folder_manager.data_root / episode.run.benchmark_id
 
         barrier = load_barrier_map(map_name, run_dir=run_dir)
-        if barrier is None:
-            logger.warning("No barrier map for '%s' (episode %s)", map_name, episode.episode_id)
-            return nulls
-
         grid, resolution = barrier.occupancy, barrier.resolution
         ox, oy = barrier.origin
 
