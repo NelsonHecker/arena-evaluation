@@ -87,6 +87,7 @@ class AcousticsCalculator(BaseMetricCalculator):
     _L_GATE_DBA = 65.0  # dBA, ASF level gate
 
     @classmethod
+    @classmethod
     def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
         # A window may legitimately lack an optional sensor stream; a missing stream is then per-metric
         # `no_samples`, not a row-level `topic_missing` that would block the whole encounter.
@@ -113,7 +114,11 @@ class AcousticsCalculator(BaseMetricCalculator):
         if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
             return self.calculate(episode, prior_results)
         if scope_slice.scope == MetricScope.ENCOUNTER:
-            return self.calculate(episode, {"path_length": self._window_path_length_m(episode)})
+            # The window bundle carries only this encounter's acoustics samples, and no window path
+            # length exists, so the per-metre acoustic cost is explicitly unavailable here.
+            window_metrics = self.calculate(episode, {})
+            window_metrics["acoustic_cost"] = None
+            return window_metrics
         raise ValueError(f"acoustics does not serve the {scope_slice.scope.value} scope")
 
     def calculate(
@@ -204,25 +209,6 @@ class AcousticsCalculator(BaseMetricCalculator):
             "acoustic_surge_index": acoustic_surge_index,
             "acoustic_cost": acoustic_cost,
         }
-
-    def _window_path_length_m(self, episode: AlignedEpisodeBundle) -> float | None:
-        """Sum of the window's native /tf robot steps in metres, None without a usable track."""
-        tracks = self.native_topics(episode).get("robot_tracks")
-        if tracks is None or len(tracks) < 2:
-            return None
-        frame = (
-            tracks.select(
-                pl.col("t_ns").cast(pl.Int64),
-                pl.col("x").cast(pl.Float64),
-                pl.col("y").cast(pl.Float64),
-            )
-            .drop_nulls(["x", "y"])
-            .sort("t_ns")
-        )
-        if len(frame) < 2:
-            return None
-        steps = (pl.col("x").diff().pow(2) + pl.col("y").diff().pow(2)).sqrt().alias("step_m")
-        return float(frame.select(steps).get_column("step_m").drop_nulls().sum())
 
     @staticmethod
     def _median_filter_3(signal: np.ndarray) -> np.ndarray:
