@@ -206,6 +206,19 @@ relocated_series:
       - time_looked_at_by_pedestrians
       - time_in_personal_space
       - hhi_stall_onsets_s
+  - reason: "path/motion/pedestrian-path per-sample arrays moved to the 1NF series tables: series_path (x_m, y_m, yaw_rad, odom_x_m, odom_y_m, odom_yaw_rad, step_length_m, curvature_inv_m, normalized_curvature, roughness), series_motion (speed_mps, acceleration_mps2, jerk_mps3), series_pedestrian_path (ped_id, x_m, y_m, z_m, yaw_rad, vx_mps, vy_mps, speed_mps); `time` duplicated the sample clock every 1NF series table already carries as t_ns, so it is retired rather than relocated"
+    metric_keys:
+      - velocity
+      - acceleration
+      - jerk
+      - path
+      - path_odom
+      - path_length_values
+      - curvature
+      - normalized_curvature
+      - roughness
+      - pedestrian_path
+      - time
 
 structural_replacements:
   - metric_key: char_total_energy_j
@@ -220,22 +233,6 @@ structural_replacements:
     reason: "new sample-count provenance for the 1NF characterization series; not a parity key"
 
 list_violations:
-  - reason: "per-sample arrays still carried in combined_metrics; the 1NF relocation is pending"
-    metric_keys:
-      - velocity
-      - acceleration
-      - jerk
-  - reason: "trajectory arrays still carried in combined_metrics; the 1NF relocation is pending"
-    metric_keys:
-      - path
-      - path_odom
-      - path_length_values
-      - curvature
-      - normalized_curvature
-      - roughness
-  - reason: "pedestrian trajectory array still carried in combined_metrics; the 1NF relocation is pending"
-    metric_keys:
-      - pedestrian_path
   - reason: "collision provenance arrays still carried in combined_metrics; the 1NF relocation is pending"
     metric_keys:
       - collision_obstacles
