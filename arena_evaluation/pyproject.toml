@@ -8,7 +8,6 @@ dependencies = [
     "mcap",
     "mcap-ros2-support",
     "numpy",
-    "pandas",
     "pillow",
     "plotly",
     "polars",
@@ -18,7 +17,6 @@ dependencies = [
     "rich",
     "rosbags>=0.11.3,<0.12",
     "scipy",
-    "seaborn",
     "shapely",
 ]
 dynamic = ["description", "license", "maintainers", "scripts", "entry-points"]
