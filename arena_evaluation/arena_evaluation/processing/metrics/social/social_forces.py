@@ -1,19 +1,126 @@
+"""Helbing-Molnar social force and personal-space index on the pedestrian frame axis.
+
+One vectorized plan: the robot track is sampled onto the pedestrian frame axis by a single
+backward asof join (:func:`~arena_evaluation.processing.pedestrian_frames.frame_geometry`),
+every repulsive force, anisotropy weight, personal-space index and per-frame total is a
+Polars expression over the resulting frame x pedestrian table. The per-frame force and index
+series are emitted as a 1NF table by :meth:`SocialForcesCalculator.series_table`.
+"""
+
 from __future__ import annotations
 
 import typing
+from typing import Final
 
-import numpy as np
+import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
-from arena_evaluation.processing.pedestrian_frames import frames_of
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.pedestrian_frames import (
+    ALIGN_TOLERANCE_NS,
+    NS_PER_S,
+    FrameGeometry,
+    frame_geometry,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+SFM_INTERACTION_STRENGTH_N: Final[float] = 2.1
+SFM_INTERACTION_RANGE_M: Final[float] = 0.3
+PEDESTRIAN_RADIUS_M: Final[float] = 0.3
+SFM_CUTOFF_M: Final[float] = 5.0
+SFM_MAX_FORCE_N: Final[float] = 100.0
+ESFM_ANISOTROPY: Final[float] = 0.5
+CI_SIGMA_FRONT_M: Final[float] = 1.0
+CI_SIGMA_SIDE_M: Final[float] = 0.5
+CI_SIGMA_X_M: Final[float] = 0.28
+CI_SIGMA_Y_M: Final[float] = 0.28
+
+SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
+    {
+        "run_id": pl.String,
+        "episode_id": pl.Int64,
+        "robot_id": pl.String,
+        "t_ns": pl.Int64,
+        "time_s": pl.Float64,
+        "sfm_force_n": pl.Float64,
+        "ci": pl.Float64,
+    }
+)
+
+
+def _anisotropy(angle_rad: pl.Expr) -> pl.Expr:
+    """Extended-SFM anisotropy weight in [0, 1] of a heading angle difference."""
+    return (ESFM_ANISOTROPY + (1.0 - ESFM_ANISOTROPY) * (1.0 + angle_rad.cos()) / 2.0).clip(
+        0.0, 1.0
+    )
+
+
+def _force_expression(combined_radius_m: float) -> pl.Expr:
+    """Helbing repulsive magnitude of one pedestrian, clamped, zero beyond the cutoff, null while unresolved."""
+    distance_m = pl.col("distance_m")
+    return (
+        pl.when(distance_m.is_null())
+        .then(pl.lit(None, dtype=pl.Float64))
+        .when(distance_m <= SFM_CUTOFF_M)
+        .then(
+            (
+                SFM_INTERACTION_STRENGTH_N
+                * ((combined_radius_m - distance_m) / SFM_INTERACTION_RANGE_M).exp()
+            ).clip(upper_bound=SFM_MAX_FORCE_N)
+        )
+        .otherwise(0.0)
+    )
+
+
+def _personal_space_index_expression() -> pl.Expr:
+    """Gaussian personal-space index of one pedestrian, elliptical along its heading when that heading is recorded."""
+    heading_cos = pl.col("ped_yaw_rad").cos()
+    heading_sin = pl.col("ped_yaw_rad").sin()
+    d_front_m = pl.col("dx_m") * heading_cos + pl.col("dy_m") * heading_sin
+    d_side_m = -pl.col("dx_m") * heading_sin + pl.col("dy_m") * heading_cos
+    positional_exponent = -(
+        pl.col("dx_m").pow(2) / (2.0 * CI_SIGMA_X_M**2)
+        + pl.col("dy_m").pow(2) / (2.0 * CI_SIGMA_Y_M**2)
+    )
+    heading_exponent = -(
+        d_front_m.pow(2) / (2.0 * CI_SIGMA_FRONT_M**2)
+        + d_side_m.pow(2) / (2.0 * CI_SIGMA_SIDE_M**2)
+    )
+    return (
+        pl.when(pl.col("ped_yaw_rad").is_null())
+        .then(positional_exponent)
+        .otherwise(heading_exponent)
+        .exp()
+    )
+
+
+def _frame_value(column: str, resolved: str) -> pl.Expr:
+    """A frame's pedestrian-derived value: zero without pedestrians, null while the robot state is unresolved."""
+    return (
+        pl.when(~pl.col("has_pedestrians"))
+        .then(pl.lit(0.0))
+        .when(~pl.col(resolved))
+        .then(pl.lit(None, dtype=pl.Float64))
+        .otherwise(pl.col(column))
+    )
+
+
+def _integral_expression(value: str) -> pl.Expr:
+    """Time integral of a per-frame value over the integration steps, null frames skipped."""
+    return (pl.col(value) * pl.col("dt_s")).drop_nulls().sum()
+
+
+def _summary_expression(value: str) -> pl.Expr:
+    """Aggregate of a per-frame value over the frames that observed it, null when no frame did."""
+    return pl.col(value).drop_nulls()
 
 
 class SocialForcesCalculator(BaseMetricCalculator):
-    """Computes social force and personal space violation metrics."""
+    """Helbing-Molnar social force, extended-SFM anisotropy and personal-space index metrics."""
 
     NAME = "social_forces"
     CATEGORY = "social"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = []
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
@@ -34,8 +141,6 @@ class SocialForcesCalculator(BaseMetricCalculator):
         "social_force_ped_mean": "N",
         "ci_max": "",
         "ci_mean": "",
-        "timeseries_sfm_force": "N",
-        "timeseries_ci": "",
     }
 
     PRIMARY_OUTPUTS = ["sfm_mean_force", "ci_mean", "social_force_ped_max"]
@@ -45,20 +150,6 @@ class SocialForcesCalculator(BaseMetricCalculator):
         "social_force_ped_max": "lower",
         "social_force_ped_mean": "lower",
     }
-
-    # SFM constants (Helbing & Molnar)
-    _A = 2.1  # interaction strength (N)
-    _B = 0.3  # interaction range (m)
-    _PED_RADIUS = 0.3  # m
-    _CUTOFF = 5.0  # m, ignore pedestrians beyond this radius
-    _MAX_FORCE = 100.0  # N, clamp so near-zero d_ij cannot overflow
-    _LAMBDA_ESFM = 0.5  # anisotropy, 0.5 = moderate rear de-weighting
-
-    # CI / SII personal-space sigmas
-    _SIGMA_FRONT = 1.0  # m, along pedestrian heading
-    _SIGMA_SIDE = 0.5  # m, perpendicular to heading
-    _SIGMA_PX0 = 0.28  # m
-    _SIGMA_PY0 = 0.28  # m
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -78,138 +169,156 @@ class SocialForcesCalculator(BaseMetricCalculator):
             "social_force_ped_mean",
             "ci_max",
             "ci_mean",
-            "timeseries_sfm_force",
-            "timeseries_ci",
         ]
 
+    @property
+    def _combined_radius_m(self) -> float:
+        """Robot-plus-pedestrian radius of the repulsive contact distance."""
+        return float(self.robot_params.robot_radius) + PEDESTRIAN_RADIUS_M
+
+    def _geometry(self, episode: AlignedEpisodeBundle) -> FrameGeometry:
+        """Robot state on the pedestrian frame axis, with every pedestrian's relative geometry."""
+        return frame_geometry(
+            self.native_ped_frame(episode),
+            self.native_topics(episode).get("robot_tracks"),
+            tolerance_ns=ALIGN_TOLERANCE_NS,
+        )
+
+    def _frame_forces(self, geometry: FrameGeometry) -> pl.DataFrame:
+        """Per-frame social force totals and personal-space index, one row per pedestrian frame."""
+        force_n = _force_expression(self._combined_radius_m)
+        robot_anisotropy = _anisotropy(
+            pl.col("robot_yaw_rad") - pl.arctan2(pl.col("dy_m"), pl.col("dx_m"))
+        )
+        pedestrian_anisotropy = (
+            pl.when(pl.col("ped_yaw_rad").is_null())
+            .then(pl.lit(1.0))
+            .otherwise(
+                _anisotropy(
+                    pl.col("ped_yaw_rad") - pl.arctan2(-pl.col("dy_m"), -pl.col("dx_m"))
+                )
+            )
+        )
+        contributions = geometry.pedestrians.with_columns(
+            force_n=force_n,
+            esfm_force_n=force_n * robot_anisotropy,
+            esfm_ped_force_n=force_n * pedestrian_anisotropy,
+            ci=_personal_space_index_expression(),
+        )
+        totals = contributions.group_by("frame_ix").agg(
+            has_pedestrians=(pl.len() > 0),
+            resolved=pl.col("distance_m").is_not_null().any(),
+            esfm_resolved=pl.col("esfm_force_n").is_not_null().any(),
+            sfm_force_n=pl.col("force_n").drop_nulls().sum(),
+            esfm_force_n=pl.col("esfm_force_n").drop_nulls().sum(),
+            esfm_ped_force_n=pl.col("esfm_ped_force_n").drop_nulls().sum(),
+            ci=pl.col("ci").drop_nulls().max(),
+        )
+        return (
+            geometry.frames.select("frame_ix", "t_ns", "dt_s")
+            .join(totals, on="frame_ix", how="left")
+            .with_columns(
+                has_pedestrians=pl.col("has_pedestrians").fill_null(False),
+                resolved=pl.col("resolved").fill_null(False),
+                esfm_resolved=pl.col("esfm_resolved").fill_null(False),
+                sfm_force_n=_frame_value("sfm_force_n", "resolved"),
+                esfm_force_n=_frame_value("esfm_force_n", "esfm_resolved"),
+                esfm_ped_force_n=_frame_value("esfm_ped_force_n", "resolved"),
+                ci=_frame_value("ci", "resolved"),
+            )
+            .sort("t_ns")
+        )
+
+    @staticmethod
+    def _aggregate(frame_forces: pl.DataFrame) -> dict[str, float | None]:
+        """Force and index summaries over the frames that observed a resolved robot-pedestrian pair."""
+        keys: Final[tuple[str, ...]] = (
+            "sfm_cumulative_force",
+            "esfm_cumulative_force",
+            "esfm_ped_cumulative_force",
+            "sfm_peak_force",
+            "sfm_mean_force",
+            "esfm_peak_force",
+            "esfm_mean_force",
+            "esfm_ped_peak_force",
+            "esfm_ped_mean_force",
+            "ci_max",
+            "ci_mean",
+        )
+        if frame_forces.height == 0 or frame_forces.select(
+            pl.col("sfm_force_n").is_not_null().any()
+        ).item() is not True:
+            return dict.fromkeys(keys)
+        row = frame_forces.select(
+            sfm_cumulative_force=_integral_expression("sfm_force_n"),
+            esfm_cumulative_force=_integral_expression("esfm_force_n"),
+            esfm_ped_cumulative_force=_integral_expression("esfm_ped_force_n"),
+            sfm_peak_force=_summary_expression("sfm_force_n").max(),
+            sfm_mean_force=_summary_expression("sfm_force_n").mean(),
+            esfm_peak_force=_summary_expression("esfm_force_n").max(),
+            esfm_mean_force=_summary_expression("esfm_force_n").mean(),
+            esfm_ped_peak_force=_summary_expression("esfm_ped_force_n").max(),
+            esfm_ped_mean_force=_summary_expression("esfm_ped_force_n").mean(),
+            ci_max=pl.col("ci").drop_nulls().max(),
+            ci_mean=pl.col("ci").drop_nulls().mean(),
+        ).row(0, named=True)
+        return {
+            key: None if row[key] is None else float(row[key])
+            for key in keys
+        }
+
+    def _episode_metrics(self, episode: AlignedEpisodeBundle) -> dict[str, float | None]:
+        """Every social-force output over the given episode view."""
+        geometry = self._geometry(episode)
+        if not geometry.observed:
+            return dict.fromkeys(self.output_keys())
+        aggregate = self._aggregate(self._frame_forces(geometry))
+        return {
+            **aggregate,
+            "social_force_max": aggregate["sfm_peak_force"],
+            "social_force_mean": aggregate["sfm_mean_force"],
+            "social_force_ped_max": aggregate["esfm_ped_peak_force"],
+            "social_force_ped_mean": aggregate["esfm_ped_mean_force"],
+        }
+
     def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
+    ) -> dict[str, typing.Any]:
+        """Compute the episode-scope social forces over the bundle's own pedestrian frames."""
+        del prior_results
+        return self._episode_metrics(episode)
+
+    def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        peds_df = self.native_ped_frame(episode)
-        if peds_df is None or "yaw" not in peds_df.columns:
-            return {k: None for k in self.output_keys()}
-        pos_x, pos_y, yaw, t_odom = self.resolve_native_pose(episode)
-        if len(pos_x) == 0:
-            return {k: None for k in self.output_keys()}
+        """EPISODE scope only: the slice's own window and pedestrian set are the population."""
+        del prior_results
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self._episode_metrics(episode)
 
-        frames = frames_of(peds_df)
-        peds_time_ns = np.array([int(frame["t_ns"][0]) for frame in frames], dtype=np.int64)
-
-        N = len(peds_time_ns)
-        if N == 0:
-            return {k: None for k in self.output_keys()}
-
-        # Robot pose sampled onto the peds time axis (backward-asof, 100 ms)
-        rpx, rpy, ryaw = self.pose_at_times(peds_time_ns, pos_x, pos_y, yaw, t_odom)
-
-        dt = np.diff(peds_time_ns) / 1e9
-        dt = np.append(dt, 0.0)
-        dt = np.where(dt == 0.0, 1e-6, dt)
-
-        d_combined = self.robot_params.robot_radius + self._PED_RADIUS
-        sx2 = 2.0 * self._SIGMA_PX0**2
-        sy2 = 2.0 * self._SIGMA_PY0**2
-
-        sfm_forces = []
-        esfm_forces = []
-        esfm_ped_forces = []
-        ci_values = []
-
-        for i, frame in enumerate(frames):
-            rx, ry = float(rpx[i]), float(rpy[i])
-            peds_arr = frame.select("x", "y").to_numpy()
-
-            if peds_arr.shape[0] == 0:
-                sfm_forces.append(0.0)
-                esfm_forces.append(0.0)
-                esfm_ped_forces.append(0.0)
-                ci_values.append(0.0)
-                continue
-
-            headings = frame["yaw"].to_numpy()
-
-            robot_yaw_i = float(ryaw[i])
-            total_sfm = 0.0
-            total_esfm = 0.0
-            total_esfm_ped = 0.0
-            max_ci = 0.0
-
-            for j in range(peds_arr.shape[0]):
-                px, py = peds_arr[j, 0], peds_arr[j, 1]
-                dx = px - rx
-                dy = py - ry
-                d_ij = np.sqrt(dx**2 + dy**2)
-
-                if j < len(headings) and not np.isnan(headings[j]):
-                    ped_heading = float(headings[j])
-                    cos_h = np.cos(ped_heading)
-                    sin_h = np.sin(ped_heading)
-                    d_front = dx * cos_h + dy * sin_h
-                    d_side = -dx * sin_h + dy * cos_h
-                    ci_val = np.exp(-(d_front**2 / (2 * self._SIGMA_FRONT**2) + d_side**2 / (2 * self._SIGMA_SIDE**2)))
-                else:
-                    ci_val = np.exp(-((dx**2) / sx2 + (dy**2) / sy2))
-
-                max_ci = max(max_ci, float(ci_val))
-
-                if d_ij > self._CUTOFF:
-                    continue
-
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    force_mag = self._A * np.exp((d_combined - d_ij) / self._B)
-                force_mag = min(float(force_mag), self._MAX_FORCE)
-                if np.isnan(force_mag) or np.isinf(force_mag):
-                    force_mag = 0.0
-                total_sfm += force_mag
-
-                # phi = angle between robot facing and direction to the ped
-                phi = robot_yaw_i - np.arctan2(py - ry, px - rx)
-                w_robot = self._LAMBDA_ESFM + (1.0 - self._LAMBDA_ESFM) * (1.0 + np.cos(phi)) / 2.0
-                w_robot = max(0.0, min(1.0, w_robot))
-                total_esfm += force_mag * w_robot
-
-                # Ped-heading anisotropy: the force the robot exerts
-                w_ped = 1.0
-                if j < len(headings) and not np.isnan(headings[j]):
-                    ped_heading = float(headings[j])
-                    phi_ped = ped_heading - np.arctan2(ry - py, rx - px)
-                    w_ped = self._LAMBDA_ESFM + (1.0 - self._LAMBDA_ESFM) * (1.0 + np.cos(phi_ped)) / 2.0
-                    w_ped = max(0.0, min(1.0, w_ped))
-                total_esfm_ped += force_mag * w_ped
-
-            sfm_forces.append(float(total_sfm))
-            esfm_forces.append(float(total_esfm))
-            esfm_ped_forces.append(float(total_esfm_ped))
-            ci_values.append(float(max_ci))
-
-        sfm_arr = np.array(sfm_forces)
-        esfm_arr = np.array(esfm_forces)
-        esfm_ped_arr = np.array(esfm_ped_forces)
-        ci_arr = np.array(ci_values)
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            sfm_cumulative = float(np.sum(sfm_arr * dt))
-            esfm_cumulative = float(np.sum(esfm_arr * dt))
-            esfm_ped_cumulative = float(np.sum(esfm_ped_arr * dt))
-
-        return {
-            "sfm_cumulative_force": sfm_cumulative,
-            "sfm_peak_force": float(np.max(sfm_arr)),
-            "sfm_mean_force": float(np.mean(sfm_arr)),
-            "esfm_cumulative_force": esfm_cumulative,
-            "esfm_peak_force": float(np.max(esfm_arr)),
-            "esfm_mean_force": float(np.mean(esfm_arr)),
-            "esfm_ped_cumulative_force": esfm_ped_cumulative,
-            "esfm_ped_peak_force": float(np.max(esfm_ped_arr)),
-            "esfm_ped_mean_force": float(np.mean(esfm_ped_arr)),
-            "social_force_max": float(np.max(sfm_arr)),
-            "social_force_mean": float(np.mean(sfm_arr)),
-            "social_force_ped_max": float(np.max(esfm_ped_arr)),
-            "social_force_ped_mean": float(np.mean(esfm_ped_arr)),
-            "ci_max": float(np.max(ci_arr)),
-            "ci_mean": float(np.mean(ci_arr)),
-            "timeseries_sfm_force": sfm_forces,
-            "timeseries_ci": ci_values,
-        }
+    def series_table(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str = "",
+        robot_id: str = "",
+    ) -> pl.DataFrame:
+        """1NF per-frame force and index series: one row per pedestrian frame, null where the state is unresolved."""
+        geometry = self._geometry(episode)
+        if geometry.frames.height == 0:
+            return pl.DataFrame(schema=SERIES_SCHEMA)
+        first_t_ns = int(geometry.frames.select(pl.col("t_ns").min()).item())
+        resolved_robot = robot_id or (episode.robot_name or "robot")
+        return self._frame_forces(geometry).select(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode.episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(resolved_robot, dtype=pl.String),
+            t_ns=pl.col("t_ns"),
+            time_s=(pl.col("t_ns") - first_t_ns).cast(pl.Float64) / NS_PER_S,
+            sfm_force_n=pl.col("sfm_force_n"),
+            ci=pl.col("ci"),
+        )

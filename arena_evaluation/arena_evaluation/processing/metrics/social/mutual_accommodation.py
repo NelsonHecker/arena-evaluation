@@ -1,24 +1,75 @@
+"""Mutual Accommodation Ratio and reference-twin metrics.
+
+MAR, PFI, the robot detour and the kinematic cost of social compliance are defined against a
+second episode (the unobstructed-robot and unhindered-pedestrian reference runs), so they are
+reconciled across episodes by the benchmark pipeline (:meth:`MutualAccommodationCalculator.
+reconcile_stage_references`), not inside one episode's scope hierarchy. The EPISODE scope
+therefore returns null for every key it cannot know on its own, and the pipeline fills them
+from the reference rows.
+"""
+
 from __future__ import annotations
 
+import logging
 import typing
+from collections.abc import Mapping, Sequence
+from typing import Final
 
 import numpy as np
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+logger = logging.getLogger(__name__)
+
+DTW_MAX_POINTS: Final[int] = 300
+DEGENERATE_SEGMENT_M2: Final[float] = 1e-12
+MIN_ROBOT_DEVIATION_M: Final[float] = 0.05
+MIN_PATH_DEVIATION_M: Final[float] = 0.01
+
+
+def _point_matrix(points: object) -> np.ndarray | None:
+    """(N, 2) float matrix of a trajectory, None when it is not a rectangular planar point container."""
+    if points is None:
+        return None
+    try:
+        array = np.asarray(points, dtype=np.float64)
+    except (TypeError, ValueError):
+        return None
+    if array.ndim == 3:
+        array = array[0]
+    if array.ndim != 2 or array.shape[1] < 2 or array.shape[0] == 0:
+        return None
+    return array[:, :2]
+
+
+def _stack_paths(paths: object) -> np.ndarray | None:
+    """Concatenated (N, 2) points of a recorded pedestrian path list, None when the paths are not uniform planar samples."""
+    if not isinstance(paths, list) or not paths:
+        return None
+    matrices: list[np.ndarray] = []
+    for path in paths:
+        if not path:
+            continue
+        try:
+            matrix = np.asarray(path, dtype=np.float64)
+        except (TypeError, ValueError):
+            return None
+        if matrix.ndim != 2 or matrix.shape[1] < 2:
+            return None
+        matrices.append(matrix)
+    if not matrices or len({matrix.shape[1] for matrix in matrices}) != 1:
+        return None
+    return np.concatenate(matrices, axis=0)[:, :2]
 
 
 class MutualAccommodationCalculator(BaseMetricCalculator):
-    """
-    Mutual Accommodation Ratio (MAR) and multi-agent reference metrics.
-
-    Evaluates the allocation of collision-avoidance responsibility by comparing:
-    1. Dynamic Robot vs. Unobstructed Robot Reference (P_unobstructed)
-    2. Dynamic Pedestrians vs. Unhindered Pedestrians Reference (P_unhindered)
-    """
+    """Mutual Accommodation Ratio, Pedestrian Flow Interference and reference-twin cost metrics."""
 
     NAME = "mutual_accommodation"
     CATEGORY = "social"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["proxemics_extended", "path_metrics", "energy_extended"]
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
@@ -51,160 +102,180 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
         ]
 
     @staticmethod
-    def compute_orthogonal_deviation(pts: np.ndarray | list, ref_polyline: np.ndarray | list) -> tuple[float, float]:
-        """
-        Compute (max_dev, mean_dev) of trajectory points orthogonally projected onto reference polyline.
-        Decouples lateral detour from temporal/speed differences (Frenet-Serret frame).
-        """
-        if pts is None or ref_polyline is None:
+    def compute_orthogonal_deviation(
+        points: object, reference_polyline: object
+    ) -> tuple[float, float]:
+        """(max, mean) orthogonal deviation of planar points from a reference polyline, 0 when either is unusable."""
+        point_matrix = _point_matrix(points)
+        reference_matrix = _point_matrix(reference_polyline)
+        if point_matrix is None or reference_matrix is None or reference_matrix.shape[0] < 2:
             return 0.0, 0.0
 
-        p_arr = np.asarray(pts, dtype=np.float64)
-        if p_arr.ndim == 3:
-            p_arr = p_arr[0]
-        r_arr = np.asarray(ref_polyline, dtype=np.float64)
-        if r_arr.ndim == 3:
-            r_arr = r_arr[0]
-
-        if len(p_arr) == 0 or len(r_arr) < 2:
-            return 0.0, 0.0
-
-        displacements = []
-        for p in p_arr:
-            min_d = float("inf")
-            for i in range(len(r_arr) - 1):
-                a = r_arr[i, :2]
-                b = r_arr[i + 1, :2]
-                ab = b - a
-                ab_len2 = float(np.dot(ab, ab))
-                if ab_len2 <= 1e-12:
-                    d = float(np.linalg.norm(p[:2] - a))
-                else:
-                    t = float(np.clip(np.dot(p[:2] - a, ab) / ab_len2, 0.0, 1.0))
-                    proj = a + t * ab
-                    d = float(np.linalg.norm(p[:2] - proj))
-                if d < min_d:
-                    min_d = d
-            displacements.append(min_d)
-
-        return float(np.max(displacements)), float(np.mean(displacements))
+        segment_start = reference_matrix[:-1]
+        segment_delta = reference_matrix[1:] - segment_start
+        segment_length_m2 = np.einsum("ij,ij->i", segment_delta, segment_delta)
+        usable = segment_length_m2 > DEGENERATE_SEGMENT_M2
+        if not np.any(usable):
+            distances_m = np.linalg.norm(
+                point_matrix[:, None, :] - segment_start[None, 0, :], axis=2
+            )
+        else:
+            start = segment_start[usable]
+            delta = segment_delta[usable]
+            length_m2 = segment_length_m2[usable]
+            offset = point_matrix[:, None, :] - start[None, :, :]
+            projection = np.clip(
+                np.einsum("nmk,mk->nm", offset, delta) / length_m2, 0.0, 1.0
+            )
+            projected = start[None, :, :] + projection[..., None] * delta[None, :, :]
+            distances_m = np.linalg.norm(point_matrix[:, None, :] - projected, axis=2)
+        nearest_m = distances_m.min(axis=1)
+        return float(np.max(nearest_m)), float(np.mean(nearest_m))
 
     @staticmethod
-    def compute_pfi_dtw(actual_paths: list, ref_paths: list) -> float | None:
-        """
-        Compute Pedestrian Flow Interference (PFI) via Dynamic Time Warping (DTW).
-        """
-        if not actual_paths or not ref_paths:
+    def compute_pfi_dtw(actual_paths: object, reference_paths: object) -> float | None:
+        """Pedestrian Flow Interference: mean normalised dynamic-time-warping distance of the paths."""
+        actual = actual_paths if isinstance(actual_paths, Sequence) else ()
+        reference = reference_paths if isinstance(reference_paths, Sequence) else ()
+        if not actual or not reference:
             return None
 
         errors: list[float] = []
-        n = min(len(actual_paths), len(ref_paths))
-        for i in range(n):
-            a, r = actual_paths[i], ref_paths[i]
-            if a is None or r is None or len(a) < 2 or len(r) < 2:
+        for actual_path, reference_path in zip(actual, reference, strict=False):
+            actual_matrix = _point_matrix(actual_path)
+            reference_matrix = _point_matrix(reference_path)
+            if actual_matrix is None or reference_matrix is None:
                 continue
-            a_arr = np.asarray(a, dtype=np.float64)
-            r_arr = np.asarray(r, dtype=np.float64)
-            if a_arr.ndim != 2 or r_arr.ndim != 2 or a_arr.shape[1] < 2 or r_arr.shape[1] < 2:
+            if len(actual_matrix) < 2 or len(reference_matrix) < 2:
                 continue
-            a_arr = a_arr[np.isfinite(a_arr[:, :2]).all(axis=1)]
-            r_arr = r_arr[np.isfinite(r_arr[:, :2]).all(axis=1)]
-            if len(a_arr) < 2 or len(r_arr) < 2:
+            actual_matrix = actual_matrix[np.isfinite(actual_matrix).all(axis=1)]
+            reference_matrix = reference_matrix[np.isfinite(reference_matrix).all(axis=1)]
+            if len(actual_matrix) < 2 or len(reference_matrix) < 2:
                 continue
-            if len(a_arr) > 300:
-                idx_a = np.linspace(0, len(a_arr) - 1, 300, dtype=int)
-                a_arr = a_arr[idx_a]
-            if len(r_arr) > 300:
-                idx_r = np.linspace(0, len(r_arr) - 1, 300, dtype=int)
-                r_arr = r_arr[idx_r]
-            from scipy.spatial.distance import cdist
-
-            dist_m = cdist(a_arr[:, :2], r_arr[:, :2])
-            nr, nc = dist_m.shape
-            cost = np.full((nr, nc), np.inf)
-            cost[0, 0] = dist_m[0, 0]
-            for row_i in range(1, nr):
-                cost[row_i, 0] = cost[row_i - 1, 0] + dist_m[row_i, 0]
-            for col_j in range(1, nc):
-                cost[0, col_j] = cost[0, col_j - 1] + dist_m[0, col_j]
-            for row_i in range(1, nr):
-                for col_j in range(1, nc):
-                    cost[row_i, col_j] = dist_m[row_i, col_j] + min(cost[row_i - 1, col_j], cost[row_i, col_j - 1], cost[row_i - 1, col_j - 1])
-            errors.append(float(cost[-1, -1] / max(nr, nc)))
+            if len(actual_matrix) > DTW_MAX_POINTS:
+                actual_matrix = actual_matrix[
+                    np.linspace(0, len(actual_matrix) - 1, DTW_MAX_POINTS, dtype=int)
+                ]
+            if len(reference_matrix) > DTW_MAX_POINTS:
+                reference_matrix = reference_matrix[
+                    np.linspace(0, len(reference_matrix) - 1, DTW_MAX_POINTS, dtype=int)
+                ]
+            distance_m = np.hypot(
+                actual_matrix[:, None, 0] - reference_matrix[None, :, 0],
+                actual_matrix[:, None, 1] - reference_matrix[None, :, 1],
+            )
+            rows, columns = distance_m.shape
+            cost = np.full((rows, columns), np.inf)
+            cost[0, 0] = distance_m[0, 0]
+            for row in range(1, rows):
+                cost[row, 0] = cost[row - 1, 0] + distance_m[row, 0]
+            for column in range(1, columns):
+                cost[0, column] = cost[0, column - 1] + distance_m[0, column]
+            for row in range(1, rows):
+                for column in range(1, columns):
+                    cost[row, column] = distance_m[row, column] + min(
+                        cost[row - 1, column],
+                        cost[row, column - 1],
+                        cost[row - 1, column - 1],
+                    )
+            errors.append(float(cost[-1, -1] / max(rows, columns)))
 
         return float(np.mean(errors)) if errors else None
 
     @classmethod
     def reconcile_stage_references(
         cls,
-        dynamic_row: dict[str, typing.Any],
-        ref_robot_row: dict[str, typing.Any] | None,
-        ref_ped_row: dict[str, typing.Any] | None,
+        dynamic_row: Mapping[str, typing.Any],
+        ref_robot_row: Mapping[str, typing.Any] | None,
+        ref_ped_row: Mapping[str, typing.Any] | None,
     ) -> dict[str, typing.Any]:
-        """
-        Reconcile dynamic episode metrics against stage reference runs (unobstructed robot and unhindered peds).
-        """
-        results: dict[str, typing.Any] = {k: None for k in cls.output_keys()}
+        """Reconcile one episode's metrics against its stage's unobstructed-robot and unhindered-pedestrian rows."""
+        from arena_evaluation.processing.metrics.social.pedestrian_disturbance import (
+            PedestrianDisturbanceCalculator,
+        )
+
+        results: dict[str, typing.Any] = dict.fromkeys(cls.output_keys())
 
         actual_ped_paths = dynamic_row.get("pedestrian_path")
         actual_robot_path = dynamic_row.get("path")
+        reference_ped_paths = None if ref_ped_row is None else ref_ped_row.get("pedestrian_path")
 
-        # 1. Pedestrian Flow Interference (PFI) & Deflection
-        pfi_val = None
-        if actual_ped_paths and ref_ped_row and (ref_ped_paths := ref_ped_row.get("pedestrian_path")):
-            pfi_val = cls.compute_pfi_dtw(actual_ped_paths, ref_ped_paths)
-            if pfi_val is not None:
-                results["pfi"] = round(float(pfi_val), 4)
+        interference: float | None = None
+        if actual_ped_paths and reference_ped_paths:
+            interference = cls.compute_pfi_dtw(actual_ped_paths, reference_ped_paths)
+            if interference is not None:
+                results["pfi"] = round(float(interference), 4)
+            actual_ped_points = _stack_paths(actual_ped_paths)
+            reference_ped_points = _stack_paths(reference_ped_paths)
+            if actual_ped_points is not None and reference_ped_points is not None:
+                deflection = PedestrianDisturbanceCalculator._compute_trajectory_deflection(
+                    actual_ped_points, reference_ped_points
+                )
+                results["ped_path_deflection_m"] = round(float(deflection), 3)
 
-            try:
-                actual_pts = np.concatenate([np.array(p) for p in actual_ped_paths if len(p) > 0], axis=0) if isinstance(actual_ped_paths, list) else np.array(actual_ped_paths)
-                ref_pts = np.concatenate([np.array(p) for p in ref_ped_paths if len(p) > 0], axis=0) if isinstance(ref_ped_paths, list) else np.array(ref_ped_paths)
-                if len(actual_pts) > 0 and len(ref_pts) > 0 and actual_pts.ndim == 2 and ref_pts.ndim == 2:
-                    from .pedestrian_disturbance import PedestrianDisturbanceCalculator
+        if ref_robot_row is None:
+            return results
 
-                    deflect = PedestrianDisturbanceCalculator._compute_trajectory_deflection(actual_pts, ref_pts)
-                    results["ped_path_deflection_m"] = round(float(deflect), 3)
-            except Exception:
-                pass
+        reference_robot_path = ref_robot_row.get("path")
+        robot_deviation_m: float | None = None
+        actual_robot_points = _point_matrix(actual_robot_path)
+        reference_robot_points = _point_matrix(reference_robot_path)
+        if actual_robot_points is not None and reference_robot_points is not None:
+            maximum_m, _ = cls.compute_orthogonal_deviation(
+                actual_robot_points, reference_robot_points
+            )
+            robot_deviation_m = float(maximum_m)
+            results["robot_path_deviation_m"] = round(robot_deviation_m, 3)
 
-        # 2. Robot Lateral Detour & MAR Computation
-        if ref_robot_row:
-            ref_robot_path = ref_robot_row.get("path")
-            robot_lat_dev = None
-            if actual_robot_path is not None and ref_robot_path is not None:
-                try:
-                    max_d, _ = cls.compute_orthogonal_deviation(actual_robot_path, ref_robot_path)
-                    robot_lat_dev = float(max_d)
-                    results["robot_path_deviation_m"] = round(robot_lat_dev, 3)
-                except Exception:
-                    pass
+        if interference is not None:
+            if robot_deviation_m is not None and robot_deviation_m > 0.0:
+                results["mar"] = round(
+                    float(interference / max(robot_deviation_m, MIN_ROBOT_DEVIATION_M)), 4
+                )
+            elif (
+                dynamic_row.get("path_length") is not None
+                and ref_robot_row.get("path_length") is not None
+            ):
+                path_deviation_m = max(
+                    float(dynamic_row["path_length"])
+                    - float(ref_robot_row["path_length"]),
+                    MIN_PATH_DEVIATION_M,
+                )
+                results["mar"] = round(float(interference / path_deviation_m), 4)
 
-            if pfi_val is not None:
-                if robot_lat_dev is not None and robot_lat_dev > 0:
-                    results["mar"] = round(float(pfi_val / max(robot_lat_dev, 0.05)), 4)
-                elif dynamic_row.get("path_length") is not None and ref_robot_row.get("path_length") is not None:
-                    ref_len = float(ref_robot_row["path_length"])
-                    robot_dev = max(float(dynamic_row["path_length"]) - ref_len, 0.01)
-                    results["mar"] = round(float(pfi_val / robot_dev), 4)
+        reference_time_s = ref_robot_row.get("time_to_goal")
+        episode_time_s = dynamic_row.get("time_to_goal")
+        if (
+            reference_time_s is not None
+            and episode_time_s is not None
+            and float(episode_time_s) > 0.0
+        ):
+            results["relative_throughput"] = round(
+                float(reference_time_s) / float(episode_time_s), 4
+            )
 
-            # 3. Relative Throughput (Speed under congestion vs free run)
-            ref_time = ref_robot_row.get("time_to_goal")
-            ep_time = dynamic_row.get("time_to_goal")
-            if ref_time is not None and ep_time is not None and float(ep_time) > 0:
-                results["relative_throughput"] = round(float(ref_time) / float(ep_time), 4)
-
-            # 4. Kinematic Cost of Social Compliance (KCSC Wh)
-            ref_energy = ref_robot_row.get("energy_total_wh")
-            ep_energy = dynamic_row.get("energy_total_wh")
-            if ref_energy is not None and ep_energy is not None:
-                results["kcsc_wh"] = round(max(float(ep_energy) - float(ref_energy), 0.0), 4)
-
+        reference_energy_wh = ref_robot_row.get("energy_total_wh")
+        episode_energy_wh = dynamic_row.get("energy_total_wh")
+        if reference_energy_wh is not None and episode_energy_wh is not None:
+            results["kcsc_wh"] = round(
+                max(float(episode_energy_wh) - float(reference_energy_wh), 0.0), 4
+            )
         return results
 
     def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
+    ) -> dict[str, typing.Any]:
+        """EPISODE scope: every reference-twin output is null until the pipeline reconciles the stage's references."""
+        del episode, prior_results
+        return dict.fromkeys(self.output_keys())
+
+    def calculate_for_scope(
         self,
         episode: AlignedEpisodeBundle,
         prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        del episode, prior_results
-        return {k: None for k in self.output_keys()}
+        """EPISODE scope only: the twin baselines are separate episodes, reconciled after the run."""
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self.calculate(episode, prior_results)

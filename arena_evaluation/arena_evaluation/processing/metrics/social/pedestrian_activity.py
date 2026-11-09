@@ -29,7 +29,7 @@ def pedestrian_round_trips_frame(trajectory: pl.DataFrame) -> pl.DataFrame:
 
 
 class PedestrianActivityCalculator(BaseMetricCalculator):
-    """Pedestrian lifetime activity metrics: distance traveled, mean speed, rounds, deflection."""
+    """Pedestrian lifetime activity metrics: distance traveled, mean speed and patrol rounds."""
 
     NAME = "pedestrian_activity"
     CATEGORY = "social"
@@ -42,14 +42,12 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
     UNITS = {
         "total_distance_m": "m",
         "mean_speed_mps": "m/s",
-        "ped_path_deflection_m": "m",
         "round_trips_completed": "",
     }
     PRIMARY_OUTPUTS = ["total_distance_m", "mean_speed_mps"]
     OUTPUT_DIRECTIONS = {
         "total_distance_m": "higher",
         "mean_speed_mps": "higher",
-        "ped_path_deflection_m": "lower",
         "round_trips_completed": "higher",
     }
 
@@ -58,7 +56,6 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
         return [
             "total_distance_m",
             "mean_speed_mps",
-            "ped_path_deflection_m",
             "round_trips_completed",
         ]
 
@@ -76,7 +73,6 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
             return {
                 "total_distance_m": None,
                 "mean_speed_mps": None,
-                "ped_path_deflection_m": None,
                 "round_trips_completed": 0,
             }
 
@@ -88,7 +84,6 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
             return {
                 "total_distance_m": None,
                 "mean_speed_mps": None,
-                "ped_path_deflection_m": None,
                 "round_trips_completed": 0,
             }
 
@@ -116,14 +111,9 @@ class PedestrianActivityCalculator(BaseMetricCalculator):
             completed = disp_df.filter(pl.col("is_away") & ~pl.col("next_away").fill_null(True))
             round_trips = len(completed)
 
-        deflection = prior_results.get("ped_path_deflection_m")
-        if deflection is None:
-            deflection = prior_results.get("path_deviation_m")
-
         return {
             "total_distance_m": total_distance_m,
             "mean_speed_mps": mean_speed_mps,
-            "ped_path_deflection_m": float(deflection) if deflection is not None else None,
             "round_trips_completed": round_trips,
         }
 
