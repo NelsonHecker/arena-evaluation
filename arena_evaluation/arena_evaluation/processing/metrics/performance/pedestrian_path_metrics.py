@@ -1,17 +1,46 @@
+"""Pedestrian trajectories as a flat 1NF series table.
+
+One row per recorded pedestrian frame ``(t_ns, ped_id)``, carrying the position and,
+when the recording published them, the velocity components. The legacy per-pedestrian
+list column is the pre-1NF mirror and has no scalar replacement: this calculator
+publishes no metric-row outputs, only :meth:`series_table`.
+"""
+
 from __future__ import annotations
 
 import typing
 
-import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
-from arena_evaluation.processing.pedestrian_frames import pedestrians_at
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+
+NANOSECONDS_PER_SECOND: typing.Final[float] = 1e9
+
+SERIES_TABLE_STEM = "pedestrian_path"
+
+# One row per (episode, pedestrian, frame); no list or struct columns.
+SERIES_SCHEMA: typing.Final[dict[str, pl.DataType]] = {
+    "run_id": pl.String,
+    "episode_id": pl.Int64,
+    "robot_id": pl.String,
+    "t_ns": pl.Int64,
+    "time_s": pl.Float64,
+    "ped_id": pl.String,
+    "x_m": pl.Float64,
+    "y_m": pl.Float64,
+    "z_m": pl.Float64,
+    "yaw_rad": pl.Float64,
+    "vx_mps": pl.Float64,
+    "vy_mps": pl.Float64,
+    "speed_mps": pl.Float64,
+}
+
+_REQUIRED_TRACK_COLUMNS: typing.Final[frozenset[str]] = frozenset({"t_ns", "ped_id", "x", "y"})
 
 
 class PedestrianPathMetricsCalculator(BaseMetricCalculator):
-    """Calculates time-synchronized pedestrian trajectory paths."""
+    """Time-synchronized pedestrian trajectories, published only as the ``series_pedestrian_path`` table."""
 
     NAME = "pedestrian_path_metrics"
     CATEGORY = "performance"
@@ -22,69 +51,50 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
     SCOPE = MetricScope.EPISODE
     SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.PEDESTRIAN})
 
-    UNITS = {"pedestrian_path": "m"}
-
     @classmethod
     def output_keys(cls) -> list[str]:
-        return ["pedestrian_path"]
+        return []
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+        del episode, prior_results
+        return {}
 
-        peds_df = self.native_ped_frame(episode)
-        if episode.data is None or peds_df is None or len(peds_df) == 0:
-            return {"pedestrian_path": []}
+    @staticmethod
+    def _optional_track_column(tracks: pl.DataFrame, column: str) -> pl.Expr:
+        """Optional telemetry column cast to Float64, null when the recording predates it."""
+        # agent-contracts: ignore MCAP schema evolution
+        if column not in tracks.columns:
+            return pl.lit(None, dtype=pl.Float64)
+        return pl.col(column).cast(pl.Float64)
 
-        time_ns = episode.data["time_ns"].to_numpy()
-        T = len(time_ns)
-        if T == 0:
-            return {"pedestrian_path": []}
+    def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
+        """1NF flat pedestrian path series, one row per pedestrian frame; schema-typed when empty."""
+        tracks = self.native_ped_frame(episode)
+        if tracks is None or tracks.height == 0:
+            return pl.DataFrame(schema=SERIES_SCHEMA)
+        missing = sorted(_REQUIRED_TRACK_COLUMNS - set(tracks.columns))
+        if missing:
+            raise ValueError(f"pedestrian_tracks lacks {missing}; the telemetry contract is (t_ns, ped_id, x, y, z, yaw, vx, vy, speed_mps)")
 
-        paths = {ped_id: [[float("nan")] * 3 for _ in range(T)] for ped_id in peds_df["ped_id"].unique().sort().to_list()}
-        row_of = {int(stamp): row for row, stamp in enumerate(time_ns)}
-        present = pedestrians_at(pl.Series("time_ns", time_ns.astype(np.int64)), peds_df)
-        for ped_id, stamp, x, y, z in present.select("ped_id", "time_ns", "x", "y", "z").iter_rows():
-            paths[ped_id][row_of[int(stamp)]] = [x, y, z]
+        present = tracks.filter(
+            pl.col("x").is_not_null() & ~pl.col("x").is_nan() & pl.col("y").is_not_null() & ~pl.col("y").is_nan()
+        ).sort(["t_ns", "ped_id"])
+        if present.height == 0:
+            return pl.DataFrame(schema=SERIES_SCHEMA)
 
-        for path in paths.values():
-            for t in range(1, T):
-                if np.isnan(path[t][0]):
-                    path[t] = path[t - 1]
-
-        valid_paths = [path for path in paths.values() if any(not np.isnan(pt[0]) for pt in path)]
-        return {"pedestrian_path": valid_paths}
-
-    def _native_paths(self, episode: AlignedEpisodeBundle) -> list[list[list[float]]]:
-        """One path per pedestrian from the window's native pedestrian track, gaps forward-filled per pedestrian."""
-        peds = self.native_ped_frame(episode)
-        if peds is None or len(peds) == 0 or not {"t_ns", "ped_id", "x", "y"} <= set(peds.columns):
-            return []
-        z = pl.col("z").forward_fill().over("ped_id") if "z" in peds.columns else pl.lit(0.0, dtype=pl.Float64)
-        rows = (
-            peds.sort(["ped_id", "t_ns"])
-            .with_columns(
-                x=pl.col("x").cast(pl.Float64).forward_fill().over("ped_id"),
-                y=pl.col("y").cast(pl.Float64).forward_fill().over("ped_id"),
-                z=z,
-            )
-            .filter(pl.col("x").is_not_null() & pl.col("y").is_not_null())
+        first_t_ns = int(present["t_ns"].min())
+        return present.select(
+            run_id=pl.lit(run_id, dtype=pl.String),
+            episode_id=pl.lit(int(episode.episode_id), dtype=pl.Int64),
+            robot_id=pl.lit(robot_id or (episode.robot_name or "robot"), dtype=pl.String),
+            t_ns=pl.col("t_ns").cast(pl.Int64),
+            time_s=(pl.col("t_ns").cast(pl.Float64) - first_t_ns) / NANOSECONDS_PER_SECOND,
+            ped_id=pl.col("ped_id").cast(pl.String),
+            x_m=pl.col("x").cast(pl.Float64),
+            y_m=pl.col("y").cast(pl.Float64),
+            z_m=self._optional_track_column(tracks, "z"),
+            yaw_rad=self._optional_track_column(tracks, "yaw"),
+            vx_mps=self._optional_track_column(tracks, "vx"),
+            vy_mps=self._optional_track_column(tracks, "vy"),
+            speed_mps=self._optional_track_column(tracks, "speed_mps"),
         )
-        if len(rows) == 0:
-            return []
-        grouped = (
-            rows.group_by("ped_id", maintain_order=True)
-            .agg(pl.concat_list([pl.col("x"), pl.col("y"), pl.col("z")]).alias("path"))
-            .sort("ped_id")
-        )
-        return [[list(point) for point in path] for path in grouped["path"].to_list()]
-
-    def calculate_for_scope(
-        self,
-        episode: AlignedEpisodeBundle,
-        prior_results: dict[str, typing.Any],
-        scope_slice: ScopeSlice | None = None,
-    ) -> dict[str, typing.Any]:
-        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
-            return self.calculate(episode, prior_results)
-        if scope_slice.scope == MetricScope.PEDESTRIAN:
-            return {"pedestrian_path": self._native_paths(episode)}
-        raise ValueError(f"pedestrian_path_metrics does not serve the {scope_slice.scope.value} scope")

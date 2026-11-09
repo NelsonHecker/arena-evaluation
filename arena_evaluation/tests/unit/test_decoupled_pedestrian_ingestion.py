@@ -303,13 +303,17 @@ def test_concurrent_dual_topic_ingestion_eliminates_double_counting(tmp_path: pa
     assert arena_df["desired_speed"].null_count() == 4
     assert arena_df["policy"].null_count() == 4
 
-    # 3. Downstream TopicBundle binds strictly to authoritative physics telemetry
+    # 3. `pedestrian_tracks` binds the map-frame arena stream, which shares the robot-track frame;
+    #    the physics telemetry stays available as `pedestrian_tracks_physics`.
     bundle_tracks = bundles["env_0_jackal"].pedestrian_tracks.collect()
-    assert bundle_tracks.height == 6
-    assert bundle_tracks["t_ns"].to_list() == physics_stamps
-    assert bundle_tracks["radius_m"].to_list() == pytest.approx([0.4] * 6)
-    assert bundle_tracks["desired_speed"].to_list() == pytest.approx([1.1] * 6)
-    assert bundle_tracks["policy"].to_list() == ["social_force"] * 6
+    assert bundle_tracks.height == len(visual_stamps)
+    assert bundle_tracks["t_ns"].to_list() == visual_stamps
+    bundle_physics = bundles["env_0_jackal"].pedestrian_tracks_physics.collect()
+    assert bundle_physics.height == len(physics_stamps)
+    assert bundle_physics["t_ns"].to_list() == physics_stamps
+    assert bundle_physics["radius_m"].to_list() == pytest.approx([0.4] * 6)
+    assert bundle_physics["desired_speed"].to_list() == pytest.approx([1.1] * 6)
+    assert bundle_physics["policy"].to_list() == ["social_force"] * 6
 
 
 def test_agent_frame_flat_layout_metadata_ingestion(tmp_path: pathlib.Path) -> None:

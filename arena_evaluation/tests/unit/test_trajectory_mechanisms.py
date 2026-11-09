@@ -125,7 +125,8 @@ def test_mechanism_states_sampled_on_the_time_grid():
     assert by_name["door_a"]["locked"] == [False, False, False, True, True, True]
     assert by_name["elev_a"]["progress"] == [0.0, 0.0, 0.0, 0.0, 0.5, 0.5]
     assert by_name["elev_a"]["locked"] == [False] * 6
-    assert MechanismStatesCalculator(RobotParams()).calculate(episode, {})["mechanism_states"] is None
+    without_prior = MechanismStatesCalculator(RobotParams()).calculate(episode, {})["mechanism_states"]
+    assert without_prior is not None and len(without_prior) == 2
 
 
 def _episode_row(planner: str, episode: int, xs: list[float], result: str, states: list[dict] | None) -> dict:

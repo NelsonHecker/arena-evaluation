@@ -169,7 +169,7 @@ class BaseMetricCalculator(ABC):
         track_x = df["pos_x_gt"].to_numpy().copy()
         track_y = df["pos_y_gt"].to_numpy().copy()
         track_yaw = df["yaw_gt"].to_numpy().copy()
-        has_odometry = "pos_x" in df.columns
+        has_odometry = "pos_x" in df.columns and "yaw" in df.columns
         odom_x = df["pos_x"].to_numpy().astype(np.float64) if has_odometry else empty
         odom_y = df["pos_y"].to_numpy().astype(np.float64) if has_odometry else empty
         odom_yaw = df["yaw"].to_numpy().astype(np.float64) if has_odometry else empty

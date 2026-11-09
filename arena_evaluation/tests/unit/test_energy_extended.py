@@ -1,6 +1,9 @@
+import dataclasses
+
 import polars as pl
 import pytest
 
+from arena_evaluation.processing.metrics.base import MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.ecological.energy_extended import (
     EnergyExtendedCalculator,
 )
@@ -121,3 +124,55 @@ def test_kinetic_energy_demand_follows_the_velocity_track(calc):
     inertia = 0.5 * MASS * 0.25**2
     kinetic = [0.5 * MASS * v**2 + 0.0 * inertia for v in [0.0, 1.0, 1.0, 0.0]]
     assert results["kinetic_energy_demand_j"] == pytest.approx(sum(abs(b - a) for a, b in zip(kinetic, kinetic[1:])))
+
+# --- ENCOUNTER scope ---------------------------------------------------------
+
+def _encounter_episode() -> AlignedEpisodeBundle:
+    times = [0, SEC, 2 * SEC]
+    return AlignedEpisodeBundle(
+        episode_id=1,
+        data=pl.DataFrame({"time_ns": times}),
+        start_pos=[0.0, 0.0, 0.0],
+        goal_pos=[2.0, 0.0],
+        topics={
+            "robot_power": pl.DataFrame({"t_ns": times, "total_power_w": [360.0, 360.0, 360.0]}),
+            "robot_tracks": pl.DataFrame(
+                {"t_ns": times, "x": [0.0, 1.0, 2.0], "y": [0.0] * 3, "speed_mps": [1.0, 1.0, 1.0]}
+            ),
+        },
+    )
+
+
+def _encounter_slice(episode: AlignedEpisodeBundle) -> ScopeSlice:
+    window = dataclasses.replace(episode, data=pl.DataFrame())
+    return ScopeSlice(
+        scope=MetricScope.ENCOUNTER,
+        slice_id="enc-001",
+        parent_id=None,
+        t_start_ns=0,
+        t_end_ns=2 * SEC,
+        identity={},
+        window_bundle=window,
+        full_episode=episode,
+    )
+
+
+def test_encounter_scope_uses_the_windows_own_path_and_energy(calc):
+    episode = _encounter_episode()
+    encounter_slice = _encounter_slice(episode)
+    result = calc.calculate_for_scope(encounter_slice.window_bundle, {}, encounter_slice)
+    assert set(result) == set(calc.output_keys())
+    assert result["energy_per_meter"] == pytest.approx(0.1)
+    assert result["specific_cost_of_transport"] == pytest.approx(0.2 * 3600.0 / (MASS * G * 2.0))
+    assert result["peak_to_mean_power_ratio"] == pytest.approx(1.0)
+
+
+def test_encounter_scope_keeps_explicit_priors(calc):
+    episode = _encounter_episode()
+    encounter_slice = _encounter_slice(episode)
+    result = calc.calculate_for_scope(
+        encounter_slice.window_bundle,
+        {"path_length": 10.0, "energy_total_wh": 1.0},
+        encounter_slice,
+    )
+    assert result["energy_per_meter"] == pytest.approx(0.1)
