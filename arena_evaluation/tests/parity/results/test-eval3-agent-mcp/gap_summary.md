@@ -5,19 +5,27 @@
 - inventory keys: 267
 - compared metric mappings: 24
 - keys with a reviewed star mapping: 21
-- keys without a scoped producer (port gaps): 216
+- keys without a reviewed mapping but with a produced star column (UNMAPPED, manifest review): 1
+- keys without a produced star column (NO_PRODUCER, real porting gaps): 215
 - relocated series keys (not gaps): 30
 - known remaining 1NF list violations: 12
 - structural replacement keys (not parity keys): 5
 - numeric star columns not claimed by any reviewed inventory mapping: 34
+- minimum non-null comparisons per key: 3
 
-## Port gaps by owner
+## UNMAPPED (star column exists, manifest review needed)
+
+| calculator | keys |
+| --- | ---: |
+| pedestrian_disturbance | 1 |
+
+## NO_PRODUCER port gaps by owner
 
 | owner | keys |
 | --- | ---: |
 | parity-g1 | 15 |
 | port-eco | 101 |
-| port-social | 100 |
+| port-social | 99 |
 
 ## Port gaps by calculator
 
@@ -46,12 +54,12 @@
 | proxemics | 4 |
 | semantic_interaction_metrics | 4 |
 | energy | 3 |
-| pedestrian_disturbance | 3 |
 | time_metrics | 3 |
 | clearance_metrics | 2 |
 | holistic_metrics | 2 |
 | mechanism_component | 2 |
 | mutual_accommodation | 2 |
+| pedestrian_disturbance | 2 |
 | characterization | 1 |
 | mechanism_states | 1 |
 | pedestrian_path_metrics | 1 |
@@ -60,7 +68,7 @@
 
 | category | keys |
 | --- | ---: |
-| social | 64 |
+| social | 63 |
 | ecological | 58 |
 | performance | 50 |
 | edge_case | 34 |

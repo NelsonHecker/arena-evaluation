@@ -1,0 +1,2 @@
+metric_key,calculator,category,inventory_owner,target_table,star_table,star_column,legacy_dtype,note
+ped_path_deflection_m,pedestrian_disturbance,social,Agent 4 (parity),fact_pedestrians,fact_pedestrians,ped_path_deflection_m,Null,"star column exists but has no reviewed mapping: manifest review, not a port"
