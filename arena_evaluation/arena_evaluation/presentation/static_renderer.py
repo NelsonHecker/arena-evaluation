@@ -61,4 +61,4 @@ class StaticRenderer:
         renderer.run_dir = run_dir
         if renderer_cls.__name__ == "TrajectoryRenderer":
             renderer.generate_gifs = self.generate_gifs
-        renderer.render_seaborn(df, out_path)
+        renderer.render_static(df, out_path)

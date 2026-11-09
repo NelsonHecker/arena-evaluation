@@ -433,7 +433,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         html += '</div>'
         return html
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         work_df = self._prepared_df(df)
         if len(work_df) == 0:
             return
@@ -1005,10 +1005,9 @@ class AcousticFieldRenderer(BasePlotRenderer):
         wall_outline = (mask_grid == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"], linewidths=0.3, alpha=0.25)
 
-        door_contour = None
         open_door_contour = None
         if show_doors and door_mask_all.any():
-            door_contour = ax.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5], colors=["#64748b"], linewidths=0.9, alpha=0.6, linestyles="dashed")
+            ax.contour(cx, cy, door_mask_all.astype(np.uint8), levels=[0.5], colors=["#64748b"], linewidths=0.9, alpha=0.6, linestyles="dashed")
             if open_door_masks[0].any():
                 open_door_contour = ax.contour(cx, cy, open_door_masks[0].astype(np.uint8), levels=[0.5], colors=["#10b981"], linewidths=1.4, alpha=0.75)
 
@@ -1210,7 +1209,7 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
 
     PLOT_TYPE = "acoustic_field_animation"
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         """Generate acoustic-field animations."""
         work_df = self._prepared_df(df)
         if len(work_df) == 0:

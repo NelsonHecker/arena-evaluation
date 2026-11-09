@@ -443,9 +443,9 @@ def test_bar_renderer_with_query_store_data(tmp_path: pathlib.Path, sample_star_
     out_png = tmp_path / "bar.png"
     out_svg = tmp_path / "bar.svg"
     out_pdf = tmp_path / "bar.pdf"
-    renderer.render_seaborn(df, out_png)
-    renderer.render_seaborn(df, out_svg)
-    renderer.render_seaborn(df, out_pdf)
+    renderer.render_static(df, out_png)
+    renderer.render_static(df, out_svg)
+    renderer.render_static(df, out_pdf)
 
     assert out_png.exists() and out_png.stat().st_size > 0
     assert out_png.read_bytes()[:8] == _PNG_MAGIC
@@ -480,7 +480,7 @@ def test_table_renderer_with_query_store_data(tmp_path: pathlib.Path, sample_sta
     assert "mppi" in html
 
     out_png = tmp_path / "scorecard.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
     assert out_png.read_bytes()[:8] == _PNG_MAGIC
 
@@ -508,7 +508,7 @@ def test_radar_renderer_with_star_schema_view(tmp_path: pathlib.Path, sample_sta
     assert html.startswith("<div")
 
     out_png = tmp_path / "radar.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -532,7 +532,7 @@ def test_heatmap_2d_pivot_and_correlation(tmp_path: pathlib.Path) -> None:
     assert html_pivot.startswith("<div")
 
     out_png = tmp_path / "heatmap_pivot.png"
-    renderer_pivot.render_seaborn(df, out_png)
+    renderer_pivot.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
     # Correlation matrix test
@@ -574,7 +574,7 @@ def test_timeseries_1nf_flat_rows(tmp_path: pathlib.Path) -> None:
     assert html.startswith("<div")
 
     out_png = tmp_path / "timeseries.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -611,7 +611,7 @@ def test_trajectory_rendering_and_formats(tmp_path: pathlib.Path) -> None:
     assert html.startswith("<div")
 
     out_png = tmp_path / "traj.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 

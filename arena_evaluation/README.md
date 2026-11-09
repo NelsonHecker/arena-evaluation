@@ -78,7 +78,7 @@ arena_evaluation/
 |   |   |-- manifest_registry.py <- Resolves report manifests
 |   |   |-- viz_manifest.py    <- VizManifest model and default loader
 |   |   |-- plotly_renderer.py <- Interactive HTML chart dispatcher
-|   |   |-- seaborn_renderer.py<- Static PNG chart dispatcher
+|   |   |-- static_renderer.py<- Static Matplotlib chart dispatcher
 |   |   |-- color_utils.py     <- Palette loader and styling
 |   |   |-- dimension_detector.py <- Auto-detects varying dimensions for compound labels
 |   |   |-- report_template.html.j2 <- Jinja2 report template

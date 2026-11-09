@@ -202,6 +202,7 @@ class BenchmarkCatalog:
         self._load_source(source)
         self._ensure_default_tables_and_aliases()
         self._register_canonical_views()
+        self._register_series_views()
 
     def _load_source(
         self,
@@ -291,6 +292,30 @@ class BenchmarkCatalog:
     def tables(self) -> dict[str, pl.LazyFrame]:
         """Return a shallow copy of all registered ``LazyFrame`` tables."""
         return dict(self._tables)
+
+    def _register_series_views(self) -> None:
+        """Expose every ``series_*`` table joined with the episode identity columns of the summary view."""
+        series_names = [name for name in self._tables if name.startswith(SERIES_TABLE_PREFIX)]
+        if not series_names:
+            return
+        identity = self._tables["v_episode_summary"].select(
+            [
+                *_JOIN_KEYS,
+                "local_planner",
+                "planner",
+                "inter_planner",
+                "dispatcher",
+                "robot_model",
+                "stage",
+                "world",
+                "scenario",
+                "crowd_condition",
+                "seed",
+                "is_reference",
+            ]
+        )
+        for name in series_names:
+            self._tables[f"v_{name}"] = self._tables[name].join(identity, on=list(_JOIN_KEYS), how="left")
 
     def _register_telemetry_views(self, benchmark_dir: pathlib.Path) -> None:
         """Lazily scan episode telemetry Parquet tables across ``benchmark_dir / 'episodes'``."""

@@ -91,29 +91,29 @@ def test_bar_plotly_empty_df_returns_none():
     assert BarRenderer(_spec("bar")).render_plotly(pl.DataFrame()) is None
 
 
-def test_bar_seaborn_happy_path(tmp_path):
+def test_bar_static_happy_path(tmp_path):
     out = tmp_path / "bar.png"
-    BarRenderer(_spec("bar")).render_seaborn(_df(), out)
+    BarRenderer(_spec("bar")).render_static(_df(), out)
     _assert_png(out)
 
 
-def test_bar_seaborn_missing_diff_writes_nothing(tmp_path):
+def test_bar_static_missing_diff_writes_nothing(tmp_path):
     out = tmp_path / "bar.png"
     df = _df().drop("planner")
-    BarRenderer(_spec("bar")).render_seaborn(df, out)
+    BarRenderer(_spec("bar")).render_static(df, out)
     assert not out.exists()
 
 
-def test_bar_seaborn_empty_df_writes_nothing(tmp_path):
+def test_bar_static_empty_df_writes_nothing(tmp_path):
     out = tmp_path / "bar.png"
-    BarRenderer(_spec("bar")).render_seaborn(pl.DataFrame(), out)
+    BarRenderer(_spec("bar")).render_static(pl.DataFrame(), out)
     assert not out.exists()
 
 
-def test_bar_seaborn_filtered_empty_writes_nothing(tmp_path):
+def test_bar_static_filtered_empty_writes_nothing(tmp_path):
     out = tmp_path / "bar.png"
     spec = _spec("bar", filter={"planner": ["nobody"]})
-    BarRenderer(spec).render_seaborn(_df(), out)
+    BarRenderer(spec).render_static(_df(), out)
     assert not out.exists()
 
 
@@ -142,31 +142,31 @@ def test_box_plotly_empty_df_returns_none():
     assert BoxRenderer(_spec("box")).render_plotly(pl.DataFrame()) is None
 
 
-def test_box_seaborn_happy_path(tmp_path):
+def test_box_static_happy_path(tmp_path):
     out = tmp_path / "box.png"
-    BoxRenderer(_spec("box")).render_seaborn(_df(), out)
+    BoxRenderer(_spec("box")).render_static(_df(), out)
     _assert_png(out)
 
 
-def test_box_seaborn_missing_data_key_writes_nothing(tmp_path):
+def test_box_static_missing_data_key_writes_nothing(tmp_path):
     out = tmp_path / "box.png"
-    BoxRenderer(_spec("box", data_key="bogus")).render_seaborn(_df(), out)
+    BoxRenderer(_spec("box", data_key="bogus")).render_static(_df(), out)
     assert not out.exists()
 
 
-def test_box_seaborn_all_nan_data_writes_nothing(tmp_path):
+def test_box_static_all_nan_data_writes_nothing(tmp_path):
     out = tmp_path / "box.png"
     df = pl.DataFrame(
         {"planner": ["dwb", "teb"], "success": [None, None]},
         schema={"planner": pl.Utf8, "success": pl.Float64},
     )
-    BoxRenderer(_spec("box")).render_seaborn(df, out)
+    BoxRenderer(_spec("box")).render_static(df, out)
     assert not out.exists()
 
 
-def test_box_seaborn_empty_df_writes_nothing(tmp_path):
+def test_box_static_empty_df_writes_nothing(tmp_path):
     out = tmp_path / "box.png"
-    BoxRenderer(_spec("box")).render_seaborn(pl.DataFrame(), out)
+    BoxRenderer(_spec("box")).render_static(pl.DataFrame(), out)
     assert not out.exists()
 
 
@@ -225,35 +225,35 @@ def test_histogram_plotly_all_nan_returns_none():
     assert HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_plotly(df) is None
 
 
-def test_histogram_seaborn_happy_path(tmp_path):
+def test_histogram_static_happy_path(tmp_path):
     out = tmp_path / "hist.png"
-    HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_seaborn(_hist_df(), out)
+    HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_static(_hist_df(), out)
     _assert_png(out)
 
 
-def test_histogram_seaborn_single_value_adjusts_range(tmp_path):
+def test_histogram_static_single_value_adjusts_range(tmp_path):
     out = tmp_path / "hist.png"
     df = pl.DataFrame(
         {"planner": ["dwb", "teb"], "time_to_goal": [1.0, 1.0]},
         schema={"planner": pl.Utf8, "time_to_goal": pl.Float64},
     )
-    HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_seaborn(df, out)
+    HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_static(df, out)
     _assert_png(out)
 
 
-def test_histogram_seaborn_missing_x_writes_nothing(tmp_path):
+def test_histogram_static_missing_x_writes_nothing(tmp_path):
     out = tmp_path / "hist.png"
-    HistogramRenderer(_spec("histogram", data_key="bogus")).render_seaborn(_hist_df(), out)
+    HistogramRenderer(_spec("histogram", data_key="bogus")).render_static(_hist_df(), out)
     assert not out.exists()
 
 
-def test_histogram_seaborn_all_nan_writes_nothing(tmp_path):
+def test_histogram_static_all_nan_writes_nothing(tmp_path):
     out = tmp_path / "hist.png"
     df = pl.DataFrame(
         {"planner": ["dwb"], "time_to_goal": [None]},
         schema={"planner": pl.Utf8, "time_to_goal": pl.Float64},
     )
-    HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_seaborn(df, out)
+    HistogramRenderer(_spec("histogram", data_key="time_to_goal")).render_static(df, out)
     assert not out.exists()
 
 
@@ -282,20 +282,20 @@ def test_violin_plotly_empty_df_returns_none():
     assert ViolinRenderer(_spec("violin")).render_plotly(pl.DataFrame()) is None
 
 
-def test_violin_seaborn_happy_path(tmp_path):
+def test_violin_static_happy_path(tmp_path):
     out = tmp_path / "violin.png"
-    ViolinRenderer(_spec("violin")).render_seaborn(_df(), out)
+    ViolinRenderer(_spec("violin")).render_static(_df(), out)
     _assert_png(out)
 
 
-def test_violin_seaborn_missing_diff_writes_nothing(tmp_path):
+def test_violin_static_missing_diff_writes_nothing(tmp_path):
     out = tmp_path / "violin.png"
     df = _df().drop("planner")
-    ViolinRenderer(_spec("violin")).render_seaborn(df, out)
+    ViolinRenderer(_spec("violin")).render_static(df, out)
     assert not out.exists()
 
 
-def test_violin_seaborn_empty_df_writes_nothing(tmp_path):
+def test_violin_static_empty_df_writes_nothing(tmp_path):
     out = tmp_path / "violin.png"
-    ViolinRenderer(_spec("violin")).render_seaborn(pl.DataFrame(), out)
+    ViolinRenderer(_spec("violin")).render_static(pl.DataFrame(), out)
     assert not out.exists()

@@ -2,7 +2,7 @@
 
 Covers ``load_color_palette`` (real YAML files, white/black exclusion,
 fallbacks, failure paths) and ``set_global_color_palette`` (the real Plotly
-template colourway and Seaborn theme, import-error tolerance).
+template colourway and Matplotlib theme, import-error tolerance).
 """
 
 import sys
@@ -131,16 +131,15 @@ def test_set_global_color_palette_skips_plotly_on_import_error(theme, monkeypatc
     assert _cycle() == ["#445566"]
 
 
-def test_set_global_color_palette_applies_seaborn_theme(theme):
+def test_set_global_color_palette_applies_matplotlib_theme(theme):
     set_global_color_palette(["#445566"])
     assert _cycle() == ["#445566"]
     assert mpl.rcParams["axes.grid"] is True
+    assert mpl.rcParams["grid.linestyle"] == "--"
 
 
-def test_set_global_color_palette_skips_seaborn_on_import_error(theme, monkeypatch):
-    before = _cycle()
-    monkeypatch.setitem(sys.modules, "plotly.io", None)
-    monkeypatch.setitem(sys.modules, "plotly.graph_objects", None)
-    monkeypatch.setitem(sys.modules, "seaborn", None)
-    set_global_color_palette(["#445566"])
-    assert _cycle() == before
+def test_set_global_color_palette_replaces_the_matplotlib_cycle(theme):
+    set_global_color_palette(["#112233", "#445566"])
+    assert _cycle() == ["#112233", "#445566"]
+    set_global_color_palette(["#778899"])
+    assert _cycle() == ["#778899"]

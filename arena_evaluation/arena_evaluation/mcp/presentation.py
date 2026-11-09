@@ -1,7 +1,7 @@
 """MCP Presentation Gateway Tools (Layer 5).
 
 Exposes declarative plot recipe discovery, schema inspection, plot recipe persistence,
-and standalone visual artifact rendering (Plotly HTML, Seaborn PNG/SVG/PDF).
+and standalone visual artifact rendering (Plotly HTML, Matplotlib PNG/SVG/PDF).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from arena_evaluation.presentation.resolver import (
     _deep_merge_dict,
     find_recipe_path,
 )
-from arena_evaluation.presentation.seaborn_renderer import SeabornRenderer
+from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.storage.schemas import PlotSpec
 from arena_mcp.core import ToolError
 
@@ -280,8 +280,8 @@ def evaluation_render_plot(
         )
         out_file.write_text(full_html, encoding="utf-8")
     else:
-        seaborn_renderer = SeabornRenderer(generate_gifs=False, units={})
-        seaborn_renderer.render(spec, df, out_path=out_file, run_dir=benchmark_path)
+        static_renderer = StaticRenderer(generate_gifs=False, units={})
+        static_renderer.render(spec, df, out_path=out_file, run_dir=benchmark_path)
         if not out_file.is_file() or out_file.stat().st_size == 0:
             raise ToolError(f"Static renderer failed to produce output at {out_file}")
 

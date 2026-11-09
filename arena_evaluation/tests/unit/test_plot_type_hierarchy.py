@@ -9,7 +9,7 @@ import yaml
 
 from arena_evaluation.presentation.plot_types.hierarchy import HierarchyRenderer
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
-from arena_evaluation.presentation.seaborn_renderer import SeabornRenderer
+from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.storage.schemas import PlotSpec
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -172,7 +172,7 @@ def test_empty_dataframe_returns_none():
 # ── Seaborn / Static PNG Rendering ─────────────────────────────────────────
 
 
-def test_dendrogram_seaborn_renders_png(tmp_path: pathlib.Path):
+def test_dendrogram_static_renders_png(tmp_path: pathlib.Path):
     out = tmp_path / "dendrogram.png"
     spec = PlotSpec(
         id="dendro_sb",
@@ -181,11 +181,11 @@ def test_dendrogram_seaborn_renders_png(tmp_path: pathlib.Path):
         channels={"x": "planner", "y": ["time_to_goal", "path_length", "jerk_mean"]},
         options={"mode": "dendrogram", "clustering_method": "ward"},
     )
-    HierarchyRenderer(spec).render_seaborn(_episodes_df(), out)
+    HierarchyRenderer(spec).render_static(_episodes_df(), out)
     _assert_png(out)
 
 
-def test_dendrogram_seaborn_clustermap_renders_png(tmp_path: pathlib.Path):
+def test_dendrogram_static_clustermap_renders_png(tmp_path: pathlib.Path):
     out = tmp_path / "clustermap.png"
     spec = PlotSpec(
         id="dendro_cm",
@@ -194,11 +194,11 @@ def test_dendrogram_seaborn_clustermap_renders_png(tmp_path: pathlib.Path):
         channels={"x": "planner", "y": ["time_to_goal", "path_length", "jerk_mean"]},
         options={"mode": "dendrogram", "clustermap": True},
     )
-    HierarchyRenderer(spec).render_seaborn(_episodes_df(), out)
+    HierarchyRenderer(spec).render_static(_episodes_df(), out)
     _assert_png(out)
 
 
-def test_hierarchy_seaborn_renders_png(tmp_path: pathlib.Path):
+def test_hierarchy_static_renders_png(tmp_path: pathlib.Path):
     out = tmp_path / "hierarchy_bars.png"
     spec = PlotSpec(
         id="hier_sb",
@@ -209,7 +209,7 @@ def test_hierarchy_seaborn_renders_png(tmp_path: pathlib.Path):
             "y": "encounter_energy_j",
         },
     )
-    HierarchyRenderer(spec).render_seaborn(_encounters_df(), out)
+    HierarchyRenderer(spec).render_static(_encounters_df(), out)
     _assert_png(out)
 
 
@@ -238,25 +238,25 @@ def test_plotly_dispatcher_dendrogram():
     assert html.startswith("<div")
 
 
-def test_seaborn_dispatcher_hierarchy(tmp_path: pathlib.Path):
+def test_static_dispatcher_hierarchy(tmp_path: pathlib.Path):
     out = tmp_path / "disp_hier.png"
     spec = PlotSpec(
         id="disp_sb_hier",
         type="hierarchy",
         channels={"hierarchy": ["crowd_condition", "approach_type"], "y": "encounter_energy_j"},
     )
-    SeabornRenderer().render(spec, _encounters_df(), out)
+    StaticRenderer().render(spec, _encounters_df(), out)
     _assert_png(out)
 
 
-def test_seaborn_dispatcher_dendrogram(tmp_path: pathlib.Path):
+def test_static_dispatcher_dendrogram(tmp_path: pathlib.Path):
     out = tmp_path / "disp_sb_dendro.png"
     spec = PlotSpec(
         id="disp_sb_dendro",
         type="dendrogram",
         channels={"x": "planner", "y": ["time_to_goal", "path_length"]},
     )
-    SeabornRenderer().render(spec, _episodes_df(), out)
+    StaticRenderer().render(spec, _episodes_df(), out)
     _assert_png(out)
 
 
@@ -279,7 +279,7 @@ def test_declarative_recipes_load_and_render(tmp_path: pathlib.Path):
     assert dendro_html.startswith("<div")
 
     dendro_png = tmp_path / "recipe_dendro.png"
-    SeabornRenderer().render(dendro_spec, _episodes_df(), dendro_png)
+    StaticRenderer().render(dendro_spec, _episodes_df(), dendro_png)
     _assert_png(dendro_png)
 
     # 2. Encounter Hierarchy Treemap
@@ -295,5 +295,5 @@ def test_declarative_recipes_load_and_render(tmp_path: pathlib.Path):
     assert treemap_html.startswith("<div")
 
     treemap_png = tmp_path / "recipe_treemap.png"
-    SeabornRenderer().render(treemap_spec, _encounters_df(), treemap_png)
+    StaticRenderer().render(treemap_spec, _encounters_df(), treemap_png)
     _assert_png(treemap_png)

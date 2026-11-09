@@ -610,29 +610,29 @@ def test_af_plotly_cell_render_failure_returns_empty(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("change", [*_UNUSABLE_ROWS, pytest.param(lambda df: df.drop("ped_max_exposure_dba"), id="no_exposure_column")])
-def test_af_seaborn_writes_nothing_without_usable_rows(monkeypatch, tmp_path, change):
+def test_af_static_writes_nothing_without_usable_rows(monkeypatch, tmp_path, change):
     _patch_grid(monkeypatch)
     out = tmp_path / "af.png"
     renderer = _new_renderer(_af_spec(), tmp_path)
-    renderer.render_seaborn(change(_af_df()), out)
+    renderer.render_static(change(_af_df()), out)
     assert not out.exists()
 
 
-def test_af_seaborn_meta_missing_writes_nothing(monkeypatch, tmp_path):
+def test_af_static_meta_missing_writes_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(af_mod.AcousticFieldRenderer, "_load_grid_and_meta", staticmethod(lambda map_name, run_dir=None: None))
     out = tmp_path / "af.png"
     renderer = _new_renderer(_af_spec(), tmp_path)
-    renderer.render_seaborn(_af_df(), out)
+    renderer.render_static(_af_df(), out)
     assert not out.exists()
 
 
 @pytest.mark.slow
-def test_af_seaborn_happy_path_with_doors(monkeypatch, tmp_path):
+def test_af_static_happy_path_with_doors(monkeypatch, tmp_path):
     _patch_grid(monkeypatch)
     _patch_doors(monkeypatch, {"world/d1": (_door_mask(20), 25.0)})
     out = tmp_path / "af.png"
     renderer = _new_renderer(_af_spec(), tmp_path)
-    renderer.render_seaborn(_af_df(), out)
+    renderer.render_static(_af_df(), out)
     assert out.exists() and out.read_bytes()[:8] == _PNG_MAGIC
 
 
@@ -726,7 +726,7 @@ def _patch_animation(monkeypatch, seen: dict):
     monkeypatch.setattr(af_mod.AcousticFieldRenderer, "render_animation", _fake_render_animation)
 
 
-def test_animation_renderer_seaborn_orchestrates(monkeypatch, tmp_path):
+def test_animation_renderer_static_orchestrates(monkeypatch, tmp_path):
     bench = _make_episode(tmp_path, tf_gt=True)
     _patch_grid(monkeypatch)
     _patch_doors(monkeypatch)
@@ -735,7 +735,7 @@ def test_animation_renderer_seaborn_orchestrates(monkeypatch, tmp_path):
     out = tmp_path / "anim.png"
     renderer = AcousticFieldAnimationRenderer(_anim_spec())
     renderer.run_dir = bench
-    renderer.render_seaborn(_af_df(), out)
+    renderer.render_static(_af_df(), out)
     assert seen["out_path"] == tmp_path / "anim.gif"
     assert seen["fmt"] == "gif"
     assert seen["fps"] == 10
@@ -744,7 +744,7 @@ def test_animation_renderer_seaborn_orchestrates(monkeypatch, tmp_path):
     assert seen["state_timeline"] is None
 
 
-def test_animation_renderer_seaborn_finds_episode_in_parent_dir(monkeypatch, tmp_path):
+def test_animation_renderer_static_finds_episode_in_parent_dir(monkeypatch, tmp_path):
     import shutil
 
     bench = _make_episode(tmp_path, tf_gt=True)  # tmp_path/bench/episodes/...
@@ -758,37 +758,37 @@ def test_animation_renderer_seaborn_finds_episode_in_parent_dir(monkeypatch, tmp
     out = run_dir / "anim.png"
     renderer = AcousticFieldAnimationRenderer(_anim_spec())
     renderer.run_dir = run_dir
-    renderer.render_seaborn(_af_df(), out)
+    renderer.render_static(_af_df(), out)
     assert seen["out_path"] == run_dir / "anim.gif"
 
 
-def test_animation_renderer_seaborn_empty_df(monkeypatch, tmp_path):
+def test_animation_renderer_static_empty_df(monkeypatch, tmp_path):
     _patch_grid(monkeypatch)
     df = _af_df().with_columns(pl.Series("is_reference", [True, True]))
     out = tmp_path / "anim.png"
     renderer = AcousticFieldAnimationRenderer(_anim_spec())
     renderer.run_dir = tmp_path
-    renderer.render_seaborn(df, out)
+    renderer.render_static(df, out)
     assert not out.exists()
 
 
-def test_animation_renderer_seaborn_no_episode_column(monkeypatch, tmp_path):
+def test_animation_renderer_static_no_episode_column(monkeypatch, tmp_path):
     _patch_grid(monkeypatch)
     _patch_doors(monkeypatch)
     out = tmp_path / "anim.png"
     renderer = AcousticFieldAnimationRenderer(_anim_spec())
     renderer.run_dir = tmp_path
-    renderer.render_seaborn(_af_df().drop("episode"), out)
+    renderer.render_static(_af_df().drop("episode"), out)
     assert not out.exists()
 
 
-def test_animation_renderer_seaborn_no_episode_data(monkeypatch, tmp_path):
+def test_animation_renderer_static_no_episode_data(monkeypatch, tmp_path):
     _patch_grid(monkeypatch)
     monkeypatch.setattr(af_mod.AcousticFieldRenderer, "_load_episode_data", staticmethod(lambda *a, **k: None))
     out = tmp_path / "anim.png"
     renderer = AcousticFieldAnimationRenderer(_anim_spec())
     renderer.run_dir = tmp_path
-    renderer.render_seaborn(_af_df(), out)
+    renderer.render_static(_af_df(), out)
     assert not out.exists()
 
 
@@ -815,7 +815,7 @@ def test_animation_renderer_plotly_mp4_embeds_video():
     assert '<video src="plots/af_anim.mp4"' in html
 
 
-def test_animation_renderer_seaborn_characterization_null_peds(monkeypatch, tmp_path):
+def test_animation_renderer_static_characterization_null_peds(monkeypatch, tmp_path):
     bench = _make_episode(tmp_path, tf_gt=True)
     _patch_grid(monkeypatch)
     _patch_doors(monkeypatch)
@@ -825,7 +825,7 @@ def test_animation_renderer_seaborn_characterization_null_peds(monkeypatch, tmp_
     df = _af_df().with_columns(pl.lit(None, dtype=pl.Float64).alias("ped_max_exposure_dba"))
     renderer = AcousticFieldAnimationRenderer(_anim_spec(data_key="timeseries_char_dba"))
     renderer.run_dir = bench
-    renderer.render_seaborn(df, out)
+    renderer.render_static(df, out)
     assert seen.get("out_path") == tmp_path / "anim.gif"
 
 

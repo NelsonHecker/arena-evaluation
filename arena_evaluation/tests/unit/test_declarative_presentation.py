@@ -125,7 +125,7 @@ def _sample_trajectory_frame() -> pl.DataFrame:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def test_grammar_of_graphics_violin_channels_plotly_and_seaborn(tmp_path: pathlib.Path) -> None:
+def test_grammar_of_graphics_violin_channels_plotly_and_static(tmp_path: pathlib.Path) -> None:
     df = _sample_distributions_frame()
     spec = PlotSpec(
         id="violin_multidim",
@@ -149,14 +149,14 @@ def test_grammar_of_graphics_violin_channels_plotly_and_seaborn(tmp_path: pathli
 
     out_png = tmp_path / "violin.png"
     out_svg = tmp_path / "violin.svg"
-    renderer.render_seaborn(df, out_png)
-    renderer.render_seaborn(df, out_svg)
+    renderer.render_static(df, out_png)
+    renderer.render_static(df, out_svg)
     assert out_png.exists() and out_png.stat().st_size > 0
     assert out_png.read_bytes()[:8] == _PNG_MAGIC
     assert out_svg.exists() and out_svg.stat().st_size > 0
 
 
-def test_grammar_of_graphics_box_channels_plotly_and_seaborn(tmp_path: pathlib.Path) -> None:
+def test_grammar_of_graphics_box_channels_plotly_and_static(tmp_path: pathlib.Path) -> None:
     df = _sample_distributions_frame()
     spec = PlotSpec(
         id="box_multidim",
@@ -177,7 +177,7 @@ def test_grammar_of_graphics_box_channels_plotly_and_seaborn(tmp_path: pathlib.P
     assert html.startswith("<div")
 
     out_png = tmp_path / "box.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -200,7 +200,7 @@ def test_grammar_of_graphics_bar_stacked_and_grouped_modes(tmp_path: pathlib.Pat
     assert html_grouped is not None and html_grouped.startswith("<div")
 
     out_png = tmp_path / "bar_grouped.png"
-    renderer_grouped.render_seaborn(df, out_png)
+    renderer_grouped.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
     spec_stacked = PlotSpec(
@@ -219,7 +219,7 @@ def test_grammar_of_graphics_bar_stacked_and_grouped_modes(tmp_path: pathlib.Pat
     assert html_stacked is not None and html_stacked.startswith("<div")
 
 
-def test_grammar_of_graphics_line_channels_plotly_and_seaborn(tmp_path: pathlib.Path) -> None:
+def test_grammar_of_graphics_line_channels_plotly_and_static(tmp_path: pathlib.Path) -> None:
     df = _sample_timeseries_frame()
     spec = PlotSpec(
         id="line_multidim",
@@ -232,11 +232,11 @@ def test_grammar_of_graphics_line_channels_plotly_and_seaborn(tmp_path: pathlib.
     assert html is not None and html.startswith("<div")
 
     out_png = tmp_path / "line.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
-def test_grammar_of_graphics_scatter_channels_plotly_and_seaborn(tmp_path: pathlib.Path) -> None:
+def test_grammar_of_graphics_scatter_channels_plotly_and_static(tmp_path: pathlib.Path) -> None:
     df = _sample_distributions_frame()
     spec = PlotSpec(
         id="scatter_multidim",
@@ -254,11 +254,11 @@ def test_grammar_of_graphics_scatter_channels_plotly_and_seaborn(tmp_path: pathl
     assert html is not None and html.startswith("<div")
 
     out_png = tmp_path / "scatter.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
-def test_grammar_of_graphics_histogram_channels_plotly_and_seaborn(tmp_path: pathlib.Path) -> None:
+def test_grammar_of_graphics_histogram_channels_plotly_and_static(tmp_path: pathlib.Path) -> None:
     df = _sample_distributions_frame()
     spec = PlotSpec(
         id="hist_multidim",
@@ -272,7 +272,7 @@ def test_grammar_of_graphics_histogram_channels_plotly_and_seaborn(tmp_path: pat
     assert html is not None and html.startswith("<div")
 
     out_png = tmp_path / "hist.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -290,7 +290,7 @@ def test_grammar_of_graphics_heatmap_pivot_and_correlation(tmp_path: pathlib.Pat
     assert html_pivot is not None and html_pivot.startswith("<div")
 
     out_png = tmp_path / "heatmap_pivot.png"
-    renderer_pivot.render_seaborn(df, out_png)
+    renderer_pivot.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
     # 2. Metric Correlation Heatmap
@@ -306,7 +306,7 @@ def test_grammar_of_graphics_heatmap_pivot_and_correlation(tmp_path: pathlib.Pat
     assert html_corr is not None and html_corr.startswith("<div")
 
 
-def test_grammar_of_graphics_timeseries_plotly_and_seaborn(tmp_path: pathlib.Path) -> None:
+def test_grammar_of_graphics_timeseries_plotly_and_static(tmp_path: pathlib.Path) -> None:
     df = _sample_timeseries_frame()
     spec = PlotSpec(
         id="timeseries_power",
@@ -320,7 +320,7 @@ def test_grammar_of_graphics_timeseries_plotly_and_seaborn(tmp_path: pathlib.Pat
     assert html is not None and html.startswith("<div")
 
     out_png = tmp_path / "timeseries.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -338,7 +338,7 @@ def test_grammar_of_graphics_trajectory_2d_paths(tmp_path: pathlib.Path) -> None
     assert html is not None and html.startswith("<div")
 
     out_png = tmp_path / "trajectory.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -367,7 +367,7 @@ def test_grammar_of_graphics_radar_multi_metric(tmp_path: pathlib.Path) -> None:
     assert html is not None and html.startswith("<div")
 
     out_png = tmp_path / "radar.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 
@@ -395,7 +395,7 @@ def test_grammar_of_graphics_table_html_and_image(tmp_path: pathlib.Path) -> Non
     assert "0.95" in html
 
     out_png = tmp_path / "table.png"
-    renderer.render_seaborn(df, out_png)
+    renderer.render_static(df, out_png)
     assert out_png.exists() and out_png.stat().st_size > 0
 
 

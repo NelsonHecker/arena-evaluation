@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import pathlib
 
+import matplotlib.pyplot as plt
+import numpy as np
 import plotly.express as px
 import polars as pl
 
 from arena_evaluation.presentation.color_utils import get_color_palette
 
-from .base import BasePlotRenderer
+from .base import BasePlotRenderer, finish_axes, new_figure, palette_color
 
 __all__ = ["ViolinRenderer"]
 
@@ -39,12 +41,9 @@ class ViolinRenderer(BasePlotRenderer):
         facet_row = self.resolve_channel("facet_row")
 
         keep = [c for c in [y_col, x_col, color_col, facet_col, facet_row] if c and df_filtered.schema.get(c) is not None]
-        pdf = df_filtered.select(list(dict.fromkeys(keep))).to_pandas()
-        if pdf.empty or bool(pdf[y_col].isna().all()):
+        selected = df_filtered.select(list(dict.fromkeys(keep)))
+        if selected.is_empty() or selected[y_col].is_null().all():
             return None
-
-        box_opt = bool(self.spec.options.get("box", True))
-        points_opt = self.spec.options.get("points", "all")
 
         labels = {
             y_col: self.format_label(y_col.replace("_", " ").title(), y_col),
@@ -54,14 +53,14 @@ class ViolinRenderer(BasePlotRenderer):
             labels[x_col] = self.format_label(x_col.replace("_", " ").title(), x_col)
 
         fig = px.violin(
-            pdf,
+            selected,
             x=x_col,
             y=y_col,
             color=color_col,
             facet_col=facet_col,
             facet_row=facet_row,
-            box=box_opt,
-            points=points_opt,
+            box=bool(self.spec.options.get("box", True)),
+            points=self.spec.options.get("points", "all"),
             labels=labels,
             template="plotly_white",
         )
@@ -71,7 +70,7 @@ class ViolinRenderer(BasePlotRenderer):
         )
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
         y_col = self.resolve_channel("y", fallback=self.spec.data_key)
         if not y_col or df_filtered.schema.get(y_col) is None:
@@ -89,35 +88,50 @@ class ViolinRenderer(BasePlotRenderer):
         if x_col is not None and df_filtered.schema.get(x_col) is None:
             x_col = None
 
-        keep = [c for c in [y_col, x_col, color_col] if c and df_filtered.schema.get(c) is not None]
-        pdf = df_filtered.select(list(dict.fromkeys(keep))).to_pandas()
-        if pdf.empty or bool(pdf[y_col].isna().all()):
+        category_col = x_col if x_col is not None else color_col
+        series_col = color_col if color_col != category_col else None
+        group_cols = [category_col] if series_col is None else [category_col, series_col]
+        grouped = df_filtered.group_by(group_cols).agg(pl.col(y_col).cast(pl.Float64).drop_nulls().alias("values"))
+        if grouped.is_empty():
             return
 
-        import matplotlib.pyplot as plt
-        import seaborn as sns
+        lookup: dict[tuple[str, str], np.ndarray] = {}
+        for row in grouped.iter_rows(named=True):
+            category = str(row[category_col])
+            series_name = str(row[series_col]) if series_col else ""
+            lookup[(category, series_name)] = np.asarray(row["values"], dtype=float)
 
-        split_opt = self.spec.channels.split or bool(self.spec.options.get("split", False))
-        box_opt = bool(self.spec.options.get("box", True))
+        categories = sorted({key[0] for key in lookup})
+        series = sorted({key[1] for key in lookup}) if series_col else [""]
+        palette = get_color_palette()
+        fig, ax = new_figure()
+        width = 0.8 / max(1, len(series))
+        for series_index, series_name in enumerate(series):
+            specimens: list[np.ndarray] = []
+            positions: list[float] = []
+            for category_index, category in enumerate(categories):
+                values = lookup.get((category, series_name))
+                if values is None or values.size < 2:
+                    continue
+                specimens.append(values)
+                positions.append(category_index + (series_index - (len(series) - 1) / 2.0) * width)
+            if not specimens:
+                continue
+            artists = ax.violinplot(specimens, positions=positions, widths=width, showmeans=True, showmedians=False, showextrema=False)
+            color = palette_color(palette, series_index)
+            for body in artists["bodies"]:
+                body.set_facecolor(color)
+                body.set_alpha(0.65)
+            artists["cmeans"].set_color(color)
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        palette = get_color_palette() if color_col else None
-        sns.violinplot(
-            data=pdf,
-            x=x_col,
-            y=y_col,
-            hue=color_col if color_col != x_col else None,
-            split=split_opt if (x_col and color_col and split_opt) else False,
-            inner="box" if box_opt else None,
-            palette=palette,
-            ax=ax,
+        ax.set_xticks(np.arange(len(categories)), categories)
+        if series_col is not None:
+            ax.legend(frameon=False)
+        finish_axes(
+            ax,
+            title=self.spec.title,
+            x_label=self.format_label(category_col.lstrip("_").replace("_", " ").title(), category_col),
+            y_label=self.format_label(y_col.replace("_", " ").title(), y_col),
         )
-        sns.despine(fig=fig, top=True, right=True)
-        ax.grid(True, linestyle="--", alpha=0.5, axis="y")
-        ax.set_title(self.spec.title, pad=12, fontsize=12, fontweight="bold")
-        ax.set_ylabel(self.format_label(y_col.replace("_", " ").title(), y_col))
-        if x_col:
-            ax.set_xlabel(self.format_label(x_col.replace("_", " ").title(), x_col))
-        fig.tight_layout()
         self.save_figure(fig, out_path)
         plt.close(fig)

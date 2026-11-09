@@ -63,16 +63,16 @@ def test_line_time_conversion_and_relative():
     assert "Time [s]" in html
 
 
-def test_line_seaborn_renders_png(tmp_path: pathlib.Path):
+def test_line_static_renders_png(tmp_path: pathlib.Path):
     spec = _spec(y="p_total_w", error_y="std", mode="lines+markers")
     out = tmp_path / "line.png"
-    LineRenderer(spec).render_seaborn(_samples_df(), out)
+    LineRenderer(spec).render_static(_samples_df(), out)
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_line_seaborn_empty_df_no_crash(tmp_path: pathlib.Path):
+def test_line_static_empty_df_no_crash(tmp_path: pathlib.Path):
     out = tmp_path / "empty.png"
-    LineRenderer(_spec(y="p_total_w")).render_seaborn(pl.DataFrame(), out)
+    LineRenderer(_spec(y="p_total_w")).render_static(pl.DataFrame(), out)
     assert not out.exists() or out.stat().st_size == 0
 
 
@@ -158,4 +158,4 @@ def test_line_outlier_trimming():
     assert prepared is not None
     pdf = prepared[0]
     # The mean should be 50.0 (the 1000.0 spike was trimmed out)
-    assert abs(pdf["power"].iloc[0] - 50.0) < 1e-3
+    assert abs(pdf.item(0, "power") - 50.0) < 1e-3

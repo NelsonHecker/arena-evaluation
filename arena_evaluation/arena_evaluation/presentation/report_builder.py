@@ -310,7 +310,7 @@ class ReportBuilder:
                 try:
                     static_renderer.render(resolved_spec, plot_df, svg_path, run_dir=self.output_dir)
                 except Exception as e:
-                    pass
+                    print(f"Warning: Failed to render vector plot {resolved_spec.id}: {e}")
 
             try:
                 html_chunk = plotly_renderer.render(resolved_spec, plot_df, run_dir=self.output_dir)

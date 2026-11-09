@@ -5,6 +5,7 @@ from __future__ import annotations
 import html as html_escape
 import pathlib
 
+import matplotlib.pyplot as plt
 import polars as pl
 
 from arena_evaluation.presentation.plot_types.base import BasePlotRenderer
@@ -259,7 +260,7 @@ class TableRenderer(BasePlotRenderer):
         df_filtered = self._apply_filters(df)
         return self._render_html(df_filtered, self.run_dir)
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         df_filtered = self._apply_filters(df)
         header, rows = self._data_rows(df_filtered)
 
@@ -269,11 +270,6 @@ class TableRenderer(BasePlotRenderer):
                 return
             header = ["Label", "Value"]
             rows = [[r.get("label", ""), r.get("value", "")] for r in agent_rows]
-
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         n_rows = len(rows)
         n_cols = len(header)

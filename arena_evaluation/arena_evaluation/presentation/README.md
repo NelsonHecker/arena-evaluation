@@ -12,7 +12,7 @@ Reads processed metric data (Parquet) and produces interactive HTML reports, sta
 | `manifest_registry.py` | Resolves report manifests by name, path, or inline YAML |
 | `viz_manifest.py` | `VizManifest` and `PlotSpec` models and default manifest loader |
 | `plotly_renderer.py` | Dispatches `PlotSpec` to interactive chart renderers |
-| `seaborn_renderer.py` | Dispatches `PlotSpec` to static PNG renderers |
+| `static_renderer.py` | Dispatches `PlotSpec` to static Matplotlib PNG/SVG/PDF renderers |
 | `color_utils.py` | Accessibility color palette loader and global plotting styles |
 | `dimension_detector.py` | Auto-detects varying dimensions and builds compound labels |
 | `report_template.html.j2` | Jinja2 HTML template for reports |
@@ -127,7 +127,7 @@ plots: [ ... ]
 ## Adding a Plot Type
 
 1. Create `plot_types/<mytype>.py`, subclass `BasePlotRenderer`, and define `PLOT_TYPE`.
-2. Implement `render_plotly(df)` and `render_seaborn(df, out_path)`.
-3. Register class in `plot_types/__init__.py`, `plotly_renderer.py`, and `seaborn_renderer.py`.
+2. Implement `render_plotly(df)` and `render_static(df, out_path)`; the static renderer feeds Matplotlib from Polars and NumPy, never pandas.
+3. Register class in `plot_types/__init__.py`, `plotly_renderer.py`, and `static_renderer.py`.
 4. Ensure renderers handle empty or missing columns safely.
 
