@@ -177,7 +177,7 @@ def _frames(robot: list[tuple[float | None, float | None]], peds: list[list[tupl
 
 def _episode(data: pl.DataFrame | None, map_name: str | None, **kwargs) -> AlignedEpisodeBundle:
     topics = dict(kwargs.pop("topics", {}) or {})
-    if data is not None and "pedestrian_tracks" not in topics and "peds_positions" in data.columns:
+    if data is not None and "time_ns" in data.columns and "pedestrian_tracks" not in topics and "peds_positions" in data.columns:
         peds_rows = []
         seen = set()
         for stamp, frame in zip(data["time_ns"].to_list(), data["peds_positions"].to_list()):
@@ -189,13 +189,13 @@ def _episode(data: pl.DataFrame | None, map_name: str | None, **kwargs) -> Align
                         peds_rows.append({"t_ns": int(stamp), "ped_id": f"ped_{index}", "x": float(point[0]), "y": float(point[1])})
         schema = {"t_ns": pl.Int64, "ped_id": pl.Utf8, "x": pl.Float64, "y": pl.Float64}
         topics["pedestrian_tracks"] = pl.DataFrame(peds_rows, schema=schema) if peds_rows else pl.DataFrame(schema=schema)
-    if data is not None and "robot_tracks" not in topics:
+    if data is not None and "time_ns" in data.columns and "robot_tracks" not in topics:
         tracks = pl.DataFrame(
             {
                 "t_ns": data["time_ns"].cast(pl.Int64),
                 "x": data["pos_x_gt"].cast(pl.Float64),
                 "y": data["pos_y_gt"].cast(pl.Float64),
-                "yaw": pl.lit(0.0, dtype=pl.Float64),
+                "yaw": [0.0] * len(data),
             }
         ).drop_nulls(["x", "y"])
         topics["robot_tracks"] = tracks

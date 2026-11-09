@@ -30,7 +30,7 @@ def _episode(frame: pl.DataFrame, **kwargs) -> AlignedEpisodeBundle:
             "t_ns": frame["time_ns"].cast(pl.Int64),
             "x": frame["pos_x"].cast(pl.Float64),
             "y": frame["pos_y"].cast(pl.Float64),
-            "yaw": pl.lit(0.0, dtype=pl.Float64),
+            "yaw": [0.0] * len(frame),
         }
     )
     return AlignedEpisodeBundle(episode_id=0, data=frame, start_pos=[], goal_pos=[], robot_name="env_0_jackal", topics={"robot_tracks": tracks}, **kwargs)

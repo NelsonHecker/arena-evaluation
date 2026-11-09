@@ -173,7 +173,7 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
                     robot_radius=robot_radius,
                     run_dir=episode.run_dir,
                 )
-            except (OSError, ValueError, RuntimeError) as error:
+            except (OSError, ValueError, RuntimeError, OverflowError) as error:
                 import logging
 
                 logging.getLogger(__name__).info(f"theta* reference unavailable for episode {episode.episode_id}: {error!r}")
@@ -231,7 +231,7 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         """Modified Hausdorff distance between two paths."""
         try:
             from scipy.spatial import cKDTree
-        except ImportError:
+        except (ImportError, ValueError):
             distances = cdist(robot_points, reference_points)
             return float(max(np.mean(np.min(distances, axis=1)), np.mean(np.min(distances, axis=0))))
         robot_tree = cKDTree(robot_points)

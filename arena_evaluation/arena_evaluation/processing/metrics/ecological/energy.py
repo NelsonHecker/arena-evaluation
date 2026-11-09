@@ -95,12 +95,12 @@ class EnergyMetricCalculator(BaseMetricCalculator):
         columns: dict[str, pl.Series] = {}
         for target, source in _POWER_COLUMNS.items():
             values = frame[source].cast(pl.Float64).to_numpy() if source in frame.columns else np.full(len(frame), np.nan)
-            columns[target] = pl.Series(target, _forward_backward_fill(values.astype(np.float64)))
+            columns[target] = pl.Series(target, _forward_backward_fill(values.astype(np.float64))).fill_nan(None)
         battery = frame["battery_soc_percent"].cast(pl.Float64).to_numpy() if "battery_soc_percent" in frame.columns else np.full(len(frame), np.nan)
         battery = _forward_backward_fill(battery.astype(np.float64))
         velocity = frame["vel_linear"].cast(pl.Float64).to_numpy() if "vel_linear" in frame.columns else np.full(len(frame), np.nan)
-        columns["battery_soc_pct"] = pl.Series("battery_soc_pct", battery)
-        columns["velocity_linear_mps"] = pl.Series("velocity_linear_mps", velocity)
+        columns["battery_soc_pct"] = pl.Series("battery_soc_pct", battery).fill_nan(None)
+        columns["velocity_linear_mps"] = pl.Series("velocity_linear_mps", velocity).fill_nan(None)
 
         series = pl.DataFrame({"t_ns": time_ns, **columns})
         return series.with_columns(

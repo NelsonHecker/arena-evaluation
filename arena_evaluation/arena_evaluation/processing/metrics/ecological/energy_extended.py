@@ -208,7 +208,7 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
     @staticmethod
     def _standstill_energy_wh(velocity_mps: np.ndarray, power_w: np.ndarray, dt: np.ndarray) -> float | None:
         """Energy drawn while standing still in blocks of at least half a second."""
-        if len(velocity_mps) == 0 or len(power_w) != len(velocity_mps):
+        if len(velocity_mps) == 0 or len(power_w) != len(velocity_mps) or np.isnan(velocity_mps).all():
             return None
         stationary = np.abs(velocity_mps) < STANDSTILL_SPEED_MPS
         if not np.any(stationary):
