@@ -108,11 +108,13 @@ def _episode(release: bool = True) -> AlignedEpisodeBundle:
 
 
 def test_calculator_on_a_synthetic_episode() -> None:
-    out = ContactInteractionCalculator(RobotParams()).calculate(_episode(), {})
+    episode = _episode()
+    contact = ContactInteractionCalculator(RobotParams())
+    out = contact.calculate(episode, {})
     assert out["hhi_interaction"] == "hug"
     assert (out["hhi_hold_onset_s"], out["hhi_release_s"]) == (pytest.approx(5.0), pytest.approx(11.0))
     assert out["hhi_stall_count"] == 1
-    assert out["hhi_stall_onsets_s"][0] == pytest.approx(12.0, abs=0.2)
+    assert contact.series_table(episode).get_column("onset_s")[0] == pytest.approx(12.0, abs=0.2)
     assert (out["hhi_stalls_approach"], out["hhi_stalls_hold"], out["hhi_stalls_post"], out["hhi_stalls_rest"]) == (0, 0, 1, 0)
     shares = [out[f"hhi_share_{w}"] for w in ("approach", "hold", "post", "rest")]
     assert sum(shares) == pytest.approx(1.0)
