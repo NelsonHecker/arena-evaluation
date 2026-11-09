@@ -43,7 +43,9 @@ FORBIDDEN_SQL_KEYWORDS: Final[frozenset[str]] = frozenset(
 _ALLOWED_START_KEYWORDS: Final[frozenset[str]] = frozenset({"SELECT", "WITH"})
 _BLOCK_COMMENT_RE: Final[re.Pattern[str]] = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COMMENT_RE: Final[re.Pattern[str]] = re.compile(r"--[^\r\n]*")
-_STRING_LITERAL_RE: Final[re.Pattern[str]] = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"")
+_STRING_LITERAL_RE: Final[re.Pattern[str]] = re.compile(
+    r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\""
+)
 _WORD_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 _SCIENTIFIC_NOTATION_RE: Final[re.Pattern[str]] = re.compile(
     r"(?<![a-zA-Z0-9_])([0-9]+(?:\.[0-9]+)?[eE][+-]?[0-9]+)(?![a-zA-Z0-9_])"
@@ -52,6 +54,7 @@ _SCIENTIFIC_NOTATION_RE: Final[re.Pattern[str]] = re.compile(
 
 def normalize_sql_scientific_notation(sql: str) -> str:
     """Replace scientific notation numbers outside string literals with standard float strings."""
+
     def _repl(match: re.Match[str]) -> str:
         val = float(match.group(1))
         s = str(val)
@@ -64,7 +67,7 @@ def normalize_sql_scientific_notation(sql: str) -> str:
     parts: list[str] = []
     last_end = 0
     for match in _STRING_LITERAL_RE.finditer(sql):
-        code_part = sql[last_end:match.start()]
+        code_part = sql[last_end : match.start()]
         parts.append(_SCIENTIFIC_NOTATION_RE.sub(_repl, code_part))
         parts.append(match.group(0))
         last_end = match.end()
@@ -104,11 +107,15 @@ def validate_readonly_sql(sql: str) -> str:
 
     forbidden_found = [tok for tok in tokens if tok in FORBIDDEN_SQL_KEYWORDS]
     if forbidden_found:
-        raise SQLGuardError(f"Forbidden SQL keyword(s) detected: {', '.join(dict.fromkeys(forbidden_found))}")
+        raise SQLGuardError(
+            f"Forbidden SQL keyword(s) detected: {', '.join(dict.fromkeys(forbidden_found))}"
+        )
 
     first_token = tokens[0]
     if first_token not in _ALLOWED_START_KEYWORDS:
-        raise SQLGuardError(f"Only SELECT or WITH ... SELECT queries are permitted; got '{first_token}'.")
+        raise SQLGuardError(
+            f"Only SELECT or WITH ... SELECT queries are permitted; got '{first_token}'."
+        )
 
     if first_token == "WITH" and "SELECT" not in tokens:
         raise SQLGuardError("CTE (WITH) query must contain a SELECT clause.")
