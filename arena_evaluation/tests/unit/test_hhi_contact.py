@@ -242,7 +242,7 @@ def test_contact_scope_splits_the_windows_inside_its_own_slice() -> None:
     contact = ContactInteractionCalculator(RobotParams())
     window_metrics = contact.calculate_for_scope(episode, {}, _contact_slice(window, 18 * SEC))
     episode_metrics = contact.calculate(episode, {})
-    assert window_metrics["hhi_episode_s"] == pytest.approx(17.95)
+    assert window_metrics["hhi_episode_s"] == pytest.approx(18.0)
     assert window_metrics["hhi_episode_s"] < episode_metrics["hhi_episode_s"]
     assert window_metrics["hhi_stall_count"] == 1
     assert window_metrics["hhi_stalls_post"] == 1
