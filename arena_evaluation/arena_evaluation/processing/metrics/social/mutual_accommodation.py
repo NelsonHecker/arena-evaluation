@@ -218,9 +218,11 @@ class MutualAccommodationCalculator(BaseMetricCalculator):
 
         reference_robot_path = ref_robot_row.get("path")
         robot_deviation_m: float | None = None
-        if actual_robot_path is not None and reference_robot_path is not None:
+        actual_robot_points = _point_matrix(actual_robot_path)
+        reference_robot_points = _point_matrix(reference_robot_path)
+        if actual_robot_points is not None and reference_robot_points is not None:
             maximum_m, _ = cls.compute_orthogonal_deviation(
-                actual_robot_path, reference_robot_path
+                actual_robot_points, reference_robot_points
             )
             robot_deviation_m = float(maximum_m)
             results["robot_path_deviation_m"] = round(robot_deviation_m, 3)
