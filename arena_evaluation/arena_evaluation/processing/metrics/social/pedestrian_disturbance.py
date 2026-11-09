@@ -140,7 +140,7 @@ def round_trips_completed(geometry: pl.DataFrame, peds: pl.DataFrame) -> int:
         (pl.col("x_m") - pl.col("x_m").first()).pow(2)
         + (pl.col("y_m") - pl.col("y_m").first()).pow(2)
     ).sqrt().over("ped_id")
-    trajectory = _track_frame(peds).filter(pl.col("ped_id").is_in(qualifying_ids)).with_columns(
+    trajectory = _track_frame(peds).filter(pl.col("ped_id").is_in(qualifying_ids.implode())).with_columns(
         displacement_m=displacement_m
     )
     completed = pedestrian_round_trips_frame(trajectory)

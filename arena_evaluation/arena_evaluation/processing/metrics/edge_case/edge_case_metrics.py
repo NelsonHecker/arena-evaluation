@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping
 import numpy as np
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.pedestrian_frames import pedestrians_at
 
 from .criticality import SETTLE_S, Sample, formation_hold, score
@@ -31,6 +31,15 @@ def agent_name(recorded: str) -> str:
     """`/env_0/d_1/0` -> `d_1`, the name the scenario gives the pedestrian."""
     return _ENV_PREFIX.sub("", recorded, count=1).lstrip("/").split("/", 1)[0]
 
+
+def _grid_step_ns() -> int:
+    """Sampling step of the criticality grid in nanoseconds."""
+    return int(1e9 / SAMPLE_HZ)
+
+
+def _bare_ped_name_expression() -> pl.Expr:
+    """Recorded pedestrian name with the env prefix and the trailing entity path removed."""
+    return pl.col("ped_name").cast(pl.String).str.replace(_ENV_PREFIX.pattern, "").str.split("/").list.first()
 
 def episode_provenance(episode: AlignedEpisodeBundle, world: str | None) -> Provenance | None:
     """The provenance of the scenario the episode ran, None when it has none."""
@@ -79,11 +88,26 @@ def episode_samples(calc: BaseMetricCalculator, episode: AlignedEpisodeBundle, r
     vx, vy = calc.velocity_from_pose(rx, ry, grid)
     rows: list[dict[str, tuple[tuple[float, float], tuple[float, float], float]]] = [{} for _ in grid]
     peds = calc.native_ped_frame(episode)
-    if peds is not None and "ped_name" in peds.columns:
-        row_of = {int(t): i for i, t in enumerate(grid)}
-        for held in pedestrians_at(pl.Series("time_ns", grid), peds, PEDS_TOLERANCE_NS).iter_rows(named=True):
-            bare = agent_name(str(held["ped_name"]))
-            rows[row_of[int(held["time_ns"])]][bare] = ((float(held["x"]), float(held["y"])), (float(held["vx"]), float(held["vy"])), radii.get(bare, PED_RADIUS))
+    if peds is not None and peds.height > 0:
+        held = pedestrians_at(pl.Series("time_ns", grid), peds, PEDS_TOLERANCE_NS).with_columns(
+            frame_ix=((pl.col("time_ns") - int(grid[0])) // _grid_step_ns()).cast(pl.Int64),
+            bare_name=_bare_ped_name_expression(),
+        )
+        for frame_ix, bare, ped_x, ped_y, ped_vx, ped_vy in zip(
+            held.get_column("frame_ix").to_numpy(),
+            held.get_column("bare_name").to_numpy(),
+            held.get_column("x").to_numpy(),
+            held.get_column("y").to_numpy(),
+            held.get_column("vx").to_numpy(),
+            held.get_column("vy").to_numpy(),
+            strict=True,
+        ):
+            name = str(bare)
+            rows[int(frame_ix)][name] = (
+                (float(ped_x), float(ped_y)),
+                (float(ped_vx), float(ped_vy)),
+                radii.get(name, PED_RADIUS),
+            )
     radius = calc.robot_params.robot_radius
     return [Sample(t=float(t) / 1e9, robot=(float(x), float(y)), robot_vel=(float(u), float(w)), robot_radius=radius, peds=rows[i]) for i, (t, x, y, u, w) in enumerate(zip(grid, rx, ry, vx, vy, strict=True))]
 
@@ -93,6 +117,8 @@ class EdgeCaseCriticalityCalculator(BaseMetricCalculator):
 
     NAME = "edge_case_criticality"
     CATEGORY = "edge_case"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
@@ -192,11 +218,24 @@ class EdgeCaseCriticalityCalculator(BaseMetricCalculator):
         return results
 
 
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """EPISODE scope only: the case provenance and its agents are episode-level records."""
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self.calculate(episode, prior_results)
+
 class EdgeCaseFormationCalculator(BaseMetricCalculator):
     """Whether the formation a case's D step owns formed around its center, how long it held and when it broke."""
 
     NAME = "edge_case_formation"
     CATEGORY = "edge_case"
+    SCOPE = MetricScope.EPISODE
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE})
     REQUIRES_PEDSIM = True
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
@@ -247,3 +286,14 @@ class EdgeCaseFormationCalculator(BaseMetricCalculator):
         results["edge_case_formation_form_fired_at"] = form_at
         results["edge_case_formation_break_fired_at"] = break_at
         return results
+
+    def calculate_for_scope(
+        self,
+        episode: AlignedEpisodeBundle,
+        prior_results: dict[str, typing.Any],
+        scope_slice: ScopeSlice | None = None,
+    ) -> dict[str, typing.Any]:
+        """EPISODE scope only: the case provenance and its agents are episode-level records."""
+        if scope_slice is not None and scope_slice.scope != MetricScope.EPISODE:
+            return dict.fromkeys(self.output_keys())
+        return self.calculate(episode, prior_results)
