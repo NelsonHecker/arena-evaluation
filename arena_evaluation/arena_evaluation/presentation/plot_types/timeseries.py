@@ -25,6 +25,8 @@ class TimeseriesRenderer(BasePlotRenderer):
         if not color_col:
             diff_col, df_filtered = self.resolve_diff_col(df_filtered)
             color_col = diff_col
+        if color_col and df_filtered.schema.get(color_col) is None:
+            color_col = None
 
         options = self.spec.options or {}
         metrics = options.get("metrics", [])

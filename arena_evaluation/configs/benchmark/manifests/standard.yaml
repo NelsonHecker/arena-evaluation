@@ -83,13 +83,13 @@ units:
   ped_max_startle_factor: dBA/s
   total_sound_energy_joules: J
   total_acoustic_work_joules: J
-  timeseries_power_total_w: W
-  timeseries_power_static_w: W
-  timeseries_power_mechanical_w: W
-  timeseries_power_thermal_w: W
-  timeseries_battery_soc: "%"
-  timeseries_time_s: s
-  timeseries_velocity_linear: m/s
+  power_total_w: W
+  power_static_w: W
+  power_mechanical_w: W
+  power_thermal_w: W
+  battery_soc_pct: "%"
+  time_s: s
+  velocity_linear_mps: m/s
 plots:
   # ── Overview ────────────────────────────────────────────────────────────────
   - id: overview_table
@@ -588,29 +588,29 @@ plots:
   - id: timeseries_power
     type: timeseries
     title: Power & Battery Over Time
-    data:
-      source: fact_episodes
     channels:
-      x: timeseries_time_s
+      x: time_s
       color: planner
-      y: [timeseries_power_total_w, timeseries_power_static_w, timeseries_power_mechanical_w, timeseries_power_thermal_w, timeseries_battery_soc]
+      y: [power_total_w, power_static_w, power_mechanical_w, power_thermal_w, battery_soc_pct]
+    data:
+      source: v_series_energy
     layout_group: ecological
     group_by: [stage]
     options:
-      x: timeseries_time_s
-      metrics: [timeseries_power_total_w, timeseries_power_static_w, timeseries_power_mechanical_w, timeseries_power_thermal_w, timeseries_battery_soc]
+      x: time_s
+      metrics: [power_total_w, power_static_w, power_mechanical_w, power_thermal_w, battery_soc_pct]
   - id: timeseries_velocity
     type: timeseries
     title: Velocity Over Time
-    data:
-      source: fact_episodes
     channels:
-      x: timeseries_time_s
-      y: timeseries_velocity_linear
+      x: time_s
+      y: velocity_linear_mps
       color: planner
+    data:
+      source: v_series_energy
     layout_group: ecological
     group_by: [stage]
-    options: {x: timeseries_time_s}
+    options: {x: time_s}
   - id: box_acoustic_max
     type: box
     title: Max Pedestrian Acoustic Exposure (dBA)

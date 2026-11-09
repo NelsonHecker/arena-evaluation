@@ -716,7 +716,7 @@ class TrajectoryRenderer(BasePlotRenderer):
             origin = map_meta.get("origin", [0.0, 0.0, 0.0])
             ox, oy = float(origin[0]), float(origin[1])
             ax.imshow(image, extent=(ox, ox + map_meta["width"] * resolution, oy, oy + map_meta["height"] * resolution), alpha=0.5, origin="upper", zorder=0)
-        except OSError as e:
+        except (OSError, SyntaxError) as e:
             print(f"Failed to overlay map: {e}")
     def _draw_static(self, ax: Axes, panel: _Panel, world: MechanismWorld | None, map_name: str | None, run_dir: pathlib.Path | None) -> None:
         x0, x1, y0, y1 = panel.limits
@@ -846,7 +846,7 @@ class TrajectoryRenderer(BasePlotRenderer):
         ani = animation.FuncAnimation(fig, update, frames=times, interval=1000 // GIF_FPS, blit=True)
         try:
             ani.save(out_path, writer="pillow", fps=GIF_FPS)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, RuntimeError) as e:
             print(f"Failed to save GIF {out_path}: {e}")
         finally:
             clock.remove()

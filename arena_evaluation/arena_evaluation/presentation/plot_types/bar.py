@@ -5,6 +5,7 @@ import pathlib
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.express as px
+from plotly.graph_objects import Figure
 import polars as pl
 
 from arena_evaluation.presentation.color_utils import get_color_palette
@@ -164,7 +165,7 @@ class BarRenderer(BasePlotRenderer):
         return self._finish_plotly(fig)
 
     @staticmethod
-    def _finish_plotly(fig: object) -> str:
+    def _finish_plotly(fig: Figure) -> str:
         fig.update_layout(
             legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
             margin=dict(t=40, b=40, l=50, r=30),

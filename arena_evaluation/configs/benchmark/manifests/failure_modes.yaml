@@ -511,8 +511,10 @@ plots:
   - id: timeseries_motion_velocity_tracking
     type: timeseries
     title: "Visual Confirmation: Linear Velocity Profile v(t) Timeseries"
-    data_key: timeseries_velocity_linear
+    data_key: velocity_linear_mps
     differentiate: local_planner
+    data:
+      source: v_series_energy
     layout_group: kinematic_stress_and_jerk_spikes
 
   - id: box_jerk_max_local
@@ -586,8 +588,10 @@ plots:
   - id: timeseries_power_breakdown
     type: timeseries
     title: "Visual Confirmation: Total vs Mechanical Power Profile P(t) Timeseries"
-    data_key: timeseries_power_total_w
+    data_key: power_total_w
     differentiate: local_planner
+    data:
+      source: v_series_energy
     layout_group: energy_surges_and_dynamic_dissipation
 
   - id: bar_energy_subsystems
@@ -692,29 +696,37 @@ plots:
   - id: timeseries_power_mech_w
     type: timeseries
     title: "Subsystem Mechanical Power Demand P_mech(t) Timeseries"
-    data_key: timeseries_power_mechanical_w
+    data_key: power_mechanical_w
     differentiate: local_planner
+    data:
+      source: v_series_energy
     layout_group: synchronized_failure_timeseries
 
-  - id: timeseries_power_thermal_w
+  - id: power_thermal_w
     type: timeseries
     title: "Subsystem Thermal Power Dissipation P_therm(t) Timeseries"
-    data_key: timeseries_power_thermal_w
+    data_key: power_thermal_w
     differentiate: local_planner
+    data:
+      source: v_series_energy
     layout_group: synchronized_failure_timeseries
 
-  - id: timeseries_battery_soc
+  - id: battery_soc_pct
     type: timeseries
     title: "Battery State of Charge (SoC %) Depletion Timeseries"
-    data_key: timeseries_battery_soc
+    data_key: battery_soc_pct
     differentiate: local_planner
+    data:
+      source: v_series_energy
     layout_group: synchronized_failure_timeseries
 
   - id: timeseries_min_clearance
     type: timeseries
     title: "Minimum Edge-to-Edge Pedestrian Clearance d_eff(t) Timeseries"
-    data_key: timeseries_min_ped_clearance
+    data_key: pedestrian_clearance_m
     differentiate: local_planner
+    data:
+      source: v_series_clearance
     layout_group: synchronized_failure_timeseries
 
   # ============================================================================
