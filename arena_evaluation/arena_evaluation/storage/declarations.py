@@ -95,10 +95,6 @@ _PEDESTRIAN_TABLE: Final[str] = MetricScope.PEDESTRIAN.value
 # This tuple is the single source of truth for the fact schema: FACT_SCHEMAS derives
 # each table's metric columns and dtypes from it, and the scoped evaluator copies
 # each declared column from the calculator result of the same name.
-# Every metric column the scoped evaluator publishes beyond the pre-port schema.
-# This tuple is the single source of truth for the fact schema: FACT_SCHEMAS derives
-# each table's metric columns and dtypes from it, and the scoped evaluator copies
-# each declared column from the calculator result of the same name.
 METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     # --- EPISODE scope -> fact_episodes --------------------------------------------------
     MetricDeclaration(name="barn_collided", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="", description="performance metric of the barn_score calculator"),
