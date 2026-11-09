@@ -4,7 +4,6 @@ import typing
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 
 import numpy as np
 import polars as pl
@@ -14,26 +13,7 @@ from ..pose_segments import consistent_segment, ride_arrival_times
 if typing.TYPE_CHECKING:
     from ...storage.schemas import AlignedEpisodeBundle, RobotParams
 
-
-class MetricScope(StrEnum):
-    """The five first-class fact table evaluation scopes."""
-
-    EPISODE = "episodes"
-    ENCOUNTER = "encounters"
-    CONTACT = "contacts"
-    PEDESTRIAN = "pedestrians"
-    ROBOT = "robots"
-
-
-def _coerce_scope(value: MetricScope | str) -> MetricScope:
-    """Normalize a MetricScope enum or scope token string into a MetricScope."""
-    if isinstance(value, MetricScope):
-        return value
-    token = str(value).strip().lower()
-    for member in MetricScope:
-        if token in (member.value, member.name.lower()):
-            return member
-    raise ValueError(f"Unknown MetricScope: {value!r}")
+from ...storage.declarations import MetricScope, _coerce_scope
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -96,7 +76,9 @@ class BaseMetricCalculator(ABC):
     NAME: str = ""
     CATEGORY: str = "general"
     SCOPE: MetricScope = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope] | set[MetricScope | str]] = frozenset()
+    SCOPES: typing.ClassVar[frozenset[MetricScope] | set[MetricScope | str]] = (
+        frozenset()
+    )
     REQUIRES_PEDSIM: bool = False
     DEPENDS_ON: list[str] = []
     REQUIRED_TOPICS: list[str | list[str] | tuple[str, ...] | set[str]] = []
@@ -118,7 +100,9 @@ class BaseMetricCalculator(ABC):
         return frozenset({_coerce_scope(cls.SCOPE)})
 
     @classmethod
-    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+    def required_topics_for_scope(
+        cls, scope: MetricScope
+    ) -> tuple[str | tuple[str, ...], ...]:
         """Required topic names (or topic alternatives) for executing in `scope`."""
         del scope
         normalized: list[str | tuple[str, ...]] = []
@@ -135,7 +119,9 @@ class BaseMetricCalculator(ABC):
         del scope
         return tuple(cls.output_keys())
 
-    def resolve_robot_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def resolve_robot_pose(
+        self, episode: AlignedEpisodeBundle
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Map-frame ground-truth pose (pos_x, pos_y, yaw) of the longest teleport-free piece of the track.
 
         The second triple is the odometry of the same piece, anchored to the episode start: an estimate for drift only.
@@ -144,7 +130,14 @@ class BaseMetricCalculator(ABC):
         empty = np.array([], dtype=np.float64)
         if episode.data is None or "pos_x_gt" not in episode.data.columns:
             return empty, empty, empty, empty, empty, empty
-        episode.data = episode.data.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
+        episode.data = episode.data.filter(
+            pl.col("pos_x_gt").is_not_null()
+            & ~pl.col("pos_x_gt").is_nan()
+            & pl.col("pos_y_gt").is_not_null()
+            & ~pl.col("pos_y_gt").is_nan()
+            & pl.col("yaw_gt").is_not_null()
+            & ~pl.col("yaw_gt").is_nan()
+        )
         if len(episode.data) == 0:
             return empty, empty, empty, empty, empty, empty
 
@@ -152,28 +145,64 @@ class BaseMetricCalculator(ABC):
         track_y = episode.data["pos_y_gt"].to_numpy().copy()
         track_yaw = episode.data["yaw_gt"].to_numpy().copy()
         has_odometry = "pos_x" in episode.data.columns
-        odom_x = episode.data["pos_x"].to_numpy().astype(np.float64) if has_odometry else empty
-        odom_y = episode.data["pos_y"].to_numpy().astype(np.float64) if has_odometry else empty
-        odom_yaw = episode.data["yaw"].to_numpy().astype(np.float64) if has_odometry else empty
-        odometry_origin = (odom_x[0], odom_y[0], odom_yaw[0]) if has_odometry and len(odom_x) > 0 else (0.0, 0.0, 0.0)
+        odom_x = (
+            episode.data["pos_x"].to_numpy().astype(np.float64)
+            if has_odometry
+            else empty
+        )
+        odom_y = (
+            episode.data["pos_y"].to_numpy().astype(np.float64)
+            if has_odometry
+            else empty
+        )
+        odom_yaw = (
+            episode.data["yaw"].to_numpy().astype(np.float64) if has_odometry else empty
+        )
+        odometry_origin = (
+            (odom_x[0], odom_y[0], odom_yaw[0])
+            if has_odometry and len(odom_x) > 0
+            else (0.0, 0.0, 0.0)
+        )
 
-        start, end = consistent_segment(track_x, track_y, episode.data["time_ns"].to_numpy(), self._ride_arrivals(episode))
+        start, end = consistent_segment(
+            track_x,
+            track_y,
+            episode.data["time_ns"].to_numpy(),
+            self._ride_arrivals(episode),
+        )
         episode.data = episode.data.slice(start, end - start)
-        odom_x_trans, odom_y_trans, odom_yaw_trans = _anchored_odometry(odom_x[start:end], odom_y[start:end], odom_yaw[start:end], odometry_origin, episode.start_pos)
-        return track_x[start:end], track_y[start:end], track_yaw[start:end], odom_x_trans, odom_y_trans, odom_yaw_trans
+        odom_x_trans, odom_y_trans, odom_yaw_trans = _anchored_odometry(
+            odom_x[start:end],
+            odom_y[start:end],
+            odom_yaw[start:end],
+            odometry_origin,
+            episode.start_pos,
+        )
+        return (
+            track_x[start:end],
+            track_y[start:end],
+            track_yaw[start:end],
+            odom_x_trans,
+            odom_y_trans,
+            odom_yaw_trans,
+        )
 
     @staticmethod
     def _ride_arrivals(episode: AlignedEpisodeBundle) -> np.ndarray:
         """Elevator arrival and stair crossing log times of the robot's env, the teleports that are rides."""
         from .ecological.mechanism_common import robot_env_snapshot
 
-        return ride_arrival_times(robot_env_snapshot(episode.semantic_snapshot, episode.robot_name))
+        return ride_arrival_times(
+            robot_env_snapshot(episode.semantic_snapshot, episode.robot_name)
+        )
 
     def native_topics(self, episode: AlignedEpisodeBundle) -> dict:
         """Raw native-rate topic frames keyed by topic name; {} when absent."""
         return episode.topics if isinstance(episode.topics, dict) else {}
 
-    def resolve_native_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def resolve_native_pose(
+        self, episode: AlignedEpisodeBundle
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Ground-truth robot pose on the native clock: (pos_x, pos_y, yaw, time_ns) float64 arrays, empty without ground truth.
 
         The robot's /tf track is the only trajectory source; wheel odometry never stands in for it.
@@ -209,7 +238,11 @@ class BaseMetricCalculator(ABC):
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Interpolate pose arrays onto query timestamps ``times_ns``."""
         if len(time_ns) == 0 or len(times_ns) == 0:
-            return np.zeros(len(times_ns)), np.zeros(len(times_ns)), np.zeros(len(times_ns))
+            return (
+                np.zeros(len(times_ns)),
+                np.zeros(len(times_ns)),
+                np.zeros(len(times_ns)),
+            )
 
         order = np.argsort(time_ns)
         t_sorted = time_ns[order]
@@ -234,7 +267,9 @@ class BaseMetricCalculator(ABC):
             }
         )
         df_query = pl.DataFrame({"time_ns": times_ns})
-        merged = df_query.join_asof(df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
+        merged = df_query.join_asof(
+            df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns
+        )
         px = np.nan_to_num(merged["pos_x"].to_numpy(), nan=0.0)
         py = np.nan_to_num(merged["pos_y"].to_numpy(), nan=0.0)
         ya = np.nan_to_num(merged["yaw"].to_numpy(), nan=0.0)
@@ -268,11 +303,15 @@ class BaseMetricCalculator(ABC):
             }
         )
         df_query = pl.DataFrame({"time_ns": query_times_ns})
-        merged = df_query.join_asof(df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
+        merged = df_query.join_asof(
+            df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns
+        )
         return merged["val"].to_numpy()
 
     @staticmethod
-    def speed_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> np.ndarray:
+    def speed_from_pose(
+        pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray
+    ) -> np.ndarray:
         """GT speed (m/s) by finite-differencing GT positions."""
         n = len(pos_x)
         speed = np.zeros(n)
@@ -284,7 +323,9 @@ class BaseMetricCalculator(ABC):
         return np.nan_to_num(speed, nan=0.0)
 
     @staticmethod
-    def velocity_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def velocity_from_pose(
+        pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         """GT velocity vector (m/s) by finite-differencing GT positions."""
         n = len(pos_x)
         vx = np.zeros(n)
@@ -304,7 +345,9 @@ class BaseMetricCalculator(ABC):
         pass
 
     @abstractmethod
-    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+    def calculate(
+        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
+    ) -> dict[str, typing.Any]:
         """Calculate metrics for a single episode."""
         pass
 

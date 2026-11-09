@@ -17,20 +17,18 @@ from typing import Any, Final
 
 import polars as pl
 
-from arena_evaluation.processing.metrics.social.interaction_common import (
-    PEDESTRIAN_TRACKS_TOPIC,
-    ROBOT_TRACKS_TOPIC,
-    resolve_crowd_condition,
-)
-from arena_evaluation.processing.scoped_evaluator import (
+from arena_evaluation.storage.declarations import (
     CONTACT_FACT_SCHEMA,
     ENCOUNTER_FACT_SCHEMA,
     EPISODE_FACT_SCHEMA,
     FACT_SCHEMAS,
     FACT_TABLE_NAMES,
     PEDESTRIAN_FACT_SCHEMA,
+    PEDESTRIAN_TRACKS_TOPIC,
     ROBOT_FACT_SCHEMA,
+    ROBOT_TRACKS_TOPIC,
     ScopedFactTables,
+    resolve_crowd_condition,
     write_fact_tables,
 )
 from arena_evaluation.storage.planner_names import split_planner_name
@@ -228,7 +226,9 @@ def _env_from_robot_id(robot_id: str, fallback: str = "env_0") -> str:
     return match.group(1) if match is not None else fallback
 
 
-def _parse_lidar_variant(raw_model: str, robot_params: RobotParams | None) -> str | None:
+def _parse_lidar_variant(
+    raw_model: str, robot_params: RobotParams | None
+) -> str | None:
     match = _LIDAR_BRACKET_RE.search(raw_model)
     if match is not None:
         return match.group(1)
@@ -378,11 +378,21 @@ class StarSchemaBuilder:
             dim_robots=dim_rob_df,
             dim_pedestrians=dim_ped_df,
             dim_world_entities=dim_world_df,
-            fact_episodes=facts.episodes.select(list(EPISODE_FACT_SCHEMA.names())).cast(EPISODE_FACT_SCHEMA),
-            fact_encounters=facts.encounters.select(list(ENCOUNTER_FACT_SCHEMA.names())).cast(ENCOUNTER_FACT_SCHEMA),
-            fact_contacts=facts.contacts.select(list(CONTACT_FACT_SCHEMA.names())).cast(CONTACT_FACT_SCHEMA),
-            fact_pedestrians=facts.pedestrians.select(list(PEDESTRIAN_FACT_SCHEMA.names())).cast(PEDESTRIAN_FACT_SCHEMA),
-            fact_robots=facts.robots.select(list(ROBOT_FACT_SCHEMA.names())).cast(ROBOT_FACT_SCHEMA),
+            fact_episodes=facts.episodes.select(list(EPISODE_FACT_SCHEMA.names())).cast(
+                EPISODE_FACT_SCHEMA
+            ),
+            fact_encounters=facts.encounters.select(
+                list(ENCOUNTER_FACT_SCHEMA.names())
+            ).cast(ENCOUNTER_FACT_SCHEMA),
+            fact_contacts=facts.contacts.select(list(CONTACT_FACT_SCHEMA.names())).cast(
+                CONTACT_FACT_SCHEMA
+            ),
+            fact_pedestrians=facts.pedestrians.select(
+                list(PEDESTRIAN_FACT_SCHEMA.names())
+            ).cast(PEDESTRIAN_FACT_SCHEMA),
+            fact_robots=facts.robots.select(list(ROBOT_FACT_SCHEMA.names())).cast(
+                ROBOT_FACT_SCHEMA
+            ),
         )
 
     def build_status_episode_tables(
@@ -395,16 +405,47 @@ class StarSchemaBuilder:
         robot_id: str = "",
     ) -> StarSchemaTables:
         """Build StarSchemaTables for an episode that had no trajectory or recording."""
-        resolved_robot_id = robot_id or (metadata.robot_model[0].partition("[")[0] if metadata is not None and metadata.robot_model else "robot")
-        env_id = _env_from_robot_id(resolved_robot_id, fallback=metadata.env_ns_root or "env_0" if metadata else "env_0")
-        planner = metadata.planner if metadata is not None and metadata.planner else descriptor.planner
-        inter_planner = metadata.inter_planner if metadata is not None and metadata.inter_planner else split_planner_name(planner)[1]
-        dispatcher = str(metadata.params.get("dispatcher", "none")) if metadata is not None else "none"
-        raw_model = metadata.robot_model[0] if metadata is not None and metadata.robot_model else "unknown"
+        resolved_robot_id = robot_id or (
+            metadata.robot_model[0].partition("[")[0]
+            if metadata is not None and metadata.robot_model
+            else "robot"
+        )
+        env_id = _env_from_robot_id(
+            resolved_robot_id,
+            fallback=metadata.env_ns_root or "env_0" if metadata else "env_0",
+        )
+        planner = (
+            metadata.planner
+            if metadata is not None and metadata.planner
+            else descriptor.planner
+        )
+        inter_planner = (
+            metadata.inter_planner
+            if metadata is not None and metadata.inter_planner
+            else split_planner_name(planner)[1]
+        )
+        dispatcher = (
+            str(metadata.params.get("dispatcher", "none"))
+            if metadata is not None
+            else "none"
+        )
+        raw_model = (
+            metadata.robot_model[0]
+            if metadata is not None and metadata.robot_model
+            else "unknown"
+        )
         robot_model = raw_model.partition("[")[0] or "unknown"
-        world = metadata.map if metadata is not None and metadata.map else descriptor.map
-        scenario = str(metadata.params.get("scenario", descriptor.stage)) if metadata is not None else descriptor.stage
-        seed_val = _opt_int(metadata.params.get("seed")) if metadata is not None else None
+        world = (
+            metadata.map if metadata is not None and metadata.map else descriptor.map
+        )
+        scenario = (
+            str(metadata.params.get("scenario", descriptor.stage))
+            if metadata is not None
+            else descriptor.stage
+        )
+        seed_val = (
+            _opt_int(metadata.params.get("seed")) if metadata is not None else None
+        )
         if seed_val is None:
             seed_val = int(episode_id)
 
@@ -444,12 +485,22 @@ class StarSchemaBuilder:
             "inter_planner": inter_planner,
             "dispatcher": dispatcher,
             "lidar_variant": _opt_str(meta_params.get("lidar_variant")),
-            "max_linear_vel": _opt_float(meta_params.get("robot.mobile.max_linear_vel")) or _opt_float(meta_params.get("max_linear_vel")) or (float(self._robot_params.max_linear_velocity) if self._robot_params and self._robot_params.max_linear_velocity > 0.0 else None),
+            "max_linear_vel": _opt_float(meta_params.get("robot.mobile.max_linear_vel"))
+            or _opt_float(meta_params.get("max_linear_vel"))
+            or (
+                float(self._robot_params.max_linear_velocity)
+                if self._robot_params and self._robot_params.max_linear_velocity > 0.0
+                else None
+            ),
             "max_angular_vel": _opt_float(meta_params.get("max_angular_vel")),
             "linear_acc": _opt_float(meta_params.get("linear_acc")),
             "linear_decel": _opt_float(meta_params.get("linear_decel")),
-            "robot_mass_kg": float(self._robot_params.total_mass) if self._robot_params else None,
-            "robot_radius_m": float(self._robot_params.robot_radius) if self._robot_params else None,
+            "robot_mass_kg": float(self._robot_params.total_mass)
+            if self._robot_params
+            else None,
+            "robot_radius_m": float(self._robot_params.robot_radius)
+            if self._robot_params
+            else None,
             "static_power_w": _opt_float(meta_params.get("static_power_w")),
             "start_x": None,
             "start_y": None,
@@ -472,14 +523,28 @@ class StarSchemaBuilder:
             return tables_seq[0]
 
         return StarSchemaTables(
-            dim_episodes=pl.concat([t.dim_episodes for t in tables_seq], how="vertical"),
+            dim_episodes=pl.concat(
+                [t.dim_episodes for t in tables_seq], how="vertical"
+            ),
             dim_robots=pl.concat([t.dim_robots for t in tables_seq], how="vertical"),
-            dim_pedestrians=pl.concat([t.dim_pedestrians for t in tables_seq], how="vertical"),
-            dim_world_entities=pl.concat([t.dim_world_entities for t in tables_seq], how="vertical"),
-            fact_episodes=pl.concat([t.fact_episodes for t in tables_seq], how="vertical"),
-            fact_encounters=pl.concat([t.fact_encounters for t in tables_seq], how="vertical"),
-            fact_contacts=pl.concat([t.fact_contacts for t in tables_seq], how="vertical"),
-            fact_pedestrians=pl.concat([t.fact_pedestrians for t in tables_seq], how="vertical"),
+            dim_pedestrians=pl.concat(
+                [t.dim_pedestrians for t in tables_seq], how="vertical"
+            ),
+            dim_world_entities=pl.concat(
+                [t.dim_world_entities for t in tables_seq], how="vertical"
+            ),
+            fact_episodes=pl.concat(
+                [t.fact_episodes for t in tables_seq], how="vertical"
+            ),
+            fact_encounters=pl.concat(
+                [t.fact_encounters for t in tables_seq], how="vertical"
+            ),
+            fact_contacts=pl.concat(
+                [t.fact_contacts for t in tables_seq], how="vertical"
+            ),
+            fact_pedestrians=pl.concat(
+                [t.fact_pedestrians for t in tables_seq], how="vertical"
+            ),
             fact_robots=pl.concat([t.fact_robots for t in tables_seq], how="vertical"),
         )
 
@@ -506,7 +571,9 @@ class StarSchemaBuilder:
         return self.concat_tables(built)
 
     @staticmethod
-    def _resolve_robot_id(episode: AlignedEpisodeBundle, facts: ScopedFactTables) -> str:
+    def _resolve_robot_id(
+        episode: AlignedEpisodeBundle, facts: ScopedFactTables
+    ) -> str:
         if not facts.episodes.is_empty():
             val = facts.episodes.item(0, "robot_id")
             if isinstance(val, str) and val:
@@ -540,7 +607,11 @@ class StarSchemaBuilder:
             non_null = rt_df.get_column("env_id").drop_nulls()
             if len(non_null) > 0:
                 return str(non_null[0])
-        fallback = metadata.env_ns_root if metadata is not None and metadata.env_ns_root else "env_0"
+        fallback = (
+            metadata.env_ns_root
+            if metadata is not None and metadata.env_ns_root
+            else "env_0"
+        )
         return _env_from_robot_id(robot_id, fallback=fallback)
 
     def _build_dim_episodes(
@@ -561,19 +632,85 @@ class StarSchemaBuilder:
         human_params = episode.human_params or {}
         meta_params = metadata.params if metadata is not None else {}
 
-        benchmark_id = (metadata.benchmark_id if metadata is not None and metadata.benchmark_id else None) or (descriptor.benchmark_id if descriptor is not None and descriptor.benchmark_id else None) or str(metrics_config.get("benchmark_id", run_id))
-        suite_name = metadata.suite_name if metadata is not None and metadata.suite_name else str(metrics_config.get("suite_name", ""))
-        contest_name = metadata.contest_name if metadata is not None and metadata.contest_name else str(metrics_config.get("contest_name", ""))
-        stage = (metadata.stage if metadata is not None and metadata.stage else None) or (descriptor.stage if descriptor is not None and descriptor.stage else None) or str(metrics_config.get("stage", "default"))
-        world = episode.map or (metadata.map if metadata is not None and metadata.map else None) or (descriptor.map if descriptor is not None and descriptor.map else None) or str(metrics_config.get("world", "unknown"))
-        scenario = str(meta_params.get("scenario") or human_params.get("scenario") or metrics_config.get("scenario") or stage)
-        planner = (metadata.planner if metadata is not None and metadata.planner else None) or (descriptor.planner if descriptor is not None and descriptor.planner else None) or str(metrics_config.get("planner", "unknown"))
-        inter_planner = (metadata.inter_planner if metadata is not None and metadata.inter_planner else None) or _opt_str(metrics_config.get("inter_planner")) or split_planner_name(planner)[1]
-        dispatcher = str(meta_params.get("dispatcher") or metrics_config.get("dispatcher") or "none")
-        raw_robot_model = (metadata.robot_model[0] if metadata is not None and metadata.robot_model else None) or _opt_str(metrics_config.get("robot_model")) or robot_params.model
+        benchmark_id = (
+            (
+                metadata.benchmark_id
+                if metadata is not None and metadata.benchmark_id
+                else None
+            )
+            or (
+                descriptor.benchmark_id
+                if descriptor is not None and descriptor.benchmark_id
+                else None
+            )
+            or str(metrics_config.get("benchmark_id", run_id))
+        )
+        suite_name = (
+            metadata.suite_name
+            if metadata is not None and metadata.suite_name
+            else str(metrics_config.get("suite_name", ""))
+        )
+        contest_name = (
+            metadata.contest_name
+            if metadata is not None and metadata.contest_name
+            else str(metrics_config.get("contest_name", ""))
+        )
+        stage = (
+            (metadata.stage if metadata is not None and metadata.stage else None)
+            or (
+                descriptor.stage
+                if descriptor is not None and descriptor.stage
+                else None
+            )
+            or str(metrics_config.get("stage", "default"))
+        )
+        world = (
+            episode.map
+            or (metadata.map if metadata is not None and metadata.map else None)
+            or (descriptor.map if descriptor is not None and descriptor.map else None)
+            or str(metrics_config.get("world", "unknown"))
+        )
+        scenario = str(
+            meta_params.get("scenario")
+            or human_params.get("scenario")
+            or metrics_config.get("scenario")
+            or stage
+        )
+        planner = (
+            (metadata.planner if metadata is not None and metadata.planner else None)
+            or (
+                descriptor.planner
+                if descriptor is not None and descriptor.planner
+                else None
+            )
+            or str(metrics_config.get("planner", "unknown"))
+        )
+        inter_planner = (
+            (
+                metadata.inter_planner
+                if metadata is not None and metadata.inter_planner
+                else None
+            )
+            or _opt_str(metrics_config.get("inter_planner"))
+            or split_planner_name(planner)[1]
+        )
+        dispatcher = str(
+            meta_params.get("dispatcher") or metrics_config.get("dispatcher") or "none"
+        )
+        raw_robot_model = (
+            (
+                metadata.robot_model[0]
+                if metadata is not None and metadata.robot_model
+                else None
+            )
+            or _opt_str(metrics_config.get("robot_model"))
+            or robot_params.model
+        )
         robot_model = raw_robot_model.partition("[")[0] or "unknown"
 
-        ped_policy_default = _opt_str(human_params.get("ped_policy")) or _opt_str(metrics_config.get("ped_policy_default"))
+        ped_policy_default = _opt_str(human_params.get("ped_policy")) or _opt_str(
+            metrics_config.get("ped_policy_default")
+        )
         if ped_policy_default is None and not facts.pedestrians.is_empty():
             policies = facts.pedestrians.get_column("ped_policy").drop_nulls()
             if len(policies) > 0:
@@ -581,14 +718,38 @@ class StarSchemaBuilder:
         if ped_policy_default is None:
             ped_policy_default = "sfm"
 
-        crowd_size = int(episode.num_pedestrians) if episode.num_pedestrians > 0 else int(facts.pedestrians.height)
-        seed_raw = human_params.get("seed") if human_params.get("seed") is not None else meta_params.get("seed", metrics_config.get("seed"))
+        crowd_size = (
+            int(episode.num_pedestrians)
+            if episode.num_pedestrians > 0
+            else int(facts.pedestrians.height)
+        )
+        seed_raw = (
+            human_params.get("seed")
+            if human_params.get("seed") is not None
+            else meta_params.get("seed", metrics_config.get("seed"))
+        )
         seed = _opt_int(seed_raw)
         if seed is None:
             seed = int(episode_id)
 
-        is_reference = bool((metadata.is_reference if metadata is not None else False) or (descriptor.is_reference if descriptor is not None else False) or bool(metrics_config.get("is_reference", False)))
-        reference_type = (metadata.reference_type if metadata is not None and metadata.reference_type else None) or (descriptor.reference_type if descriptor is not None and descriptor.reference_type else None) or _opt_str(metrics_config.get("reference_type"))
+        is_reference = bool(
+            (metadata.is_reference if metadata is not None else False)
+            or (descriptor.is_reference if descriptor is not None else False)
+            or bool(metrics_config.get("is_reference", False))
+        )
+        reference_type = (
+            (
+                metadata.reference_type
+                if metadata is not None and metadata.reference_type
+                else None
+            )
+            or (
+                descriptor.reference_type
+                if descriptor is not None and descriptor.reference_type
+                else None
+            )
+            or _opt_str(metrics_config.get("reference_type"))
+        )
 
         duration_s: float | None = None
         if not facts.episodes.is_empty():
@@ -605,7 +766,15 @@ class StarSchemaBuilder:
                 if isinstance(t_min, int) and isinstance(t_max, int) and t_max >= t_min:
                     duration_s = float(t_max - t_min) / 1e9
 
-        outcome_state = episode.outcome_state if episode.outcome_state is not None else (metadata.outcome_state if metadata is not None else _opt_int(metrics_config.get("outcome_state")))
+        outcome_state = (
+            episode.outcome_state
+            if episode.outcome_state is not None
+            else (
+                metadata.outcome_state
+                if metadata is not None
+                else _opt_int(metrics_config.get("outcome_state"))
+            )
+        )
         if outcome_state is None and not facts.episodes.is_empty():
             succ = facts.episodes.item(0, "success")
             if succ is True:
@@ -613,7 +782,15 @@ class StarSchemaBuilder:
             elif succ is False:
                 outcome_state = 3
 
-        outcome_info = episode.outcome_info if episode.outcome_info is not None else (metadata.outcome_info if metadata is not None and metadata.outcome_info else _opt_str(metrics_config.get("outcome_info")))
+        outcome_info = (
+            episode.outcome_info
+            if episode.outcome_info is not None
+            else (
+                metadata.outcome_info
+                if metadata is not None and metadata.outcome_info
+                else _opt_str(metrics_config.get("outcome_info"))
+            )
+        )
         if outcome_info is None and not facts.episodes.is_empty():
             outcome_info = _opt_str(facts.episodes.item(0, "result"))
 
@@ -658,18 +835,65 @@ class StarSchemaBuilder:
         metrics_config: Mapping[str, Any],
     ) -> pl.DataFrame:
         meta_params = metadata.params if metadata is not None else {}
-        planner = (metadata.planner if metadata is not None and metadata.planner else None) or (descriptor.planner if descriptor is not None and descriptor.planner else None) or str(metrics_config.get("planner", "unknown"))
-        inter_planner = (metadata.inter_planner if metadata is not None and metadata.inter_planner else None) or _opt_str(metrics_config.get("inter_planner")) or split_planner_name(planner)[1]
-        dispatcher = str(meta_params.get("dispatcher") or metrics_config.get("dispatcher") or "none")
-        raw_robot_model = (metadata.robot_model[0] if metadata is not None and metadata.robot_model else None) or _opt_str(metrics_config.get("robot_model")) or robot_params.model
+        planner = (
+            (metadata.planner if metadata is not None and metadata.planner else None)
+            or (
+                descriptor.planner
+                if descriptor is not None and descriptor.planner
+                else None
+            )
+            or str(metrics_config.get("planner", "unknown"))
+        )
+        inter_planner = (
+            (
+                metadata.inter_planner
+                if metadata is not None and metadata.inter_planner
+                else None
+            )
+            or _opt_str(metrics_config.get("inter_planner"))
+            or split_planner_name(planner)[1]
+        )
+        dispatcher = str(
+            meta_params.get("dispatcher") or metrics_config.get("dispatcher") or "none"
+        )
+        raw_robot_model = (
+            (
+                metadata.robot_model[0]
+                if metadata is not None and metadata.robot_model
+                else None
+            )
+            or _opt_str(metrics_config.get("robot_model"))
+            or robot_params.model
+        )
         robot_model = raw_robot_model.partition("[")[0] or "unknown"
-        lidar_variant = _opt_str(meta_params.get("lidar_variant")) or _opt_str(metrics_config.get("lidar_variant")) or _parse_lidar_variant(raw_robot_model, robot_params)
+        lidar_variant = (
+            _opt_str(meta_params.get("lidar_variant"))
+            or _opt_str(metrics_config.get("lidar_variant"))
+            or _parse_lidar_variant(raw_robot_model, robot_params)
+        )
 
-        max_linear_vel = _opt_float(meta_params.get("robot.mobile.max_linear_vel")) or _opt_float(meta_params.get("max_linear_vel")) or _opt_float(metrics_config.get("max_linear_vel")) or (float(robot_params.max_linear_velocity) if robot_params.max_linear_velocity > 0.0 else None)
-        max_angular_vel = _opt_float(meta_params.get("max_angular_vel", metrics_config.get("max_angular_vel")))
-        linear_acc = _opt_float(meta_params.get("linear_acc", metrics_config.get("linear_acc")))
-        linear_decel = _opt_float(meta_params.get("linear_decel", metrics_config.get("linear_decel")))
-        static_power_w = _opt_float(meta_params.get("static_power_w", metrics_config.get("static_power_w")))
+        max_linear_vel = (
+            _opt_float(meta_params.get("robot.mobile.max_linear_vel"))
+            or _opt_float(meta_params.get("max_linear_vel"))
+            or _opt_float(metrics_config.get("max_linear_vel"))
+            or (
+                float(robot_params.max_linear_velocity)
+                if robot_params.max_linear_velocity > 0.0
+                else None
+            )
+        )
+        max_angular_vel = _opt_float(
+            meta_params.get("max_angular_vel", metrics_config.get("max_angular_vel"))
+        )
+        linear_acc = _opt_float(
+            meta_params.get("linear_acc", metrics_config.get("linear_acc"))
+        )
+        linear_decel = _opt_float(
+            meta_params.get("linear_decel", metrics_config.get("linear_decel"))
+        )
+        static_power_w = _opt_float(
+            meta_params.get("static_power_w", metrics_config.get("static_power_w"))
+        )
 
         start_x = float(episode.start_pos[0]) if len(episode.start_pos) >= 2 else None
         start_y = float(episode.start_pos[1]) if len(episode.start_pos) >= 2 else None
@@ -711,7 +935,14 @@ class StarSchemaBuilder:
             return pl.DataFrame(schema=DIM_PEDESTRIANS_SCHEMA)
 
         human_params = episode.human_params or {}
-        default_waypoints = _opt_int(human_params.get("waypoints_count", metrics_config.get("waypoints_count"))) or 0
+        default_waypoints = (
+            _opt_int(
+                human_params.get(
+                    "waypoints_count", metrics_config.get("waypoints_count")
+                )
+            )
+            or 0
+        )
 
         topics = episode.topics or {}
         ped_tracks = topics.get(PEDESTRIAN_TRACKS_TOPIC)
@@ -720,8 +951,14 @@ class StarSchemaBuilder:
 
         base_lf = facts.pedestrians.lazy()
         if ped_tracks is not None and not ped_tracks.is_empty():
-            agent_types_lf = ped_tracks.lazy().group_by("ped_id").agg(agent_type=pl.col("agent_type").drop_nulls().first())
-            base_lf = base_lf.join(agent_types_lf, on="ped_id", how="left").with_columns(
+            agent_types_lf = (
+                ped_tracks.lazy()
+                .group_by("ped_id")
+                .agg(agent_type=pl.col("agent_type").drop_nulls().first())
+            )
+            base_lf = base_lf.join(
+                agent_types_lf, on="ped_id", how="left"
+            ).with_columns(
                 agent_type=pl.col("agent_type").fill_null("adult"),
                 waypoints_count=pl.lit(default_waypoints, dtype=pl.Int64),
             )
@@ -731,7 +968,11 @@ class StarSchemaBuilder:
                 waypoints_count=pl.lit(default_waypoints, dtype=pl.Int64),
             )
 
-        return base_lf.select(list(DIM_PEDESTRIANS_SCHEMA.names())).cast(DIM_PEDESTRIANS_SCHEMA).collect()
+        return (
+            base_lf.select(list(DIM_PEDESTRIANS_SCHEMA.names()))
+            .cast(DIM_PEDESTRIANS_SCHEMA)
+            .collect()
+        )
 
     @staticmethod
     def _build_dim_world_entities(
@@ -775,10 +1016,34 @@ class StarSchemaBuilder:
             .group_by("env_id", "entity_name", maintain_order=True)
             .agg(
                 entity_kind=pl.col("kind").drop_nulls().first().fill_null("entity"),
-                zone=pl.col("value_str").filter(pl.col("field_name") == "zone").drop_nulls().first(),
-                activation_dist=pl.col("value_num").filter(pl.col("field_name").is_in(["activation_dist", "activation_distance"])).drop_nulls().first(),
-                acoustic_tl_db=pl.col("value_num").filter(pl.col("field_name").is_in(["acoustic_tl_db", "transmission_loss_db"])).drop_nulls().first(),
-                initial_state=pl.col("value_str").filter(pl.col("field_name").is_in(["state", "state_label", "initial_state"])).drop_nulls().first(),
+                zone=pl.col("value_str")
+                .filter(pl.col("field_name") == "zone")
+                .drop_nulls()
+                .first(),
+                activation_dist=pl.col("value_num")
+                .filter(
+                    pl.col("field_name").is_in(
+                        ["activation_dist", "activation_distance"]
+                    )
+                )
+                .drop_nulls()
+                .first(),
+                acoustic_tl_db=pl.col("value_num")
+                .filter(
+                    pl.col("field_name").is_in(
+                        ["acoustic_tl_db", "transmission_loss_db"]
+                    )
+                )
+                .drop_nulls()
+                .first(),
+                initial_state=pl.col("value_str")
+                .filter(
+                    pl.col("field_name").is_in(
+                        ["state", "state_label", "initial_state"]
+                    )
+                )
+                .drop_nulls()
+                .first(),
             )
             .with_columns(
                 run_id=pl.lit(run_id, dtype=pl.String),
@@ -791,7 +1056,9 @@ class StarSchemaBuilder:
         )
 
 
-def write_episode_star_tables(tables: StarSchemaTables, directory: pathlib.Path) -> dict[str, pathlib.Path]:
+def write_episode_star_tables(
+    tables: StarSchemaTables, directory: pathlib.Path
+) -> dict[str, pathlib.Path]:
     """Write per-episode dimension and fact tables into ``directory`` (e.g. ``episode_dir / 'metrics'``)."""
     directory.mkdir(parents=True, exist_ok=True)
     written: dict[str, pathlib.Path] = {}
@@ -814,7 +1081,9 @@ def read_episode_star_tables(directory: pathlib.Path) -> StarSchemaTables | None
     for name, schema in STAR_SCHEMA_SCHEMAS.items():
         path = directory / f"{name}.parquet"
         if path.is_file():
-            loaded[name] = pl.read_parquet(path).select(list(schema.names())).cast(schema)
+            loaded[name] = (
+                pl.read_parquet(path).select(list(schema.names())).cast(schema)
+            )
         else:
             loaded[name] = pl.DataFrame(schema=schema)
 
@@ -831,7 +1100,9 @@ def read_episode_star_tables(directory: pathlib.Path) -> StarSchemaTables | None
     )
 
 
-def write_star_schema(tables: StarSchemaTables, benchmark_dir: pathlib.Path) -> dict[str, pathlib.Path]:
+def write_star_schema(
+    tables: StarSchemaTables, benchmark_dir: pathlib.Path
+) -> dict[str, pathlib.Path]:
     """Write ``dim_*.parquet`` at ``benchmark_dir`` and ``fact_*.parquet`` under ``benchmark_dir / 'metrics'``."""
     benchmark_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir = benchmark_dir / "metrics"

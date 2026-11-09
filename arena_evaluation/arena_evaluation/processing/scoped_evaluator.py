@@ -11,7 +11,6 @@ materialized only at the serialization boundary.
 from __future__ import annotations
 
 import dataclasses
-import pathlib
 import re
 import typing
 from collections.abc import Mapping
@@ -19,7 +18,11 @@ from typing import Any, Final
 
 import polars as pl
 
-from arena_evaluation.processing.metrics.base import MetricScope, ScopeExecutionOutcome, ScopeSlice
+from arena_evaluation.processing.metrics.base import (
+    MetricScope,
+    ScopeExecutionOutcome,
+    ScopeSlice,
+)
 from arena_evaluation.processing.metrics.registry import MetricRegistry
 from arena_evaluation.processing.metrics.safety.contact_attribution import (
     COLLISION_EVENTS_TOPIC,
@@ -36,7 +39,9 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     extract_ped_tracks,
     resolve_crowd_condition,
 )
-from arena_evaluation.processing.metrics.social.proxemics import pedestrian_intrusion_counts_frame
+from arena_evaluation.processing.metrics.social.proxemics import (
+    pedestrian_intrusion_counts_frame,
+)
 from arena_evaluation.processing.windows import (
     ACTOR_PEDESTRIAN,
     DEFAULT_DETECTOR_PARAMS,
@@ -48,6 +53,22 @@ from arena_evaluation.processing.windows import (
     fleet_pairs_lf,
     pedestrian_pairs_lf,
 )
+from arena_evaluation.storage.declarations import (
+    CONTACT_FACT_SCHEMA,
+    ENCOUNTER_FACT_SCHEMA,
+    EPISODE_FACT_SCHEMA,
+    FACT_SCHEMAS,
+    FACT_TABLE_NAMES,
+    PEDESTRIAN_FACT_SCHEMA,
+    ROBOT_FACT_SCHEMA,
+    ScopedFactTables,
+    _CONTACT_NULLABLE,
+    _ENCOUNTER_NULLABLE,
+    _EPISODE_NULLABLE,
+    _PEDESTRIAN_NULLABLE,
+    _ROBOT_NULLABLE,
+    write_fact_tables,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 EVALUATOR_VERSION: Final[str] = "wp2-scoped-evaluator-v1"
@@ -58,6 +79,21 @@ REFERENCE_MISSING: Final[str] = "reference_missing"
 ZERO_DENOMINATOR: Final[str] = "zero_denominator"
 TOPIC_MISSING: Final[str] = "topic_missing"
 
+__all__ = [
+    "CONTACT_FACT_SCHEMA",
+    "ENCOUNTER_FACT_SCHEMA",
+    "EPISODE_FACT_SCHEMA",
+    "FACT_SCHEMAS",
+    "FACT_TABLE_NAMES",
+    "PEDESTRIAN_FACT_SCHEMA",
+    "ROBOT_FACT_SCHEMA",
+    "ScopedFactTables",
+    "write_fact_tables",
+    "EpisodeScopeHierarchy",
+    "ScopedEvaluator",
+    "EVALUATOR_VERSION",
+]
+
 COLLISION_CONTACTS_TOPIC: Final[str] = "collision_contacts"
 ROBOT_POWER_TOPIC: Final[str] = "robot_power"
 ROBOT_ACOUSTICS_TOPIC: Final[str] = "robot_acoustics"
@@ -67,208 +103,6 @@ CONTACT_PRE_WINDOW_S: Final[float] = 0.5
 CONTACT_POST_WINDOW_S: Final[float] = 0.5
 METRES_PER_WH_J: Final[float] = 3600.0
 _ENV_PREFIX: Final[re.Pattern[str]] = re.compile(r"^env_[0-9]+_")
-
-FACT_TABLE_NAMES: Final[tuple[str, ...]] = ("episodes", "encounters", "contacts", "pedestrians", "robots")
-
-EPISODE_FACT_SCHEMA = pl.Schema(
-    {
-        "run_id": pl.String,
-        "episode_id": pl.Int64,
-        "robot_id": pl.String,
-        "result": pl.String,
-        "success": pl.Boolean,
-        "time_to_goal_s": pl.Float64,
-        "path_length_m": pl.Float64,
-        "path_efficiency": pl.Float64,
-        "total_energy_wh": pl.Float64,
-        "energy_per_meter_j_m": pl.Float64,
-        "mean_velocity_mps": pl.Float64,
-        "max_acceleration_mps2": pl.Float64,
-        "jerk_max_mps3": pl.Float64,
-        "min_obstacle_clearance_m": pl.Float64,
-        "min_ped_clearance_m": pl.Float64,
-        "total_collisions_ped": pl.Int64,
-        "total_collisions_static": pl.Int64,
-        "success_no_robot_fault": pl.Boolean,
-        "mar": pl.Float64,
-        "pfi": pl.Float64,
-        "robot_path_dev_m": pl.Float64,
-        "total_acoustic_dose_pa2s": pl.Float64,
-        "null_reason": pl.String,
-    }
-)
-
-ENCOUNTER_FACT_SCHEMA = pl.Schema(
-    {
-        "run_id": pl.String,
-        "episode_id": pl.Int64,
-        "robot_id": pl.String,
-        "encounter_id": pl.String,
-        "actor_1": pl.String,
-        "actor_2": pl.String,
-        "actor_2_kind": pl.String,
-        "t_start_ns": pl.Int64,
-        "t_end_ns": pl.Int64,
-        "duration_s": pl.Float64,
-        "approach_type": pl.String,
-        "min_clearance_m": pl.Float64,
-        "detour_time_s": pl.Float64,
-        "path_deviation_m": pl.Float64,
-        "encounter_energy_j": pl.Float64,
-        "energy_surge_ratio": pl.Float64,
-        "sound_exposure_dose_pa2s": pl.Float64,
-        "probst_R_robot": pl.Float64,
-        "probst_R_actor2": pl.Float64,
-        "probst_R_time": pl.Float64,
-        "probst_E_robot": pl.Float64,
-        "probst_E_actor2": pl.Float64,
-        "had_contact": pl.Boolean,
-        "contact_id": pl.String,
-        "null_reason": pl.String,
-    }
-)
-
-CONTACT_FACT_SCHEMA = pl.Schema(
-    {
-        "run_id": pl.String,
-        "episode_id": pl.Int64,
-        "robot_id": pl.String,
-        "contact_id": pl.String,
-        "encounter_id": pl.String,
-        "collider_kind": pl.String,
-        "obstacle_id": pl.String,
-        "t_onset_ns": pl.Int64,
-        "t_end_ns": pl.Int64,
-        "duration_s": pl.Float64,
-        "impact_speed_mps": pl.Float64,
-        "robot_speed_at_impact_mps": pl.Float64,
-        "obstacle_speed_at_impact_mps": pl.Float64,
-        "closer_label": pl.String,
-        "robot_closing_share": pl.Float64,
-        "counterfactual_freeze_persists": pl.Boolean,
-        "fault_attributed_to": pl.String,
-        "null_reason": pl.String,
-    }
-)
-
-PEDESTRIAN_FACT_SCHEMA = pl.Schema(
-    {
-        "run_id": pl.String,
-        "episode_id": pl.Int64,
-        "env_id": pl.String,
-        "ped_id": pl.String,
-        "ped_name": pl.String,
-        "ped_policy": pl.String,
-        "is_blind": pl.Boolean,
-        "desired_speed": pl.Float64,
-        "radius_m": pl.Float64,
-        "spawn_x": pl.Float64,
-        "spawn_y": pl.Float64,
-        "spawn_yaw": pl.Float64,
-        "total_distance_m": pl.Float64,
-        "mean_speed_mps": pl.Float64,
-        "cumulative_sound_dose_pa2s": pl.Float64,
-        "total_encounters": pl.Int64,
-        "total_intrusions_intimate": pl.Int64,
-        "total_intrusions_personal": pl.Int64,
-        "ped_path_deflection_m": pl.Float64,
-        "round_trips_completed": pl.Int64,
-        "null_reason": pl.String,
-    }
-)
-
-ROBOT_FACT_SCHEMA = pl.Schema(
-    {
-        "run_id": pl.String,
-        "episode_id": pl.Int64,
-        "env_id": pl.String,
-        "robot_id": pl.String,
-        "robot_name": pl.String,
-        "path_length_m": pl.Float64,
-        "mean_speed_mps": pl.Float64,
-        "max_speed_mps": pl.Float64,
-        "mean_power_w": pl.Float64,
-        "peak_power_w": pl.Float64,
-        "mechanical_work_j": pl.Float64,
-        "thermal_energy_j": pl.Float64,
-        "electrical_energy_wh": pl.Float64,
-        "acoustic_emission_pa2s": pl.Float64,
-        "drivetrain_scrub_j": pl.Float64,
-        "null_reason": pl.String,
-    }
-)
-
-FACT_SCHEMAS: Final[dict[str, pl.Schema]] = {
-    "episodes": EPISODE_FACT_SCHEMA,
-    "encounters": ENCOUNTER_FACT_SCHEMA,
-    "contacts": CONTACT_FACT_SCHEMA,
-    "pedestrians": PEDESTRIAN_FACT_SCHEMA,
-    "robots": ROBOT_FACT_SCHEMA,
-}
-
-_EPISODE_NULLABLE: Final[tuple[str, ...]] = (
-    "result",
-    "success",
-    "time_to_goal_s",
-    "path_length_m",
-    "path_efficiency",
-    "total_energy_wh",
-    "energy_per_meter_j_m",
-    "mean_velocity_mps",
-    "max_acceleration_mps2",
-    "jerk_max_mps3",
-    "min_obstacle_clearance_m",
-    "min_ped_clearance_m",
-    "total_collisions_ped",
-    "total_collisions_static",
-    "success_no_robot_fault",
-    "mar",
-    "pfi",
-    "robot_path_dev_m",
-    "total_acoustic_dose_pa2s",
-)
-_ENCOUNTER_NULLABLE: Final[tuple[str, ...]] = (
-    "detour_time_s",
-    "path_deviation_m",
-    "encounter_energy_j",
-    "energy_surge_ratio",
-    "sound_exposure_dose_pa2s",
-    "probst_R_robot",
-    "probst_R_actor2",
-    "probst_R_time",
-    "probst_E_robot",
-    "probst_E_actor2",
-)
-_CONTACT_NULLABLE: Final[tuple[str, ...]] = (
-    "impact_speed_mps",
-    "robot_speed_at_impact_mps",
-    "obstacle_speed_at_impact_mps",
-    "closer_label",
-    "robot_closing_share",
-)
-_PEDESTRIAN_NULLABLE: Final[tuple[str, ...]] = (
-    "ped_policy",
-    "desired_speed",
-    "radius_m",
-    "spawn_x",
-    "spawn_y",
-    "spawn_yaw",
-    "mean_speed_mps",
-    "cumulative_sound_dose_pa2s",
-    "ped_path_deflection_m",
-)
-_ROBOT_NULLABLE: Final[tuple[str, ...]] = (
-    "path_length_m",
-    "mean_speed_mps",
-    "max_speed_mps",
-    "mean_power_w",
-    "peak_power_w",
-    "mechanical_work_j",
-    "thermal_energy_j",
-    "electrical_energy_wh",
-    "acoustic_emission_pa2s",
-    "drivetrain_scrub_j",
-)
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -282,28 +116,6 @@ class EpisodeScopeHierarchy:
     episodes: tuple[ScopeSlice, ...]
     encounter_windows: pl.DataFrame
     contact_windows: pl.DataFrame
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class ScopedFactTables:
-    """The five typed fact tables of one evaluated episode."""
-
-    episodes: pl.DataFrame
-    encounters: pl.DataFrame
-    contacts: pl.DataFrame
-    pedestrians: pl.DataFrame
-    robots: pl.DataFrame
-
-    def by_name(self) -> dict[str, pl.DataFrame]:
-        """Fact tables keyed by their star-schema table name."""
-        return {"episodes": self.episodes, "encounters": self.encounters, "contacts": self.contacts, "pedestrians": self.pedestrians, "robots": self.robots}
-
-
-def write_fact_tables(tables: ScopedFactTables, directory: pathlib.Path) -> None:
-    """Write the five fact tables as ``fact_<name>.parquet`` in ``directory``."""
-    directory.mkdir(parents=True, exist_ok=True)
-    for name, frame in tables.by_name().items():
-        frame.write_parquet(directory / f"fact_{name}.parquet")
 
 
 def _materialize_episode_bundle(episode: AlignedEpisodeBundle) -> AlignedEpisodeBundle:
@@ -372,15 +184,21 @@ def _int(value: object) -> int | None:
 
 def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...]) -> str:
     """``field:code`` provenance for every mapped field that stayed null."""
-    return ";".join(f"{field}:{NO_SAMPLES}" for field in nullable if row.get(field) is None)
+    return ";".join(
+        f"{field}:{NO_SAMPLES}" for field in nullable if row.get(field) is None
+    )
 
 
-def _merge_provenance_reasons(base_reason: str, provenance: Mapping[str, str], row: Mapping[str, object]) -> str:
+def _merge_provenance_reasons(
+    base_reason: str, provenance: Mapping[str, str], row: Mapping[str, object]
+) -> str:
     """Combine field missingness codes with registry topic_missing and exception provenance."""
     parts = [part for part in base_reason.split(";") if part]
     seen = set(parts)
     for key, code in provenance.items():
-        if ":exception:" in code or (":topic_missing:" in code and row.get(key) is None):
+        if ":exception:" in code or (
+            ":topic_missing:" in code and row.get(key) is None
+        ):
             if code not in seen:
                 parts.append(code)
                 seen.add(code)
@@ -394,22 +212,54 @@ def _frame(rows: list[dict[str, object]], schema: pl.Schema) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
-def _robot_trajectory_from_frame(robot_tracks: pl.DataFrame | None, radius_m: float) -> Trajectory2D:
+def _robot_trajectory_from_frame(
+    robot_tracks: pl.DataFrame | None, radius_m: float
+) -> Trajectory2D:
     """Construct Trajectory2D from materialized robot_tracks DataFrame."""
     import numpy as np
 
     empty = np.array([], dtype=np.float64)
     if not _has_rows(robot_tracks):
-        return Trajectory2D(time_ns=np.array([], dtype=np.int64), x=empty, y=empty.copy(), vx=empty.copy(), vy=empty.copy(), radius_m=radius_m)
-    rows = typing.cast(pl.DataFrame, robot_tracks).select("t_ns", "x", "y", "vx", "vy").drop_nulls(["t_ns", "x", "y"]).with_columns(pl.col("vx").fill_null(0.0), pl.col("vy").fill_null(0.0)).sort("t_ns")
+        return Trajectory2D(
+            time_ns=np.array([], dtype=np.int64),
+            x=empty,
+            y=empty.copy(),
+            vx=empty.copy(),
+            vy=empty.copy(),
+            radius_m=radius_m,
+        )
+    rows = (
+        typing.cast(pl.DataFrame, robot_tracks)
+        .select("t_ns", "x", "y", "vx", "vy")
+        .drop_nulls(["t_ns", "x", "y"])
+        .with_columns(pl.col("vx").fill_null(0.0), pl.col("vy").fill_null(0.0))
+        .sort("t_ns")
+    )
     if len(rows) == 0:
-        return Trajectory2D(time_ns=np.array([], dtype=np.int64), x=empty, y=empty.copy(), vx=empty.copy(), vy=empty.copy(), radius_m=radius_m)
+        return Trajectory2D(
+            time_ns=np.array([], dtype=np.int64),
+            x=empty,
+            y=empty.copy(),
+            vx=empty.copy(),
+            vy=empty.copy(),
+            radius_m=radius_m,
+        )
     return Trajectory2D(
         time_ns=rows.get_column("t_ns").to_numpy().astype(np.int64),
         x=rows.get_column("x").to_numpy().astype(np.float64),
         y=rows.get_column("y").to_numpy().astype(np.float64),
-        vx=np.nan_to_num(rows.get_column("vx").to_numpy().astype(np.float64), nan=0.0, posinf=0.0, neginf=0.0),
-        vy=np.nan_to_num(rows.get_column("vy").to_numpy().astype(np.float64), nan=0.0, posinf=0.0, neginf=0.0),
+        vx=np.nan_to_num(
+            rows.get_column("vx").to_numpy().astype(np.float64),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        ),
+        vy=np.nan_to_num(
+            rows.get_column("vy").to_numpy().astype(np.float64),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        ),
         radius_m=radius_m,
     )
 
@@ -417,12 +267,19 @@ def _robot_trajectory_from_frame(robot_tracks: pl.DataFrame | None, radius_m: fl
 class ScopedEvaluator:
     """Multi-resolution scoped evaluator delegating metric calculations to the scope-native registry."""
 
-    def __init__(self, robot_params: RobotParams, metrics_config: Mapping[str, Any] | None = None, detector_params: DetectorParams = DEFAULT_DETECTOR_PARAMS) -> None:
+    def __init__(
+        self,
+        robot_params: RobotParams,
+        metrics_config: Mapping[str, Any] | None = None,
+        detector_params: DetectorParams = DEFAULT_DETECTOR_PARAMS,
+    ) -> None:
         self.robot_params = robot_params
         self.metrics_config: dict[str, Any] = dict(metrics_config or {})
         self.detector_params = detector_params
 
-    def decompose_hierarchy(self, episode: AlignedEpisodeBundle, *, run_id: str, episode_id: int) -> EpisodeScopeHierarchy:
+    def decompose_hierarchy(
+        self, episode: AlignedEpisodeBundle, *, run_id: str, episode_id: int
+    ) -> EpisodeScopeHierarchy:
         """Stage 1: Materialize episode topics once and decompose into immutable ScopeSlice hierarchy."""
         materialized = _materialize_episode_bundle(episode)
         robot_tracks = _table(materialized, ROBOT_TRACKS_TOPIC)
@@ -431,8 +288,15 @@ class ScopedEvaluator:
         encounter_windows = empty_encounter_windows()
 
         if _has_rows(robot_tracks):
-            encounter_windows = self._detect_encounters(materialized, typing.cast(pl.DataFrame, robot_tracks), pedestrian_tracks)
-            contact_windows = self._detect_contacts(materialized, encounter_windows, typing.cast(pl.DataFrame, robot_tracks), pedestrian_tracks)
+            encounter_windows = self._detect_encounters(
+                materialized, typing.cast(pl.DataFrame, robot_tracks), pedestrian_tracks
+            )
+            contact_windows = self._detect_contacts(
+                materialized,
+                encounter_windows,
+                typing.cast(pl.DataFrame, robot_tracks),
+                pedestrian_tracks,
+            )
 
         robot_id = self._robot_actor_id(materialized, robot_tracks)
         robot_token = self._short_robot_token(robot_id)
@@ -455,13 +319,29 @@ class ScopedEvaluator:
             if len(envs) > 0:
                 env_id = str(envs[0])
 
-        encounter_ids = {int(index): self._encounter_id(episode_id, robot_token, int(index)) for index in encounter_windows.get_column("encounter_idx").to_numpy()}
+        encounter_ids = {
+            int(index): self._encounter_id(episode_id, robot_token, int(index))
+            for index in encounter_windows.get_column("encounter_idx").to_numpy()
+        }
 
         contact_slices: list[ScopeSlice] = []
         if len(contact_windows) > 0:
-            pre_window_s = float(self.metrics_config.get("pre_contact_window_s", CONTACT_PRE_WINDOW_S))
-            post_window_s = float(self.metrics_config.get("post_contact_window_s", CONTACT_POST_WINDOW_S))
-            for contact_idx, collider_kind, obstacle_id, t_onset_ns, t_end_ns, obstacle_x, obstacle_y, encounter_idx in zip(
+            pre_window_s = float(
+                self.metrics_config.get("pre_contact_window_s", CONTACT_PRE_WINDOW_S)
+            )
+            post_window_s = float(
+                self.metrics_config.get("post_contact_window_s", CONTACT_POST_WINDOW_S)
+            )
+            for (
+                contact_idx,
+                collider_kind,
+                obstacle_id,
+                t_onset_ns,
+                t_end_ns,
+                obstacle_x,
+                obstacle_y,
+                encounter_idx,
+            ) in zip(
                 contact_windows.get_column("contact_idx").to_numpy(),
                 contact_windows.get_column("collider_kind").to_numpy(),
                 contact_windows.get_column("obstacle_id").to_numpy(),
@@ -472,14 +352,26 @@ class ScopedEvaluator:
                 contact_windows.get_column("encounter_idx").fill_null(-1).to_numpy(),
                 strict=True,
             ):
-                internal_kind = ACTOR_PEDESTRIAN if collider_kind in (ACTOR_PEDESTRIAN, "robot") else str(collider_kind)
+                internal_kind = (
+                    ACTOR_PEDESTRIAN
+                    if collider_kind in (ACTOR_PEDESTRIAN, "robot")
+                    else str(collider_kind)
+                )
                 actor_id = str(obstacle_id)
                 win_start_ns = int(t_onset_ns - round(pre_window_s * NS_PER_S))
                 win_end_ns = int(t_end_ns + round(post_window_s * NS_PER_S))
-                window_bundle = self._window_episode(materialized, win_start_ns, win_end_ns, actor_id, internal_kind)
-                static_pt = None if collider_kind in (ACTOR_PEDESTRIAN, "robot") else _static_point(float(obstacle_x), float(obstacle_y))
+                window_bundle = self._window_episode(
+                    materialized, win_start_ns, win_end_ns, actor_id, internal_kind
+                )
+                static_pt = (
+                    None
+                    if collider_kind in (ACTOR_PEDESTRIAN, "robot")
+                    else _static_point(float(obstacle_x), float(obstacle_y))
+                )
                 enc_index = None if int(encounter_idx) < 0 else int(encounter_idx)
-                parent_encounter_id = None if enc_index is None else encounter_ids.get(enc_index)
+                parent_encounter_id = (
+                    None if enc_index is None else encounter_ids.get(enc_index)
+                )
                 contact_id = self._contact_id(episode_id, robot_token, int(contact_idx))
                 contact_slices.append(
                     ScopeSlice(
@@ -508,7 +400,15 @@ class ScopedEvaluator:
 
         encounter_slices: list[ScopeSlice] = []
         if len(encounter_windows) > 0:
-            for encounter_idx, actor_id, actor_kind, t_start_ns, t_end_ns, min_clearance_m, approach_type in zip(
+            for (
+                encounter_idx,
+                actor_id,
+                actor_kind,
+                t_start_ns,
+                t_end_ns,
+                min_clearance_m,
+                approach_type,
+            ) in zip(
                 encounter_windows.get_column("encounter_idx").fill_null(-1).to_numpy(),
                 encounter_windows.get_column("actor_id").to_numpy(),
                 encounter_windows.get_column("actor_kind").to_numpy(),
@@ -520,8 +420,12 @@ class ScopedEvaluator:
             ):
                 actor = str(actor_id)
                 kind = str(actor_kind)
-                window_bundle = self._window_episode(materialized, int(t_start_ns), int(t_end_ns), actor, kind)
-                encounter_id = self._encounter_id(episode_id, robot_token, int(encounter_idx))
+                window_bundle = self._window_episode(
+                    materialized, int(t_start_ns), int(t_end_ns), actor, kind
+                )
+                encounter_id = self._encounter_id(
+                    episode_id, robot_token, int(encounter_idx)
+                )
                 encounter_slices.append(
                     ScopeSlice(
                         scope=MetricScope.ENCOUNTER,
@@ -548,7 +452,9 @@ class ScopedEvaluator:
 
         pedestrian_slices: list[ScopeSlice] = []
         if _has_rows(pedestrian_tracks):
-            tracks_sorted = typing.cast(pl.DataFrame, pedestrian_tracks).sort(["ped_id", "t_ns"])
+            tracks_sorted = typing.cast(pl.DataFrame, pedestrian_tracks).sort(
+                ["ped_id", "t_ns"]
+            )
             for ped_df in tracks_sorted.partition_by("ped_id", maintain_order=True):
                 ped_id = str(ped_df.get_column("ped_id")[0])
                 ped_t_col = ped_df.get_column("t_ns").drop_nulls()
@@ -558,7 +464,9 @@ class ScopedEvaluator:
                 ped_end_ns = max_ped_t if isinstance(max_ped_t, int) else ep_end_ns
                 ped_topics = dict(materialized.topics or {})
                 ped_topics[PEDESTRIAN_TRACKS_TOPIC] = ped_df
-                ped_bundle = dataclasses.replace(materialized, data=pl.DataFrame(), topics=ped_topics, fleet={})
+                ped_bundle = dataclasses.replace(
+                    materialized, data=pl.DataFrame(), topics=ped_topics, fleet={}
+                )
 
                 ped_envs = ped_df.get_column("env_id").drop_nulls()
                 ped_names = ped_df.get_column("ped_name").drop_nulls()
@@ -581,14 +489,24 @@ class ScopedEvaluator:
                             "episode_id": int(episode_id),
                             "env_id": str(ped_envs[0]) if len(ped_envs) > 0 else env_id,
                             "ped_id": ped_id,
-                            "ped_name": str(ped_names[0]) if len(ped_names) > 0 else ped_id,
-                            "ped_policy": str(ped_policies[0]) if len(ped_policies) > 0 else None,
+                            "ped_name": str(ped_names[0])
+                            if len(ped_names) > 0
+                            else ped_id,
+                            "ped_policy": str(ped_policies[0])
+                            if len(ped_policies) > 0
+                            else None,
                             "is_blind": crowd_condition == "blind",
-                            "desired_speed": _float(ped_speeds[0]) if len(ped_speeds) > 0 else None,
-                            "radius_m": _float(ped_radii[0]) if len(ped_radii) > 0 else None,
+                            "desired_speed": _float(ped_speeds[0])
+                            if len(ped_speeds) > 0
+                            else None,
+                            "radius_m": _float(ped_radii[0])
+                            if len(ped_radii) > 0
+                            else None,
                             "spawn_x": _float(ped_xs[0]) if len(ped_xs) > 0 else None,
                             "spawn_y": _float(ped_ys[0]) if len(ped_ys) > 0 else None,
-                            "spawn_yaw": _float(ped_yaws[0]) if len(ped_yaws) > 0 else None,
+                            "spawn_yaw": _float(ped_yaws[0])
+                            if len(ped_yaws) > 0
+                            else None,
                         },
                         window_bundle=ped_bundle,
                         full_episode=materialized,
@@ -637,31 +555,61 @@ class ScopedEvaluator:
             contact_windows=contact_windows,
         )
 
-    def evaluate(self, episode: AlignedEpisodeBundle, *, run_id: str, episode_id: int, episode_metrics: Mapping[str, Any] | None = None) -> ScopedFactTables:
+    def evaluate(
+        self,
+        episode: AlignedEpisodeBundle,
+        *,
+        run_id: str,
+        episode_id: int,
+        episode_metrics: Mapping[str, Any] | None = None,
+    ) -> ScopedFactTables:
         """Evaluate one episode and return its five fact tables."""
-        hierarchy = self.decompose_hierarchy(episode, run_id=run_id, episode_id=episode_id)
+        hierarchy = self.decompose_hierarchy(
+            episode, run_id=run_id, episode_id=episode_id
+        )
         episode_slice = hierarchy.episodes[0]
         materialized = episode_slice.full_episode
         pedestrian_tracks = _table(materialized, PEDESTRIAN_TRACKS_TOPIC)
 
-        registry = MetricRegistry(self.robot_params, world=materialized.map, metrics_config=dict(self.metrics_config))
+        registry = MetricRegistry(
+            self.robot_params,
+            world=materialized.map,
+            metrics_config=dict(self.metrics_config),
+        )
 
         # Bottom-up Stage 2 execution: CONTACT -> ENCOUNTER -> PEDESTRIAN -> EPISODE & ROBOT
         contact_rows = self._contact_fact_rows(registry, hierarchy.contacts)
-        encounter_rows = self._encounter_fact_rows(registry, materialized, hierarchy.encounters, contact_rows)
-        pedestrians = self._pedestrian_fact_frame(registry, materialized, hierarchy.pedestrians, encounter_rows)
+        encounter_rows = self._encounter_fact_rows(
+            registry, materialized, hierarchy.encounters, contact_rows
+        )
+        pedestrians = self._pedestrian_fact_frame(
+            registry, materialized, hierarchy.pedestrians, encounter_rows
+        )
 
         episode_provenance: dict[str, str] = {}
         if episode_metrics is not None:
             metrics = dict(episode_metrics)
-            if "total_acoustic_dose_pa2s" not in metrics or metrics["total_acoustic_dose_pa2s"] is None:
-                acous_calc = registry.calculators_by_scope[MetricScope.EPISODE].get("acoustic_dose")
-                if acous_calc is not None and _has_rows(_table(materialized, ROBOT_ACOUSTICS_TOPIC)):
-                    dose_res = acous_calc.calculate_for_scope(materialized, metrics, episode_slice)
+            if (
+                "total_acoustic_dose_pa2s" not in metrics
+                or metrics["total_acoustic_dose_pa2s"] is None
+            ):
+                acous_calc = registry.calculators_by_scope[MetricScope.EPISODE].get(
+                    "acoustic_dose"
+                )
+                if acous_calc is not None and _has_rows(
+                    _table(materialized, ROBOT_ACOUSTICS_TOPIC)
+                ):
+                    dose_res = acous_calc.calculate_for_scope(
+                        materialized, metrics, episode_slice
+                    )
                     if dose_res.get("total_acoustic_dose_pa2s") is not None:
-                        metrics["total_acoustic_dose_pa2s"] = dose_res["total_acoustic_dose_pa2s"]
+                        metrics["total_acoustic_dose_pa2s"] = dose_res[
+                            "total_acoustic_dose_pa2s"
+                        ]
                 elif not _has_rows(_table(materialized, ROBOT_ACOUSTICS_TOPIC)):
-                    episode_provenance["total_acoustic_dose_pa2s"] = f"total_acoustic_dose_pa2s:{TOPIC_MISSING}:{ROBOT_ACOUSTICS_TOPIC}"
+                    episode_provenance["total_acoustic_dose_pa2s"] = (
+                        f"total_acoustic_dose_pa2s:{TOPIC_MISSING}:{ROBOT_ACOUSTICS_TOPIC}"
+                    )
         else:
             ep_outcome = registry.run_scope(
                 MetricScope.EPISODE,
@@ -673,7 +621,15 @@ class ScopedEvaluator:
             metrics = ep_outcome.results
             episode_provenance = ep_outcome.provenance
 
-        episode_row = self._episode_fact_row(materialized, run_id, episode_id, metrics, encounter_rows, contact_rows, episode_provenance)
+        episode_row = self._episode_fact_row(
+            materialized,
+            run_id,
+            episode_id,
+            metrics,
+            encounter_rows,
+            contact_rows,
+            episode_provenance,
+        )
         robots = self._robot_fact_frame(registry, hierarchy.robots[0], metrics)
 
         return ScopedFactTables(
@@ -684,13 +640,32 @@ class ScopedEvaluator:
             robots=robots,
         )
 
-    def _detect_encounters(self, episode: AlignedEpisodeBundle, robot_tracks: pl.DataFrame, pedestrian_tracks: pl.DataFrame | None) -> pl.DataFrame:
+    def _detect_encounters(
+        self,
+        episode: AlignedEpisodeBundle,
+        robot_tracks: pl.DataFrame,
+        pedestrian_tracks: pl.DataFrame | None,
+    ) -> pl.DataFrame:
         """Encounter windows of this robot with its pedestrians and other fleet robots."""
         pairs = []
         if _has_rows(pedestrian_tracks):
-            pairs.append(pedestrian_pairs_lf(robot_tracks, typing.cast(pl.DataFrame, pedestrian_tracks), float(self.robot_params.robot_radius), self.detector_params))
+            pairs.append(
+                pedestrian_pairs_lf(
+                    robot_tracks,
+                    typing.cast(pl.DataFrame, pedestrian_tracks),
+                    float(self.robot_params.robot_radius),
+                    self.detector_params,
+                )
+            )
         if episode.fleet:
-            pairs.append(fleet_pairs_lf(robot_tracks, episode.fleet, float(self.robot_params.robot_radius), params=self.detector_params))
+            pairs.append(
+                fleet_pairs_lf(
+                    robot_tracks,
+                    episode.fleet,
+                    float(self.robot_params.robot_radius),
+                    params=self.detector_params,
+                )
+            )
         if not pairs:
             return empty_encounter_windows()
         pairs_lf = pairs[0] if len(pairs) == 1 else pl.concat(pairs)
@@ -709,8 +684,17 @@ class ScopedEvaluator:
         if collision_contacts is None and collision_events is None:
             return empty_contact_windows()
 
-        robot = _robot_trajectory_from_frame(robot_tracks if robot_tracks is not None else _table(episode, ROBOT_TRACKS_TOPIC), float(self.robot_params.robot_radius))
-        tracks = extract_ped_tracks(pedestrian_tracks if pedestrian_tracks is not None else _table(episode, PEDESTRIAN_TRACKS_TOPIC))
+        robot = _robot_trajectory_from_frame(
+            robot_tracks
+            if robot_tracks is not None
+            else _table(episode, ROBOT_TRACKS_TOPIC),
+            float(self.robot_params.robot_radius),
+        )
+        tracks = extract_ped_tracks(
+            pedestrian_tracks
+            if pedestrian_tracks is not None
+            else _table(episode, PEDESTRIAN_TRACKS_TOPIC)
+        )
 
         if _has_rows(collision_contacts):
             cc_df = typing.cast(pl.DataFrame, collision_contacts)
@@ -719,10 +703,14 @@ class ScopedEvaluator:
                 obstacle_id=resolved.get_column("obstacle_id"),
                 kind=resolved.get_column("obstacle_kind"),
             )
-            return detect_contact_windows_lf(prepared, encounters, self.detector_params).collect()
+            return detect_contact_windows_lf(
+                prepared, encounters, self.detector_params
+            ).collect()
 
         merge_gap_ns = int(round(self.detector_params.contact_merge_gap_s * NS_PER_S))
-        fallback_events = _contacts_from_clearance(robot=robot, tracks=tracks, merge_gap_ns=merge_gap_ns)
+        fallback_events = _contacts_from_clearance(
+            robot=robot, tracks=tracks, merge_gap_ns=merge_gap_ns
+        )
         fallback_events.extend(_contacts_from_bumper_events(collision_events))
         if not fallback_events:
             return empty_contact_windows()
@@ -762,9 +750,18 @@ class ScopedEvaluator:
                 "obstacle_z": pl.Float64,
             },
         )
-        return detect_contact_windows_lf(synthesized, encounters, self.detector_params).collect()
+        return detect_contact_windows_lf(
+            synthesized, encounters, self.detector_params
+        ).collect()
 
-    def _window_episode(self, episode: AlignedEpisodeBundle, t_start_ns: int, t_end_ns: int, actor_id: str, actor_kind: str) -> AlignedEpisodeBundle:
+    def _window_episode(
+        self,
+        episode: AlignedEpisodeBundle,
+        t_start_ns: int,
+        t_end_ns: int,
+        actor_id: str,
+        actor_kind: str,
+    ) -> AlignedEpisodeBundle:
         """Episode view cut to ``[t_start_ns, t_end_ns]`` with the pedestrian stream restricted to the window's actor."""
         topics: dict[str, pl.DataFrame] = {}
         for name, frame in (episode.topics or {}).items():
@@ -773,16 +770,30 @@ class ScopedEvaluator:
             if name == PEDESTRIAN_TRACKS_TOPIC:
                 frame = self._actor_track_frame(episode, frame, actor_id, actor_kind)
             if len(frame) > 0:
-                frame = frame.filter((pl.col("t_ns") >= t_start_ns) & (pl.col("t_ns") <= t_end_ns))
+                frame = frame.filter(
+                    (pl.col("t_ns") >= t_start_ns) & (pl.col("t_ns") <= t_end_ns)
+                )
             topics[name] = frame
         if PEDESTRIAN_TRACKS_TOPIC not in topics and actor_kind != ACTOR_PEDESTRIAN:
-            actor_frame = self._actor_track_frame(episode, pl.DataFrame(), actor_id, actor_kind)
+            actor_frame = self._actor_track_frame(
+                episode, pl.DataFrame(), actor_id, actor_kind
+            )
             if len(actor_frame) > 0:
-                actor_frame = actor_frame.filter((pl.col("t_ns") >= t_start_ns) & (pl.col("t_ns") <= t_end_ns))
+                actor_frame = actor_frame.filter(
+                    (pl.col("t_ns") >= t_start_ns) & (pl.col("t_ns") <= t_end_ns)
+                )
             topics[PEDESTRIAN_TRACKS_TOPIC] = actor_frame
-        return dataclasses.replace(episode, data=pl.DataFrame(), topics=topics, fleet={})
+        return dataclasses.replace(
+            episode, data=pl.DataFrame(), topics=topics, fleet={}
+        )
 
-    def _actor_track_frame(self, episode: AlignedEpisodeBundle, pedestrian_tracks: pl.DataFrame, actor_id: str, actor_kind: str) -> pl.DataFrame:
+    def _actor_track_frame(
+        self,
+        episode: AlignedEpisodeBundle,
+        pedestrian_tracks: pl.DataFrame,
+        actor_id: str,
+        actor_kind: str,
+    ) -> pl.DataFrame:
         """Pedestrian-shaped track of the window's actor: pedestrian rows or another robot's task poses."""
         if actor_kind == ACTOR_PEDESTRIAN:
             if len(pedestrian_tracks) == 0:
@@ -821,7 +832,17 @@ class ScopedEvaluator:
                 radius_m=pl.lit(DEFAULT_ROBOT_ACTOR_RADIUS_M, dtype=pl.Float64),
                 desired_speed=pl.lit(None, dtype=pl.Float64),
             )
-            .select("t_ns", "ped_id", "ped_name", "x", "y", "vx", "vy", "radius_m", "desired_speed")
+            .select(
+                "t_ns",
+                "ped_id",
+                "ped_name",
+                "x",
+                "y",
+                "vx",
+                "vy",
+                "radius_m",
+                "desired_speed",
+            )
         )
 
     @staticmethod
@@ -830,10 +851,16 @@ class ScopedEvaluator:
         return _ENV_PREFIX.sub("", robot_id, count=1)
 
     @staticmethod
-    def _robot_actor_id(episode: AlignedEpisodeBundle, robot_tracks: pl.DataFrame | None) -> str:
+    def _robot_actor_id(
+        episode: AlignedEpisodeBundle, robot_tracks: pl.DataFrame | None
+    ) -> str:
         """Robot identity of the bundle: its robot column, else its bundle name."""
         if _has_rows(robot_tracks):
-            robot_ids = typing.cast(pl.DataFrame, robot_tracks).get_column("robot_id").drop_nulls()
+            robot_ids = (
+                typing.cast(pl.DataFrame, robot_tracks)
+                .get_column("robot_id")
+                .drop_nulls()
+            )
             if len(robot_ids) > 0:
                 return str(robot_ids[0])
         return str(episode.robot_name or "robot")
@@ -852,9 +879,21 @@ class ScopedEvaluator:
         del encounter_rows
         robot_tracks = _table(episode, ROBOT_TRACKS_TOPIC)
         robot_id = self._robot_actor_id(episode, robot_tracks)
-        robot_fault_contacts = sum(1 for contact in contact_rows if contact.get("fault_attributed_to") == "robot")
-        pedestrian_contacts = sum(1 for contact in contact_rows if contact.get("collider_kind") == ACTOR_PEDESTRIAN)
-        static_contacts = sum(1 for contact in contact_rows if contact.get("collider_kind") in ("wall", "static"))
+        robot_fault_contacts = sum(
+            1
+            for contact in contact_rows
+            if contact.get("fault_attributed_to") == "robot"
+        )
+        pedestrian_contacts = sum(
+            1
+            for contact in contact_rows
+            if contact.get("collider_kind") == ACTOR_PEDESTRIAN
+        )
+        static_contacts = sum(
+            1
+            for contact in contact_rows
+            if contact.get("collider_kind") in ("wall", "static")
+        )
         success = metrics.get("success")
         energy_per_meter = _float(metrics.get("energy_per_meter"))
         collisions_ped = _int(metrics.get("collision_amount_pedestrian"))
@@ -870,15 +909,23 @@ class ScopedEvaluator:
             "path_length_m": _float(metrics.get("path_length")),
             "path_efficiency": _float(metrics.get("path_efficiency")),
             "total_energy_wh": _float(metrics.get("energy_total_wh")),
-            "energy_per_meter_j_m": None if energy_per_meter is None else energy_per_meter * METRES_PER_WH_J,
+            "energy_per_meter_j_m": None
+            if energy_per_meter is None
+            else energy_per_meter * METRES_PER_WH_J,
             "mean_velocity_mps": _float(metrics.get("velocity_mean")),
             "max_acceleration_mps2": _float(metrics.get("acceleration_max")),
             "jerk_max_mps3": _float(metrics.get("jerk_max")),
             "min_obstacle_clearance_m": _float(metrics.get("min_obstacle_clearance")),
             "min_ped_clearance_m": _float(metrics.get("min_pedestrian_clearance")),
-            "total_collisions_ped": collisions_ped if collisions_ped is not None else pedestrian_contacts,
-            "total_collisions_static": (collisions_wall or 0) + (collisions_static or 0) if collisions_wall is not None or collisions_static is not None else static_contacts,
-            "success_no_robot_fault": None if success is None else bool(success) and robot_fault_contacts == 0,
+            "total_collisions_ped": collisions_ped
+            if collisions_ped is not None
+            else pedestrian_contacts,
+            "total_collisions_static": (collisions_wall or 0) + (collisions_static or 0)
+            if collisions_wall is not None or collisions_static is not None
+            else static_contacts,
+            "success_no_robot_fault": None
+            if success is None
+            else bool(success) and robot_fault_contacts == 0,
             "mar": _float(metrics.get("mar")),
             "pfi": _float(metrics.get("pfi")),
             "robot_path_dev_m": _float(metrics.get("robot_path_deviation_m")),
@@ -887,7 +934,12 @@ class ScopedEvaluator:
         row["null_reason"] = self._episode_null_reason(episode, row, provenance or {})
         return row
 
-    def _episode_null_reason(self, episode: AlignedEpisodeBundle, row: Mapping[str, object], provenance: Mapping[str, str]) -> str:
+    def _episode_null_reason(
+        self,
+        episode: AlignedEpisodeBundle,
+        row: Mapping[str, object],
+        provenance: Mapping[str, str],
+    ) -> str:
         """Episode provenance: missing-field codes, missing trajectory/pedestrian stream topics, and calculator exceptions."""
         reasons = [_row_null_reason(row, _EPISODE_NULLABLE)]
         if not _has_rows(_table(episode, ROBOT_TRACKS_TOPIC)):
@@ -897,7 +949,9 @@ class ScopedEvaluator:
         base = ";".join(reason for reason in reasons if reason)
         return _merge_provenance_reasons(base, provenance, row)
 
-    def _contact_fact_rows(self, registry: MetricRegistry, contact_slices: tuple[ScopeSlice, ...]) -> list[dict[str, object]]:
+    def _contact_fact_rows(
+        self, registry: MetricRegistry, contact_slices: tuple[ScopeSlice, ...]
+    ) -> list[dict[str, object]]:
         """One fact row per detected contact slice, attributed by the scope-aware contact calculators."""
         rows: list[dict[str, object]] = []
         for contact_slice in contact_slices:
@@ -919,17 +973,30 @@ class ScopedEvaluator:
                 "obstacle_id": str(ident["obstacle_id"]),
                 "t_onset_ns": int(contact_slice.t_start_ns),
                 "t_end_ns": int(contact_slice.t_end_ns),
-                "duration_s": float(max(0, int(contact_slice.t_end_ns) - int(contact_slice.t_start_ns))) / 1e9,
+                "duration_s": float(
+                    max(0, int(contact_slice.t_end_ns) - int(contact_slice.t_start_ns))
+                )
+                / 1e9,
                 "impact_speed_mps": _float(contact_res.get("impact_speed_mps")),
-                "robot_speed_at_impact_mps": _float(contact_res.get("robot_speed_at_impact_mps")),
-                "obstacle_speed_at_impact_mps": _float(contact_res.get("obstacle_speed_at_impact_mps")),
+                "robot_speed_at_impact_mps": _float(
+                    contact_res.get("robot_speed_at_impact_mps")
+                ),
+                "obstacle_speed_at_impact_mps": _float(
+                    contact_res.get("obstacle_speed_at_impact_mps")
+                ),
                 "closer_label": contact_res.get("closer_label"),
                 "robot_closing_share": _float(contact_res.get("robot_closing_share")),
-                "counterfactual_freeze_persists": contact_res.get("counterfactual_freeze_persists"),
-                "fault_attributed_to": contact_res.get("fault_attributed_to", "unavoidable"),
+                "counterfactual_freeze_persists": contact_res.get(
+                    "counterfactual_freeze_persists"
+                ),
+                "fault_attributed_to": contact_res.get(
+                    "fault_attributed_to", "unavoidable"
+                ),
             }
             base_reason = _row_null_reason(row, _CONTACT_NULLABLE)
-            row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
+            row["null_reason"] = _merge_provenance_reasons(
+                base_reason, outcome.provenance, row
+            )
             rows.append(row)
         return rows
 
@@ -938,7 +1005,10 @@ class ScopedEvaluator:
         """Final blame of a contact: a static-world impact is the robot's, otherwise the counterfactual record decides."""
         if collider_kind in ("wall", "static"):
             return "robot"
-        if record.get("is_robot_fault") is True or record.get("is_robot_fault_lower_bound") is True:
+        if (
+            record.get("is_robot_fault") is True
+            or record.get("is_robot_fault_lower_bound") is True
+        ):
             return "robot"
         if record.get("is_robot_fault") is False:
             return "pedestrian"
@@ -958,16 +1028,33 @@ class ScopedEvaluator:
         power_tbl = _table(episode, ROBOT_POWER_TOPIC)
         has_power = _has_rows(power_tbl)
         episode_mean_power_w = (
-            float(typing.cast(pl.DataFrame, power_tbl).get_column("total_power_w").drop_nulls().mean())  # type: ignore[arg-type]
-            if has_power and len(typing.cast(pl.DataFrame, power_tbl).get_column("total_power_w").drop_nulls()) > 0
+            float(
+                typing.cast(pl.DataFrame, power_tbl)
+                .get_column("total_power_w")
+                .drop_nulls()
+                .mean()
+            )  # type: ignore[arg-type]
+            if has_power
+            and len(
+                typing.cast(pl.DataFrame, power_tbl)
+                .get_column("total_power_w")
+                .drop_nulls()
+            )
+            > 0
             else None
         )
-        has_reference = bool(self.metrics_config.get("reference_peds") or self.metrics_config.get("reference_episode"))
+        has_reference = bool(
+            self.metrics_config.get("reference_peds")
+            or self.metrics_config.get("reference_episode")
+        )
 
         contacts_by_encounter: dict[str, dict[str, object]] = {}
         for contact in contact_rows:
             encounter_id = contact.get("encounter_id")
-            if isinstance(encounter_id, str) and encounter_id not in contacts_by_encounter:
+            if (
+                isinstance(encounter_id, str)
+                and encounter_id not in contacts_by_encounter
+            ):
                 contacts_by_encounter[encounter_id] = contact
 
         rows: list[dict[str, object]] = []
@@ -994,29 +1081,62 @@ class ScopedEvaluator:
                 "actor_2_kind": ident["actor_2_kind"],
                 "t_start_ns": int(enc_slice.t_start_ns),
                 "t_end_ns": int(enc_slice.t_end_ns),
-                "duration_s": float(max(0, int(enc_slice.t_end_ns) - int(enc_slice.t_start_ns))) / 1e9,
+                "duration_s": float(
+                    max(0, int(enc_slice.t_end_ns) - int(enc_slice.t_start_ns))
+                )
+                / 1e9,
                 "approach_type": str(ident["approach_type"]),
                 "min_clearance_m": _float(ident["min_clearance_m"]),
-                "detour_time_s": _float(enc_res.get("detour_time_s", enc_res.get("cost_ped_delay_s"))),
-                "path_deviation_m": _float(enc_res.get("path_deviation_m", enc_res.get("cost_ped_deflection_m"))),
-                "encounter_energy_j": _float(enc_res.get("encounter_energy_j", enc_res.get("cost_energy_j"))),
+                "detour_time_s": _float(
+                    enc_res.get("detour_time_s", enc_res.get("cost_ped_delay_s"))
+                ),
+                "path_deviation_m": _float(
+                    enc_res.get(
+                        "path_deviation_m", enc_res.get("cost_ped_deflection_m")
+                    )
+                ),
+                "encounter_energy_j": _float(
+                    enc_res.get("encounter_energy_j", enc_res.get("cost_energy_j"))
+                ),
                 "energy_surge_ratio": _float(enc_res.get("energy_surge_ratio")),
-                "sound_exposure_dose_pa2s": _float(enc_res.get("sound_exposure_dose_pa2s", enc_res.get("cost_sound_pa2s"))),
-                "probst_R_robot": _float(enc_res.get("probst_R_robot", enc_res.get("probst_r_robot"))),
-                "probst_R_actor2": _float(enc_res.get("probst_R_actor2", enc_res.get("probst_r_target"))),
-                "probst_R_time": _float(enc_res.get("probst_R_time", enc_res.get("probst_r_time"))),
-                "probst_E_robot": _float(enc_res.get("probst_E_robot", enc_res.get("probst_e_robot"))),
-                "probst_E_actor2": _float(enc_res.get("probst_E_actor2", enc_res.get("probst_e_target"))),
+                "sound_exposure_dose_pa2s": _float(
+                    enc_res.get(
+                        "sound_exposure_dose_pa2s", enc_res.get("cost_sound_pa2s")
+                    )
+                ),
+                "probst_R_robot": _float(
+                    enc_res.get("probst_R_robot", enc_res.get("probst_r_robot"))
+                ),
+                "probst_R_actor2": _float(
+                    enc_res.get("probst_R_actor2", enc_res.get("probst_r_target"))
+                ),
+                "probst_R_time": _float(
+                    enc_res.get("probst_R_time", enc_res.get("probst_r_time"))
+                ),
+                "probst_E_robot": _float(
+                    enc_res.get("probst_E_robot", enc_res.get("probst_e_robot"))
+                ),
+                "probst_E_actor2": _float(
+                    enc_res.get("probst_E_actor2", enc_res.get("probst_e_target"))
+                ),
                 "had_contact": linked_contact is not None,
-                "contact_id": None if linked_contact is None else linked_contact.get("contact_id"),
+                "contact_id": None
+                if linked_contact is None
+                else linked_contact.get("contact_id"),
             }
-            base_reason = self._encounter_null_reason(row, has_reference=has_reference, has_power=has_power)
-            row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
+            base_reason = self._encounter_null_reason(
+                row, has_reference=has_reference, has_power=has_power
+            )
+            row["null_reason"] = _merge_provenance_reasons(
+                base_reason, outcome.provenance, row
+            )
             rows.append(row)
         return rows
 
     @staticmethod
-    def _encounter_null_reason(row: Mapping[str, object], has_reference: bool, has_power: bool) -> str:
+    def _encounter_null_reason(
+        row: Mapping[str, object], has_reference: bool, has_power: bool
+    ) -> str:
         """Encounter provenance: twin-dependent values are reference_missing without a twin, the power ratio is zero_denominator without power."""
         reasons: list[str] = []
         for field in _ENCOUNTER_NULLABLE:
@@ -1040,7 +1160,9 @@ class ScopedEvaluator:
         if not pedestrian_slices:
             return pl.DataFrame(schema=PEDESTRIAN_FACT_SCHEMA)
 
-        intrusions_df = pedestrian_intrusion_counts_frame(episode, float(self.robot_params.robot_radius))
+        intrusions_df = pedestrian_intrusion_counts_frame(
+            episode, float(self.robot_params.robot_radius)
+        )
         intrusions_by_ped: dict[str, tuple[int, int]] = {}
         if len(intrusions_df) > 0:
             for ped_id, intimate_cnt, personal_cnt in zip(
@@ -1063,8 +1185,14 @@ class ScopedEvaluator:
             ):
                 agg_by_ped[str(ped_id)] = (
                     int(enc_cnt),
-                    None if sound_dose is None or (isinstance(sound_dose, float) and sound_dose != sound_dose) else float(sound_dose),
-                    None if deflection is None or (isinstance(deflection, float) and deflection != deflection) else float(deflection),
+                    None
+                    if sound_dose is None
+                    or (isinstance(sound_dose, float) and sound_dose != sound_dose)
+                    else float(sound_dose),
+                    None
+                    if deflection is None
+                    or (isinstance(deflection, float) and deflection != deflection)
+                    else float(deflection),
                 )
 
         rows: list[dict[str, object]] = []
@@ -1104,32 +1232,60 @@ class ScopedEvaluator:
                 "spawn_yaw": _float(ident["spawn_yaw"]),
                 "total_distance_m": _float(ped_res.get("total_distance_m")),
                 "mean_speed_mps": _float(ped_res.get("mean_speed_mps")),
-                "cumulative_sound_dose_pa2s": _float(ped_res.get("cumulative_sound_dose_pa2s")),
+                "cumulative_sound_dose_pa2s": _float(
+                    ped_res.get("cumulative_sound_dose_pa2s")
+                ),
                 "total_encounters": int(enc_cnt),
-                "total_intrusions_intimate": int(ped_res.get("total_intrusions_intimate", intimate_cnt) or 0),
-                "total_intrusions_personal": int(ped_res.get("total_intrusions_personal", personal_cnt) or 0),
+                "total_intrusions_intimate": int(
+                    ped_res.get("total_intrusions_intimate", intimate_cnt) or 0
+                ),
+                "total_intrusions_personal": int(
+                    ped_res.get("total_intrusions_personal", personal_cnt) or 0
+                ),
                 "ped_path_deflection_m": _float(ped_res.get("ped_path_deflection_m")),
                 "round_trips_completed": int(ped_res.get("round_trips_completed") or 0),
             }
             base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE)
-            row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
+            row["null_reason"] = _merge_provenance_reasons(
+                base_reason, outcome.provenance, row
+            )
             rows.append(row)
 
         return _frame(rows, PEDESTRIAN_FACT_SCHEMA)
 
     @staticmethod
-    def _encounter_aggregates_frame(encounter_rows: list[dict[str, object]]) -> pl.DataFrame:
+    def _encounter_aggregates_frame(
+        encounter_rows: list[dict[str, object]],
+    ) -> pl.DataFrame:
         """Per-actor aggregates of the encounter facts: count, sound dose and reference-twin deflection."""
         if not encounter_rows:
-            return pl.DataFrame(schema={"ped_id": pl.String, "total_encounters": pl.Int64, "cumulative_sound_dose_pa2s": pl.Float64, "ped_path_deflection_m": pl.Float64})
+            return pl.DataFrame(
+                schema={
+                    "ped_id": pl.String,
+                    "total_encounters": pl.Int64,
+                    "cumulative_sound_dose_pa2s": pl.Float64,
+                    "ped_path_deflection_m": pl.Float64,
+                }
+            )
         frame = pl.DataFrame(encounter_rows, schema=ENCOUNTER_FACT_SCHEMA)
         return frame.group_by(pl.col("actor_2").alias("ped_id")).agg(
             total_encounters=pl.len().cast(pl.Int64),
-            cumulative_sound_dose_pa2s=pl.col("sound_exposure_dose_pa2s").drop_nulls().sum() if len(frame.get_column("sound_exposure_dose_pa2s").drop_nulls()) > 0 else pl.lit(None, dtype=pl.Float64),
-            ped_path_deflection_m=pl.col("path_deviation_m").drop_nulls().sum() if len(frame.get_column("path_deviation_m").drop_nulls()) > 0 else pl.lit(None, dtype=pl.Float64),
+            cumulative_sound_dose_pa2s=pl.col("sound_exposure_dose_pa2s")
+            .drop_nulls()
+            .sum()
+            if len(frame.get_column("sound_exposure_dose_pa2s").drop_nulls()) > 0
+            else pl.lit(None, dtype=pl.Float64),
+            ped_path_deflection_m=pl.col("path_deviation_m").drop_nulls().sum()
+            if len(frame.get_column("path_deviation_m").drop_nulls()) > 0
+            else pl.lit(None, dtype=pl.Float64),
         )
 
-    def _robot_fact_frame(self, registry: MetricRegistry, robot_slice: ScopeSlice, metrics: Mapping[str, Any]) -> pl.DataFrame:
+    def _robot_fact_frame(
+        self,
+        registry: MetricRegistry,
+        robot_slice: ScopeSlice,
+        metrics: Mapping[str, Any],
+    ) -> pl.DataFrame:
         """Per-robot lifetime summary of work, emissions and drivetrain losses from registered robot calculators."""
         episode = robot_slice.window_bundle
         outcome: ScopeExecutionOutcome = registry.run_scope(
@@ -1148,19 +1304,31 @@ class ScopedEvaluator:
             "env_id": ident["env_id"],
             "robot_id": ident["robot_id"],
             "robot_name": ident["robot_name"],
-            "path_length_m": _float(robot_res.get("path_length_m", metrics.get("path_length"))),
-            "mean_speed_mps": _float(robot_res.get("mean_speed_mps", metrics.get("velocity_mean"))),
-            "max_speed_mps": _float(robot_res.get("max_speed_mps", metrics.get("velocity_max"))),
+            "path_length_m": _float(
+                robot_res.get("path_length_m", metrics.get("path_length"))
+            ),
+            "mean_speed_mps": _float(
+                robot_res.get("mean_speed_mps", metrics.get("velocity_mean"))
+            ),
+            "max_speed_mps": _float(
+                robot_res.get("max_speed_mps", metrics.get("velocity_max"))
+            ),
             "mean_power_w": _float(robot_res.get("mean_power_w")),
             "peak_power_w": _float(robot_res.get("peak_power_w")),
             "mechanical_work_j": _float(robot_res.get("mechanical_work_j")),
             "thermal_energy_j": _float(robot_res.get("thermal_energy_j")),
             "electrical_energy_wh": _float(robot_res.get("electrical_energy_wh")),
-            "acoustic_emission_pa2s": _float(robot_res.get("acoustic_emission_pa2s", metrics.get("total_acoustic_dose_pa2s"))),
+            "acoustic_emission_pa2s": _float(
+                robot_res.get(
+                    "acoustic_emission_pa2s", metrics.get("total_acoustic_dose_pa2s")
+                )
+            ),
             "drivetrain_scrub_j": _float(robot_res.get("drivetrain_scrub_j")),
         }
         base_reason = _row_null_reason(row, _ROBOT_NULLABLE)
-        row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
+        row["null_reason"] = _merge_provenance_reasons(
+            base_reason, outcome.provenance, row
+        )
         return _frame([row], ROBOT_FACT_SCHEMA)
 
     @staticmethod
