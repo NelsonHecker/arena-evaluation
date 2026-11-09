@@ -6,16 +6,15 @@ import typing
 
 import numpy as np
 import polars as pl
-from PIL import Image
 
 from arena_evaluation.processing.acoustics.door_map import (
     _entity_matches_door,
+    barrier_door_tl,
     build_pixel_tl,
-    door_segments,
+    load_barrier_map,
 )
 from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
-from arena_evaluation.processing.map_registry import MapRegistry
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.characterization import _ACOUSTIC_DEFAULTS
 from arena_evaluation.processing.pedestrian_frames import pedestrians_by_time
@@ -42,7 +41,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     }
 
     world: str | None = None
-    maps_cache: pathlib.Path | None = None
 
     @classmethod
     def output_keys(cls) -> list[str]:
@@ -83,20 +81,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                         pts.append((float(row[j]), float(row[j + 1])))
         return pts
 
-    def _get_map_occupancy(self, map_name: str, run_dir: pathlib.Path | None = None) -> tuple[np.ndarray, float, tuple[float, float, float]] | None:
-        """Load the map PNG as a binary occupancy grid, flipped so row 0 = bottom (y = origin_y)."""
-        meta = MapRegistry.get_map(map_name, cache_dir=self.maps_cache, run_dir=run_dir)
-        if not meta or "png_path" not in meta:
-            return None
-        try:
-            img = Image.open(meta["png_path"]).convert("L")
-            img_data = np.array(img)
-            grid = np.ascontiguousarray(np.flipud((img_data < 200).astype(np.uint8)))
-            return grid, meta["resolution"], meta["origin"]
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Failed to load map image for acoustics: {e}")
-            return None
-
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         nulls = {k: None for k in self.output_keys()}
 
@@ -124,17 +108,17 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         if run_dir is None and episode.folder_manager and episode.run is not None and episode.run.benchmark_id:
             run_dir = episode.folder_manager.data_root / episode.run.benchmark_id
 
-        map_data = self._get_map_occupancy(map_name, run_dir=run_dir)
-        if not map_data:
-            logger.warning("Failed to load map occupancy for '%s' (episode %s)", map_name, episode.episode_id)
+        barrier = load_barrier_map(map_name, run_dir=run_dir)
+        if barrier is None:
+            logger.warning("No barrier map for '%s' (episode %s)", map_name, episode.episode_id)
             return nulls
 
-        grid, resolution, origin = map_data
-        ox, oy = origin[0], origin[1]
+        grid, resolution = barrier.occupancy, barrier.resolution
+        ox, oy = barrier.origin
 
         # Semantic door geometry + per-frame door state (PR #68 semantics)
         # Doors are per-pixel entities: closed = door TL (25 dB), open = carved.
-        doors = door_segments(map_name, grid, resolution, origin, run_dir=run_dir)
+        doors = barrier_door_tl(barrier)
         tl_cache: dict[tuple, np.ndarray] = {}
         state_timeline = DoorStateTimeline.from_semantic_frame(episode.semantic_snapshot)
         if doors:

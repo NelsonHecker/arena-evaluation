@@ -29,7 +29,7 @@ def _grid(n: int = 20) -> np.ndarray:
 
 
 def _meta(n: int = 20) -> dict:
-    return {"png_path": "synthetic", "resolution": 0.1, "origin": [0.0, 0.0, 0.0], "width": n, "height": n}
+    return {"resolution": 0.1, "origin": (0.0, 0.0), "doors": {}, "width": n, "height": n}
 
 
 def _door_mask(n: int = 20) -> np.ndarray:
@@ -49,7 +49,16 @@ def _patch_grid(monkeypatch, n: int = 20) -> np.ndarray:
 
 
 def _patch_doors(monkeypatch, doors=None):
-    monkeypatch.setattr(af_mod, "door_segments", lambda *a, **k: doors or {})
+    load_grid_and_meta = af_mod.AcousticFieldRenderer._load_grid_and_meta
+
+    def with_doors(map_name, run_dir=None):
+        loaded = load_grid_and_meta(map_name, run_dir=run_dir)
+        if loaded is None:
+            return None
+        grid, meta = loaded
+        return grid, {**meta, "doors": doors or {}}
+
+    monkeypatch.setattr(af_mod.AcousticFieldRenderer, "_load_grid_and_meta", staticmethod(with_doors))
 
 
 def _af_df(**overrides) -> pl.DataFrame:

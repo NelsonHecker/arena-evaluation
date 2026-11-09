@@ -199,10 +199,7 @@ def _acoustic_animate(df: pl.DataFrame, args: argparse.Namespace) -> None:
         print(f"Error: no topic data for {episode_id}. Run 'evaluation extract' first.")
         sys.exit(1)
 
-    # Load doors
-    from arena_evaluation.processing.acoustics.door_map import door_segments
-
-    doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=args.benchmark_dir)
+    doors = meta["doors"]
 
     # Load door state timeline
     state_timeline = None
@@ -299,9 +296,7 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
         print(f"Error: no topic data for {episode_id}.")
         sys.exit(1)
 
-    from arena_evaluation.processing.acoustics.door_map import door_segments
-
-    doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=args.benchmark_dir)
+    doors = meta["doors"]
 
     state_timeline = None
     semantic_path = args.benchmark_dir / "episodes" / episode_id / "topics" / "world_semantics.parquet"

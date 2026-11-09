@@ -2,8 +2,8 @@
 
 Covers :mod:`arena_evaluation.cli_acoustic`. Episode resolution and table
 rendering run against real Polars frames written to ``tmp_path``. The heavy
-renderer/parquet plumbing (``AcousticFieldRenderer``, ``door_segments``,
-``DoorStateTimeline``, ``ParquetStore``) is replaced with in-memory stubs so
+renderer/parquet plumbing (``AcousticFieldRenderer``, ``DoorStateTimeline``,
+``ParquetStore``) is replaced with in-memory stubs so
 no plotting backend or ROS graph is required; parquet files are still real.
 """
 
@@ -77,7 +77,7 @@ class _FakeTimeline:
 
 
 class _FakeRenderer:
-    load_grid_result = ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0)})
+    load_grid_result = ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0), "doors": {}})
     episode_df: pl.DataFrame | None = pl.DataFrame(
         {
             "pos_x_gt": [1.0, 2.0, 3.0],
@@ -124,7 +124,7 @@ def _install_stubs(monkeypatch, *, doors: list[int] | None = None) -> types.Simp
         render_animation=[],
         render_cell=[],
         build_pixel_tl=[],
-        door_segments=[],
+        load_grid=[],
         timeline=[],
     )
 
@@ -144,16 +144,23 @@ def _install_stubs(monkeypatch, *, doors: list[int] | None = None) -> types.Simp
 
     door_map_mod = types.ModuleType("arena_evaluation.processing.acoustics.door_map")
 
-    def _door_segments(map_name, grid, resolution, origin, run_dir=None):  # noqa: ARG001
-        calls.door_segments.append(map_name)
-        return doors if doors is not None else [1, 2, 3]
-
     def _build_pixel_tl(grid, doors_, open_doors=None):  # noqa: ARG001
         calls.build_pixel_tl.append(open_doors)
         return "pixel_tl"
 
-    door_map_mod.door_segments = _door_segments
     door_map_mod.build_pixel_tl = _build_pixel_tl
+
+    def _load_grid_and_meta(cls, map_name, run_dir=None):  # noqa: ARG001
+        calls.load_grid.append(map_name)
+        return cls.load_grid_result
+
+    doors_meta = doors if doors is not None else [1, 2, 3]
+    monkeypatch.setattr(_FakeRenderer, "_load_grid_and_meta", classmethod(_load_grid_and_meta))
+    monkeypatch.setattr(
+        _FakeRenderer,
+        "load_grid_result",
+        ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0), "doors": doors_meta}),
+    )
 
     parents = [
         "arena_evaluation.presentation",
@@ -522,7 +529,7 @@ def test_animate_success_default_output(tmp_path: pathlib.Path, capsys, monkeypa
     out = capsys.readouterr().out
     assert "Rendering animation for episode_002 (3 data frames)..." in out
     assert "Animation saved to: rendered.gif" in out
-    assert calls.door_segments == ["map1"]
+    assert calls.load_grid == ["map1"]
     assert _RENDER_CALLS
     # default output path: plots/{episode}_acoustic.gif
     assert _RENDER_CALLS[-1]["out_path"] == bench_dir / "plots" / "episode_002_acoustic.gif"
@@ -573,7 +580,7 @@ def test_animate_grid_load_failure_exits(tmp_path: pathlib.Path, capsys, monkeyp
         assert exc.value.code == 1
         assert "Error: could not load map 'map1'." in capsys.readouterr().out
     finally:
-        _FakeRenderer.load_grid_result = ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0)})
+        _FakeRenderer.load_grid_result = ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0), "doors": {}})
 
 
 def test_animate_missing_episode_data_exits(tmp_path: pathlib.Path, capsys, monkeypatch):
@@ -740,7 +747,7 @@ def test_snapshot_grid_load_failure_exits(tmp_path: pathlib.Path, capsys, monkey
         assert exc.value.code == 1
         assert "Error: could not load map 'map1'." in capsys.readouterr().out
     finally:
-        _FakeRenderer.load_grid_result = ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0)})
+        _FakeRenderer.load_grid_result = ({"grid": True}, {"resolution": 0.1, "origin": (1.0, 2.0), "doors": {}})
 
 
 def test_handle_acoustic_snapshot_resolution_failure(tmp_path: pathlib.Path, capsys, monkeypatch):
