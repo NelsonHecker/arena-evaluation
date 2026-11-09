@@ -123,6 +123,8 @@ def test_null_ground_truth_rows_are_dropped_before_the_geometry():
     assert table.height == 3
     assert results["path_length"] == pytest.approx(3.0)
     assert_series_equal(table["step_length_m"], pl.Series("step_length_m", [None, 2.0, 1.0], dtype=pl.Float64), check_names=False)
+    assert table["x_m"].null_count() == 0
+    assert table["odom_x_m"].is_null().all()
 
 
 def test_missing_ground_truth_yields_zeroed_aggregates_and_an_empty_series():

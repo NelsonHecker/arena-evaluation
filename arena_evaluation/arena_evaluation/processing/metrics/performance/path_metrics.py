@@ -220,6 +220,9 @@ class PathMetricsCalculator(BaseMetricCalculator):
         time_ns = np.array([], dtype=np.int64) if frame is None else frame["time_ns"].to_numpy().astype(np.int64)
         if len(time_ns) != len(pos_x_m):
             raise ValueError(f"path_metrics: {len(time_ns)} sample times for {len(pos_x_m)} resolved poses")
+        if len(odom_x_m) != len(pos_x_m):
+            # No wheel-odometry stream: the odom columns are null at every sample, not absent from the row axis.
+            odom_x_m, odom_y_m, odom_yaw_rad = _nan_array(len(pos_x_m)), _nan_array(len(pos_x_m)), _nan_array(len(pos_x_m))
         return _build_geometry(
             time_ns=time_ns,
             pos_x_m=pos_x_m,
