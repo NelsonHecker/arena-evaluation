@@ -42,6 +42,11 @@ from arena_evaluation.processing.scoped_evaluator import (
     write_fact_tables,
 )
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, DetectorParams
+from arena_evaluation.storage.declarations import (
+    METRIC_DECLARATIONS,
+    MetricDeclaration,
+    declarations_for,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 NS_PER_S: typing.Final[int] = 1_000_000_000
@@ -107,6 +112,27 @@ _EPISODE_METRICS: typing.Final[dict[str, object]] = {
     "power_peak_w": 150.0,
     "friction_dissipation_j": 5.0,
 }
+
+_SAMPLE_BY_DTYPE: typing.Final[Mapping[pl.DataType, object]] = {
+    pl.Float64: 0.5,
+    pl.Int64: 2,
+    pl.Boolean: True,
+    pl.String: "declared_sample",
+}
+
+
+def _complete_episode_metrics() -> dict[str, object]:
+    """Fixture metrics plus one typed sample per declared EPISODE and ROBOT source key."""
+    metrics: dict[str, object] = dict(_EPISODE_METRICS)
+    for declaration in (
+        *declarations_for(MetricScope.EPISODE),
+        *declarations_for(MetricScope.ROBOT),
+    ):
+        metrics.setdefault(declaration.name, _SAMPLE_BY_DTYPE[declaration.dtype])
+    return metrics
+
+
+_COMPLETE_EPISODE_METRICS: typing.Final[dict[str, object]] = _complete_episode_metrics()
 
 _ROBOT_PARAMS: typing.Final[RobotParams] = RobotParams(model="test_robot", robot_radius=0.25)
 
@@ -382,7 +408,7 @@ def _evaluate(
         episode,
         run_id=RUN_ID,
         episode_id=EPISODE_ID,
-        episode_metrics=_EPISODE_METRICS if episode_metrics is None else episode_metrics,
+        episode_metrics=_COMPLETE_EPISODE_METRICS if episode_metrics is None else episode_metrics,
     )
 
 
@@ -519,9 +545,9 @@ def test_episode_null_reason_lists_missing_metric_fields(episode: AlignedEpisode
     reason = row["null_reason"]
     assert isinstance(reason, str)
     assert reason != ""
-    for code in ("result:no_samples", "time_to_goal_s:no_samples", "mar:no_samples", "pfi:no_samples"):
-        assert code in reason
-    assert "success:no_samples" not in reason
+    codes = set(reason.split(";"))
+    assert {"result:no_samples", "time_to_goal_s:no_samples", "mar:no_samples", "pfi:no_samples"} <= codes
+    assert "success:no_samples" not in codes
     assert row["total_collisions_ped"] == 1
     assert row["total_collisions_static"] == 1
 
@@ -1037,3 +1063,78 @@ def test_registry_provenance_records_topic_missing_no_samples_and_exception(epis
         scope_slice=missing_power_slice,
     )
     assert missing_outcome.provenance.get("energy_surge_ratio") == "energy_surge_ratio:topic_missing:robot_power"
+
+
+# ---------------------------------------------------------------------------
+# Ported declarations: schema derivation, publication and null provenance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("table_name", FACT_TABLE_NAMES)
+def test_declared_columns_are_typed_schema_columns(table_name: str) -> None:
+    scope = MetricScope(table_name)
+    schema = FACT_SCHEMAS[table_name]
+    for declaration in declarations_for(scope):
+        assert schema[declaration.name] == declaration.dtype
+
+
+def test_every_declaration_lands_in_its_scope_schema() -> None:
+    for declaration in METRIC_DECLARATIONS:
+        assert declaration.scopes
+        for scope in declaration.scopes:
+            assert FACT_SCHEMAS[scope.value][declaration.name] == declaration.dtype
+
+
+def test_declared_column_names_are_unique_within_each_scope() -> None:
+    for scope in MetricScope:
+        names = [declaration.name for declaration in declarations_for(scope)]
+        assert len(names) == len(set(names))
+
+
+@pytest.mark.parametrize("table_name", FACT_TABLE_NAMES)
+def test_declared_columns_keep_the_declaration_order(table_name: str) -> None:
+    names = FACT_SCHEMAS[table_name].names()
+    indexes = [names.index(declaration.name) for declaration in declarations_for(MetricScope(table_name))]
+    assert indexes == sorted(indexes)
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    declarations_for(MetricScope.EPISODE),
+    ids=lambda declaration: declaration.name,
+)
+def test_episode_fact_publishes_each_declared_metric(
+    declaration: MetricDeclaration, tables: ScopedFactTables
+) -> None:
+    row = tables.episodes.row(0, named=True)
+    assert row[declaration.name] == _COMPLETE_EPISODE_METRICS[declaration.name]
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    declarations_for(MetricScope.ROBOT),
+    ids=lambda declaration: declaration.name,
+)
+def test_robot_fact_falls_back_to_the_declared_episode_metrics(
+    declaration: MetricDeclaration, tables: ScopedFactTables
+) -> None:
+    assert tables.robots.item(0, declaration.name) == _COMPLETE_EPISODE_METRICS[declaration.name]
+
+
+def test_pedestrian_fact_publishes_the_declared_disturbance_metrics(
+    tables: ScopedFactTables,
+) -> None:
+    alice = _pedestrian_row(tables, "Pedestrian_1")
+    assert alice["ped_round_trips_completed"] >= 0.0
+    assert 0.0 <= alice["ped_velocity_delay_ratio"] <= 1.0
+
+
+def test_declared_columns_stay_null_and_name_their_star_column(
+    episode: AlignedEpisodeBundle,
+) -> None:
+    tables = _evaluate(episode, episode_metrics={"success": True})
+    row = tables.episodes.row(0, named=True)
+    reason = typing.cast(str, row["null_reason"])
+    assert row["barn_score"] is None
+    assert "barn_score:no_samples" in reason
+    assert "barn_time:no_samples" in reason
