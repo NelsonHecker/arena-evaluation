@@ -1,7 +1,10 @@
+import dataclasses
+
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
+from arena_evaluation.processing.metrics.base import MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.ecological.energy import EnergyMetricCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
@@ -112,3 +115,39 @@ def test_series_table_without_data_keeps_the_schema(calc):
             "velocity_linear_mps": pl.Float64,
         }
     )
+
+# --- ENCOUNTER scope ---------------------------------------------------------
+
+def _encounter_episode() -> AlignedEpisodeBundle:
+    times = [0, SEC, 2 * SEC]
+    return AlignedEpisodeBundle(
+        episode_id=1,
+        data=pl.DataFrame({"time_ns": times}),
+        start_pos=[0.0, 0.0, 0.0],
+        goal_pos=[2.0, 0.0],
+        topics={"robot_power": pl.DataFrame({"t_ns": times, "total_power_w": [36.0, 36.0, 36.0]})},
+    )
+
+
+def _encounter_slice(episode: AlignedEpisodeBundle) -> ScopeSlice:
+    window = dataclasses.replace(episode, data=pl.DataFrame())
+    return ScopeSlice(
+        scope=MetricScope.ENCOUNTER,
+        slice_id="enc-001",
+        parent_id=None,
+        t_start_ns=0,
+        t_end_ns=2 * SEC,
+        identity={},
+        window_bundle=window,
+        full_episode=episode,
+    )
+
+
+def test_encounter_scope_emits_every_key_from_the_window_power(calc):
+    episode = _encounter_episode()
+    encounter_slice = _encounter_slice(episode)
+    result = calc.calculate_for_scope(encounter_slice.window_bundle, {}, encounter_slice)
+    assert set(result) == set(calc.output_keys())
+    assert result["energy_total_wh"] == pytest.approx(36.0 * 2.0 / 3600.0)
+    assert result["power_peak_w"] == pytest.approx(36.0)
+    assert result["energy_static_wh"] is None
