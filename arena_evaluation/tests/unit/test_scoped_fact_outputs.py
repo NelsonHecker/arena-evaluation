@@ -128,9 +128,7 @@ def _complete_episode_metrics() -> dict[str, object]:
         *declarations_for(MetricScope.EPISODE),
         *declarations_for(MetricScope.ROBOT),
     ):
-        metrics.setdefault(
-            declaration.calculator_key, _SAMPLE_BY_DTYPE[declaration.dtype]
-        )
+        metrics.setdefault(declaration.name, _SAMPLE_BY_DTYPE[declaration.dtype])
     return metrics
 
 
@@ -547,9 +545,9 @@ def test_episode_null_reason_lists_missing_metric_fields(episode: AlignedEpisode
     reason = row["null_reason"]
     assert isinstance(reason, str)
     assert reason != ""
-    for code in ("result:no_samples", "time_to_goal_s:no_samples", "mar:no_samples", "pfi:no_samples"):
-        assert code in reason
-    assert "success:no_samples" not in reason
+    codes = set(reason.split(";"))
+    assert {"result:no_samples", "time_to_goal_s:no_samples", "mar:no_samples", "pfi:no_samples"} <= codes
+    assert "success:no_samples" not in codes
     assert row["total_collisions_ped"] == 1
     assert row["total_collisions_static"] == 1
 
@@ -1109,7 +1107,7 @@ def test_episode_fact_publishes_each_declared_metric(
     declaration: MetricDeclaration, tables: ScopedFactTables
 ) -> None:
     row = tables.episodes.row(0, named=True)
-    assert row[declaration.name] == _SAMPLE_BY_DTYPE[declaration.dtype]
+    assert row[declaration.name] == _COMPLETE_EPISODE_METRICS[declaration.name]
 
 
 @pytest.mark.parametrize(
@@ -1120,7 +1118,7 @@ def test_episode_fact_publishes_each_declared_metric(
 def test_robot_fact_falls_back_to_the_declared_episode_metrics(
     declaration: MetricDeclaration, tables: ScopedFactTables
 ) -> None:
-    assert tables.robots.item(0, declaration.name) == _SAMPLE_BY_DTYPE[declaration.dtype]
+    assert tables.robots.item(0, declaration.name) == _COMPLETE_EPISODE_METRICS[declaration.name]
 
 
 def test_pedestrian_fact_publishes_the_declared_disturbance_metrics(
@@ -1139,5 +1137,4 @@ def test_declared_columns_stay_null_and_name_their_star_column(
     reason = typing.cast(str, row["null_reason"])
     assert row["barn_score"] is None
     assert "barn_score:no_samples" in reason
-    assert "barn_time_s:no_samples" in reason
-    assert "barn_time:no_samples" not in reason
+    assert "barn_time:no_samples" in reason

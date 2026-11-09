@@ -235,25 +235,11 @@ def _declared_value(value: object, declaration: MetricDeclaration) -> object:
 def _declared_fact_values(
     results: Mapping[str, object], scope: MetricScope
 ) -> dict[str, object]:
-    """Every declared fact column of ``scope``, copied from the calculator results."""
+    """Every declared fact column of ``scope``, copied from the calculator result of its name."""
     return {
-        declaration.name: _declared_value(
-            results.get(declaration.calculator_key), declaration
-        )
+        declaration.name: _declared_value(results.get(declaration.name), declaration)
         for declaration in declarations_for(scope)
     }
-
-
-def _declared_provenance(
-    scope: MetricScope, provenance: Mapping[str, str]
-) -> dict[str, str]:
-    """Registry provenance re-keyed from calculator output keys to declared fact columns."""
-    renames = {
-        declaration.calculator_key: declaration.name
-        for declaration in declarations_for(scope)
-        if declaration.calculator_key != declaration.name
-    }
-    return {renames.get(key, key): code for key, code in provenance.items()}
 
 
 def _frame(rows: list[dict[str, object]], schema: pl.Schema) -> pl.DataFrame:
@@ -985,9 +971,7 @@ class ScopedEvaluator:
             "total_acoustic_dose_pa2s": _float(metrics.get("total_acoustic_dose_pa2s")),
         }
         row.update(_declared_fact_values(metrics, MetricScope.EPISODE))
-        row["null_reason"] = self._episode_null_reason(
-            episode, row, _declared_provenance(MetricScope.EPISODE, provenance or {})
-        )
+        row["null_reason"] = self._episode_null_reason(episode, row, provenance or {})
         return row
 
     def _episode_null_reason(
@@ -1387,7 +1371,7 @@ class ScopedEvaluator:
         base_reason = _row_null_reason(row, _ROBOT_NULLABLE)
         merged = _merge_provenance_reasons(base_reason, outcome.provenance, row)
         row["null_reason"] = _merge_provenance_reasons(
-            merged, _declared_provenance(MetricScope.EPISODE, episode_provenance), row
+            merged, episode_provenance, row
         )
         return _frame([row], ROBOT_FACT_SCHEMA)
 

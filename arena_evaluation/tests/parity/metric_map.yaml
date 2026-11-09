@@ -27,19 +27,21 @@
 #
 # The "ported producers" section below claims the columns added by the port-boundary
 # work. fact_episodes and fact_robots carry one row per episode and robot, so their
-# values are the calculator output verbatim. fact_pedestrians is a per-pedestrian
-# grain, so its two claims declare a star_reduction:
-#   - ped_round_trips_completed: mean over the per-pedestrian rows, because the legacy
-#     episode value is the pedestrian mean of the same counts (total / num_agents).
-#   - ped_velocity_delay_ratio is published but NOT claimed: the calculator divides
-#     each pedestrian's travelled distance by that pedestrian's own track span, while
-#     the legacy episode value divides the pedestrian-mean distance by the episode
-#     duration, so no per-row reduction reproduces it. It stays UNMAPPED pending a
-#     reviewed expected_diff or a port decision.
-# The 67 published columns listed below as producers whose columns exist but whose
-# mapping is deferred are the keys that are null on both sides in every available run
-# (barn, edge-case, mechanism, task-replay, vln and the like); claiming them would add
-# gate-failing CERT_NULL_ONLY rows without certifying anything.
+# values are the calculator output verbatim.
+#
+# Claim policy: a producer is claimed only where the certificate can compare at least
+# --min-nonnull-episodes (3) non-null pairs on the reprocessed benchmark. The published
+# columns outside that set stay UNMAPPED until a data-rich benchmark exists:
+#   - ne, osr, sdtw, spl_geodesic, ndtw, success_geodesic (vln_metrics) and
+#     time_waiting_at_doors_robot have 0-1 non-null comparisons in this run;
+#   - ped_round_trips_completed and ped_velocity_delay_ratio are published per
+#     pedestrian. Their reviewed per-episode reduction is `mean` for the round trips
+#     (the legacy episode value is the pedestrian mean of the same counts) and no
+#     reduction reproduces the velocity delay (its per-pedestrian denominator is the
+#     pedestrian's own track span, not the episode duration). Both claims are deferred
+#     because the certificate joins fact_pedestrians on (run_id, episode_id) while
+#     combined_metrics holds one row per robot, so the three non-evaluated robots'
+#     status rows read as unexpected legacy nulls.
 version: 1
 mappings:
   # --- fact_episodes: written by ScopedEvaluator._episode_fact_row -----------------
@@ -168,364 +170,315 @@ mappings:
     legacy_columns: [energy_thermal_wh]
     note: "_robot_fact_frame converts thermal Wh to J"
 
-  # --- ported producers: 60 reviewed claims of the 127 declared columns --------------
+  # --- ported producers: 52 reviewed claims of the 127 declared columns -------------
   - metric_key: l_aeq_t
     star_table: fact_robots
     star_column: l_aeq_t
     legacy_columns: [l_aeq_t]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: l_a10
     star_table: fact_robots
     star_column: l_a10
     legacy_columns: [l_a10]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: l_a50
     star_table: fact_robots
     star_column: l_a50
     legacy_columns: [l_a50]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: l_a90
     star_table: fact_robots
     star_column: l_a90
     legacy_columns: [l_a90]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: acoustic_startle_factor
     star_table: fact_robots
     star_column: acoustic_startle_factor
     legacy_columns: [acoustic_startle_factor]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: acoustic_surge_index
     star_table: fact_robots
     star_column: acoustic_surge_index
     legacy_columns: [acoustic_surge_index]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: acoustic_cost
     star_table: fact_robots
     star_column: acoustic_cost
     legacy_columns: [acoustic_cost]
-    note: "fact_robots ported column copied from the acoustics calculator output"
+    note: "ported acoustics output, published by the declaration registry"
 
   - metric_key: char_phase_coverage
     star_table: fact_robots
     star_column: char_phase_coverage
     legacy_columns: [char_phase_coverage]
-    note: "fact_robots ported column copied from the characterization calculator output"
+    note: "ported characterization output, published by the declaration registry"
 
   - metric_key: mean_pedestrian_clearance
     star_table: fact_episodes
     star_column: mean_pedestrian_clearance
     legacy_columns: [mean_pedestrian_clearance]
-    note: "fact_episodes ported column copied from the clearance_metrics calculator output"
+    note: "ported clearance_metrics output, published by the declaration registry"
 
   - metric_key: speed_zone_violations
     star_table: fact_episodes
     star_column: speed_zone_violations
     legacy_columns: [speed_zone_violations]
-    note: "fact_episodes ported column copied from the compliance_metrics calculator output"
+    note: "ported compliance_metrics output, published by the declaration registry"
 
   - metric_key: speed_zone_violation_seconds
     star_table: fact_episodes
     star_column: speed_zone_violation_seconds
     legacy_columns: [speed_zone_violation_seconds]
-    note: "fact_episodes ported column copied from the compliance_metrics calculator output"
+    note: "ported compliance_metrics output, published by the declaration registry"
 
   - metric_key: quiet_zone_dwell_seconds
     star_table: fact_episodes
     star_column: quiet_zone_dwell_seconds
     legacy_columns: [quiet_zone_dwell_seconds]
-    note: "fact_episodes ported column copied from the compliance_metrics calculator output"
+    note: "ported compliance_metrics output, published by the declaration registry"
 
   - metric_key: restricted_zone_entries
     star_table: fact_episodes
     star_column: restricted_zone_entries
     legacy_columns: [restricted_zone_entries]
-    note: "fact_episodes ported column copied from the compliance_metrics calculator output"
+    note: "ported compliance_metrics output, published by the declaration registry"
 
   - metric_key: doorway_blocking_time
     star_table: fact_episodes
     star_column: doorway_blocking_time
     legacy_columns: [doorway_blocking_time]
-    note: "fact_episodes ported column copied from the compliance_metrics calculator output"
+    note: "ported compliance_metrics output, published by the declaration registry"
 
   - metric_key: passing_rule_compliance
     star_table: fact_episodes
     star_column: passing_rule_compliance
     legacy_columns: [passing_rule_compliance]
-    note: "fact_episodes ported column copied from the compliance_metrics calculator output"
+    note: "ported compliance_metrics output, published by the declaration registry"
 
   - metric_key: energy_static_wh
     star_table: fact_robots
     star_column: energy_static_wh
     legacy_columns: [energy_static_wh]
-    note: "fact_robots ported column copied from the energy calculator output"
+    note: "ported energy output, published by the declaration registry"
 
   - metric_key: battery_soc_final
     star_table: fact_robots
     star_column: battery_soc_final
     legacy_columns: [battery_soc_final]
-    note: "fact_robots ported column copied from the energy calculator output"
+    note: "ported energy output, published by the declaration registry"
 
   - metric_key: battery_soc_drop_pct
     star_table: fact_robots
     star_column: battery_soc_drop_pct
     legacy_columns: [battery_soc_drop_pct]
-    note: "fact_robots ported column copied from the energy calculator output"
+    note: "ported energy output, published by the declaration registry"
 
   - metric_key: specific_cost_of_transport
     star_table: fact_robots
     star_column: specific_cost_of_transport
     legacy_columns: [specific_cost_of_transport]
-    note: "fact_robots ported column copied from the energy_extended calculator output"
+    note: "ported energy_extended output, published by the declaration registry"
 
   - metric_key: peak_to_mean_power_ratio
     star_table: fact_robots
     star_column: peak_to_mean_power_ratio
     legacy_columns: [peak_to_mean_power_ratio]
-    note: "fact_robots ported column copied from the energy_extended calculator output"
+    note: "ported energy_extended output, published by the declaration registry"
 
   - metric_key: standstill_energy_penalty_wh
     star_table: fact_robots
     star_column: standstill_energy_penalty_wh
     legacy_columns: [standstill_energy_penalty_wh]
-    note: "fact_robots ported column copied from the energy_extended calculator output"
+    note: "ported energy_extended output, published by the declaration registry"
 
   - metric_key: kinetic_energy_demand_j
     star_table: fact_robots
     star_column: kinetic_energy_demand_j
     legacy_columns: [kinetic_energy_demand_j]
-    note: "fact_robots ported column copied from the energy_extended calculator output"
+    note: "ported energy_extended output, published by the declaration registry"
 
   - metric_key: friction_dissipation_j
     star_table: fact_robots
     star_column: friction_dissipation_j
     legacy_columns: [friction_dissipation_j]
-    note: "fact_robots ported column copied from the energy_extended calculator output"
+    note: "ported energy_extended output, published by the declaration registry"
 
   - metric_key: e_cot
     star_table: fact_episodes
     star_column: e_cot
     legacy_columns: [e_cot]
-    note: "fact_episodes ported column copied from the holistic_metrics calculator output"
+    note: "ported holistic_metrics output, published by the declaration registry"
 
   - metric_key: mechanism_score
     star_table: fact_episodes
     star_column: mechanism_score
     legacy_columns: [mechanism_score]
-    note: "fact_episodes ported column copied from the mechanism_component calculator output"
+    note: "ported mechanism_component output, published by the declaration registry"
 
   - metric_key: mechanism_components
     star_table: fact_episodes
     star_column: mechanism_components
     legacy_columns: [mechanism_components]
-    note: "fact_episodes ported column copied from the mechanism_component calculator output"
+    note: "ported mechanism_component output, published by the declaration registry"
 
   - metric_key: ped_mechanism_delay_seconds
     star_table: fact_episodes
     star_column: ped_mechanism_delay_seconds
     legacy_columns: [ped_mechanism_delay_seconds]
-    note: "fact_episodes ported column copied from the mechanism_metrics calculator output"
+    note: "ported mechanism_metrics output, published by the declaration registry"
 
   - metric_key: door_yield_violations
     star_table: fact_episodes
     star_column: door_yield_violations
     legacy_columns: [door_yield_violations]
-    note: "fact_episodes ported column copied from the mechanism_metrics calculator output"
+    note: "ported mechanism_metrics output, published by the declaration registry"
 
   - metric_key: door_freeze_s
     star_table: fact_episodes
     star_column: door_freeze_s
     legacy_columns: [door_freeze_s]
-    note: "fact_episodes ported column copied from the mechanism_metrics calculator output"
+    note: "ported mechanism_metrics output, published by the declaration registry"
 
   - metric_key: door_oscillations
     star_table: fact_episodes
     star_column: door_oscillations
     legacy_columns: [door_oscillations]
-    note: "fact_episodes ported column copied from the mechanism_metrics calculator output"
+    note: "ported mechanism_metrics output, published by the declaration registry"
 
   - metric_key: acceleration_mean
     star_table: fact_robots
-    star_column: acceleration_mean_mps2
+    star_column: acceleration_mean
     legacy_columns: [acceleration_mean]
-    note: "fact_robots ported column copied from the motion_metrics calculator output"
+    note: "ported motion_metrics output, published by the declaration registry"
 
   - metric_key: jerk_mean
     star_table: fact_robots
-    star_column: jerk_mean_mps3
+    star_column: jerk_mean
     legacy_columns: [jerk_mean]
-    note: "fact_robots ported column copied from the motion_metrics calculator output"
+    note: "ported motion_metrics output, published by the declaration registry"
 
   - metric_key: curvature_mean
     star_table: fact_episodes
     star_column: curvature_mean
     legacy_columns: [curvature_mean]
-    note: "fact_episodes ported column copied from the path_metrics calculator output"
+    note: "ported path_metrics output, published by the declaration registry"
 
   - metric_key: curvature_max
     star_table: fact_episodes
     star_column: curvature_max
     legacy_columns: [curvature_max]
-    note: "fact_episodes ported column copied from the path_metrics calculator output"
+    note: "ported path_metrics output, published by the declaration registry"
 
   - metric_key: roughness_mean
     star_table: fact_episodes
     star_column: roughness_mean
     legacy_columns: [roughness_mean]
-    note: "fact_episodes ported column copied from the path_metrics calculator output"
+    note: "ported path_metrics output, published by the declaration registry"
 
   - metric_key: roughness_max
     star_table: fact_episodes
     star_column: roughness_max
     legacy_columns: [roughness_max]
-    note: "fact_episodes ported column copied from the path_metrics calculator output"
+    note: "ported path_metrics output, published by the declaration registry"
 
   - metric_key: angle_over_length
     star_table: fact_episodes
     star_column: angle_over_length
     legacy_columns: [angle_over_length]
-    note: "fact_episodes ported column copied from the path_metrics calculator output"
-
-  - metric_key: ped_round_trips_completed
-    star_table: fact_pedestrians
-    star_column: ped_round_trips_completed
-    legacy_columns: [ped_round_trips_completed]
-    star_reduction: mean
-    note: "fact_pedestrians ported column copied from the pedestrian_disturbance calculator output"
+    note: "ported path_metrics output, published by the declaration registry"
 
   - metric_key: replan_latency_after_state_change_median
     star_table: fact_episodes
     star_column: replan_latency_after_state_change_median
     legacy_columns: [replan_latency_after_state_change_median]
-    note: "fact_episodes ported column copied from the regime_metrics calculator output"
+    note: "ported regime_metrics output, published by the declaration registry"
 
   - metric_key: replan_latency_after_state_change_p95
     star_table: fact_episodes
     star_column: replan_latency_after_state_change_p95
     legacy_columns: [replan_latency_after_state_change_p95]
-    note: "fact_episodes ported column copied from the regime_metrics calculator output"
+    note: "ported regime_metrics output, published by the declaration registry"
 
   - metric_key: time_waiting_at_doors
     star_table: fact_episodes
     star_column: time_waiting_at_doors
     legacy_columns: [time_waiting_at_doors]
-    note: "fact_episodes ported column copied from the semantic_interaction_metrics calculator output"
+    note: "ported semantic_interaction_metrics output, published by the declaration registry"
 
   - metric_key: elevator_rides
     star_table: fact_episodes
     star_column: elevator_rides
     legacy_columns: [elevator_rides]
-    note: "fact_episodes ported column copied from the semantic_interaction_metrics calculator output"
-
-  - metric_key: time_waiting_at_doors_robot
-    star_table: fact_episodes
-    star_column: time_waiting_at_doors_robot
-    legacy_columns: [time_waiting_at_doors_robot]
-    note: "fact_episodes ported column copied from the semantic_interaction_metrics calculator output"
+    note: "ported semantic_interaction_metrics output, published by the declaration registry"
 
   - metric_key: time_diff
     star_table: fact_episodes
     star_column: time_diff
     legacy_columns: [time_diff]
-    note: "fact_episodes ported column copied from the time_metrics calculator output"
+    note: "ported time_metrics output, published by the declaration registry"
 
   - metric_key: idling_time
     star_table: fact_episodes
     star_column: idling_time
     legacy_columns: [idling_time]
-    note: "fact_episodes ported column copied from the time_metrics calculator output"
+    note: "ported time_metrics output, published by the declaration registry"
 
   - metric_key: ade
     star_table: fact_episodes
     star_column: ade
     legacy_columns: [ade]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: fde
     star_table: fact_episodes
     star_column: fde
     legacy_columns: [fde]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: adtw
     star_table: fact_episodes
     star_column: adtw
     legacy_columns: [adtw]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: mhd
     star_table: fact_episodes
     star_column: mhd
     legacy_columns: [mhd]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: frechet_distance
     star_table: fact_episodes
     star_column: frechet_distance
     legacy_columns: [frechet_distance]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: path_irregularity
     star_table: fact_episodes
     star_column: path_irregularity
     legacy_columns: [path_irregularity]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: topological_complexity
     star_table: fact_episodes
     star_column: topological_complexity
     legacy_columns: [topological_complexity]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: theta_star_length
     star_table: fact_episodes
     star_column: theta_star_length
     legacy_columns: [theta_star_length]
-    note: "fact_episodes ported column copied from the trajectory_naturalness calculator output"
-
-  - metric_key: ne
-    star_table: fact_episodes
-    star_column: ne
-    legacy_columns: [ne]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
-
-  - metric_key: osr
-    star_table: fact_episodes
-    star_column: osr
-    legacy_columns: [osr]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
-
-  - metric_key: success_geodesic
-    star_table: fact_episodes
-    star_column: success_geodesic
-    legacy_columns: [success_geodesic]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
-
-  - metric_key: spl_geodesic
-    star_table: fact_episodes
-    star_column: spl_geodesic
-    legacy_columns: [spl_geodesic]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
-
-  - metric_key: ndtw
-    star_table: fact_episodes
-    star_column: ndtw
-    legacy_columns: [ndtw]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
-
-  - metric_key: sdtw
-    star_table: fact_episodes
-    star_column: sdtw
-    legacy_columns: [sdtw]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
+    note: "ported trajectory_naturalness output, published by the declaration registry"
 
   - metric_key: stuck
     star_table: fact_episodes
     star_column: stuck
     legacy_columns: [stuck]
-    note: "fact_episodes ported column copied from the vln_metrics calculator output"
+    note: "ported vln_metrics output, published by the declaration registry"

@@ -50,12 +50,6 @@ class MetricDeclaration:
     dtype: pl.DataType = pl.Float64
     description: str = ""
     direction: str = ""  # "higher", "lower", or ""
-    source_key: str = ""  # calculator output key; the declaration name when empty
-
-    @property
-    def calculator_key(self) -> str:
-        """Calculator output key this declaration publishes."""
-        return self.source_key or self.name
 
 
 def resolve_crowd_condition(
@@ -97,15 +91,23 @@ _CONTACT_TABLE: Final[str] = MetricScope.CONTACT.value
 _ROBOT_TABLE: Final[str] = MetricScope.ROBOT.value
 _PEDESTRIAN_TABLE: Final[str] = MetricScope.PEDESTRIAN.value
 
+# Every metric column the scoped evaluator publishes beyond the pre-port schema.
+# This tuple is the single source of truth for the fact schema: FACT_SCHEMAS derives
+# each table's metric columns and dtypes from it, and the scoped evaluator copies
+# each declared column from the calculator result of the same name.
+# Every metric column the scoped evaluator publishes beyond the pre-port schema.
+# This tuple is the single source of truth for the fact schema: FACT_SCHEMAS derives
+# each table's metric columns and dtypes from it, and the scoped evaluator copies
+# each declared column from the calculator result of the same name.
 METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
-    # --- EPISODE scope -> fact_episodes ------------------------------------------------
+    # --- EPISODE scope -> fact_episodes --------------------------------------------------
     MetricDeclaration(name="barn_collided", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="", description="performance metric of the barn_score calculator"),
-    MetricDeclaration(name="barn_optimal_time_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="performance metric of the barn_score calculator", source_key="barn_optimal_time"),
+    MetricDeclaration(name="barn_optimal_time", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="performance metric of the barn_score calculator"),
     MetricDeclaration(name="barn_score", unit="", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="performance metric of the barn_score calculator"),
     MetricDeclaration(name="barn_success", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="higher", description="performance metric of the barn_score calculator"),
-    MetricDeclaration(name="barn_time_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="performance metric of the barn_score calculator", source_key="barn_time"),
+    MetricDeclaration(name="barn_time", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="performance metric of the barn_score calculator"),
     MetricDeclaration(name="barn_timeout", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="", description="performance metric of the barn_score calculator"),
-    MetricDeclaration(name="mean_obstacle_clearance_m", unit="m", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="performance metric of the clearance_metrics calculator", source_key="mean_obstacle_clearance"),
+    MetricDeclaration(name="mean_obstacle_clearance", unit="m", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="performance metric of the clearance_metrics calculator"),
     MetricDeclaration(name="mean_pedestrian_clearance", unit="m", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="performance metric of the clearance_metrics calculator"),
     MetricDeclaration(name="doorway_blocking_time", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="ecological metric of the compliance_metrics calculator"),
     MetricDeclaration(name="passing_rule_compliance", unit="", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="ecological metric of the compliance_metrics calculator"),
@@ -119,30 +121,30 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="clauses_unknown", unit="", scopes=(_EPISODE,), dtype=pl.Int64, direction="", description="ecological metric of the condition_compliance calculator"),
     MetricDeclaration(name="condition_success", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="", description="ecological metric of the condition_compliance calculator"),
     MetricDeclaration(name="edge_case_collided", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="lower", description="edge_case metric of the edge_case_criticality calculator"),
-    MetricDeclaration(name="edge_case_collision_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator", source_key="edge_case_collision_at"),
+    MetricDeclaration(name="edge_case_collision_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_collision_fault", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
-    MetricDeclaration(name="edge_case_collision_ped_closing_mps", unit="m/s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator", source_key="edge_case_collision_ped_closing"),
-    MetricDeclaration(name="edge_case_collision_robot_closing_mps", unit="m/s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator", source_key="edge_case_collision_robot_closing"),
+    MetricDeclaration(name="edge_case_collision_ped_closing", unit="m/s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator"),
+    MetricDeclaration(name="edge_case_collision_robot_closing", unit="m/s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_collision_with", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_freeze_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="lower", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_id", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_intrusion_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="lower", description="edge_case metric of the edge_case_criticality calculator"),
-    MetricDeclaration(name="edge_case_min_clearance_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator", source_key="edge_case_min_clearance_at"),
+    MetricDeclaration(name="edge_case_min_clearance_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_min_clearance_m", unit="m", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_min_clearance_with", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
-    MetricDeclaration(name="edge_case_min_ttc_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator", source_key="edge_case_min_ttc_at"),
+    MetricDeclaration(name="edge_case_min_ttc_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_min_ttc_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_min_ttc_with", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_pet_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_pet_with", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_played", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_scope", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_criticality calculator"),
-    MetricDeclaration(name="edge_case_triggered_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator", source_key="edge_case_triggered_at"),
+    MetricDeclaration(name="edge_case_triggered_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_criticality calculator"),
     MetricDeclaration(name="edge_case_formation_arrived", unit="", scopes=(_EPISODE,), dtype=pl.Int64, direction="higher", description="edge_case metric of the edge_case_formation calculator"),
-    MetricDeclaration(name="edge_case_formation_break_fired_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator", source_key="edge_case_formation_break_fired_at"),
-    MetricDeclaration(name="edge_case_formation_broke_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator", source_key="edge_case_formation_broke_at"),
-    MetricDeclaration(name="edge_case_formation_form_fired_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator", source_key="edge_case_formation_form_fired_at"),
-    MetricDeclaration(name="edge_case_formation_formed_at_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator", source_key="edge_case_formation_formed_at"),
+    MetricDeclaration(name="edge_case_formation_break_fired_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator"),
+    MetricDeclaration(name="edge_case_formation_broke_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator"),
+    MetricDeclaration(name="edge_case_formation_form_fired_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator"),
+    MetricDeclaration(name="edge_case_formation_formed_at", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="", description="edge_case metric of the edge_case_formation calculator"),
     MetricDeclaration(name="edge_case_formation_held_s", unit="s", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="edge_case metric of the edge_case_formation calculator"),
     MetricDeclaration(name="edge_case_formation_seen", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="", description="edge_case metric of the edge_case_formation calculator"),
     MetricDeclaration(name="edge_case_formation_variant", unit="", scopes=(_EPISODE,), dtype=pl.String, direction="", description="edge_case metric of the edge_case_formation calculator"),
@@ -206,10 +208,10 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="spl_geodesic", unit="", scopes=(_EPISODE,), dtype=pl.Float64, direction="higher", description="performance metric of the vln_metrics calculator"),
     MetricDeclaration(name="stuck", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="lower", description="performance metric of the vln_metrics calculator"),
     MetricDeclaration(name="success_geodesic", unit="", scopes=(_EPISODE,), dtype=pl.Boolean, direction="higher", description="performance metric of the vln_metrics calculator"),
-    # --- ROBOT scope -> fact_robots --------------------------------------------------
+    # --- ROBOT scope -> fact_robots ----------------------------------------------------
     MetricDeclaration(name="acoustic_cost", unit="s/m", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="acoustic_startle_factor", unit="dBA/s", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
-    MetricDeclaration(name="acoustic_surge_index", unit="dBA2", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
+    MetricDeclaration(name="acoustic_surge_index", unit="dBA²", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="l_a10", unit="dBA", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="l_a50", unit="dBA", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="l_a90", unit="dBA", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
@@ -223,9 +225,9 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="peak_to_mean_power_ratio", unit="", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
     MetricDeclaration(name="specific_cost_of_transport", unit="", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
     MetricDeclaration(name="standstill_energy_penalty_wh", unit="Wh", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
-    MetricDeclaration(name="acceleration_mean_mps2", unit="m/s2", scopes=(_ROBOT,), dtype=pl.Float64, direction="", description="performance metric of the motion_metrics calculator", source_key="acceleration_mean"),
-    MetricDeclaration(name="jerk_mean_mps3", unit="m/s3", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="performance metric of the motion_metrics calculator", source_key="jerk_mean"),
-    # --- PEDESTRIAN scope -> fact_pedestrians ---------------------------------------------
+    MetricDeclaration(name="acceleration_mean", unit="m/s²", scopes=(_ROBOT,), dtype=pl.Float64, direction="", description="performance metric of the motion_metrics calculator"),
+    MetricDeclaration(name="jerk_mean", unit="m/s³", scopes=(_ROBOT,), dtype=pl.Float64, direction="lower", description="performance metric of the motion_metrics calculator"),
+    # --- PEDESTRIAN scope -> fact_pedestrians -----------------------------------------------
     MetricDeclaration(name="ped_round_trips_completed", unit="", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
     MetricDeclaration(name="ped_velocity_delay_ratio", unit="", scopes=(_PEDESTRIAN,), dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
 )
