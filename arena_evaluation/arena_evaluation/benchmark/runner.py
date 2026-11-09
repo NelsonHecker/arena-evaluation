@@ -29,6 +29,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from arena_bringup.defaults import default_sim
+from arena_evaluation.processing.world_lookup import installed_world_dir
 from arena_evaluation_msgs.msg import BenchmarkState
 from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
@@ -2215,16 +2216,30 @@ def _resolve_contest_source(contest_name: str) -> tuple[pathlib.Path, dict | Non
     return _config_file(verdict.path, ContestIdentifier._asset_type), _provenance(verdict)
 
 
+def _world_source(bundle_dir: pathlib.Path, name: str) -> pathlib.Path:
+    """The world a run copies: the suite bundle's copy when it ships one, else the installed package's copy."""
+    bundled = bundle_dir / "worlds" / name
+    if bundled.is_dir():
+        return bundled
+    installed = installed_world_dir(name)
+    if installed is not None and installed.is_dir():
+        return installed
+    raise FileNotFoundError(f"map {name!r} is in neither the suite bundle nor the installed arena_simulation_setup worlds")
+
+
 def _snapshot_bundle_worlds(bundle_dir: pathlib.Path | None, maps: typing.Iterable[str], run_path: pathlib.Path) -> list[str]:
-    """Copy the bundle worlds the stages use into <run>/worlds, where evaluation looks maps up."""
+    """Copy the world each stage uses into <run>/worlds, where evaluation looks maps up.
+
+    A world the run already holds is kept. A map that neither the bundle nor the installed package provides is an error.
+    """
     copied: list[str] = []
     if bundle_dir is None:
         return copied
     for name in sorted(set(maps)):
-        source = bundle_dir / "worlds" / name
         target = run_path / "worlds" / name
-        if not source.is_dir() or target.exists():
+        if target.exists():
             continue
+        source = _world_source(bundle_dir, name)
         target.parent.mkdir(parents=True, exist_ok=True)
         part = pathlib.Path(tempfile.mkdtemp(prefix=f".{name}.", suffix=".part", dir=target.parent))
         try:
