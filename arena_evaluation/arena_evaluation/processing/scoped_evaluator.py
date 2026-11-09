@@ -16,6 +16,7 @@ import typing
 from collections.abc import Mapping
 from typing import Any, Final
 
+import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import (
@@ -61,12 +62,14 @@ from arena_evaluation.storage.declarations import (
     FACT_TABLE_NAMES,
     PEDESTRIAN_FACT_SCHEMA,
     ROBOT_FACT_SCHEMA,
+    MetricDeclaration,
     ScopedFactTables,
     _CONTACT_NULLABLE,
     _ENCOUNTER_NULLABLE,
     _EPISODE_NULLABLE,
     _PEDESTRIAN_NULLABLE,
     _ROBOT_NULLABLE,
+    declarations_for,
     write_fact_tables,
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
@@ -203,6 +206,54 @@ def _merge_provenance_reasons(
                 parts.append(code)
                 seen.add(code)
     return ";".join(parts)
+
+
+def _declared_value(value: object, declaration: MetricDeclaration) -> object:
+    """One calculator value coerced to its declared fact dtype; None stays null for provenance."""
+    if value is None:
+        return None
+    dtype = declaration.dtype
+    if dtype == pl.Float64:
+        return float(typing.cast(float, value))
+    if dtype == pl.Int64:
+        return int(typing.cast(int, value))
+    if dtype == pl.Boolean:
+        if not isinstance(value, (bool, int, float, np.bool_, np.integer, np.floating)):
+            raise TypeError(
+                f"{declaration.name}: expected a boolean, got {type(value).__name__}"
+            )
+        return bool(value)
+    if dtype == pl.String:
+        if not isinstance(value, str):
+            raise TypeError(
+                f"{declaration.name}: expected a string, got {type(value).__name__}"
+            )
+        return value
+    raise TypeError(f"{declaration.name}: unsupported fact dtype {dtype}")
+
+
+def _declared_fact_values(
+    results: Mapping[str, object], scope: MetricScope
+) -> dict[str, object]:
+    """Every declared fact column of ``scope``, copied from the calculator results."""
+    return {
+        declaration.name: _declared_value(
+            results.get(declaration.calculator_key), declaration
+        )
+        for declaration in declarations_for(scope)
+    }
+
+
+def _declared_provenance(
+    scope: MetricScope, provenance: Mapping[str, str]
+) -> dict[str, str]:
+    """Registry provenance re-keyed from calculator output keys to declared fact columns."""
+    renames = {
+        declaration.calculator_key: declaration.name
+        for declaration in declarations_for(scope)
+        if declaration.calculator_key != declaration.name
+    }
+    return {renames.get(key, key): code for key, code in provenance.items()}
 
 
 def _frame(rows: list[dict[str, object]], schema: pl.Schema) -> pl.DataFrame:
@@ -630,7 +681,9 @@ class ScopedEvaluator:
             contact_rows,
             episode_provenance,
         )
-        robots = self._robot_fact_frame(registry, hierarchy.robots[0], metrics)
+        robots = self._robot_fact_frame(
+            registry, hierarchy.robots[0], metrics, episode_provenance
+        )
 
         return ScopedFactTables(
             episodes=_frame([episode_row], EPISODE_FACT_SCHEMA),
@@ -931,7 +984,10 @@ class ScopedEvaluator:
             "robot_path_dev_m": _float(metrics.get("robot_path_deviation_m")),
             "total_acoustic_dose_pa2s": _float(metrics.get("total_acoustic_dose_pa2s")),
         }
-        row["null_reason"] = self._episode_null_reason(episode, row, provenance or {})
+        row.update(_declared_fact_values(metrics, MetricScope.EPISODE))
+        row["null_reason"] = self._episode_null_reason(
+            episode, row, _declared_provenance(MetricScope.EPISODE, provenance or {})
+        )
         return row
 
     def _episode_null_reason(
@@ -1245,6 +1301,7 @@ class ScopedEvaluator:
                 "ped_path_deflection_m": _float(ped_res.get("ped_path_deflection_m")),
                 "round_trips_completed": int(ped_res.get("round_trips_completed") or 0),
             }
+            row.update(_declared_fact_values(ped_res, MetricScope.PEDESTRIAN))
             base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE)
             row["null_reason"] = _merge_provenance_reasons(
                 base_reason, outcome.provenance, row
@@ -1285,6 +1342,7 @@ class ScopedEvaluator:
         registry: MetricRegistry,
         robot_slice: ScopeSlice,
         metrics: Mapping[str, Any],
+        episode_provenance: Mapping[str, str],
     ) -> pl.DataFrame:
         """Per-robot lifetime summary of work, emissions and drivetrain losses from registered robot calculators."""
         episode = robot_slice.window_bundle
@@ -1325,9 +1383,11 @@ class ScopedEvaluator:
             ),
             "drivetrain_scrub_j": _float(robot_res.get("drivetrain_scrub_j")),
         }
+        row.update(_declared_fact_values(robot_res, MetricScope.ROBOT))
         base_reason = _row_null_reason(row, _ROBOT_NULLABLE)
+        merged = _merge_provenance_reasons(base_reason, outcome.provenance, row)
         row["null_reason"] = _merge_provenance_reasons(
-            base_reason, outcome.provenance, row
+            merged, _declared_provenance(MetricScope.EPISODE, episode_provenance), row
         )
         return _frame([row], ROBOT_FACT_SCHEMA)
 
