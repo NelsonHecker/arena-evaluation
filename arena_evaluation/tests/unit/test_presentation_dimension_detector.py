@@ -76,10 +76,10 @@ def test_detect_ignores_constant_null_column():
 
 def test_detect_null_and_value_counts_as_varying():
     df = pl.DataFrame(
-        {"robot": [None, "r1", "r2"], "success": [1.0, 0.5, 0.25]},
-        schema={"robot": pl.Utf8, "success": pl.Float64},
+        {"robot_model": [None, "r1", "r2"], "success": [1.0, 0.5, 0.25]},
+        schema={"robot_model": pl.Utf8, "success": pl.Float64},
     )
-    assert detect_varying_dims(df) == ["robot"]
+    assert detect_varying_dims(df) == ["robot_model"]
 
 
 def test_detect_empty_frame():
@@ -150,8 +150,8 @@ def test_build_label_overwrites_existing_label_column():
 
 def test_resolve_auto_false_uses_requested_in_columns():
     df = _identity_frame(n_varying=3)
-    col, out = resolve_differentiate(_spec(differentiate="robot", auto_differentiate=False), df)
-    assert col == "robot"
+    col, out = resolve_differentiate(_spec(differentiate="robot_model", auto_differentiate=False), df)
+    assert col == "robot_model"
     assert out is df
 
 
@@ -179,7 +179,7 @@ def test_resolve_auto_false_empty_requested_falls_back():
 @pytest.mark.parametrize(
     ("n_varying", "requested", "expected"),
     [
-        pytest.param(0, "robot", "robot", id="no_varying_requested_present"),
+        pytest.param(0, "robot_model", "robot_model", id="no_varying_requested_present"),
         pytest.param(0, "bogus", "planner", id="no_varying_requested_missing"),
         pytest.param(1, "inter_planner", "inter_planner", id="single_varying_prefers_requested"),
         pytest.param(1, "bogus", "local_planner", id="single_varying_when_requested_missing"),
@@ -213,7 +213,7 @@ def test_resolve_auto_three_varying_compound():
 
 def test_resolve_compound_overrides_requested_column():
     df = _identity_frame(n_varying=2)
-    col, _ = resolve_differentiate(_spec(differentiate="robot"), df)
+    col, _ = resolve_differentiate(_spec(differentiate="robot_model"), df)
     assert col == COMPOUND_LABEL_COL
 
 

@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 import polars as pl
@@ -24,12 +23,14 @@ from arena_evaluation.storage.star_schema import (
 
 __all__ = [
     "CANONICAL_VIEW_NAMES",
+    "SERIES_TABLE_PREFIX",
     "TELEMETRY_TABLE_NAMES",
     "TELEMETRY_TABLE_SCHEMAS",
     "BenchmarkCatalog",
     "StarCatalog",
-    "synthesize_star_schema_from_combined",
 ]
+
+SERIES_TABLE_PREFIX: Final[str] = "series_"
 
 CANONICAL_VIEW_NAMES: Final[tuple[str, ...]] = (
     "v_episode_summary",
@@ -100,7 +101,6 @@ TELEMETRY_TABLE_SCHEMAS: Final[dict[str, dict[str, pl.DataType | type[pl.DataTyp
 }
 
 _EPISODE_DIR_RE: Final[re.Pattern[str]] = re.compile(r"^episode_(\d+)$")
-_DURATION_REGEX: Final[str] = r"(\d+(?:\.\d+)?)s"
 
 _JOIN_KEYS: Final[tuple[str, ...]] = ("run_id", "episode_id", "robot_id")
 
@@ -176,59 +176,8 @@ _ENCOUNTER_MEAN_METRICS: Final[tuple[str, ...]] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _SchemaResolver:
-    """Declarative helper to resolve Polars expressions against an existing column set."""
-
-    available_columns: frozenset[str]
-
-    def has(self, col_name: str) -> bool:
-        return col_name in self.available_columns
-
-    def pick(
-        self,
-        candidates: Sequence[str],
-        dtype: pl.DataType | type[pl.DataType],
-        default: str | float | bool | None = None,
-        *,
-        fallback_expr: pl.Expr | None = None,
-        fill_null: str | float | bool | None = None,
-    ) -> pl.Expr:
-        """Select the first matching column from `candidates`, or fall back to a default/expression."""
-        expr: pl.Expr | None = None
-        for col in candidates:
-            if col in self.available_columns:
-                expr = pl.col(col).cast(dtype)
-                break
-
-        if expr is None:
-            expr = fallback_expr if fallback_expr is not None else pl.lit(default, dtype=dtype)
-
-        if fill_null is not None:
-            expr = expr.fill_null(fill_null)
-
-        return expr
-
-    def first_rule(self, rules: Sequence[tuple[str, Callable[[], pl.Expr]]], default_expr: pl.Expr) -> pl.Expr:
-        """Evaluate and return the first expression whose trigger column exists."""
-        for col, builder in rules:
-            if col in self.available_columns:
-                return builder()
-        return default_expr
-
-
 def _to_lazy(frame: pl.LazyFrame | pl.DataFrame) -> pl.LazyFrame:
     return frame.lazy() if isinstance(frame, pl.DataFrame) else frame
-
-
-def _has_rows(lf: pl.LazyFrame | None) -> bool:
-    if lf is None:
-        return False
-    try:
-        return lf.select(pl.len()).collect().item() > 0
-    except Exception:
-        return False
-
 
 def _sync_bidirectional_aliases(lf: pl.LazyFrame, pairs: Sequence[tuple[str, str]]) -> pl.LazyFrame:
     """Ensure both column names in each `(col_a, col_b)` pair exist if either is present."""
@@ -240,146 +189,6 @@ def _sync_bidirectional_aliases(lf: pl.LazyFrame, pairs: Sequence[tuple[str, str
         elif col_b in schema_names and col_a not in schema_names:
             exprs.append(pl.col(col_b).alias(col_a))
     return lf.with_columns(exprs) if exprs else lf
-
-
-def synthesize_star_schema_from_combined(
-    combined_lf: pl.LazyFrame,
-    default_run_id: str = "default_run",
-) -> tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame]:
-    """Synthesize dim_episodes, dim_robots, and fact_episodes from combined_metrics.parquet."""
-    res = _SchemaResolver(frozenset(combined_lf.collect_schema().names()))
-
-    # Shared keys & common attributes
-    run_id_expr = res.pick(("run_id", "benchmark_id"), pl.String, default_run_id)
-    bench_id_expr = res.pick(("benchmark_id", "run_id"), pl.String, default_run_id)
-    ep_id_expr = res.pick(
-        ("episode_id", "episode"),
-        pl.Int64,
-        fallback_expr=pl.int_range(0, pl.len(), dtype=pl.Int64),
-    )
-    env_id_expr = res.pick(("env_id",), pl.String, "env_0")
-    robot_id_expr = res.pick(("robot_id", "robot"), pl.String, "robot_0")
-    robot_model_expr = res.pick(("robot_model", "robot"), pl.String, "unknown")
-    planner_expr = res.pick(("planner",), pl.String, "unknown")
-    inter_planner_expr = res.pick(("inter_planner",), pl.String, "none")
-    dispatcher_expr = res.pick(("dispatcher",), pl.String, "single")
-
-    # Complex / conditional expressions
-    duration_fallback = pl.col("outcome_info").str.extract(_DURATION_REGEX, 1).cast(pl.Float64, strict=False).fill_null(0.0) if res.has("outcome_info") else pl.lit(0.0, dtype=pl.Float64)
-    duration_expr = res.pick(
-        ("duration_s", "time_to_goal_s", "time_to_goal", "time"),
-        pl.Float64,
-        fallback_expr=duration_fallback,
-    )
-
-    ttg_fallback = pl.col("outcome_info").str.extract(_DURATION_REGEX, 1).cast(pl.Float64, strict=False) if res.has("outcome_info") else pl.lit(None, dtype=pl.Float64)
-    ttg_expr = res.pick(
-        ("time_to_goal_s", "time_to_goal", "time", "duration_s"),
-        pl.Float64,
-        fallback_expr=ttg_fallback,
-    )
-
-    outcome_state_expr = res.first_rule(
-        rules=[
-            ("outcome_state", lambda: pl.col("outcome_state").cast(pl.Int64)),
-            (
-                "success",
-                lambda: pl.when(pl.col("success").fill_null(False)).then(pl.lit(2, dtype=pl.Int64)).otherwise(pl.lit(3, dtype=pl.Int64)),
-            ),
-        ],
-        default_expr=pl.lit(0, dtype=pl.Int64),
-    )
-
-    success_expr = res.pick(("success",), pl.Boolean, False, fill_null=False)
-    snrf_expr = res.pick(("success_no_robot_fault",), pl.Boolean, fallback_expr=success_expr, fill_null=False)
-
-    dim_episodes = combined_lf.select(
-        run_id=run_id_expr,
-        episode_id=ep_id_expr,
-        env_id=env_id_expr,
-        robot_id=robot_id_expr,
-        benchmark_id=bench_id_expr,
-        suite_name=res.pick(("suite_name",), pl.String, ""),
-        contest_name=res.pick(("contest_name",), pl.String, ""),
-        stage=res.pick(("stage", "scenario"), pl.String, "default"),
-        world=res.pick(("world", "map"), pl.String, "unknown"),
-        scenario=res.pick(("scenario", "stage"), pl.String, "default"),
-        planner=planner_expr,
-        inter_planner=inter_planner_expr,
-        dispatcher=dispatcher_expr,
-        robot_model=robot_model_expr,
-        crowd_condition=res.pick(("crowd_condition",), pl.String, "default"),
-        ped_policy_default=res.pick(("ped_policy_default",), pl.String, "none"),
-        crowd_size=res.pick(("crowd_size", "num_pedestrians"), pl.Int64, 0),
-        seed=res.pick(("seed",), pl.Int64, 0),
-        is_reference=res.pick(("is_reference",), pl.Boolean, False, fill_null=False),
-        reference_type=res.pick(("reference_type",), pl.String, None),
-        duration_s=duration_expr,
-        outcome_state=outcome_state_expr,
-        outcome_info=res.pick(("outcome_info", "result", "status_reason"), pl.String, ""),
-    )
-
-    fact_episodes = combined_lf.select(
-        run_id=run_id_expr,
-        episode_id=ep_id_expr,
-        robot_id=robot_id_expr,
-        result=res.pick(("result", "status"), pl.String, "UNKNOWN"),
-        success=success_expr,
-        time_to_goal_s=ttg_expr,
-        path_length_m=res.pick(("path_length_m", "path_length"), pl.Float64, None),
-        path_efficiency=res.pick(("path_efficiency", "spl"), pl.Float64, None),
-        total_energy_wh=res.pick(("total_energy_wh", "energy_total_wh"), pl.Float64, None),
-        energy_per_meter_j_m=res.pick(("energy_per_meter_j_m", "energy_per_meter"), pl.Float64, None),
-        mean_velocity_mps=res.pick(("mean_velocity_mps", "velocity_mean"), pl.Float64, None),
-        max_acceleration_mps2=res.pick(("max_acceleration_mps2", "acceleration_max"), pl.Float64, None),
-        jerk_max_mps3=res.pick(("jerk_max_mps3", "jerk_max"), pl.Float64, None),
-        min_obstacle_clearance_m=res.pick(("min_obstacle_clearance_m", "min_obstacle_clearance"), pl.Float64, None),
-        min_ped_clearance_m=res.pick(("min_ped_clearance_m", "min_pedestrian_clearance"), pl.Float64, None),
-        total_collisions_ped=res.pick(("total_collisions_ped", "collision_amount_pedestrian"), pl.Int64, 0),
-        total_collisions_static=res.pick(
-            ("total_collisions_static", "collision_amount_static", "collision_amount_wall", "collision_amount"),
-            pl.Int64,
-            0,
-        ),
-        success_no_robot_fault=snrf_expr,
-        mar=res.pick(("mar",), pl.Float64, None),
-        pfi=res.pick(("pfi",), pl.Float64, None),
-        robot_path_dev_m=res.pick(("robot_path_dev_m", "robot_path_deviation_m"), pl.Float64, None),
-        total_acoustic_dose_pa2s=res.pick(("total_acoustic_dose_pa2s", "acoustic_cost"), pl.Float64, None),
-        null_reason=res.pick(("null_reason", "status_reason"), pl.String, None),
-    ).with_columns(
-        time_to_goal=pl.col("time_to_goal_s"),
-        path_length=pl.col("path_length_m"),
-    )
-
-    optional_robot_floats = (
-        "max_linear_vel",
-        "max_angular_vel",
-        "linear_acc",
-        "linear_decel",
-        "robot_radius",
-        "robot_mass_kg",
-        "static_power_w",
-        "start_x",
-        "start_y",
-        "goal_x",
-        "goal_y",
-    )
-
-    dim_robots = combined_lf.select(
-        run_id=run_id_expr,
-        episode_id=ep_id_expr,
-        env_id=env_id_expr,
-        robot_id=robot_id_expr,
-        robot_model=robot_model_expr,
-        planner=planner_expr,
-        inter_planner=inter_planner_expr,
-        dispatcher=dispatcher_expr,
-        **{col: res.pick((col,), pl.Float64, None) for col in optional_robot_floats},
-        lidar_variant=res.pick(("lidar_variant",), pl.String, None),
-    )
-
-    return dim_episodes, dim_robots, fact_episodes
 
 
 class BenchmarkCatalog:
@@ -408,26 +217,19 @@ class BenchmarkCatalog:
             self._load_empty_star_schema()
 
     def _load_from_directory(self, source_dir: pathlib.Path) -> None:
+        """Scan the canonical Star Schema Parquet tables, plus series, telemetry and evidence tables."""
         self._tables.update(scan_star_schema(source_dir))
+        self._register_series_tables(source_dir)
         self._register_telemetry_views(source_dir)
         self._register_evidence_index(source_dir)
 
-        combined_file = next(
-            (p for p in (source_dir / "combined_metrics.parquet", source_dir / "metrics" / "combined_metrics.parquet") if p.is_file()),
-            None,
-        )
-        if combined_file is None:
+    def _register_series_tables(self, benchmark_dir: pathlib.Path) -> None:
+        """Register the consolidated 1NF long-format ``series_*.parquet`` tables under ``benchmark_dir / metrics``."""
+        metrics_dir = benchmark_dir / "metrics"
+        if not metrics_dir.is_dir():
             return
-
-        if not _has_rows(self._tables.get("fact_episodes")):
-            comb_lf = pl.scan_parquet(combined_file)
-            dim_ep, dim_rob, fact_ep = synthesize_star_schema_from_combined(comb_lf, default_run_id=source_dir.name)
-            for name, synthesized_lf in (("dim_episodes", dim_ep), ("dim_robots", dim_rob)):
-                if not _has_rows(self._tables.get(name)):
-                    self._tables[name] = synthesized_lf
-            self._tables["fact_episodes"] = fact_ep
-
-        self._tables.setdefault("combined_metrics", pl.scan_parquet(combined_file))
+        for path in sorted(metrics_dir.glob(f"{SERIES_TABLE_PREFIX}*.parquet")):
+            self._tables[path.stem] = pl.scan_parquet(path)
 
     def _load_from_mapping(self, source: Mapping[str, pl.LazyFrame | pl.DataFrame]) -> None:
         for name, schema in STAR_SCHEMA_SCHEMAS.items():
@@ -534,7 +336,23 @@ class BenchmarkCatalog:
         fact_enc = self._tables["fact_encounters"]
         fact_con = self._tables["fact_contacts"]
 
-        v_episode_summary = fact_ep.join(dim_ep.select(_DIM_EPISODE_VIEW_COLS), on=list(_JOIN_KEYS), how="left").join(dim_rob.select(_DIM_ROBOT_VIEW_COLS), on=list(_JOIN_KEYS), how="left")
+        # local_planner is the planner token a contest entry compares on: contest
+        # names carry the inter-planner suffix, the local planner is the first
+        # segment for a plain name and the middle segment for a three-part name.
+        planner_parts = pl.col("planner").str.split("-")
+        local_planner = (
+            pl.when(pl.col("planner").is_null() | (pl.col("planner") == ""))
+            .then(pl.lit("unknown"))
+            .when(planner_parts.list.len() >= 3)
+            .then(planner_parts.list.get(1, null_on_oob=True))
+            .otherwise(planner_parts.list.get(0, null_on_oob=True))
+            .alias("local_planner")
+        )
+        v_episode_summary = (
+            fact_ep.join(dim_ep.select(_DIM_EPISODE_VIEW_COLS), on=list(_JOIN_KEYS), how="left")
+            .join(dim_rob.select(_DIM_ROBOT_VIEW_COLS), on=list(_JOIN_KEYS), how="left")
+            .with_columns(local_planner)
+        )
         self._tables["v_episode_summary"] = v_episode_summary
 
         enc_counts = fact_enc.group_by(_JOIN_KEYS).agg(encounter_count=pl.len().cast(pl.Int64))

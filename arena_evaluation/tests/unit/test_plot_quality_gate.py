@@ -11,6 +11,7 @@ from arena_evaluation.presentation.checks import DiagnosticInspector
 from arena_evaluation.presentation.report_builder import ReportBuilder
 from arena_evaluation.presentation.viz_manifest import VizManifest
 from arena_evaluation.storage.schemas import PlotChannels, PlotSpec
+from star_benchmark import write_benchmark
 
 
 def test_empty_dataframe_rejection() -> None:
@@ -150,14 +151,13 @@ def test_missing_required_columns_rejection() -> None:
 
 def test_quality_gate_failed_card_in_report_and_skips_static(tmp_path: pathlib.Path) -> None:
     """Failed quality gate renders an HTML rejection card and skips static rendering."""
-    df = pl.DataFrame(
-        {
-            "planner": ["dwb", "mppi"],
-            "success": [1.0, 0.5],
-            "broken_metric": [float("nan"), float("nan")],
-        }
+    write_benchmark(
+        tmp_path,
+        [
+            {"episode_id": 0, "planner": "dwb", "success": True, "min_ped_clearance_m": None},
+            {"episode_id": 1, "planner": "mppi", "success": False, "min_ped_clearance_m": None},
+        ],
     )
-    df.write_parquet(tmp_path / "combined_metrics.parquet")
 
     manifest = VizManifest(
         plots=[
@@ -165,7 +165,7 @@ def test_quality_gate_failed_card_in_report_and_skips_static(tmp_path: pathlib.P
                 id="plot_broken",
                 type="bar",
                 title="Broken Metric Plot",
-                channels=PlotChannels(x="planner", y="broken_metric"),
+                channels=PlotChannels(x="planner", y="min_ped_clearance_m"),
             )
         ]
     )
@@ -187,13 +187,7 @@ def test_quality_gate_failed_card_in_report_and_skips_static(tmp_path: pathlib.P
 
 def test_agent_annotation_from_notes_json(tmp_path: pathlib.Path) -> None:
     """Agent insights from notes.json are rendered in HTML callouts below the plot."""
-    df = pl.DataFrame(
-        {
-            "planner": [f"planner_{i}" for i in range(12)],
-            "path_length": [float(10.0 + i) for i in range(12)],
-        }
-    )
-    df.write_parquet(tmp_path / "combined_metrics.parquet")
+    write_benchmark(tmp_path, [{"episode_id": i, "planner": f"planner_{i}", "path_length_m": float(10.0 + i)} for i in range(12)])
 
     notes = {
         "plot_path_length": "DWB shows highest SPL despite near-miss surge",
@@ -206,7 +200,7 @@ def test_agent_annotation_from_notes_json(tmp_path: pathlib.Path) -> None:
                 id="plot_path_length",
                 type="bar",
                 title="Path Length by Planner",
-                channels=PlotChannels(x="planner", y="path_length"),
+                channels=PlotChannels(x="planner", y="path_length_m"),
             )
         ]
     )
@@ -224,13 +218,7 @@ def test_agent_annotation_from_notes_json(tmp_path: pathlib.Path) -> None:
 
 def test_agent_annotation_from_insights_json_list(tmp_path: pathlib.Path) -> None:
     """Agent insights from insights.json list structure are rendered in HTML callouts."""
-    df = pl.DataFrame(
-        {
-            "planner": [f"planner_{i}" for i in range(12)],
-            "time_to_goal": [float(5.0 + i) for i in range(12)],
-        }
-    )
-    df.write_parquet(tmp_path / "combined_metrics.parquet")
+    write_benchmark(tmp_path, [{"episode_id": i, "planner": f"planner_{i}", "time_to_goal_s": float(5.0 + i)} for i in range(12)])
 
     insights = [
         {
@@ -246,7 +234,7 @@ def test_agent_annotation_from_insights_json_list(tmp_path: pathlib.Path) -> Non
                 id="plot_ttg",
                 type="bar",
                 title="Time to Goal",
-                channels=PlotChannels(x="planner", y="time_to_goal"),
+                channels=PlotChannels(x="planner", y="time_to_goal_s"),
             )
         ]
     )

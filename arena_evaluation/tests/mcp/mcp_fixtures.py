@@ -8,6 +8,7 @@ import pathlib
 import sys
 import time
 
+import polars as pl
 import pytest
 
 sourced = pytest.mark.skipif("BASH_FUNC__arena_cli%%" not in os.environ, reason="needs a shell that sourced arena")
@@ -47,29 +48,64 @@ def _manifest(run_id: str, steps: tuple[str, ...]) -> object:
 
 
 def metric_rows() -> list[dict]:
+    """Canonical episode-summary rows: two contestants over two stages plus two reference rows."""
     rows = []
-    for planner, local, success, ttg, collisions in (("dwb", "dwb", [True, True, True, False], [40.0, 42.0, 44.0, 90.0], [0, 0, 1, 2]), ("dwb_social", "dwb", [True, False, False, False], [60.0, 90.0, 90.0, 90.0], [1, 2, 3, 3])):
+    for planner, success, ttg, collisions, path_efficiency, energy in (
+        ("dwb", [True, True, True, False], [40.0, 42.0, 44.0, 90.0], [0, 0, 1, 2], [0.9, 0.8, 0.7, 0.5], [10.0, 11.0, 12.0, 20.0]),
+        ("dwb_social", [True, False, False, False], [60.0, 90.0, 90.0, 90.0], [1, 2, 3, 3], [0.6, 0.5, 0.4, 0.3], [15.0, 18.0, 20.0, 25.0]),
+    ):
         for index in range(4):
             rows.append(
                 {
-                    "episode": len(rows),
+                    "episode_id": len(rows),
                     "planner": planner,
-                    "local_planner": local,
-                    "inter_planner": "social" if planner == "dwb_social" else "plain",
                     "stage": "s1" if index < 2 else "s2",
-                    "map": "map_empty",
+                    "world": "map_empty",
                     "is_reference": False,
                     "success": success[index],
-                    "time_to_goal": ttg[index],
-                    "collision_amount": collisions[index],
-                    "judge_agrees": success[index],
-                    "phases_total": 1,
-                    "path_speeds": [0.5, 0.6 + index * 0.1],
+                    "time_to_goal_s": ttg[index],
+                    "total_collisions_ped": collisions[index],
+                    "total_collisions_static": 0,
+                    "path_efficiency": path_efficiency[index],
+                    "total_energy_wh": energy[index],
+                    "min_ped_clearance_m": 0.5,
+                    "mar": 0.4,
+                    "pfi": 0.2,
                 }
             )
-    for index in range(2):
-        rows.append({"episode": len(rows), "planner": "unhindered_peds", "local_planner": "unhindered_peds", "inter_planner": "", "stage": "s1", "map": "map_empty", "is_reference": True, "success": None, "time_to_goal": None, "collision_amount": None, "judge_agrees": None, "phases_total": None, "path_speeds": []})
+    for _ in range(2):
+        rows.append(
+            {
+                "episode_id": len(rows),
+                "planner": "unhindered_peds",
+                "stage": "s1",
+                "world": "map_empty",
+                "is_reference": True,
+                "success": None,
+                "time_to_goal_s": None,
+                "total_collisions_ped": None,
+                "total_collisions_static": None,
+                "path_efficiency": None,
+                "total_energy_wh": None,
+                "min_ped_clearance_m": None,
+                "mar": None,
+                "pfi": None,
+            }
+        )
     return rows
+
+
+def write_star_schema(benchmark_dir: pathlib.Path, rows: list[dict]) -> None:
+    """Write the canonical episode dimension/fact tables the analysis catalog scans."""
+    from arena_evaluation.storage.declarations import EPISODE_FACT_SCHEMA
+    from arena_evaluation.storage.star_schema import DIM_EPISODES_SCHEMA
+
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    resolved = [{"run_id": "run", "robot_id": "robot_0", "env_id": "env_0", **row} for row in rows]
+    pl.DataFrame([{name: row.get(name) for name in DIM_EPISODES_SCHEMA.names()} for row in resolved], schema=DIM_EPISODES_SCHEMA).write_parquet(benchmark_dir / "dim_episodes.parquet")
+    metrics = benchmark_dir / "metrics"
+    metrics.mkdir(exist_ok=True)
+    pl.DataFrame([{name: row.get(name) for name in EPISODE_FACT_SCHEMA.names()} for row in resolved], schema=EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
 
 
 def _iso(timestamp: float) -> str:
@@ -77,10 +113,9 @@ def _iso(timestamp: float) -> str:
 
 
 def build_runs(root: pathlib.Path) -> pathlib.Path:
-    """A benchmark run written by the package's own writers: manifest, state and progress plus a second lane, an episode, logs and combined metrics."""
+    """A benchmark run written by the package's own writers: manifest, state and progress plus a second lane, an episode, logs and the Star Schema."""
     from arena_evaluation.benchmark.state import RunDir
     from arena_evaluation.benchmark.step import StepErrorKind, StepResult
-    from arena_evaluation.processing.parquet_store import ParquetStore
     from arena_evaluation.storage.manifest import MetadataWriter
     from arena_evaluation.storage.schemas import RunMetadata
 
@@ -101,7 +136,7 @@ def build_runs(root: pathlib.Path) -> pathlib.Path:
     episode_dir = run.path / "episodes" / "episode_000"
     episode_dir.mkdir(parents=True, exist_ok=True)
     MetadataWriter.write(RunMetadata(benchmark_id=RUN_ID, planner="dwb", map="map_empty", stage="s1", recording_started_at="2026-10-19T12:00:00", python_version="3.12", ros_distro="jazzy"), episode_dir / "episode_000.yaml")
-    ParquetStore.write_rows(metric_rows(), run.path / "combined_metrics.parquet")
+    write_star_schema(run.path, metric_rows())
     empty = RunDir.create(root, EMPTY_RUN_ID, _manifest(EMPTY_RUN_ID, ("dwb/s1",)))
     empty.progress.close()
     return run.path

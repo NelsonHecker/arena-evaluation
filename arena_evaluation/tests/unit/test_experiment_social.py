@@ -9,6 +9,7 @@ import yaml
 pl = pytest.importorskip("polars")
 
 from arena_evaluation.experiments import social
+from star_benchmark import write_benchmark
 
 
 def test_contact_partners_straddle_the_center_facing_each_other() -> None:
@@ -50,34 +51,49 @@ def test_stage_carries_the_arm_as_the_gesture_mode() -> None:
     assert (stage["map"], stage["robot"], stage["episodes"], stage["timeout"]) == (social.WORLD, social.ROBOT, 3, "90s")
 
 
-def _run(tmp_path: pathlib.Path, arm: str, *, planners: tuple[str, ...] = ("dwb",), cases: tuple[str, ...] = ("contact_hug_ward", "group_ward"), episodes: int = 2, through: bool = False) -> pathlib.Path:
-    rows = []
+def _rows(*, arm: str, cases: tuple[str, ...] = ("contact_hug_ward", "group_ward"), planners: tuple[str, ...] = ("dwb",), episodes: int = 2, through: bool = False) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     episode = 0
     for planner in planners:
         for case in cases:
-            cx, cy = social.CENTERS[case]
             for seed in range(episodes):
                 rows.append(
                     {
                         "stage": f"{case}_{arm}",
                         "planner": planner,
-                        "episode": episode,
-                        "result": "SUCCESS",
-                        "path": [[cx, cy - 3.0], [cx + (0.0 if through else 2.0), cy], [cx, cy + 3.0]],
+                        "episode_id": episode,
+                        "result": "GOAL_REACHED",
                         "success": True,
-                        "min_pedestrian_clearance": 0.5 + 0.1 * seed + (0.0 if through else 1.0),
-                        "time_in_intimate_zone": 1.0,
-                        "time_in_personal_zone": 2.0,
-                        "path_length": 6.0 + seed,
-                        "time_to_goal": 10.0 + seed,
+                        "min_ped_clearance_m": 0.5 + 0.1 * seed + (0.0 if through else 1.0),
+                        "path_length_m": 6.0 + seed,
+                        "time_to_goal_s": 10.0 + seed,
                     }
                 )
                 episode += 1
-    rows.append({**rows[-1], "episode": episode, "result": "UNRESOLVED"})
-    run = tmp_path / arm
-    run.mkdir()
-    pl.DataFrame(rows, infer_schema_length=None).write_parquet(run / "combined_metrics.parquet")
-    return run
+    rows.append({**rows[-1], "episode_id": episode, "result": "UNRESOLVED"})
+    return rows
+
+
+def _tracks(rows: list[dict[str, object]], *, through: bool) -> list[dict[str, object]]:
+    samples: list[dict[str, object]] = []
+    for row in rows:
+        cx, cy = social.CENTERS[str(row["stage"]).rsplit("_", 1)[0]]
+        offset = 0.0 if through else 2.0
+        samples.extend(
+            {
+                "episode_id": row["episode_id"],
+                "x": x,
+                "y": y,
+            }
+            for x, y in ((cx, cy - 3.0), (cx + offset, cy), (cx, cy + 3.0))
+        )
+    return samples
+
+
+def _run(tmp_path: pathlib.Path, arm: str, **kwargs: object) -> pathlib.Path:
+    rows = _rows(arm=arm, **kwargs)
+    directory = tmp_path / arm
+    return write_benchmark(directory, rows, robot_tracks=_tracks(rows, through=bool(kwargs.get("through", False))))
 
 
 def test_load_marks_paths_through_the_formation_and_drops_unresolved_episodes(tmp_path: pathlib.Path) -> None:
@@ -94,27 +110,17 @@ def test_load_marks_paths_through_the_formation_and_drops_unresolved_episodes(tm
 
 def test_load_measures_unknown_cases_from_the_origin_and_tolerates_an_empty_path(tmp_path: pathlib.Path) -> None:
     run = tmp_path / "run"
-    run.mkdir()
-    pl.DataFrame(
-        {
-            "stage": ["mystery_on", "group_ward_on"],
-            "planner": ["dwb", "dwb"],
-            "episode": [0, 1],
-            "path": [[[0.1, 0.0]], []],
-            "success": [True, False],
-            "min_pedestrian_clearance": [0.3, None],
-            "time_in_intimate_zone": [0.0, None],
-            "time_in_personal_zone": [0.0, None],
-            "path_length": [1.0, None],
-            "time_to_goal": [2.0, None],
-        }
-    ).write_parquet(run / "combined_metrics.parquet")
+    rows = [
+        {"stage": "mystery_on", "planner": "dwb", "episode_id": 0, "result": "GOAL_REACHED", "success": True, "min_ped_clearance_m": 0.3, "path_length_m": 1.0, "time_to_goal_s": 2.0},
+        {"stage": "group_ward_on", "planner": "dwb", "episode_id": 1, "result": "GOAL_REACHED", "success": False, "min_ped_clearance_m": None, "path_length_m": None, "time_to_goal_s": None},
+    ]
+    write_benchmark(run, rows, robot_tracks=[{"episode_id": 0, "x": 0.1, "y": 0.0}])
     df = social.load(run, "on")
     assert df["case"].to_list() == ["mystery", "group_ward"]
     assert df["pierced"].to_list() == [1.0, 0.0]
     assert df["closest_to_group_m"][0] == pytest.approx(0.1)
-    assert math.isnan(df["closest_to_group_m"][1])
-    with pytest.raises(FileNotFoundError, match="process the run first"):
+    assert df["closest_to_group_m"][1] is None
+    with pytest.raises(FileNotFoundError, match="arena evaluation process"):
         social.load(tmp_path / "missing", "on")
 
 
@@ -136,7 +142,7 @@ def test_analyze_pairs_the_arms_by_seed_within_each_case(tmp_path: pathlib.Path,
     assert set(paired["metric"]) == set(social.METRICS)
     pierced = paired.filter(pl.col("metric") == "pierced").row(0, named=True)
     assert (pierced["off_minus_on"], pierced["n_cases"], pierced["n_pairs"]) == (1.0, 2, 4)
-    clearance = paired.filter(pl.col("metric") == "min_pedestrian_clearance").row(0, named=True)
+    clearance = paired.filter(pl.col("metric") == "min_ped_clearance_m").row(0, named=True)
     assert clearance["off_minus_on"] == pytest.approx(-1.0)
     assert paired.filter(pl.col("metric") == "success")["p"][0] == 1.0
     assert "p_holm" in paired.columns

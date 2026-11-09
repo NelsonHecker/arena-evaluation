@@ -14,6 +14,33 @@ if TYPE_CHECKING:
     import polars as pl
 
 CONTESTANT = "planner"
+
+# Canonical Star Schema fact measures: the episode summary names the dimensions the
+# registry's legacy output keys used to carry, and the OLAP layer declares their direction.
+_CANONICAL_MEASURE_DIRECTIONS: dict[str, str] = {
+    "success": "higher",
+    "success_no_robot_fault": "higher",
+    "time_to_goal_s": "lower",
+    "path_length_m": "lower",
+    "path_efficiency": "higher",
+    "total_energy_wh": "lower",
+    "energy_per_meter_j_m": "lower",
+    "mean_velocity_mps": "higher",
+    "max_acceleration_mps2": "lower",
+    "jerk_max_mps3": "lower",
+    "min_obstacle_clearance_m": "higher",
+    "min_ped_clearance_m": "higher",
+    "total_collisions_ped": "lower",
+    "total_collisions_static": "lower",
+    "mar": "higher",
+    "pfi": "lower",
+    "robot_path_dev_m": "lower",
+    "total_acoustic_dose_pa2s": "lower",
+    "duration_s": "lower",
+}
+
+# Fallback ranking set when a tool's caller names no metrics.
+_DEFAULT_METRICS: tuple[str, ...] = ("success", "time_to_goal_s", "path_efficiency", "total_energy_wh")
 Metrics = Annotated[list[str] | None, pydantic.Field(description="metric columns, the metrics' declared primary outputs when omitted")]
 References = Annotated[bool, pydantic.Field(description="keep reference episodes (is_reference), which are not contestant runs")]
 Scalar = str | int | float | bool
@@ -40,25 +67,26 @@ def directions(rows: list[dict[str, Any]]) -> dict[str, str]:
     return out
 
 
-def primary_outputs(rows: list[dict[str, Any]]) -> list[str]:
-    return list(dict.fromkeys(key for row in rows for key in row["primary_outputs"]))
+def declared_directions(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Every metric output direction: registry outputs first, canonical Star Schema measures override."""
+    return {**directions(rows), **_CANONICAL_MEASURE_DIRECTIONS}
 
 
 def load_metrics(run_id: str) -> pl.DataFrame:
-    """combined_metrics.parquet of a run, a ToolError when it was not processed yet."""
-    from arena_evaluation.processing.parquet_store import ParquetStore
+    """The run's canonical ``v_episode_summary`` view, a ToolError when the run has no Star Schema."""
+    from arena_evaluation.analytics.catalog import BenchmarkCatalog
 
-    path = run_path(run_id) / "combined_metrics.parquet"
-    if not path.is_file():
-        raise ToolError(f"run {run_id!r} has no combined_metrics.parquet", hint="evaluation_process computes it")
-    frame, _ = ParquetStore.read(path)
-    return frame
+    path = run_path(run_id)
+    catalog = BenchmarkCatalog.from_directory(path)
+    if not (path / "dim_episodes.parquet").is_file():
+        raise ToolError(f"run {run_id!r} has no Star Schema tables", hint="evaluation_process builds them")
+    return catalog.get_table("v_episode_summary").collect()
 
 
 def episodes(frame: pl.DataFrame, include_references: bool) -> pl.DataFrame:
     import polars as pl
 
-    if include_references or "is_reference" not in frame.columns:
+    if include_references:
         return frame
     return frame.filter(~pl.col("is_reference").fill_null(False).cast(pl.Boolean))
 
@@ -131,7 +159,7 @@ def compare_frame(frame: pl.DataFrame, metrics: list[str], declared: dict[str, s
     if planners:
         frame = frame.filter(pl.col(CONTESTANT).is_in(planners))
     columns(frame, metrics, "metric")
-    group = [CONTESTANT, *(["stage"] if group_by_stage and "stage" in frame.columns else [])]
+    group = [CONTESTANT, "stage"] if group_by_stage else [CONTESTANT]
     rows = means(frame, group, metrics, spread=True)
     scored, unranked = split_by_direction(metrics, declared)
     if normalize:
@@ -169,13 +197,14 @@ def correlation_frame(frame: pl.DataFrame, metrics: list[str]) -> dict[str, Any]
     lists = [name for name in metrics if isinstance(frame.schema[name], pl.List)]
     if lists:
         raise ToolError(f"{', '.join(lists)} hold one list per episode, correlate scalar metrics", hint="evaluation_read_combined_metrics shows each column's dtype")
-    work = frame.select([pl.col(name).cast(pl.Float64) for name in metrics]).to_pandas().corr()
-    matrix = {}
-    for row in metrics:
-        matrix[row] = {}
-        for col in metrics:
-            value = float(work.loc[row, col])
-            matrix[row][col] = round(value, 3) if math.isfinite(value) else None
+    work = frame.select([pl.col(name).cast(pl.Float64) for name in metrics])
+    correlation = work.corr()
+    matrix: dict[str, dict[str, float | None]] = {}
+    for row_index, row in enumerate(correlation.columns):
+        matrix[row] = {
+            col: round(value, 3) if value is not None and math.isfinite(value) else None
+            for col, value in zip(correlation.columns, correlation.row(row_index), strict=True)
+        }
     return {"metrics": metrics, "correlation_matrix": matrix}
 
 
@@ -205,22 +234,21 @@ def summary_of(frame: pl.DataFrame, include_references: bool = False) -> dict[st
     work = episodes(frame, include_references)
 
     def distinct(name: str) -> list[Any]:
-        return sorted(work[name].drop_nulls().unique().to_list()) if name in work.columns else []
+        return sorted(work[name].drop_nulls().unique().to_list())
 
     contestants = []
-    if CONTESTANT in work.columns:
-        for name in distinct(CONTESTANT):
-            rows = work.filter(pl.col(CONTESTANT) == name)
-            success = rows["success"].cast(pl.Float64).drop_nulls().mean() if "success" in rows.columns else None
-            contestants.append({"planner": name, "n_episodes": len(rows), "success_rate": round(float(cast("float", success)), 3) if success is not None else None})
-    overall = work["success"].cast(pl.Float64).drop_nulls().mean() if "success" in work.columns else None
+    for name in distinct(CONTESTANT):
+        rows = work.filter(pl.col(CONTESTANT) == name)
+        success = rows["success"].cast(pl.Float64).drop_nulls().mean()
+        contestants.append({"planner": name, "n_episodes": len(rows), "success_rate": round(float(cast("float", success)), 3) if success is not None else None})
+    overall = work["success"].cast(pl.Float64).drop_nulls().mean()
     return {
         "n_rows": len(frame),
         "n_episodes": len(work),
         "n_references": len(frame) - len(work),
         "planners": distinct(CONTESTANT),
         "stages": distinct("stage"),
-        "maps": distinct("map"),
+        "maps": distinct("world"),
         "overall_success_rate": round(float(cast("float", overall)), 3) if overall is not None else None,
         "per_planner": sorted(contestants, key=lambda entry: (entry["success_rate"] is None, -(entry["success_rate"] or 0.0))),
     }
@@ -248,7 +276,7 @@ def evaluation_describe_metric(metric_name: str) -> dict[str, Any]:
 
 @domain.tool(read_only=True)
 def evaluation_read_combined_metrics(run_id: RunId) -> dict[str, Any]:
-    """Shape, columns and per-column statistics of a run's combined_metrics.parquet."""
+    """Shape, columns and per-column statistics of a run's canonical episode summary view."""
     frame = load_metrics(run_id)
     return {"run_id": run_id, "n_rows": len(frame), "n_columns": len(frame.columns), "columns": frame.columns, "column_stats": column_stats(frame)}
 
@@ -263,7 +291,7 @@ def evaluation_query_metrics(
     descending: bool = True,
     include_references: References = False,
 ) -> dict[str, Any]:
-    """Mean of metric columns grouped by columns, after an equality filter, over combined_metrics.parquet."""
+    """Mean of metric columns grouped by columns, after an equality filter, over the run's canonical episode summary view."""
     import polars as pl
 
     frame = episodes(load_metrics(run_id), include_references)
@@ -306,8 +334,8 @@ def evaluation_compare_planners(
     """Contestants (the planner column, one per contest entry) side by side on metric means and spreads, ranked over metrics with a declared direction."""
     rows = metric_rows()
     frame = load_metrics(run_id)
-    chosen = metrics or [name for name in primary_outputs(rows) if name in frame.columns]
-    return {"run_id": run_id, **compare_frame(frame, chosen, directions(rows), planners=planners, group_by_stage=group_by_stage, normalize=normalize, include_references=include_references)}
+    chosen = metrics or list(_DEFAULT_METRICS)
+    return {"run_id": run_id, **compare_frame(frame, chosen, declared_directions(rows), planners=planners, group_by_stage=group_by_stage, normalize=normalize, include_references=include_references)}
 
 
 @domain.tool(read_only=True)
@@ -321,8 +349,8 @@ def evaluation_top_n(
     """The n best contestants by a weighted composite of normalized metric means, metrics without a declared direction left out."""
     rows = metric_rows()
     frame = load_metrics(run_id)
-    chosen = metrics or [name for name in primary_outputs(rows) if name in frame.columns]
-    return {"run_id": run_id, **top_n_frame(frame, chosen, directions(rows), n=n, weights=weights, include_references=include_references)}
+    chosen = metrics or list(_DEFAULT_METRICS)
+    return {"run_id": run_id, **top_n_frame(frame, chosen, declared_directions(rows), n=n, weights=weights, include_references=include_references)}
 
 
 @domain.tool(read_only=True)
@@ -351,7 +379,7 @@ def evaluation_summarize(run_id: RunId, include_references: References = False) 
     return {"run_id": run_id, "summary": "\n".join(lines), **summary, "status": status}
 
 
-@domain.resource("arena://evaluation/runs/{run_id}/metrics/schema", mime_type="application/json", description="Columns and dtypes of a run's combined_metrics.parquet")
+@domain.resource("arena://evaluation/runs/{run_id}/metrics/schema", mime_type="application/json", description="Columns and dtypes of a run's canonical episode summary view")
 def metrics_schema_resource(run_id: str) -> dict[str, Any]:
     frame = load_metrics(run_id)
     return {"run_id": run_id, "n_rows": len(frame), "dtypes": {name: str(dtype) for name, dtype in frame.schema.items()}}

@@ -50,6 +50,7 @@ from arena_evaluation.storage.schemas import (
     PlotSliceSpec,
     PlotSpec,
 )
+from star_benchmark import write_benchmark
 
 _PNG_MAGIC: Final[bytes] = b"\x89PNG\r\n\x1a\n"
 
@@ -648,10 +649,27 @@ def test_backward_compatibility_with_legacy_plotspec() -> None:
 
 
 def test_report_builder_with_data_resolver_and_standalone_artifacts(tmp_path: pathlib.Path) -> None:
-    # 1. Setup benchmark lakehouse directory with combined metrics
-    df = _sample_distributions_frame()
-    df.write_parquet(tmp_path / "combined_metrics.parquet")
-    df.write_parquet(tmp_path / "fact_contacts.parquet")
+    # 1. Setup the canonical benchmark lakehouse the report reads
+    from arena_evaluation.storage.declarations import CONTACT_FACT_SCHEMA
+
+    source = _sample_distributions_frame()
+    episodes = [
+        {
+            "episode_id": index,
+            "planner": row["planner"],
+            "crowd_condition": row["crowd_condition"],
+            "path_length_m": row["path_length_m"],
+            "time_to_goal_s": row["time_to_goal_s"],
+            "success": bool(row["success"]),
+        }
+        for index, row in enumerate(source.iter_rows(named=True))
+    ]
+    write_benchmark(tmp_path, episodes)
+    contacts = [
+        {"run_id": "run", "episode_id": index, "robot_id": "robot_0", "closer_label": "robot", "fault_attributed_to": "robot", "impact_speed_mps": 0.8, "robot_closing_share": 0.7, "counterfactual_freeze_persists": False}
+        for index in range(len(episodes))
+    ]
+    pl.DataFrame([{name: row.get(name) for name in CONTACT_FACT_SCHEMA.names()} for row in contacts], schema=CONTACT_FACT_SCHEMA).write_parquet(tmp_path / "metrics" / "fact_contacts.parquet")
 
     # 2. Setup manifest with recipe usage, multi-dimensional plots, and diagnostic warnings
     manifest_yaml = """

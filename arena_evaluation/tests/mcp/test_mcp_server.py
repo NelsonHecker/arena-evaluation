@@ -131,12 +131,12 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
             ("insight", "evaluation_append_insight", {"run_id": RUN_ID, "label": "b", "value": "2"}),
             ("notes", "evaluation_read_notes", {"run_id": RUN_ID}),
             ("combined", "evaluation_read_combined_metrics", {"run_id": RUN_ID}),
-            ("query", "evaluation_query_metrics", {"run_id": RUN_ID, "group_by": ["planner"], "metrics": ["time_to_goal"], "filter": {"stage": "s1"}, "sort_by": "time_to_goal"}),
+            ("query", "evaluation_query_metrics", {"run_id": RUN_ID, "group_by": ["planner"], "metrics": ["time_to_goal_s"], "filter": {"stage": "s1"}, "sort_by": "time_to_goal_s"}),
             ("aggregate", "evaluation_aggregate", {"run_id": RUN_ID, "dimension": "stage", "metrics": ["success"]}),
-            ("compare", "evaluation_compare_planners", {"run_id": RUN_ID, "metrics": ["success", "collision_amount"]}),
+            ("compare", "evaluation_compare_planners", {"run_id": RUN_ID, "metrics": ["success", "total_collisions_ped"]}),
             ("compare_default", "evaluation_compare_planners", {"run_id": RUN_ID}),
-            ("top", "evaluation_top_n", {"run_id": RUN_ID, "n": 1, "metrics": ["success", "time_to_goal"]}),
-            ("correlation", "evaluation_correlation", {"run_id": RUN_ID, "metrics": ["success", "time_to_goal"]}),
+            ("top", "evaluation_top_n", {"run_id": RUN_ID, "n": 1, "metrics": ["success", "time_to_goal_s"]}),
+            ("correlation", "evaluation_correlation", {"run_id": RUN_ID, "metrics": ["success", "time_to_goal_s"]}),
             ("summary", "evaluation_summarize", {"run_id": RUN_ID}),
             ("manifest", "evaluation_create_manifest", {"name": "my_report", "template": "standard", "run_id": RUN_ID}),
             ("run_manifests", "evaluation_manifests", {"run_id": RUN_ID}),
@@ -169,7 +169,7 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
     assert out["lane_console"]["logs"] == {"runner.p2.log": ["lane p2 started", "lane p2 sim died"]}
     assert out["episode"]["metadata"]["planner"] == "dwb"
     assert out["notes"]["notes"] == [{"label": "a", "value": "1"}, {"label": "b", "value": "2"}]
-    assert out["combined"]["column_stats"]["path_speeds"]["dtype"].startswith("List")
+    assert out["combined"]["column_stats"]["success"]["dtype"] == "Boolean"
     assert [row["planner"] for row in out["query"]["data"]] == ["dwb_social", "dwb"]
     assert {row["stage"] for row in out["aggregate"]["data"]} == {"s1", "s2"}
     assert [row["planner"] for row in out["compare"]["rankings"]] == ["dwb", "dwb_social"]
@@ -183,7 +183,7 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
     assert out["run_manifests"]["run_manifests"] == ["my_report"]
     assert yaml.safe_load(out["custom_template"]["content"])["name"] == "my_report"
     assert "no run 'nope'" in out["missing_run"]
-    assert "evaluation_process computes it" in out["unprocessed"]
+    assert "evaluation_process builds them" in out["unprocessed"]
     assert "no metric column zz" in out["bad_column"]
     assert out[f"arena://evaluation/runs/{RUN_ID}/state"]["lanes"] == ["p2"]
     assert out[f"arena://evaluation/runs/{RUN_ID}/notes"][0]["label"] == "a"

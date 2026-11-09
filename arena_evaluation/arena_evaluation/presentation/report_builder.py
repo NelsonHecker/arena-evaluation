@@ -1,54 +1,40 @@
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import html as html_escape
 import pathlib
 import typing
 
 import jinja2
-import pandas as pd
 import polars as pl
 
+from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.presentation.checks import PlotDiagnostics
 from arena_evaluation.presentation.manifest_registry import resolve_manifest
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
+from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.presentation.resolver import DataResolver
-from arena_evaluation.presentation.seaborn_renderer import SeabornRenderer
 from arena_evaluation.presentation.viz_manifest import VizManifest
 from arena_evaluation.processing.metrics.registry import MetricRegistry
-from arena_evaluation.processing.parquet_store import ParquetStore
 
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import PlotSpec
 
-# Data source name -> parquet filename. Any other data_source string ending in
-# ".parquet" is used verbatim as the filename in the benchmark/output dir.
-_DATA_FILES = {
-    "metrics": None,
-}
+_EPISODE_TABLE: typing.Final[str] = "v_episode_summary"
 
-# Legacy group headings, used verbatim when a manifest declares no groups.
-_LEGACY_GROUP_TITLES = {
-    "efficiency": "Efficiency Metrics",
-    "safety": "Safety & Collision Metrics",
-    "motion": "Motion Dynamics Metrics",
-    "smoothness": "Path Smoothness Metrics",
-    "social": "Social & Pedestrian Interaction",
-    "details": "Detailed Run Traces & Analysis",
-    "robot_analysis": "Robot Model Performance",
-    "stage_analysis": "Stage Level Performance",
+# Manifests name a data source; "metrics" is the canonical episode summary view.
+_DATA_SOURCES: typing.Final[dict[str, str]] = {
+    "metrics": _EPISODE_TABLE,
+    "episode_summary": _EPISODE_TABLE,
 }
 
 
-def data_file_for(data_source: str | None) -> str | None:
-    """Map a manifest data_source to a parquet filename (None = legacy search)."""
+def data_source_table(data_source: str | None) -> str:
+    """Map a manifest data source to the Star Schema catalog table or view it reads."""
     if not data_source:
-        return None
-    if data_source in _DATA_FILES:
-        return _DATA_FILES[data_source]
-    if data_source.endswith(".parquet"):
-        return data_source
-    return None
+        return _EPISODE_TABLE
+    return _DATA_SOURCES.get(data_source, data_source)
 
 
 def _has_values(df: pl.DataFrame, col: str) -> bool:
@@ -56,20 +42,17 @@ def _has_values(df: pl.DataFrame, col: str) -> bool:
     return col in df.columns and bool(df[col].is_not_null().any())
 
 
-_STATUS_COLS = ("stage", "planner", "episode", "robot", "status", "status_reason", "result")
+_STATUS_COLS = ("stage", "planner", "episode_id", "robot_id", "result", "null_reason")
 
 
 def _status_table_html(df: pl.DataFrame) -> str:
-    """Rows the pipeline could not fully evaluate, empty when every row is evaluated."""
-    if "status" not in df.columns:
+    """Rows of the canonical episode summary that were never evaluated, empty when every row was."""
+    rows = df.filter(pl.col("success").is_null())
+    if rows.is_empty():
         return ""
-    rows = df.filter(pl.col("status").fill_null("evaluated") != "evaluated")
-    if len(rows) == 0:
-        return ""
-    cols = [c for c in _STATUS_COLS if c in rows.columns]
-    rows = rows.select(cols).sort([c for c in ("stage", "episode") if c in cols])
-    head = "".join(f"<th>{html_escape.escape(c.replace('_', ' '))}</th>" for c in cols)
-    body = "".join("<tr>" + "".join(f"<td>{html_escape.escape('' if v is None else str(v))}</td>" for v in row) + "</tr>" for row in rows.iter_rows())
+    rows = rows.select(*_STATUS_COLS).sort("stage", "episode_id")
+    head = "".join(f"<th>{html_escape.escape(name.replace('_', ' '))}</th>" for name in _STATUS_COLS)
+    body = "".join("<tr>" + "".join(f"<td>{html_escape.escape('' if value is None else str(value))}</td>" for value in row) + "</tr>" for row in rows.iter_rows())
     return f"<h3>Episodes not fully evaluated ({len(rows)} of {len(df)})</h3><table class=\"dataframe\"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
@@ -82,13 +65,34 @@ def _default_summary_group_cols(df: pl.DataFrame) -> list[str]:
     return ([lead] if lead else []) + rest
 
 
-def _aggregate(df: pl.DataFrame, group_cols: list[str], agg_exprs: list[pl.Expr]) -> pd.DataFrame:
+def _aggregate(df: pl.DataFrame, group_cols: list[str], agg_exprs: list[pl.Expr]) -> pl.DataFrame:
     """Grouped aggregate, or a single ``All runs`` row when nothing identifies a run."""
     if group_cols:
-        return df.group_by(group_cols).agg(agg_exprs).sort(group_cols).to_pandas()
-    out = df.select(agg_exprs).to_pandas()
-    out.insert(0, "runs", "All runs")
-    return out
+        return df.group_by(group_cols).agg(agg_exprs).sort(group_cols)
+    out = df.select(agg_exprs)
+    return out.select(pl.lit("All runs", dtype=pl.String).alias("runs"), *[pl.col(name) for name in out.columns])
+
+
+def _summary_html(table: pl.DataFrame, formats: dict[str, str], labels: dict[str, str]) -> str:
+    """Render a grouped summary as an HTML table, one formatted cell per metric and group key."""
+    head = "".join(f"<th>{html_escape.escape(labels.get(name, name))}</th>" for name in table.columns)
+    body = []
+    for row in table.iter_rows(named=True):
+        cells = []
+        for name, value in row.items():
+            if isinstance(value, float):
+                cells.append(f"<td>{html_escape.escape(_format_metric(value, formats.get(name)))}</td>")
+            else:
+                cells.append(f"<td>{html_escape.escape('' if value is None else str(value))}</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    return f'<table class="dataframe"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>'
+
+
+def _format_metric(value: float, template: str | None) -> str:
+    """Format one aggregate cell, N/A when it is missing or the column declares no format."""
+    if value != value:
+        return "N/A"
+    return template.format(value) if template else f"{value:.3f}"
 
 
 def _labelled(df: pl.DataFrame, group_cols: list[str]) -> pl.DataFrame:
@@ -120,6 +124,24 @@ def _render_markdown_light(text: str) -> str:
     return out
 
 
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class _CatalogSources:
+    """The benchmark catalogs one report reads, one catalog per source directory."""
+
+    catalogs: tuple[BenchmarkCatalog, ...]
+
+    def __post_init__(self) -> None:
+        if not self.catalogs:
+            raise ValueError("A report needs at least one benchmark catalog.")
+
+    def frame(self, table: str) -> pl.DataFrame | None:
+        """Concatenate the named Star Schema table or view across every source, None when no catalog knows it."""
+        frames = [catalog.get_table(table).collect() for catalog in self.catalogs if table in catalog.table_names()]
+        if not frames:
+            return None
+        return frames[0] if len(frames) == 1 else pl.concat(frames, how="diagonal_relaxed")
+
+
 class ReportBuilder:
     """Generates the final interactive HTML report and static PNG plots."""
 
@@ -148,6 +170,7 @@ class ReportBuilder:
                     break
         self.generate_gifs = generate_gifs
         self._manifest_obj = manifest if isinstance(manifest, VizManifest) else None
+        self._sources = _CatalogSources(catalogs=(BenchmarkCatalog.from_directory(self.benchmark_dir),))
         self._source_frames: dict[str, pl.DataFrame] = {}
         self._merged_df: pl.DataFrame | None = None
         self._agent_notes: dict[str, str] | None = None
@@ -189,75 +212,19 @@ class ReportBuilder:
                 if not instance.manifest_path:
                     instance.manifest_path = output_dir / "viz_manifest.yaml"
 
-        data_file = None
-        if instance._manifest_obj is not None:
-            data_file = data_file_for(instance._manifest_obj.data_source)
-        instance._merged_df = cls._load_and_merge(source_dirs, data_file=data_file)
+        source_paths = tuple(pathlib.Path(src) for src in source_dirs) or (instance.output_dir,)
+        instance._sources = _CatalogSources(catalogs=tuple(BenchmarkCatalog.from_directory(path) for path in source_paths))
+        table = data_source_table(instance._manifest_obj.data_source) if instance._manifest_obj is not None else data_source_table(None)
+        instance._merged_df = instance._sources.frame(table)
         return instance
 
-    @staticmethod
-    def _best_parquet(directory: pathlib.Path) -> pathlib.Path | None:
-        """Return the best available metrics parquet in *directory*, or None."""
-        for name in ("combined_metrics.parquet", "metrics.parquet"):
-            p = directory / name
-            if p.exists():
-                return p
-        return None
-
-    @classmethod
-    def _load_and_merge(
-        cls,
-        source_dirs: list[pathlib.Path],
-        data_file: str | None = None,
-    ) -> pl.DataFrame | None:
-        """Load and concatenate parquet files from multiple source directories."""
-        dfs: list[pl.DataFrame] = []
-        for src in source_dirs:
-            if data_file:
-                p = pathlib.Path(src) / data_file
-                if not p.exists():
-                    print(f"  [warn] No {data_file} found in {src}, skipping.")
-                    continue
-            else:
-                p = cls._best_parquet(pathlib.Path(src))
-                if p is None:
-                    print(f"  [warn] No metrics parquet found in {src}, skipping.")
-                    continue
-            try:
-                df, _ = ParquetStore.read(p)
-                dfs.append(df)
-                print(f"  Loaded {len(df)} rows from {p}")
-            except Exception as e:
-                print(f"  [warn] Failed to read {p}: {e}")
-        if not dfs:
-            return None
-        if len(dfs) == 1:
-            return dfs[0]
-        return pl.concat(dfs, how="diagonal_relaxed")
-
     def _load_primary_frame(self, manifest: VizManifest) -> pl.DataFrame | None:
-        """Load the manifest's primary data frame (from benchmark_dir)."""
-        data_file = data_file_for(manifest.data_source)
-        if data_file:
-            target_path = self.benchmark_dir / data_file
-            if not target_path.exists():
-                print(f"Cannot generate report: '{data_file}' (data_source={manifest.data_source!r}) not found in {self.benchmark_dir}.")
-                return None
-            df, _ = ParquetStore.read(target_path)
-            return df
-
-        combined_path = self.benchmark_dir / "combined_metrics.parquet"
-        metrics_path = self.benchmark_dir / "metrics.parquet"
-        target_path = None
-        if combined_path.exists():
-            target_path = combined_path
-        elif metrics_path.exists():
-            target_path = metrics_path
-        if target_path is None:
-            print(f"Cannot generate report: neither combined_metrics.parquet nor metrics.parquet found in {self.benchmark_dir}.")
-            return None
-        df, _ = ParquetStore.read(target_path)
-        return df
+        """Load the manifest's primary frame from its Star Schema table or view."""
+        table = data_source_table(manifest.data_source)
+        frame = self._sources.frame(table)
+        if frame is None:
+            print(f"Cannot generate report: data_source={manifest.data_source!r} names no Star Schema table or view; a series data source needs the pipeline to write metrics/series_*.parquet.")
+        return frame
 
     def _frame_for_spec(
         self,
@@ -270,17 +237,14 @@ class ReportBuilder:
         src = spec.data_source
         if src is None or src == manifest.data_source:
             return df if spec.type in ("trajectory", "timeseries", "line", "table") else df_contestants
-        if src not in self._source_frames:
-            data_file = data_file_for(src)
-            if not data_file:
-                print(f"Skipping plot '{spec.id}': unknown data source '{src}'.")
+        table = data_source_table(src)
+        if table not in self._source_frames:
+            frame = self._sources.frame(table)
+            if frame is None:
+                print(f"Skipping plot '{spec.id}': data source '{src}' names no Star Schema table or view.")
                 return None
-            p = self.benchmark_dir / data_file
-            if not p.exists():
-                print(f"Skipping plot '{spec.id}': '{data_file}' not found in {self.benchmark_dir}.")
-                return None
-            self._source_frames[src] = ParquetStore.read(p)[0]
-        return self._source_frames[src]
+            self._source_frames[table] = frame
+        return self._source_frames[table]
 
     def build(self) -> pathlib.Path | None:
         """Execute the report building process."""
@@ -293,20 +257,8 @@ class ReportBuilder:
             if df is None:
                 return
 
-        if "planner" in df.columns:
-            if "local_planner" not in df.columns or "inter_planner" not in df.columns:
-                from arena_evaluation.storage.planner_names import split_planner_name
-
-                lp_list = []
-                ip_list = []
-                for p_val in df["planner"].to_list():
-                    lp, ip = split_planner_name(p_val)
-                    lp_list.append(lp)
-                    ip_list.append(ip)
-                df = df.with_columns([pl.Series("local_planner", lp_list), pl.Series("inter_planner", ip_list)])
-
-        # Separate contestant evaluation runs from reference runs (metrics only;
-        # characterization frames have no is_reference column -> no-op).
+        # Separate contestant evaluation runs from reference runs. The canonical
+        # episode summary always carries is_reference; other catalog tables may not.
         if "is_reference" in df.columns:
             df_contestants = df.filter(pl.col("is_reference").is_null() | (~pl.col("is_reference")))
             if len(df_contestants) == 0:
@@ -321,11 +273,11 @@ class ReportBuilder:
         units.update(manifest.units or {})
 
         plotly_renderer = PlotlyRenderer(units=units)
-        seaborn_renderer = SeabornRenderer(generate_gifs=self.generate_gifs, units=units)
+        static_renderer = StaticRenderer(generate_gifs=self.generate_gifs, units=units)
 
         html_plots = []
 
-        resolver = DataResolver(benchmark_dir=self.benchmark_dir)
+        resolver = DataResolver(catalog=self._sources.catalogs[0], benchmark_dir=self.benchmark_dir)
 
         for spec in manifest.plots:
             resolved_spec = resolver.resolve_spec(spec)
@@ -349,14 +301,14 @@ class ReportBuilder:
 
             png_path = self.plots_dir / f"{resolved_spec.id}.png"
             try:
-                seaborn_renderer.render(resolved_spec, plot_df, png_path, run_dir=self.output_dir)
+                static_renderer.render(resolved_spec, plot_df, png_path, run_dir=self.output_dir)
             except Exception as e:
                 print(f"Warning: Failed to render static plot {resolved_spec.id}: {e}")
 
             if resolved_spec.options.get("vector_svg", False):
                 svg_path = self.plots_dir / f"{resolved_spec.id}.svg"
                 try:
-                    seaborn_renderer.render(resolved_spec, plot_df, svg_path, run_dir=self.output_dir)
+                    static_renderer.render(resolved_spec, plot_df, svg_path, run_dir=self.output_dir)
                 except Exception as e:
                     pass
 
@@ -377,18 +329,19 @@ class ReportBuilder:
             summary_html = self._generate_summary_table_manifest(df, manifest)
         else:
             summary_html = self._generate_summary_table(df_contestants)
-        summary_html = _status_table_html(df_contestants) + summary_html
+        if data_source_table(manifest.data_source) == _EPISODE_TABLE:
+            summary_html = _status_table_html(df_contestants) + summary_html
 
         report_title = manifest.title or self.output_dir.name
 
         html_content = self._assemble_html(summary_html, html_plots, report_title, manifest)
-        with open(self.report_path, "w") as f:
+        with open(self.report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
         import plotly.offline
 
         js_path = self.output_dir / "plotly.min.js"
-        with open(js_path, "w") as f:
+        with open(js_path, "w", encoding="utf-8") as f:
             f.write(plotly.offline.get_plotlyjs())
 
         self._write_note_file(manifest)
@@ -491,7 +444,7 @@ class ReportBuilder:
                 "n_plots": len(manifest.plots),
                 "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
-            (self.output_dir / "report_manifest.yaml").write_text(yaml.safe_dump(note, sort_keys=False))
+            (self.output_dir / "report_manifest.yaml").write_text(yaml.safe_dump(note, sort_keys=False), encoding="utf-8")
         except Exception as e:
             print(f"Warning: failed to write report_manifest.yaml note: {e}")
 
@@ -501,7 +454,7 @@ class ReportBuilder:
         Groups planner-first, then by the other varying identity columns.
         """
         group_cols = _default_summary_group_cols(df)
-        metric_cols = [c for c in ["success", "time_to_goal", "path_length", "collision_amount"] if c in df.columns and not df[c].is_null().all()]
+        metric_cols = [c for c in ["success", "time_to_goal", "path_length"] if c in df.columns and not df[c].is_null().all()]
         needed = [c for c in [*group_cols, *metric_cols] if c in df.columns]
         if needed:
             df = df.select(needed)
@@ -514,26 +467,17 @@ class ReportBuilder:
             agg_exprs.append(pl.col("time_to_goal").mean().alias("avg_time"))
         if "path_length" in df.columns and not df["path_length"].is_null().all():
             agg_exprs.append(pl.col("path_length").mean().alias("avg_path_length"))
-        if "collision_amount" in df.columns and not df["collision_amount"].is_null().all():
-            agg_exprs.append(pl.col("collision_amount").mean().alias("avg_collisions"))
-
         if not agg_exprs:
             return ""
 
         summary = _aggregate(df, group_cols, agg_exprs)
-
-        import pandas as pd
-
-        if "success_rate" in summary.columns:
-            summary["success_rate"] = summary["success_rate"].map(lambda x: f"{x * 100:.1f}%" if not pd.isna(x) else "N/A")
-        if "avg_time" in summary.columns:
-            summary["avg_time"] = summary["avg_time"].map(lambda x: f"{x:.2f}s" if not pd.isna(x) else "N/A")
-        if "avg_path_length" in summary.columns:
-            summary["avg_path_length"] = summary["avg_path_length"].map(lambda x: f"{x:.2f}m" if not pd.isna(x) else "N/A")
-        if "avg_collisions" in summary.columns:
-            summary["avg_collisions"] = summary["avg_collisions"].map(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
-
-        return summary.to_html(index=False, classes="dataframe")
+        formats = {
+            "success_rate": "{:.1%}",
+            "avg_time": "{:.2f}s",
+            "avg_path_length": "{:.2f}m",
+        }
+        labels = {"success_rate": "Success Rate", "avg_time": "Avg Time", "avg_path_length": "Avg Path Length"}
+        return _summary_html(summary, formats, labels)
 
     def _generate_summary_table_manifest(self, df: pl.DataFrame, manifest: VizManifest) -> str:
         """Declarative summary table: one column per SummarySpec.
@@ -565,23 +509,10 @@ class ReportBuilder:
             return ""
 
         summary = _aggregate(df, group_cols, agg_exprs)
-
-        import pandas as pd
-
-        spec_by_metric = {s.metric: s for s in manifest.summary}
-        rename = {}
-        for metric in summary.columns:
-            if metric in group_cols:
-                continue
-            spec = spec_by_metric.get(metric)
-            if spec is None:
-                continue
-            fmt = spec.format
-            summary[metric] = summary[metric].map(lambda x, fmt=fmt: fmt.format(x) if not pd.isna(x) else "N/A")
-            rename[metric] = spec.label
-        summary = summary.rename(columns=rename)
-
-        return summary.to_html(index=False, classes="dataframe")
+        spec_by_metric = {spec.metric: spec for spec in manifest.summary}
+        formats = {metric: spec.format for metric, spec in spec_by_metric.items() if metric not in group_cols}
+        labels = {metric: spec.label for metric, spec in spec_by_metric.items() if metric not in group_cols}
+        return _summary_html(summary, formats, labels)
 
     def _assemble_html(
         self,
@@ -602,7 +533,7 @@ class ReportBuilder:
                 ordered_groups.append(group_id)
             grouped_plots[group_id].append({"title": title, "html": html})
 
-        group_titles = {g.id: g.title for g in manifest.groups} or _LEGACY_GROUP_TITLES
+        group_titles = {group.id: group.title for group in manifest.groups}
 
         plot_groups = []
         for group_id in ordered_groups:

@@ -1,130 +1,116 @@
+"""Adversarial presentation tests: hostile frames and manifests must never crash the report."""
+
+from __future__ import annotations
+
 import pathlib
-import tempfile
 
 import polars as pl
 import pytest
 
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
 from arena_evaluation.presentation.report_builder import ReportBuilder
-from arena_evaluation.presentation.seaborn_renderer import SeabornRenderer
+from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.presentation.viz_manifest import VizManifest
-from arena_evaluation.processing.parquet_store import ParquetStore
 from arena_evaluation.storage.schemas import PlotSpec
+from star_benchmark import write_benchmark
 
 
-@pytest.fixture
-def temp_benchmark_dir():
-    with tempfile.TemporaryDirectory() as td:
-        yield pathlib.Path(td)
-
-
-def _build(benchmark_dir: pathlib.Path, df: pl.DataFrame, plots: list[PlotSpec]) -> None:
-    ParquetStore.write(df, benchmark_dir / "combined_metrics.parquet")
+def _build(benchmark_dir: pathlib.Path, rows: list[dict[str, object]], plots: list[PlotSpec]) -> None:
+    write_benchmark(benchmark_dir, rows)
     ReportBuilder(benchmark_dir, manifest=VizManifest(plots=plots)).build()
 
 
-def test_report_builder_empty_dataframe(temp_benchmark_dir, capsys):
-    """Fuzzer: Completely empty DataFrame should not crash."""
-    _build(temp_benchmark_dir, pl.DataFrame(), [PlotSpec(id="test_bar", type="bar", title="Empty", data_key="non_existent")])
+def test_report_builder_empty_star_schema(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A benchmark with no episodes still assembles a report with a rejected-plot card."""
+    _build(tmp_path, [], [PlotSpec(id="test_bar", type="bar", title="Empty", data_key="path_length_m")])
 
-    assert "Skipping plot 'test_bar'" in capsys.readouterr().out
-    assert (temp_benchmark_dir / "report.html").exists()
+    assert "failed quality gate: Resolved DataFrame contains 0 rows" in capsys.readouterr().out
+    assert (tmp_path / "report.html").exists()
 
 
-def test_report_builder_missing_columns_and_nans(temp_benchmark_dir, capsys):
-    """Fuzzer: Dataframe missing critical columns or full of nulls."""
-    df = pl.DataFrame(
-        {
-            "planner": ["A", "B", "C"],
-            "some_data": [None, float('nan'), 1],  # Mixing None and NaN
-        }
-    )
+def test_report_builder_skips_a_plot_with_a_missing_metric(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A missing metric fails its own plot only; the report and the other plots still build."""
+    rows = [
+        {"episode_id": 0, "planner": "A", "path_length_m": 10.0},
+        {"episode_id": 1, "planner": "B", "path_length_m": 12.0},
+    ]
     _build(
-        temp_benchmark_dir,
-        df,
+        tmp_path,
+        rows,
         [
-            PlotSpec(id="test1", type="bar", title="T", data_key="some_data", differentiate="planner"),
+            PlotSpec(id="test1", type="bar", title="T", data_key="path_length_m", differentiate="planner"),
             PlotSpec(id="test2", type="violin", title="T", data_key="missing_col", differentiate="planner"),
         ],
     )
 
     out = capsys.readouterr().out
-    assert "Skipping plot 'test2'" in out
-    assert "Skipping plot 'test1'" not in out
-    assert (temp_benchmark_dir / "report.html").exists()
+    assert "Plot 'test2' failed quality gate" in out
+    assert "Plot 'test1' failed quality gate" not in out
+    assert (tmp_path / "report.html").exists()
 
 
-def test_renderers_empty_df():
-    """Fuzzer: Directly feed empty dataframes to the renderers."""
+def test_renderers_survive_an_empty_frame(tmp_path: pathlib.Path) -> None:
+    """Fuzzer: directly feed an empty frame to every renderer."""
     df = pl.DataFrame()
     plotly_renderer = PlotlyRenderer()
-    seaborn_renderer = SeabornRenderer()
+    static_renderer = StaticRenderer()
 
-    plot_types = ["violin", "box", "bar", "trajectory", "radar", "scatter", "histogram", "heatmap", "timeseries", "line", "table"]
-    for ptype in plot_types:
-        spec = PlotSpec(id=f"test_{ptype}", type=ptype, title="T", data_key="k")
-        try:
-            plotly_renderer.render(spec, df)
-        except Exception as e:
-            pytest.fail(f"Plotly renderer crashed on empty dataframe for {ptype}: {e}")
-
-        with tempfile.TemporaryDirectory() as td:
-            png_path = pathlib.Path(td) / f"{ptype}.png"
-            try:
-                seaborn_renderer.render(spec, df, png_path)
-            except Exception as e:
-                # Some seaborn plots might legitimately crash on empty, but we're fuzzing for robustness
-                pytest.fail(f"Seaborn renderer crashed on empty dataframe for {ptype}: {e}")
+    for plot_type in ["violin", "box", "bar", "trajectory", "radar", "scatter", "histogram", "heatmap", "timeseries", "line", "table"]:
+        spec = PlotSpec(id=f"test_{plot_type}", type=plot_type, title="T", data_key="k")
+        plotly_renderer.render(spec, df)
+        static_renderer.render(spec, df, tmp_path / f"{plot_type}.png")
 
 
-def test_huge_dataframe(temp_benchmark_dir):
-    """Fuzzer: 100k rows DataFrame simulation."""
-    df = pl.DataFrame({"planner": ["A"] * 50000 + ["B"] * 50000, "val": list(range(100000)), "success": [True, False] * 50000, "time_to_goal": [1.0] * 100000})
-    _build(temp_benchmark_dir, df, [PlotSpec(id="huge_box", type="box", title="Huge", data_key="val", differentiate="planner")])
+def test_report_builder_handles_many_rows(tmp_path: pathlib.Path) -> None:
+    """20k rows go through the catalog without the report path materialising pandas."""
+    rows = [
+        {"episode_id": index, "planner": "A" if index % 2 else "B", "path_length_m": float(index % 5), "success": index % 2 == 0}
+        for index in range(20_000)
+    ]
+    _build(tmp_path, rows, [PlotSpec(id="huge_box", type="box", title="Huge", data_key="path_length_m", differentiate="planner")])
 
-    assert (temp_benchmark_dir / "plots" / "huge_box.png").exists()
-    assert (temp_benchmark_dir / "report.html").exists()
+    assert (tmp_path / "plots" / "huge_box.png").exists()
+    assert (tmp_path / "report.html").exists()
 
 
-def test_conflicting_dimensions(temp_benchmark_dir):
-    """Fuzzer: Differentiate column exists but contains conflicting types or doesn't exist."""
-    df = pl.DataFrame({"planner": ["A", "B", "C"], "val": [1.0, 2.0, 3.0]})
+def test_conflicting_dimensions_still_render_a_report(tmp_path: pathlib.Path) -> None:
+    """A differentiate column or group key that does not exist must not abort the report."""
+    rows = [
+        {"episode_id": 0, "planner": "A", "path_length_m": 1.0},
+        {"episode_id": 1, "planner": "B", "path_length_m": 2.0},
+        {"episode_id": 2, "planner": "C", "path_length_m": 3.0},
+    ]
     _build(
-        temp_benchmark_dir,
-        df,
+        tmp_path,
+        rows,
         [
-            PlotSpec(id="test_missing_diff", type="bar", title="T", data_key="val", differentiate="non_existent_diff"),
-            PlotSpec(id="test_missing_group", type="bar", title="T", data_key="val", group_by=["missing_group"]),
+            PlotSpec(id="test_missing_diff", type="bar", title="T", data_key="path_length_m", differentiate="non_existent_diff"),
+            PlotSpec(id="test_missing_group", type="bar", title="T", data_key="path_length_m", group_by=["missing_group"]),
         ],
     )
 
-    assert (temp_benchmark_dir / "report.html").exists()
+    assert (tmp_path / "report.html").exists()
 
 
-def test_seaborn_box_renders_each_planner(temp_benchmark_dir):
+def test_static_box_renders_each_planner(tmp_path: pathlib.Path) -> None:
     df = pl.DataFrame({"planner": ["A", "B"], "val": [1, 2]})
-    png_path = temp_benchmark_dir / "test.png"
+    png_path = tmp_path / "test.png"
 
-    SeabornRenderer().render(PlotSpec(id="test", type="box", title="T", data_key="val", differentiate="planner"), df, png_path)
+    StaticRenderer().render(PlotSpec(id="test", type="box", title="T", data_key="val", differentiate="planner"), df, png_path)
 
     assert png_path.stat().st_size > 0
 
 
-def test_malformed_combined_metrics_types(temp_benchmark_dir):
-    """Fuzzer: Data keys point to unexpected types (e.g., string instead of numeric)."""
+def test_malformed_metric_types_do_not_raise() -> None:
+    """Data keys pointing at unexpected types still fail only inside their own render."""
     df = pl.DataFrame(
         {
             "planner": ["A", "B"],
-            "val": ["string1", "string2"],  # Should be numeric for violin
-            "path": [{"x": 1}, {"y": 2}],  # Malformed trajectory
+            "val": ["string1", "string2"],
+            "path": [{"x": 1}, {"y": 2}],
         }
     )
 
     plotly_renderer = PlotlyRenderer()
-
-    # These should gracefully handle or fail without throwing unhandled exceptions to the main loop
-    spec_violin = PlotSpec(id="test_violin", type="violin", title="T", data_key="val", differentiate="planner")
-    plotly_renderer.render(spec_violin, df)
-
-    spec_traj = PlotSpec(id="test_traj", type="trajectory", title="T", data_key="path", differentiate="planner")
-    plotly_renderer.render(spec_traj, df)
+    plotly_renderer.render(PlotSpec(id="test_violin", type="violin", title="T", data_key="val", differentiate="planner"), df)
+    plotly_renderer.render(PlotSpec(id="test_traj", type="trajectory", title="T", data_key="path", differentiate="planner"), df)

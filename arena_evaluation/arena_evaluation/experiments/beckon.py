@@ -23,6 +23,7 @@ import polars as pl
 import yaml
 
 from arena_evaluation.benchmark.config import _parse_duration
+from arena_evaluation.experiments.source import episode_summary
 from arena_evaluation.experiments.stats import DEFAULT_BOOT, cluster_bootstrap, holm
 
 WORLD = "hospital_1_bare"
@@ -237,18 +238,14 @@ def generate(*, scenarios_dir: pathlib.Path | None = None, suite_path: pathlib.P
 # -- analysis -----------------------------------------------------------------------------------
 
 
-EVALUATED_STATUSES = ("evaluated", "path_only")
-
-
 def load_episodes(metrics: pl.DataFrame) -> pl.DataFrame:
     """One row per evaluated episode with the case, the arm and the waiting time."""
     arms = "|".join(ARMS)
     parsed = metrics.with_columns(
         pl.col("stage").str.extract(rf"^beckon_(.*)_(?:{arms})$", 1).alias("case"),
         pl.col("stage").str.extract(rf"_({arms})$", 1).alias("arm"),
-    ).filter(pl.col("case").is_not_null() & pl.col("status").is_in(EVALUATED_STATUSES))
-    parsed = parsed.sort("episode").with_columns((pl.col("episode").rank("ordinal").over(["planner", "stage"]) - 1).cast(pl.Int64).alias("seed"))
-    return parsed
+    ).filter(pl.col("case").is_not_null() & pl.col("success").is_not_null())
+    return parsed.sort("episode_id").with_columns((pl.col("episode_id").rank("ordinal").over(["planner", "stage"]) - 1).cast(pl.Int64).alias("seed"))
 
 
 def stage_timeouts(benchmark_dir: pathlib.Path) -> dict[str, float]:
@@ -266,13 +263,13 @@ def _float_or_none(value: object) -> float | None:
 
 def paper_outcomes(df: pl.DataFrame, timeouts: Mapping[str, float] | None = None) -> pl.DataFrame:
     """Waiting time per episode, censored at the stage's timeout when the caller was never served, at the run's longest episode without a known timeout."""
-    served = pl.col("success") == 1
-    longest = df.select(pl.col("time_to_goal").max()).item() if "time_to_goal" in df.columns else None
+    served = pl.col("success").cast(pl.Float64).fill_null(0.0) > 0.5
+    longest = df.select(pl.col("time_to_goal_s").max()).item()
     fallback = max(float(longest), float(TIMEOUT_S)) if longest is not None else float(TIMEOUT_S)
     censor = pl.col("stage").replace_strict(dict(timeouts), default=fallback, return_dtype=pl.Float64) if timeouts else pl.lit(fallback)
     return df.with_columns(censor.alias("censor_at_s")).with_columns(
         served.alias("served"),
-        pl.when(served).then(pl.col("time_to_goal") - CALL_ONSET_S).otherwise(pl.col("censor_at_s") - CALL_ONSET_S).alias("wait_s"),
+        pl.when(served).then(pl.col("time_to_goal_s") - CALL_ONSET_S).otherwise(pl.col("censor_at_s") - CALL_ONSET_S).alias("wait_s"),
         (~served).alias("censored"),
     )
 
@@ -342,15 +339,8 @@ def planner_table(df: pl.DataFrame, *, n_boot: int = DEFAULT_BOOT, seed: int = 0
     return pl.DataFrame(rows)
 
 
-def _metrics_path(benchmark_dir: pathlib.Path) -> pathlib.Path:
-    path = benchmark_dir / "combined_metrics.parquet"
-    if not path.is_file():
-        raise FileNotFoundError(f"{path} not found; run `arena evaluation process --benchmark-dir {benchmark_dir}` first")
-    return path
-
-
 def analyze(benchmark_dir: pathlib.Path, *, n_boot: int = DEFAULT_BOOT, out_dir: pathlib.Path | None = None) -> dict[str, pl.DataFrame]:
-    episodes = paper_outcomes(load_episodes(pl.read_parquet(_metrics_path(benchmark_dir))), stage_timeouts(benchmark_dir))
+    episodes = paper_outcomes(load_episodes(episode_summary(benchmark_dir)), stage_timeouts(benchmark_dir))
     tables = {
         "cases": case_table(episodes, n_boot=n_boot),
         "planners": planner_table(episodes, n_boot=n_boot),
