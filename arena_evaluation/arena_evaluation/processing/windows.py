@@ -92,6 +92,46 @@ CONTACT_WINDOW_SCHEMA = pl.Schema(
     }
 )
 
+DOORWAY_WINDOW_SCHEMA = pl.Schema(
+    {
+        "doorway_idx": pl.UInt32,
+        "robot_id": pl.String,
+        "door_name": pl.String,
+        "t_start_ns": pl.Int64,
+        "t_end_ns": pl.Int64,
+        "duration_s": pl.Float64,
+        "min_dist_m": pl.Float64,
+        "door_state_at_entry": pl.String,
+        "is_opened_during_pass": pl.Boolean,
+    }
+)
+
+ZONE_DWELL_WINDOW_SCHEMA = pl.Schema(
+    {
+        "zone_idx": pl.UInt32,
+        "robot_id": pl.String,
+        "zone_name": pl.String,
+        "t_start_ns": pl.Int64,
+        "t_end_ns": pl.Int64,
+        "duration_s": pl.Float64,
+        "mean_speed_mps": pl.Float64,
+        "path_length_m": pl.Float64,
+    }
+)
+
+STALL_WINDOW_SCHEMA = pl.Schema(
+    {
+        "stall_idx": pl.UInt32,
+        "robot_id": pl.String,
+        "t_start_ns": pl.Int64,
+        "t_end_ns": pl.Int64,
+        "duration_s": pl.Float64,
+        "stall_x": pl.Float64,
+        "stall_y": pl.Float64,
+        "has_command_active": pl.Boolean,
+    }
+)
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DetectorParams:

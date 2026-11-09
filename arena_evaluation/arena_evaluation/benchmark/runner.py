@@ -219,6 +219,7 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
         f"world:={s.map}",
         *selection_args(stage_modes(s, registered_modes(task_layer(step.task_layer)))),
         f"run_seed:={s.seed}",
+        f"human.robots.visible:={'false' if s.crowd_condition == 'blind' else 'true'}",
         "task.episode.auto_reset:=false",
     ]
     if s.optim:
@@ -1653,6 +1654,8 @@ class BenchmarkRunner(ArenaMixinNode):
                         f"episodes_requested:={step.episodes}",
                         "-p",
                         f"is_reference:={str(step.is_reference).lower()}",
+                        "-p",
+                        f"crowd_condition:={step.stage.crowd_condition}",
                     ]
                     if step.reference_type:
                         recorder_args.extend(["-p", f"reference_type:={step.reference_type}"])

@@ -62,6 +62,7 @@ class RunMetadata(BaseModel):
     is_reference: bool = False
     reference_type: str | None = None
     parent_episode_id: int | None = None
+    crowd_condition: typing.Literal["visible", "blind"] = "visible"
 
     @model_validator(mode="before")
     @classmethod
@@ -162,6 +163,7 @@ class EpisodeDescriptor:
     map: str = "unknown"
     is_reference: bool = False
     reference_type: str | None = None
+    crowd_condition: typing.Literal["visible", "blind"] = "visible"
 
 
 @dataclass
