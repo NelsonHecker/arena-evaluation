@@ -45,6 +45,13 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     MAX_COLLISIONS = 3
 
     @classmethod
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        # A window may legitimately lack an optional sensor stream; a missing stream is then per-metric
+        # `no_samples`, not a row-level `topic_missing` that would block the whole encounter.
+        return () if scope == MetricScope.ENCOUNTER else super().required_topics_for_scope(scope)
+
+    @classmethod
     def output_keys(cls) -> list[str]:
         return [
             "collision_amount",
@@ -124,7 +131,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
             return self.calculate(episode, prior_results)
         if scope_slice.scope == MetricScope.ENCOUNTER:
             return {
-                "collision_amount": self._column_rising_edges(episode, "collision_event") or 0,
+                "collision_amount": self._column_rising_edges(episode, "collision_event"),
                 "collision_amount_wall": self._column_rising_edges(episode, "collision_wall"),
                 "collision_amount_static": self._column_rising_edges(episode, "collision_static"),
                 "collision_amount_pedestrian": self._column_rising_edges(episode, "collision_pedestrian"),

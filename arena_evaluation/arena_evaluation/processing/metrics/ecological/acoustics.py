@@ -87,6 +87,13 @@ class AcousticsCalculator(BaseMetricCalculator):
     _L_GATE_DBA = 65.0  # dBA, ASF level gate
 
     @classmethod
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        # A window may legitimately lack an optional sensor stream; a missing stream is then per-metric
+        # `no_samples`, not a row-level `topic_missing` that would block the whole encounter.
+        return () if scope == MetricScope.ENCOUNTER else super().required_topics_for_scope(scope)
+
+    @classmethod
     def output_keys(cls) -> list[str]:
         return [
             "l_aeq_t",
@@ -256,6 +263,8 @@ class AcousticDoseCalculator(BaseMetricCalculator):
         if scope in (MetricScope.ENCOUNTER, MetricScope.PEDESTRIAN):
             return ()
         return ("robot_acoustics",)
+
+    @classmethod
 
     @classmethod
     def output_keys(cls) -> list[str]:

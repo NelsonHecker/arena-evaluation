@@ -77,6 +77,10 @@ def load_acoustic_profile(model: str) -> AcousticProfile:
     """Per-robot acoustic profile from the arena_robots share directory, the shared profile, else the built-in."""
     from pathlib import Path
 
+    if not isinstance(model, str) or not model:
+        logger.warning(f"robot model {model!r} is not a name, using built-in acoustic constants")
+        return BUILTIN_ACOUSTIC_PROFILE
+
     import yaml
     from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 

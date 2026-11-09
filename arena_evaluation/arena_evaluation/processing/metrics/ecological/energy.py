@@ -74,6 +74,13 @@ class EnergyMetricCalculator(BaseMetricCalculator):
     OUTPUT_DIRECTIONS = {"energy_total_wh": "lower", "energy_mechanical_wh": "lower", "power_peak_w": "lower"}
 
     @classmethod
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        # A window may legitimately lack an optional sensor stream; a missing stream is then per-metric
+        # `no_samples`, not a row-level `topic_missing` that would block the whole encounter.
+        return () if scope == MetricScope.ENCOUNTER else super().required_topics_for_scope(scope)
+
+    @classmethod
     def output_keys(cls) -> list[str]:
         return [
             "energy_static_wh",

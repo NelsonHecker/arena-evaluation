@@ -40,6 +40,13 @@ class MotionMetricsCalculator(BaseMetricCalculator):
     OUTPUT_DIRECTIONS = {"jerk_mean": "lower", "jerk_max": "lower"}
 
     @classmethod
+    @classmethod
+    def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:
+        # A window may legitimately lack an optional sensor stream; a missing stream is then per-metric
+        # `no_samples`, not a row-level `topic_missing` that would block the whole encounter.
+        return () if scope == MetricScope.ENCOUNTER else super().required_topics_for_scope(scope)
+
+    @classmethod
     def output_keys(cls) -> list[str]:
         return [
             "velocity",
