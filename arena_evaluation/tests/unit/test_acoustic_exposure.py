@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import math
 import pathlib
@@ -8,9 +9,10 @@ import polars as pl
 import pytest
 import yaml
 from PIL import Image
-from polars.testing import assert_series_equal
+from polars.testing import assert_frame_equal, assert_series_equal
 
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
+from arena_evaluation.processing.metrics.base import MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.ecological.acoustic_exposure import AcousticExposureCalculator
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, EpisodeDescriptor, RobotParams
@@ -388,3 +390,109 @@ def test_run_worlds_need_a_benchmark_id(benchmark_id, tmp_path, calc, cached_map
     frames = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
     episode = _episode(frames, name, run=run, folder_manager=folder_manager)
     assert calc.series_table(episode)["attenuation_db"][0] == pytest.approx(_att(3.0) + 47.0, abs=1e-3)
+
+# --- PEDESTRIAN scope --------------------------------------------------------
+
+_PEDESTRIAN_RESULT_SCHEMA = {
+    "ped_max_exposure_dba": pl.Float64,
+    "ped_leq_exposure_dba": pl.Float64,
+    "ped_max_startle_factor": pl.Float64,
+}
+
+
+def _pedestrian_slice(episode: AlignedEpisodeBundle, ped_id: str) -> ScopeSlice:
+    topics = dict(episode.topics or {})
+    topics["pedestrian_tracks"] = topics["pedestrian_tracks"].filter(pl.col("ped_id") == ped_id)
+    window = dataclasses.replace(episode, data=pl.DataFrame(), topics=topics, fleet={})
+    time_ns = episode.data["time_ns"].to_numpy()
+    return ScopeSlice(
+        scope=MetricScope.PEDESTRIAN,
+        slice_id=ped_id,
+        parent_id=None,
+        t_start_ns=int(time_ns[0]),
+        t_end_ns=int(time_ns[-1]),
+        identity={},
+        window_bundle=window,
+        full_episode=episode,
+    )
+
+
+def _pedestrian_result_frame(result: dict) -> pl.DataFrame:
+    return pl.DataFrame({key: [result[key]] for key in _PEDESTRIAN_RESULT_SCHEMA}, schema=_PEDESTRIAN_RESULT_SCHEMA)
+
+
+def test_pedestrian_scope_reports_each_pedestrians_own_exposure(calc, cached_map):
+    frames = _frames([(1.0, 1.0)] * 3, [[(4.0, 1.0), (3.0, 4.0)]] * 3)
+    episode = _episode(frames, cached_map())
+    near_slice = _pedestrian_slice(episode, "ped_0")
+    far_slice = _pedestrian_slice(episode, "ped_1")
+    near = calc.calculate_for_scope(near_slice.window_bundle, {}, near_slice)
+    far = calc.calculate_for_scope(far_slice.window_bundle, {}, far_slice)
+
+    near_exposure = 42.0 - _att(3.0)
+    far_exposure = 42.0 - _att(math.hypot(2.0, 3.0))
+    assert set(near) == set(AcousticExposureCalculator.output_keys_for_scope(MetricScope.PEDESTRIAN))
+    assert_frame_equal(
+        _pedestrian_result_frame(near),
+        pl.DataFrame(
+            {
+                "ped_max_exposure_dba": [near_exposure],
+                "ped_leq_exposure_dba": [near_exposure],
+                "ped_max_startle_factor": [0.0],
+            },
+            schema=_PEDESTRIAN_RESULT_SCHEMA,
+        ),
+        check_exact=False,
+        rel_tol=1e-9,
+    )
+    assert_frame_equal(
+        _pedestrian_result_frame(far),
+        pl.DataFrame(
+            {
+                "ped_max_exposure_dba": [far_exposure],
+                "ped_leq_exposure_dba": [far_exposure],
+                "ped_max_startle_factor": [0.0],
+            },
+            schema=_PEDESTRIAN_RESULT_SCHEMA,
+        ),
+        check_exact=False,
+        rel_tol=1e-9,
+    )
+    episode_result = calc.calculate(episode, {})
+    assert episode_result["ped_max_exposure_dba"] == pytest.approx(
+        max(near["ped_max_exposure_dba"], far["ped_max_exposure_dba"])
+    )
+    assert episode_result["ped_leq_exposure_dba"] == pytest.approx(_leq([near_exposure, far_exposure]))
+
+
+def test_pedestrian_startle_uses_only_that_pedestrians_own_series(calc, cached_map):
+    frames = _frames(
+        [(1.0, 1.0), (1.0, 1.0)],
+        [[(4.0, 1.0), (3.0, 4.0)], [(2.0, 1.0), (3.0, 4.0)]],
+        source=[60.0, 60.0],
+    )
+    episode = _episode(frames, cached_map())
+    near_slice = _pedestrian_slice(episode, "ped_0")
+    far_slice = _pedestrian_slice(episode, "ped_1")
+    near = calc.calculate_for_scope(near_slice.window_bundle, {}, near_slice)
+    far = calc.calculate_for_scope(far_slice.window_bundle, {}, far_slice)
+
+    expected_near_startle = _att(3.0) - _att(1.0)
+    assert near["ped_max_startle_factor"] == pytest.approx(expected_near_startle, abs=1e-3)
+    assert far["ped_max_startle_factor"] == 0.0
+
+
+def test_pedestrian_scope_without_a_map_yields_nulls():
+    calculator = AcousticExposureCalculator(RobotParams())
+    episode = _episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), None)
+    pedestrian_slice = _pedestrian_slice(episode, "ped_0")
+    result = calculator.calculate_for_scope(pedestrian_slice.window_bundle, {}, pedestrian_slice)
+    assert all(value is None for value in result.values())
+
+
+def test_pedestrian_scope_publishes_the_three_scalars():
+    assert AcousticExposureCalculator.output_keys_for_scope(MetricScope.PEDESTRIAN) == (
+        "ped_max_exposure_dba",
+        "ped_leq_exposure_dba",
+        "ped_max_startle_factor",
+    )
