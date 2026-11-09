@@ -1137,7 +1137,6 @@ def certify(
         structural_replacements=structural_replacements,
     )
     expected = _expected_index(expected_diffs)
-    relocated_keys = frozenset(entry.metric_key for entry in relocated_series)
     violation_reasons = {entry.metric_key: entry.reason for entry in list_violations}
     column_index = _star_column_index(artifacts)
     rows: list[CertificateRow] = []
