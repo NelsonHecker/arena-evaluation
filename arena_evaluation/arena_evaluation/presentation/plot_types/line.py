@@ -2,36 +2,58 @@
 
 from __future__ import annotations
 
+import dataclasses
 import pathlib
-import typing
+from collections.abc import Mapping
+from typing import Any
 
+import matplotlib.pyplot as plt
+import numpy as np
+import plotly.graph_objects as go
 import polars as pl
 
-from arena_evaluation.presentation.plot_types.base import BasePlotRenderer
+from arena_evaluation.presentation.color_utils import get_color_palette
+from arena_evaluation.presentation.plot_types.base import BasePlotRenderer, finish_axes
 
-if typing.TYPE_CHECKING:
-    import numpy as np
-    import pandas as pd
+__all__ = ["LineRenderer"]
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class _LineConfig:
+    """Resolved line-plot channels and options shared by both renderers."""
+
+    x_col: str
+    y_col: str
+    group_cols: tuple[str, ...]
+    error_col: str | None
+    error_style: str
+    mode: str
+    time_to_s: bool
+    time_relative: bool
+    max_traces: int
+    max_points_per_trace: int
+    smooth: bool
+    smooth_window: int
+    error_mode: str
 
 
 class LineRenderer(BasePlotRenderer):
     PLOT_TYPE = "line"
 
-    def _prepare(self, df: pl.DataFrame) -> tuple[pd.DataFrame, str, str, list[str], str | None, dict] | None:
-        """Validate and return (pdf, x_col, y_col, group_cols, error_col, opts) or None."""
+    def _prepare(self, df: pl.DataFrame) -> tuple[pl.DataFrame, _LineConfig] | None:
+        """Validate channels and return the plotted frame plus the resolved configuration."""
         df_filtered = self._apply_filters(df)
-        opts = self.spec.options or {}
-        y_col = self.resolve_channel("y") or opts.get("y")
+        options: Mapping[str, Any] = self.spec.options or {}
+        y_col = self.resolve_channel("y") or _option_str(options, "y")
         x_col = self.resolve_channel("x") or self.spec.data_key
-        if opts.get("y") and y_col == x_col:
-            y_col = opts.get("y")
+        if options.get("y") and y_col == x_col:
+            y_col = _option_str(options, "y")
         if not y_col or not x_col:
             return None
         schema = df_filtered.schema
         if schema.get(x_col) is None or schema.get(y_col) is None:
             return None
 
-        opts = self.spec.options or {}
         color_col = self.resolve_channel("color")
         group_by = self.spec.group_by
         if isinstance(group_by, str):
@@ -45,7 +67,7 @@ class LineRenderer(BasePlotRenderer):
                 if df_filtered.schema.get(diff_col) is not None:
                     group_cols = [diff_col]
 
-        error_col = opts.get("error_y")
+        error_col = _option_str(options, "error_y") or None
         if error_col and df_filtered.schema.get(error_col) is None:
             error_col = None
 
@@ -56,28 +78,28 @@ class LineRenderer(BasePlotRenderer):
             df_filtered = df_filtered.select(keep).explode(list_cols)
         df_filtered = self._apply_row_filters(df_filtered)
 
-        bin_x = opts.get("bin_x")
-        if bin_x is not None and float(bin_x) > 0 and df_filtered.schema.get(x_col) is not None:
-            bx = float(bin_x)
-            df_filtered = df_filtered.with_columns(((pl.col(x_col) / bx).round() * bx).round(4).alias(x_col))
+        bin_x = options.get("bin_x")
+        if bin_x is not None and float(bin_x) > 0:
+            width = float(bin_x)
+            df_filtered = df_filtered.with_columns(((pl.col(x_col) / width).round() * width).round(4).alias(x_col))
 
-        trim_p = float(opts.get("trim_percentile", 0.0) or (1.0 - float(opts.get("inliers", 1.0))))
-        if 0.0 < trim_p < 0.5 and len(df_filtered) > 0 and df_filtered.schema.get(y_col) is not None:
+        trim_p = float(options.get("trim_percentile", 0.0) or (1.0 - float(options.get("inliers", 1.0))))
+        if 0.0 < trim_p < 0.5 and len(df_filtered) > 0:
             group_keys = [c for c in [x_col, *group_cols] if df_filtered.schema.get(c) is not None]
-            p_low = trim_p / 2.0
-            p_high = 1.0 - (trim_p / 2.0)
             if group_keys:
-                df_filtered = df_filtered.filter((pl.col(y_col) >= pl.col(y_col).quantile(p_low).over(group_keys)) & (pl.col(y_col) <= pl.col(y_col).quantile(p_high).over(group_keys)))
+                low = trim_p / 2.0
+                high = 1.0 - low
+                df_filtered = df_filtered.filter((pl.col(y_col) >= pl.col(y_col).quantile(low).over(group_keys)) & (pl.col(y_col) <= pl.col(y_col).quantile(high).over(group_keys)))
 
-        if opts.get("aggregate") and len(df_filtered) > 0:
+        error_mode = _option_str(options, "error_mode", "std").lower()
+        if options.get("aggregate") and len(df_filtered) > 0:
             agg_cols = [x_col, *group_cols]
-            reduce_ = opts.get("reduce", "mean")
-            if reduce_ == "leq":
+            reduce_mode = _option_str(options, "reduce", "mean")
+            if reduce_mode == "leq":
                 df_filtered = df_filtered.group_by(agg_cols).agg((10.0 * (10.0 ** (pl.col(y_col) / 10.0)).mean().log10()).alias(y_col))
-            elif reduce_ == "max":
+            elif reduce_mode == "max":
                 df_filtered = df_filtered.group_by(agg_cols).agg(pl.col(y_col).max().alias(y_col))
             else:
-                error_mode = str(opts.get("error_mode", "std")).lower()
                 if error_mode in ("ci95", "ci_95", "ci"):
                     df_filtered = df_filtered.group_by(agg_cols).agg(
                         pl.col(y_col).mean().alias(y_col),
@@ -95,29 +117,57 @@ class LineRenderer(BasePlotRenderer):
                     )
                 error_col = "__std__"
 
-        pdf = df_filtered.select(pl.col(x_col), pl.col(y_col), *[pl.col(g) for g in group_cols], *([pl.col(error_col)] if error_col else [])).to_pandas()
-        if pdf.empty:
+        selected = df_filtered.select(
+            pl.col(x_col),
+            pl.col(y_col),
+            *[pl.col(name) for name in group_cols],
+            *([pl.col(error_col)] if error_col else []),
+        )
+        if selected.is_empty():
             return None
 
-        return pdf, x_col, y_col, group_cols, error_col, opts
+        config = _LineConfig(
+            x_col=x_col,
+            y_col=y_col,
+            group_cols=tuple(group_cols),
+            error_col=error_col,
+            error_style=_option_str(options, "error_style", "band"),
+            mode=_option_str(options, "mode", "lines"),
+            time_to_s=_option_bool(options, "time_to_s"),
+            time_relative=_option_bool(options, "time_relative"),
+            max_traces=_option_int(options, "max_traces", 40),
+            max_points_per_trace=_option_int(options, "max_points_per_trace", 5000),
+            smooth=_option_bool(options, "smooth"),
+            smooth_window=_option_int(options, "smooth_window", 3),
+            error_mode=error_mode,
+        )
+        return selected, config
 
     @staticmethod
-    def _trace_data(pdf: pd.DataFrame, x_col: str, y_col: str, error_col: str | None, opts: dict, time_to_s: bool, time_relative: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    def _trace_parts(frame: pl.DataFrame, group_cols: tuple[str, ...], max_traces: int) -> list[tuple[tuple[object, ...], pl.DataFrame]]:
+        """One (group key, frame) pair per trace, capped at ``max_traces``."""
+        if not group_cols:
+            return [((), frame)]
+        parts: list[tuple[tuple[object, ...], pl.DataFrame]] = []
+        for key, group in frame.group_by(list(group_cols), maintain_order=True):
+            if len(parts) >= max_traces:
+                break
+            parts.append((key, group))
+        return parts
+
+    @staticmethod
+    def _trace_data(frame: pl.DataFrame, config: _LineConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """Downsample + transform one trace's frame -> (x, y, err) arrays."""
-        import numpy as np
+        if config.max_points_per_trace > 0 and frame.height > config.max_points_per_trace:
+            frame = frame.gather_every(max(1, frame.height // config.max_points_per_trace))
 
-        max_points = int(opts.get("max_points_per_trace", 5000))
-        if len(pdf) > max_points and max_points > 0:
-            stride = max(1, len(pdf) // max_points)
-            pdf = pdf.iloc[::stride]
+        x = frame[config.x_col].cast(pl.Float64).to_numpy()
+        y = frame[config.y_col].cast(pl.Float64).to_numpy()
+        err = frame[config.error_col].cast(pl.Float64).to_numpy() if config.error_col else None
 
-        x = pdf[x_col].astype(float).to_numpy()
-        y = pdf[y_col].astype(float).to_numpy()
-        err = pdf[error_col].astype(float).to_numpy() if error_col else None
-
-        if time_to_s:
+        if config.time_to_s:
             x = x / 1e9
-        if time_relative and len(x) > 0:
+        if config.time_relative and len(x) > 0:
             x = x - x.min()
 
         order = x.argsort()
@@ -125,82 +175,54 @@ class LineRenderer(BasePlotRenderer):
         if err is not None:
             err = err[order]
 
-        if opts.get("smooth") and len(y) >= 3:
-            w = int(opts.get("smooth_window", 3))
-            w = max(2, min(w, len(y)))
-            kernel = np.ones(w) / w
-            pad_left = w // 2
-            pad_right = w - 1 - pad_left
-            padded_y = np.pad(y, (pad_left, pad_right), mode="edge")
-            y = np.convolve(padded_y, kernel, mode="valid")
+        if config.smooth and len(y) >= 3:
+            width = max(2, min(config.smooth_window, len(y)))
+            kernel = np.ones(width) / width
+            pad_left = width // 2
+            pad_right = width - 1 - pad_left
+            y = np.convolve(np.pad(y, (pad_left, pad_right), mode="edge"), kernel, mode="valid")
             if err is not None:
-                padded_err = np.pad(err, (pad_left, pad_right), mode="edge")
-                err = np.convolve(padded_err, kernel, mode="valid")
+                err = np.convolve(np.pad(err, (pad_left, pad_right), mode="edge"), kernel, mode="valid")
 
         return x, y, err
 
     def render_plotly(self, df: pl.DataFrame) -> str | None:
-        import numpy as np
-        import plotly.graph_objects as go
-
         prepared = self._prepare(df)
         if prepared is None:
             return None
-        pdf, x_col, y_col, group_cols, error_col, opts = prepared
+        selected, config = prepared
+        parts = self._trace_parts(selected, config.group_cols, config.max_traces)
 
-        error_style = opts.get("error_style", "band")
-        mode = opts.get("mode", "lines")
-        time_to_s = bool(opts.get("time_to_s", False))
-        time_relative = bool(opts.get("time_relative", False))
-        max_traces = int(opts.get("max_traces", 40))
-
-        error_mode = str(opts.get("error_mode", "std")).lower()
-        if error_mode in ("ci95", "ci_95", "ci"):
-            band_suffix = "± 95% CI"
-        elif opts.get("smooth"):
-            band_suffix = "± 1σ (smoothed)"
-        else:
-            band_suffix = "± 1σ"
-
+        band_suffix = "± 95% CI" if config.error_mode in ("ci95", "ci_95", "ci") else ("± 1σ (smoothed)" if config.smooth else "± 1σ")
         fig = go.Figure()
         colors = _color_cycle()
 
-        keys = pdf[group_cols].drop_duplicates().head(max_traces).to_dict("records") if group_cols else [{}]  # pyright: ignore[reportCallIssue]
-        for t_idx, key in enumerate(keys):
-            if group_cols:
-                mask = pdf[group_cols].eq(pd_series(key)).all(axis=1)
-                trace_pdf = pdf[mask]
-            else:
-                trace_pdf = pdf
-            if trace_pdf.empty:
-                continue
-
-            x, y, err = self._trace_data(trace_pdf, x_col, y_col, error_col, opts, time_to_s, time_relative)  # pyright: ignore[reportArgumentType]
+        for trace_index, (key, part) in enumerate(parts):
+            x, y, err = self._trace_data(part, config)
             if len(x) == 0:
                 continue
+            label = " / ".join(str(value) for value in key) if config.group_cols else config.y_col
+            color = colors[trace_index % len(colors)]
 
-            label = " / ".join(str(key.get(g, "")) for g in group_cols) if group_cols else y_col
-            color = colors[t_idx % len(colors)]
-
-            if error_col is not None and err is not None:
+            if config.error_col is not None and err is not None:
                 err = np.nan_to_num(err, nan=0.0)
-                is_non_neg = np.all(y >= 0)
-                if error_style == "bars":
-                    arrayminus = np.minimum(err, y) if is_non_neg else err
+                non_negative = bool(np.all(y >= 0))
+                if config.error_style == "bars":
+                    arrayminus = np.minimum(err, y) if non_negative else err
                     fig.add_trace(
                         go.Scatter(
                             x=x,
                             y=y,
-                            mode=mode,
+                            mode=config.mode,
                             name=label,
                             line=dict(color=color),
                             error_y=dict(type="data", array=err, arrayminus=arrayminus, symmetric=False, visible=True),
                         )
                     )
                 else:
-                    y_low = np.maximum(0.0, y - err) if is_non_neg else y - err
+                    y_low = np.maximum(0.0, y - err) if non_negative else y - err
                     y_high = y + err
-                    fig.add_trace(go.Scatter(x=x, y=y, mode=mode, name=label, line=dict(color=color)))
+                    fig.add_trace(go.Scatter(x=x, y=y, mode=config.mode, name=label, line=dict(color=color)))
                     fig.add_trace(
                         go.Scatter(
                             x=np.concatenate([x, x[::-1]]),
@@ -214,97 +236,84 @@ class LineRenderer(BasePlotRenderer):
                         )
                     )
             else:
-                fig.add_trace(go.Scatter(x=x, y=y, mode=mode, name=label, line=dict(color=color)))
+                fig.add_trace(go.Scatter(x=x, y=y, mode=config.mode, name=label, line=dict(color=color)))
 
         fig.update_layout(
             template="plotly_white",
-            xaxis_title="Time [s]" if time_to_s else self.format_label(x_col.replace("_", " ").title(), x_col),
-            yaxis_title=self.format_label(y_col.replace("_", " ").title(), y_col),
+            xaxis_title="Time [s]" if config.time_to_s else self.format_label(config.x_col.replace("_", " ").title(), config.x_col),
+            yaxis_title=self.format_label(config.y_col.replace("_", " ").title(), config.y_col),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             margin=dict(t=30),
         )
         return fig.to_html(full_html=False, include_plotlyjs=False, config={"responsive": True})
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        import matplotlib.pyplot as plt
-        import numpy as np
-
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         prepared = self._prepare(df)
         if prepared is None:
             return
-        pdf, x_col, y_col, group_cols, error_col, opts = prepared
-
-        error_style = opts.get("error_style", "band")
-        mode = opts.get("mode", "lines")
-        time_to_s = bool(opts.get("time_to_s", False))
-        time_relative = bool(opts.get("time_relative", False))
-        max_traces = int(opts.get("max_traces", 40))
-
+        selected, config = prepared
+        parts = self._trace_parts(selected, config.group_cols, config.max_traces)
         colors = _color_cycle()
-        keys = pdf[group_cols].drop_duplicates().head(max_traces).to_dict("records") if group_cols else [{}]  # pyright: ignore[reportCallIssue]
+        marker = "o" if "markers" in config.mode else None
 
-        plt.figure(figsize=(10, 6))
-        for t_idx, key in enumerate(keys):
-            if group_cols:
-                mask = pdf[group_cols].eq(pd_series(key)).all(axis=1)
-                trace_pdf = pdf[mask]
-            else:
-                trace_pdf = pdf
-            if trace_pdf.empty:
-                continue
-
-            x, y, err = self._trace_data(trace_pdf, x_col, y_col, error_col, opts, time_to_s, time_relative)  # pyright: ignore[reportArgumentType]
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for trace_index, (key, part) in enumerate(parts):
+            x, y, err = self._trace_data(part, config)
             if len(x) == 0:
                 continue
+            label = " / ".join(str(value) for value in key) if config.group_cols else config.y_col
+            color = colors[trace_index % len(colors)]
 
-            label = " / ".join(str(key.get(g, "")) for g in group_cols) if group_cols else y_col
-            color = colors[t_idx % len(colors)]
-            marker = "o" if "markers" in mode else None
-
-            if error_col is not None and err is not None:
+            if config.error_col is not None and err is not None:
                 err = np.nan_to_num(err, nan=0.0)
-                is_non_neg = np.all(y >= 0)
-                if error_style == "bars":
-                    yerr = [np.minimum(err, y), err] if is_non_neg else err
-                    plt.errorbar(x, y, yerr=yerr, label=label, color=color, marker=marker, capsize=2)
+                non_negative = bool(np.all(y >= 0))
+                if config.error_style == "bars":
+                    yerr = [np.minimum(err, y), err] if non_negative else err
+                    ax.errorbar(x, y, yerr=yerr, label=label, color=color, marker=marker, capsize=2)
                 else:
-                    y_low = np.maximum(0.0, y - err) if is_non_neg else y - err
-                    plt.plot(x, y, label=label, color=color, marker=marker)
-                    plt.fill_between(x, y_low, y + err, color=color, alpha=0.2)
+                    y_low = np.maximum(0.0, y - err) if non_negative else y - err
+                    ax.plot(x, y, label=label, color=color, marker=marker)
+                    ax.fill_between(x, y_low, y + err, color=color, alpha=0.2)
             else:
-                plt.plot(x, y, label=label, color=color, marker=marker)
+                ax.plot(x, y, label=label, color=color, marker=marker)
 
-        plt.title(self.spec.title)
-        plt.xlabel("Time [s]" if time_to_s else self.format_label(x_col.replace("_", " ").title(), x_col))
-        plt.ylabel(self.format_label(y_col.replace("_", " ").title(), y_col))
-        plt.legend()
-        plt.tight_layout()
-        self.save_figure(plt.gcf(), out_path)
-        plt.close()
+        finish_axes(
+            ax,
+            title=self.spec.title,
+            x_label="Time [s]" if config.time_to_s else self.format_label(config.x_col.replace("_", " ").title(), config.x_col),
+            y_label=self.format_label(config.y_col.replace("_", " ").title(), config.y_col),
+            grid_axis="both",
+        )
+        if config.group_cols:
+            ax.legend(frameon=False)
+        self.save_figure(fig, out_path)
+        plt.close(fig)
+
+
+def _option_str(options: Mapping[str, Any], key: str, default: str = "") -> str:
+    value = options.get(key)
+    return str(value) if value is not None else default
+
+
+def _option_bool(options: Mapping[str, Any], key: str, default: bool = False) -> bool:
+    value = options.get(key)
+    return bool(value) if value is not None else default
+
+
+def _option_int(options: Mapping[str, Any], key: str, default: int) -> int:
+    value = options.get(key)
+    return int(value) if value is not None else default
 
 
 def _color_cycle() -> list[str]:
-    try:
-        from arena_evaluation.presentation.color_utils import get_color_palette
-
-        palette = get_color_palette()
-        if palette:
-            return list(palette)
-    except Exception:
-        pass
-    return ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+    palette = get_color_palette()
+    return list(palette) if palette else ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
 
 
 def _with_alpha(hex_color: str, alpha: float) -> str:
+    """``rgba(...)`` string for a ``#rrggbb`` color, the first palette color when it cannot be parsed."""
     try:
-        r, g, b = (int(hex_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
-        return f"rgba({r},{g},{b},{alpha})"
-    except Exception:
+        red, green, blue = (int(hex_color.lstrip("#")[index : index + 2], 16) for index in (0, 2, 4))
+    except ValueError:
         return f"rgba(31,119,180,{alpha})"
-
-
-def pd_series(d: dict) -> pd.Series:
-    """Build a pandas Series for row-masking (import lazily)."""
-    import pandas as pd
-
-    return pd.Series(d)
+    return f"rgba({red},{green},{blue},{alpha})"

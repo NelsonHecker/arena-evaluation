@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import pathlib
 
+import matplotlib.pyplot as plt
 import numpy as np
 import plotly.express as px
 import plotly.figure_factory as ff
 import polars as pl
 import scipy.cluster.hierarchy as sch
 
-from .base import BasePlot
+from arena_evaluation.presentation.color_utils import get_color_palette
+from arena_evaluation.presentation.plot_types.base import BasePlot, finish_axes, label_values, new_figure, palette_color
 
 __all__ = ["HierarchyRenderer"]
 
@@ -24,17 +26,11 @@ class HierarchyRenderer(BasePlot):
         if df_filtered.is_empty():
             return None
 
-        is_dendrogram = (
-            self.spec.type == "dendrogram"
-            or str(self.spec.options.get("mode", "")).lower() == "dendrogram"
-        )
-
-        if is_dendrogram:
-            return self._render_plotly_dendrogram(df_filtered)
-        return self._render_plotly_hierarchy(df_filtered)
+        is_dendrogram = self.spec.type == "dendrogram" or str(self.spec.options.get("mode", "")).lower() == "dendrogram"
+        return self._render_plotly_dendrogram(df_filtered) if is_dendrogram else self._render_plotly_hierarchy(df_filtered)
 
     def _render_plotly_dendrogram(self, df: pl.DataFrame) -> str | None:
-        planner_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "planner"))
+        planner_col = self.resolve_channel("x", fallback=str(self.spec.options.get("x", "planner")))
         if not planner_col or df.schema.get(planner_col) is None:
             return None
 
@@ -42,41 +38,28 @@ class HierarchyRenderer(BasePlot):
         if not metrics:
             return None
 
-        agg_df = (
-            df.group_by(planner_col)
-            .agg([pl.col(m).mean().alias(m) for m in metrics])
-            .sort(planner_col)
-        )
+        agg_df = df.group_by(planner_col).agg([pl.col(metric).mean().alias(metric) for metric in metrics]).sort(planner_col)
         if agg_df.height < 2:
             return None
 
-        agg_df = agg_df.with_columns([pl.col(m).fill_null(0.0) for m in metrics])
-        # agent-contracts: ignore dendrogram label serialization
-        planner_names = [str(p) for p in agg_df[planner_col].to_list()]
-        matrix = agg_df.select(metrics).to_numpy()
-
-        norm_matrix = self._normalize_matrix(matrix)
+        agg_df = agg_df.with_columns([pl.col(metric).fill_null(0.0) for metric in metrics])
+        planner_names = label_values(agg_df, planner_col).tolist()
+        normalized = self._normalize_matrix(agg_df.select(metrics).to_numpy())
         method = str(self.spec.options.get("clustering_method", "ward"))
-        orientation = str(self.spec.options.get("orientation", "left"))
 
         try:
             fig = ff.create_dendrogram(
-                norm_matrix,
-                orientation=orientation,
+                normalized,
+                orientation=str(self.spec.options.get("orientation", "left")),
                 labels=planner_names,
-                linkagefun=lambda x: sch.linkage(x, method=method),
+                linkagefun=lambda matrix: sch.linkage(matrix, method=method),
             )
-        except Exception:
-            fig = ff.create_dendrogram(
-                norm_matrix,
-                orientation=orientation,
-                labels=planner_names,
-            )
+        except ValueError:
+            fig = ff.create_dendrogram(normalized, labels=planner_names)
 
-        title = self.spec.title or "Planner Phenotypic Behavioral Cladistics"
         fig.update_layout(
             template="plotly_dark",
-            title=title,
+            title=self.spec.title or "Planner Phenotypic Behavioral Cladistics",
             margin=dict(t=50, b=40, l=120, r=40),
             height=max(500, len(planner_names) * 35),
         )
@@ -97,69 +80,35 @@ class HierarchyRenderer(BasePlot):
 
         df_clean = df.drop_nulls(subset=path_cols)
         if values_col:
-            df_clean = df_clean.drop_nulls(subset=[values_col])
-            df_clean = df_clean.with_columns(pl.col(values_col).clip(lower_bound=0.0))
-
+            df_clean = df_clean.drop_nulls(subset=[values_col]).with_columns(pl.col(values_col).clip(lower_bound=0.0))
         if df_clean.is_empty():
             return None
 
-        select_cols = list(
-            dict.fromkeys(
-                path_cols
-                + ([values_col] if values_col else [])
-                + ([color_col] if color_col else [])
-            )
-        )
-        pdf = df_clean.select(select_cols).to_pandas()
-        if pdf.empty:
-            return None
-
+        select_cols = list(dict.fromkeys(path_cols + ([values_col] if values_col else []) + ([color_col] if color_col else [])))
+        selected = df_clean.select(select_cols)
         mode = str(self.spec.options.get("mode", "treemap")).lower()
-        is_sunburst = mode == "sunburst" or self.spec.type == "sunburst"
-
-        if is_sunburst:
-            fig = px.sunburst(
-                pdf,
-                path=path_cols,
-                values=values_col,
-                color=color_col,
-                title=self.spec.title or None,
-            )
-        else:
-            fig = px.treemap(
-                pdf,
-                path=path_cols,
-                values=values_col,
-                color=color_col,
-                title=self.spec.title or None,
-            )
-
-        fig.update_layout(
-            template="plotly_white",
-            margin=dict(t=50 if self.spec.title else 30, b=30, l=30, r=30),
+        fig = (
+            px.sunburst(selected, path=path_cols, values=values_col, color=color_col, title=self.spec.title or None)
+            if mode == "sunburst"
+            else px.treemap(selected, path=path_cols, values=values_col, color=color_col, title=self.spec.title or None)
         )
+        fig.update_layout(template="plotly_white", margin=dict(t=50 if self.spec.title else 30, b=30, l=30, r=30))
         return fig.to_html(include_plotlyjs=False, full_html=False)
 
-    def render_seaborn(self, df: pl.DataFrame, path: pathlib.Path) -> None:
-        """Render static dendrogram, clustered heatmap, or grouped bar chart."""
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+        """Render a static dendrogram, clustered heatmap, or grouped bar chart."""
         df_filtered = self._apply_filters(df)
         if df_filtered.is_empty():
             return
 
-        is_dendrogram = (
-            self.spec.type == "dendrogram"
-            or str(self.spec.options.get("mode", "")).lower() == "dendrogram"
-        )
-
+        is_dendrogram = self.spec.type == "dendrogram" or str(self.spec.options.get("mode", "")).lower() == "dendrogram"
         if is_dendrogram:
-            self._render_seaborn_dendrogram(df_filtered, path)
+            self._render_static_dendrogram(df_filtered, out_path)
         else:
-            self._render_seaborn_hierarchy(df_filtered, path)
+            self._render_static_hierarchy(df_filtered, out_path)
 
-    def _render_seaborn_dendrogram(self, df: pl.DataFrame, path: pathlib.Path) -> None:
-        import matplotlib.pyplot as plt
-
-        planner_col = self.resolve_channel("x", fallback=self.spec.options.get("x", "planner"))
+    def _render_static_dendrogram(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+        planner_col = self.resolve_channel("x", fallback=str(self.spec.options.get("x", "planner")))
         if not planner_col or df.schema.get(planner_col) is None:
             return
 
@@ -167,111 +116,100 @@ class HierarchyRenderer(BasePlot):
         if not metrics:
             return
 
-        agg_df = (
-            df.group_by(planner_col)
-            .agg([pl.col(m).mean().alias(m) for m in metrics])
-            .sort(planner_col)
-        )
+        agg_df = df.group_by(planner_col).agg([pl.col(metric).mean().alias(metric) for metric in metrics]).sort(planner_col)
         if agg_df.height < 2:
             return
 
-        agg_df = agg_df.with_columns([pl.col(m).fill_null(0.0) for m in metrics])
-        # agent-contracts: ignore dendrogram label serialization
-        planner_names = [str(p) for p in agg_df[planner_col].to_list()]
-        matrix = agg_df.select(metrics).to_numpy()
-
-        norm_matrix = self._normalize_matrix(matrix)
+        agg_df = agg_df.with_columns([pl.col(metric).fill_null(0.0) for metric in metrics])
+        planner_names = label_values(agg_df, planner_col).tolist()
+        matrix = self._normalize_matrix(agg_df.select(metrics).to_numpy())
         method = str(self.spec.options.get("clustering_method", "ward"))
-
         try:
-            linkage_matrix = sch.linkage(norm_matrix, method=method)
-        except Exception:
-            linkage_matrix = sch.linkage(norm_matrix, method="complete")
+            linkage = sch.linkage(matrix, method=method)
+        except ValueError:
+            linkage = sch.linkage(matrix, method="complete")
 
         if self.spec.options.get("clustermap", False):
-            import pandas as pd
-            import seaborn as sns
+            self._render_static_clustermap(matrix, planner_names, metrics, linkage, out_path)
+            return
 
-            df_clust = pd.DataFrame(
-                norm_matrix,
-                index=planner_names,
-                columns=[m.replace("_", " ").title() for m in metrics],
-            )
-            g = sns.clustermap(
-                df_clust,
-                row_linkage=linkage_matrix,
-                col_cluster=len(metrics) > 1,
-                cmap=self.spec.options.get("colorscale", "viridis"),
-            )
-            if self.spec.title:
-                g.figure.suptitle(self.spec.title, y=1.02, fontsize=12, fontweight="bold")
-            self.save_figure(g.figure, path)
-            plt.close(g.figure)
-        else:
-            fig, ax = plt.subplots(figsize=(10, max(5, len(planner_names) * 0.4)))
-            sch.dendrogram(linkage_matrix, labels=planner_names, orientation="left", ax=ax)
-            ax.set_title(self.spec.title or "Planner Behavioral Cladistics", pad=12, fontsize=12, fontweight="bold")
-            ax.set_xlabel("Distance")
-            fig.tight_layout()
-            self.save_figure(fig, path)
-            plt.close(fig)
+        fig, ax = plt.subplots(figsize=(10, max(5, len(planner_names) * 0.4)))
+        sch.dendrogram(linkage, labels=planner_names, orientation="left", ax=ax)
+        fig.tight_layout()
+        self.save_figure(fig, out_path)
+        plt.close(fig)
 
-    def _render_seaborn_hierarchy(self, df: pl.DataFrame, path: pathlib.Path) -> None:
-        import matplotlib.pyplot as plt
-        import seaborn as sns
+    def _render_static_clustermap(self, matrix: np.ndarray, planner_names: list[str], metrics: list[str], linkage: np.ndarray, out_path: pathlib.Path) -> None:
+        """Row dendrogram beside the normalized metric heatmap, in the leaf order the linkage implies."""
+        leaves = sch.dendrogram(linkage, no_plot=True)["leaves"]
+        ordered = matrix[leaves]
+        ordered_names = [planner_names[index] for index in leaves]
+        labels = [metric.replace("_", " ").title() for metric in metrics]
 
+        fig, (dendrogram_ax, heatmap_ax) = plt.subplots(
+            1,
+            2,
+            figsize=(12, max(5, len(planner_names) * 0.5)),
+            gridspec_kw={"width_ratios": [1, 3]},
+        )
+        sch.dendrogram(linkage, labels=planner_names, orientation="left", ax=dendrogram_ax)
+        image = heatmap_ax.imshow(ordered, cmap=str(self.spec.options.get("colorscale", "viridis")), aspect="auto")
+        heatmap_ax.set_xticks(np.arange(len(labels)), labels, rotation=45, ha="right")
+        heatmap_ax.set_yticks(np.arange(len(ordered_names)), ordered_names)
+        fig.colorbar(image, ax=heatmap_ax, label="z-score")
+        fig.suptitle(self.spec.title or "Planner Behavioral Cladistics", fontsize=12, fontweight="bold")
+        fig.tight_layout()
+        self.save_figure(fig, out_path)
+        plt.close(fig)
+
+    def _render_static_hierarchy(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         path_cols = self._resolve_hierarchy_path(df)
         if not path_cols:
             return
 
         x_col = path_cols[0]
         hue_col = path_cols[1] if len(path_cols) > 1 else None
-
         values_col = self.resolve_channel("y", fallback=self.spec.data_key)
         schema = df.schema
         if values_col and schema.get(values_col) is None:
             values_col = None
 
-        grp = [c for c in [x_col, hue_col] if c]
-        is_numeric = (
-            values_col is not None
-            and schema.get(values_col) is not None
-            and schema[values_col] in (
-                pl.Float64,
-                pl.Float32,
-                pl.Int64,
-                pl.Int32,
-                pl.UInt64,
-                pl.UInt32,
-                pl.Int16,
-                pl.Int8,
-                pl.UInt16,
-                pl.UInt8,
-            )
-        )
-
-        if values_col and is_numeric:
-            agg_df = df.group_by(grp).agg(pl.col(values_col).sum().alias(values_col))
-            plot_val = values_col
+        group_cols = [x_col] if hue_col is None else [x_col, hue_col]
+        numeric_values_col = values_col is not None and schema.get(values_col) is not None and schema[values_col].is_numeric()
+        if numeric_values_col and values_col is not None:
+            agg_df = df.group_by(group_cols).agg(pl.col(values_col).sum().alias("value"))
             y_label = self.format_label(values_col.replace("_", " ").title(), values_col)
         else:
-            agg_df = df.group_by(grp).agg(pl.len().alias("count"))
-            plot_val = "count"
+            agg_df = df.group_by(group_cols).agg(pl.len().alias("value"))
             y_label = "Count"
-
-        pdf = agg_df.to_pandas()
-        if pdf.empty:
+        if agg_df.is_empty():
             return
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.barplot(data=pdf, x=x_col, y=plot_val, hue=hue_col, ax=ax)
-        ax.set_title(self.spec.title or "Hierarchical Breakdown", pad=12, fontsize=12, fontweight="bold")
-        ax.set_xlabel(x_col.replace("_", " ").title())
-        ax.set_ylabel(y_label)
-        if hue_col:
-            ax.legend(title=hue_col.replace("_", " ").title())
-        fig.tight_layout()
-        self.save_figure(fig, path)
+        categories = label_values(agg_df.select(x_col).unique(), x_col).tolist()
+        categories.sort()
+        if hue_col is None:
+            series = [""]
+            frames = agg_df.partition_by(x_col, as_dict=True)
+            lookup = {(str(key[0]), ""): float(frame["value"][0]) for key, frame in frames.items()}
+        else:
+            series = sorted(label_values(agg_df.select(hue_col).unique(), hue_col).tolist())
+            cells = agg_df.partition_by([x_col, hue_col], as_dict=True)
+            lookup = {(str(frame[x_col][0]), str(frame[hue_col][0])): float(frame["value"][0]) for frame in cells.values()}
+
+        positions = np.arange(len(categories))
+        palette = get_color_palette()
+        width = 0.8 / max(1, len(series))
+        fig, ax = new_figure()
+        for series_index, series_name in enumerate(series):
+            heights = [lookup.get((category, series_name), 0.0) for category in categories]
+            offset = (series_index - (len(series) - 1) / 2.0) * width
+            ax.bar(positions + offset, heights, width, label=series_name or None, color=palette_color(palette, series_index))
+
+        ax.set_xticks(positions, categories, rotation=30, ha="right")
+        if hue_col is not None:
+            ax.legend(frameon=False, title=hue_col.replace("_", " ").title())
+        finish_axes(ax, title=self.spec.title or "Hierarchical Breakdown", x_label=x_col.replace("_", " ").title(), y_label=y_label)
+        self.save_figure(fig, out_path)
         plt.close(fig)
 
     def _resolve_metrics(self, df: pl.DataFrame, planner_col: str) -> list[str]:
@@ -280,63 +218,43 @@ class HierarchyRenderer(BasePlot):
         if opt_metrics:
             raw_metrics = list(opt_metrics) if isinstance(opt_metrics, (list, tuple)) else [str(opt_metrics)]
         elif isinstance(self.spec.channels.y, list):
-            raw_metrics = [str(m) for m in self.spec.channels.y if m]
+            raw_metrics = [str(metric) for metric in self.spec.channels.y if metric]
         elif isinstance(self.spec.channels.y, str) and self.spec.channels.y.strip():
             raw_metrics = [self.spec.channels.y.strip()]
 
         schema = df.schema
-        metrics = [m for m in raw_metrics if schema.get(m) is not None]
+        metrics = [metric for metric in raw_metrics if schema.get(metric) is not None]
         if not metrics:
-            candidates = [
-                "time_to_goal",
-                "path_length",
-                "collision_amount",
-                "jerk_mean",
-                "specific_cost_of_transport",
-                "success",
-                "velocity_mean",
-            ]
-            metrics = [m for m in candidates if schema.get(m) is not None]
+            candidates = ["time_to_goal_s", "path_length_m", "total_collisions_ped", "jerk_max_mps3", "total_energy_wh", "success", "mean_velocity_mps"]
+            metrics = [metric for metric in candidates if schema.get(metric) is not None]
         if not metrics:
-            metrics = [
-                col
-                for col, dtype in schema.items()
-                if col != planner_col and dtype in (pl.Float64, pl.Float32, pl.Int64, pl.Int32, pl.UInt64, pl.UInt32)
-            ]
+            metrics = [column for column, dtype in schema.items() if column != planner_col and dtype.is_numeric()]
         return metrics
 
     def _resolve_hierarchy_path(self, df: pl.DataFrame) -> list[str]:
-        raw_hierarchy = (
-            self.spec.channels.hierarchy
-            or self.spec.options.get("path")
-            or [self.spec.channels.x, self.spec.channels.color]
-        )
+        raw_hierarchy = self.spec.channels.hierarchy or self.spec.options.get("path") or [self.spec.channels.x, self.spec.channels.color]
         path_cols: list[str] = []
         if isinstance(raw_hierarchy, (list, tuple)):
             for item in raw_hierarchy:
                 if isinstance(item, str) and item.strip():
                     path_cols.append(item.strip())
                 elif isinstance(item, list):
-                    for sub in item:
-                        if isinstance(sub, str) and sub.strip():
-                            path_cols.append(sub.strip())
+                    path_cols.extend(sub.strip() for sub in item if isinstance(sub, str) and sub.strip())
         elif isinstance(raw_hierarchy, str) and raw_hierarchy.strip():
             path_cols.append(raw_hierarchy.strip())
 
         schema = df.schema
-        return [c for c in path_cols if schema.get(c) is not None]
+        return [column for column in path_cols if schema.get(column) is not None]
 
     def _normalize_matrix(self, matrix: np.ndarray) -> np.ndarray:
         norm_mode = str(self.spec.options.get("normalize", "zscore")).lower()
         if norm_mode == "minmax":
-            col_min = matrix.min(axis=0)
-            col_max = matrix.max(axis=0)
-            col_diff = col_max - col_min
-            col_diff = np.where(col_diff == 0.0, 1.0, col_diff)
-            norm_matrix = (matrix - col_min) / col_diff
+            column_min = matrix.min(axis=0)
+            column_max = matrix.max(axis=0)
+            column_diff = np.where(column_max - column_min == 0.0, 1.0, column_max - column_min)
+            norm_matrix = (matrix - column_min) / column_diff
         else:
-            col_mean = matrix.mean(axis=0)
-            col_std = matrix.std(axis=0)
-            col_std = np.where(col_std == 0.0, 1.0, col_std)
-            norm_matrix = (matrix - col_mean) / col_std
+            column_mean = matrix.mean(axis=0)
+            column_std = np.where(matrix.std(axis=0) == 0.0, 1.0, matrix.std(axis=0))
+            norm_matrix = (matrix - column_mean) / column_std
         return np.nan_to_num(norm_matrix, nan=0.0)

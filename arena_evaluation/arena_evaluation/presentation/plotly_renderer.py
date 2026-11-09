@@ -59,5 +59,5 @@ class PlotlyRenderer:
         renderer = renderer_cls(spec, units=self.units)
         renderer.run_dir = run_dir
         if renderer_cls.__name__ == "TrajectoryRenderer":
-            renderer.generate_gifs = False  # GIFs are seaborn-only
+            renderer.generate_gifs = False  # static-only artifacts
         return renderer.render_plotly(df)

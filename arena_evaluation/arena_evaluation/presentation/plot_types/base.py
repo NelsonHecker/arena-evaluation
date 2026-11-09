@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import pathlib
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+import matplotlib.pyplot as plt
+import numpy as np
 import polars as pl
 
 from arena_evaluation.presentation.dimension_detector import resolve_differentiate
@@ -14,7 +17,51 @@ if TYPE_CHECKING:
 
     from arena_evaluation.presentation.checks import PlotDiagnostics
 
-__all__ = ["BasePlotRenderer", "BasePlot"]
+__all__ = [
+    "BasePlot",
+    "BasePlotRenderer",
+    "finish_axes",
+    "label_values",
+    "new_figure",
+    "numeric_values",
+    "palette_color",
+    "series_values",
+]
+
+
+def numeric_values(frame: pl.DataFrame, column: str) -> np.ndarray:
+    """Finite Float64 values of one column as a NumPy array, nulls and NaN dropped."""
+    return frame[column].cast(pl.Float64).fill_nan(None).drop_nulls().to_numpy()
+
+
+def series_values(frame: pl.DataFrame, column: str) -> np.ndarray:
+    """Float64 values of one column, NaN where the value is null, length preserved."""
+    return frame[column].cast(pl.Float64).to_numpy()
+
+
+def label_values(frame: pl.DataFrame, column: str) -> np.ndarray:
+    """String labels of one column as a NumPy array, nulls rendered as ``unknown``."""
+    return frame[column].cast(pl.Utf8).fill_null("unknown").to_numpy()
+
+
+def new_figure(*, width_in: float = 10.0, height_in: float = 6.0) -> tuple[plt.Figure, plt.Axes]:
+    """A fresh Matplotlib figure and its single axes."""
+    return plt.subplots(figsize=(width_in, height_in))
+
+
+def finish_axes(ax: plt.Axes, *, title: str, x_label: str, y_label: str, grid_axis: str = "y") -> None:
+    """Apply the shared static-plot style and axis labels."""
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(True, linestyle="--", alpha=0.5, axis=grid_axis)
+    ax.set_title(title, pad=12, fontsize=12, fontweight="bold")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+
+
+def palette_color(palette: Sequence[str], index: int) -> str:
+    """The palette color at ``index``, cycling through the palette."""
+    return palette[index % len(palette)]
 
 
 class BasePlotRenderer(ABC):
@@ -103,8 +150,8 @@ class BasePlotRenderer(ABC):
         pass
 
     @abstractmethod
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
-        """Render a static Seaborn/Matplotlib plot, saving the PNG/SVG/PDF to out_path."""
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+        """Render a static Matplotlib plot to ``out_path`` as PNG, SVG or PDF."""
         pass
 
     def resolve_diff_col(self, df: pl.DataFrame) -> tuple[str, pl.DataFrame]:

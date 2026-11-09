@@ -36,7 +36,7 @@ def get_color_palette() -> list[str]:
 
 
 def set_global_color_palette(palette: list[str] | None = None) -> None:
-    """Apply a palette, the configured one by default, to Plotly and Seaborn globally."""
+    """Apply a palette, the configured one by default, to Plotly and Matplotlib globally."""
     if palette is None:
         palette = get_color_palette()
 
@@ -54,9 +54,7 @@ def set_global_color_palette(palette: list[str] | None = None) -> None:
     except ImportError:
         pass
 
-    try:
-        import seaborn as sns
+    import matplotlib
 
-        sns.set_theme(style="whitegrid", palette=palette)
-    except ImportError:
-        pass
+    matplotlib.rcParams["axes.prop_cycle"] = matplotlib.cycler(color=palette)
+    matplotlib.rcParams.update({"axes.grid": True, "grid.linestyle": "--", "grid.alpha": 0.5, "axes.spines.top": False, "axes.spines.right": False})

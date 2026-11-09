@@ -29,7 +29,7 @@ def test_heatmap_correlation():
     assert "Correlation" in html
 
 
-def test_heatmap_seaborn(tmp_path):
+def test_heatmap_static(tmp_path):
     import pathlib
 
     df = pl.DataFrame(
@@ -52,5 +52,5 @@ def test_heatmap_seaborn(tmp_path):
     renderer = HeatmapRenderer(spec)
     out_path = tmp_path / "correlation_matrix.png"
 
-    renderer.render_seaborn(df, out_path)
+    renderer.render_static(df, out_path)
     assert out_path.exists()

@@ -168,7 +168,7 @@ def test_faceted_gif_animates_each_planner_with_its_own_doors(tmp_path):
     renderer = TrajectoryRenderer(spec)
     renderer.generate_gifs = True
     out = tmp_path / "traj.png"
-    renderer.render_seaborn(df, out)
+    renderer.render_static(df, out)
 
     assert out.exists() and out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     frames, total_ms = _frames(out.with_suffix(".gif"))
@@ -186,7 +186,7 @@ def test_single_panel_without_states_keeps_static_doors(tmp_path):
     renderer = TrajectoryRenderer(spec)
     renderer.generate_gifs = True
     out = tmp_path / "single.png"
-    renderer.render_seaborn(df, out)
+    renderer.render_static(df, out)
     assert out.exists()
     frames, total_ms = _frames(out.with_suffix(".gif"))
     assert total_ms == pytest.approx((GIF_FRAMES + 1) * 1000 / GIF_FPS, rel=0.02)

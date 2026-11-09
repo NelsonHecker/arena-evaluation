@@ -5,7 +5,6 @@ import pathlib
 import re
 
 import matplotlib.animation
-import pandas as pd
 import polars as pl
 
 from arena_evaluation.presentation.plot_types.scatter import ScatterRenderer
@@ -41,12 +40,6 @@ def _newplot_layout(html: str) -> dict:
     data, end = decoder.raw_decode(html[match.end() :])
     layout, _ = decoder.raw_decode(html[match.end() + end :].lstrip()[1:].lstrip())
     return layout
-
-
-def _mock_to_pandas(monkeypatch, pdf: pd.DataFrame) -> None:
-    """Substitute ``to_pandas`` so the renderer operates on a frame whose list
-    cells are plain python lists (as the trace-building code expects)."""
-    monkeypatch.setattr(pl.DataFrame, "to_pandas", lambda self: pdf)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -210,27 +203,27 @@ def test_scatter_plotly_compound_label_diff():
     assert "dwb \\u002f a" in html  # compound __label__ values colour the traces
 
 
-def test_scatter_seaborn_happy_path(tmp_path):
+def test_scatter_static_happy_path(tmp_path):
     out = tmp_path / "scatter.png"
-    ScatterRenderer(_scatter_spec()).render_seaborn(_scatter_df(), out)
+    ScatterRenderer(_scatter_spec()).render_static(_scatter_df(), out)
     assert out.exists() and out.read_bytes()[:8] == _PNG_MAGIC
 
 
-def test_scatter_seaborn_missing_y_writes_nothing(tmp_path):
+def test_scatter_static_missing_y_writes_nothing(tmp_path):
     out = tmp_path / "scatter.png"
     spec = PlotSpec(id="sc", type="scatter", title="T", data_key="time_to_goal")
-    ScatterRenderer(spec).render_seaborn(_scatter_df(), out)
+    ScatterRenderer(spec).render_static(_scatter_df(), out)
     assert not out.exists()
 
 
-def test_scatter_seaborn_missing_diff_writes_nothing(tmp_path):
+def test_scatter_static_missing_diff_writes_nothing(tmp_path):
     out = tmp_path / "scatter.png"
     df = pl.DataFrame({"time_to_goal": [1.0], "path_length": [1.0]})
-    ScatterRenderer(_scatter_spec()).render_seaborn(df, out)
+    ScatterRenderer(_scatter_spec()).render_static(df, out)
     assert not out.exists()
 
 
-def test_scatter_seaborn_list_explode(tmp_path):
+def test_scatter_static_list_explode(tmp_path):
     out = tmp_path / "scatter.png"
     df = pl.DataFrame(
         {
@@ -244,7 +237,7 @@ def test_scatter_seaborn_list_explode(tmp_path):
             "path_length": pl.Float64,
         },
     )
-    ScatterRenderer(_scatter_spec()).render_seaborn(df, out)
+    ScatterRenderer(_scatter_spec()).render_static(df, out)
     assert out.exists() and out.stat().st_size > 0
 
 
@@ -254,68 +247,47 @@ def test_scatter_seaborn_list_explode(tmp_path):
 
 
 def _ts_df() -> pl.DataFrame:
-    """Polars List-typed frame, as produced by the real pipeline."""
+    """1NF long-format series rows: one sample per row, no list columns."""
     return pl.DataFrame(
         {
-            "planner": ["dwb", "dwb", "teb"],
-            "episode": [1, 2, 1],
-            "timeseries_time_s": [[0.0, 1.0, 2.0], [0.0, 0.5, 1.0], [0.0, 1.0, 2.0]],
-            "path_efficiency": [[0.5, 0.6, 0.7], [0.4, 0.5, 0.6], [0.6, 0.8, 0.9]],
-            "collision_amount": [[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            "planner": ["dwb", "dwb", "teb", "teb"],
+            "episode_id": [1, 1, 2, 2],
+            "time_s": [0.0, 1.0, 0.0, 1.0],
+            "path_efficiency": [0.5, 0.6, 0.7, 0.8],
+            "total_energy_wh": [10.0, 11.0, 12.0, 13.0],
         },
         schema={
             "planner": pl.Utf8,
-            "episode": pl.Int64,
-            "timeseries_time_s": pl.List(pl.Float64),
-            "path_efficiency": pl.List(pl.Float64),
-            "collision_amount": pl.List(pl.Float64),
-        },
-    )
-
-
-def _ts_obj_df() -> pl.DataFrame:
-    """Same data with Object-typed list columns so that ``to_pandas`` keeps
-    the values as real Python lists (the renderer's isinstance checks pass)."""
-    return pl.DataFrame(
-        {
-            "planner": ["dwb", "dwb", "teb"],
-            "episode": [1, 2, 1],
-            "timeseries_time_s": [[0.0, 1.0, 2.0], [0.0, 0.5, 1.0], [0.0, 1.0, 2.0]],
-            "path_efficiency": [[0.5, 0.6, 0.7], [0.4, 0.5, 0.6], [0.6, 0.8, 0.9]],
-            "collision_amount": [[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-        },
-        schema={
-            "planner": pl.Utf8,
-            "episode": pl.Int64,
-            "timeseries_time_s": pl.Object,
-            "path_efficiency": pl.Object,
-            "collision_amount": pl.Object,
+            "episode_id": pl.Int64,
+            "time_s": pl.Float64,
+            "path_efficiency": pl.Float64,
+            "total_energy_wh": pl.Float64,
         },
     )
 
 
 def _ts_spec(**options) -> PlotSpec:
-    base = dict(id="ts", type="timeseries", title="Power over Time", data_key="timeseries_time_s", differentiate="planner")
-    base["options"] = {"metrics": ["path_efficiency", "collision_amount"], **options}
+    base = dict(id="ts", type="timeseries", title="Power over Time", data_key="path_efficiency", differentiate="planner")
+    base["options"] = {"metrics": ["path_efficiency"], **options}
     return PlotSpec(**base)
 
 
 def test_timeseries_plotly_happy_path_with_units():
-    html = TimeseriesRenderer(_ts_spec(), units={"timeseries_time_s": "s"}).render_plotly(_ts_obj_df())
+    html = TimeseriesRenderer(_ts_spec(), units={"time_s": "s"}).render_plotly(_ts_df())
     assert html is not None
     assert html.startswith("<div")
-    assert "Time S [s]" in html  # timeseries_ prefix stripped + unit
-    assert "dwb - Ep 1" in html  # per-episode legend groups
+    assert "Time S [s]" in html
+    assert "dwb" in html
 
 
 def test_timeseries_plotly_metrics_fall_back_to_data_key():
-    spec = PlotSpec(id="ts", type="timeseries", title="T", data_key="path_efficiency")
-    html = TimeseriesRenderer(spec).render_plotly(_ts_obj_df())
-    assert html is not None and "dwb - Ep 1" in html
+    spec = PlotSpec(id="ts", type="timeseries", title="T", data_key="path_efficiency", differentiate="planner")
+    html = TimeseriesRenderer(spec).render_plotly(_ts_df())
+    assert html is not None and "dwb" in html
 
 
 def test_timeseries_plotly_no_metrics_and_no_data_key_returns_none():
-    spec = PlotSpec(id="ts", type="timeseries", title="T", data_key="")
+    spec = PlotSpec(id="ts", type="timeseries", title="T", data_key="", differentiate="planner")
     assert TimeseriesRenderer(spec).render_plotly(_ts_df()) is None
 
 
@@ -325,102 +297,46 @@ def test_timeseries_plotly_metrics_missing_from_df_returns_none():
 
 
 def test_timeseries_plotly_custom_x_column():
-    df = _ts_obj_df().rename({"timeseries_time_s": "t_ns"})
-    html = TimeseriesRenderer(_ts_spec(x="t_ns")).render_plotly(df)
-    assert html is not None and "dwb - Ep 1" in html
+    html = TimeseriesRenderer(_ts_spec(x="time_s")).render_plotly(_ts_df())
+    assert html is not None and "dwb" in html
 
 
 def test_timeseries_plotly_x_column_missing_returns_none():
-    df = _ts_df().drop("timeseries_time_s")
-    assert TimeseriesRenderer(_ts_spec()).render_plotly(df) is None
+    assert TimeseriesRenderer(_ts_spec()).render_plotly(_ts_df().drop("time_s")) is None
 
 
 def test_timeseries_plotly_empty_df_returns_none():
     assert TimeseriesRenderer(_ts_spec()).render_plotly(pl.DataFrame()) is None
 
 
-def test_timeseries_plotly_no_episode_column_uses_unknown():
-    df = _ts_obj_df().drop("episode")
-    html = TimeseriesRenderer(_ts_spec()).render_plotly(df)
-    assert html is not None and "dwb - Ep unknown" in html
+def test_timeseries_plotly_drops_reference_rows_unless_requested():
+    frame = _ts_df().with_columns(is_reference=pl.Series([False, False, True, True]))
+    default_html = TimeseriesRenderer(_ts_spec()).render_plotly(frame)
+    assert default_html is not None and "teb" not in default_html
+    reference_html = TimeseriesRenderer(_ts_spec(include_reference=True)).render_plotly(frame)
+    assert reference_html is not None and "teb" in reference_html
 
 
-def test_timeseries_plotly_missing_diff_col_uses_unknown_planner():
-    df = pl.DataFrame(
-        {
-            "episode": [1],
-            "timeseries_time_s": [[0.0, 1.0]],
-            "path_efficiency": [[0.5, 0.6]],
-        },
-        schema={
-            "episode": pl.Int64,
-            "timeseries_time_s": pl.Object,
-            "path_efficiency": pl.Object,
-        },
-    )
-    spec = PlotSpec(id="ts", type="timeseries", title="T", data_key="timeseries_time_s", differentiate=None)
-    html = TimeseriesRenderer(spec).render_plotly(df)
-    assert html is not None and "unknown - Ep 1" in html
-
-
-def test_timeseries_plotly_scalar_x_data_skips_trace():
-    df = pl.DataFrame(
-        {
-            "planner": ["dwb"],
-            "episode": [1],
-            "timeseries_time_s": [0.0],
-            "path_efficiency": [[0.5, 0.6]],
-        },
-        schema={
-            "planner": pl.Utf8,
-            "episode": pl.Int64,
-            "timeseries_time_s": pl.Float64,
-            "path_efficiency": pl.Object,
-        },
-    )
-    html = TimeseriesRenderer(_ts_spec()).render_plotly(df)
+def test_timeseries_plotly_unknown_planner_without_diff_column():
+    frame = _ts_df().drop("planner")
+    html = TimeseriesRenderer(_ts_spec()).render_plotly(frame)
     assert html is not None
-    assert "dwb - Ep 1" not in html  # every trace was skipped -> empty figure
 
 
-def test_timeseries_plotly_none_metric_skips_trace():
-    df = pl.DataFrame(
-        {
-            "planner": ["dwb"],
-            "episode": [1],
-            "timeseries_time_s": [[0.0, 1.0]],
-            "path_efficiency": [None],
-            "collision_amount": [[0.0, 0.0]],
-        },
-        schema={
-            "planner": pl.Utf8,
-            "episode": pl.Int64,
-            "timeseries_time_s": pl.Object,
-            "path_efficiency": pl.Object,
-            "collision_amount": pl.Object,
-        },
-    )
-    html = TimeseriesRenderer(_ts_spec()).render_plotly(df)
-    assert html is not None and "dwb - Ep 1" in html
-
-
-def test_timeseries_plotly_polars_list_columns_render_successfully():
-    """Verify that Polars List columns (which convert to NumPy arrays) render correctly."""
-    html = TimeseriesRenderer(_ts_spec()).render_plotly(_ts_df())
-    assert html is not None
-    assert "dwb - Ep 1" in html
-
-
-def test_timeseries_seaborn_is_pass_through(tmp_path):
+def test_timeseries_static_writes_png(tmp_path):
     out = tmp_path / "ts.png"
-    assert TimeseriesRenderer(_ts_spec()).render_seaborn(_ts_df(), out) is None
+    TimeseriesRenderer(_ts_spec()).render_static(_ts_df(), out)
+    assert out.exists() and out.stat().st_size > 0
+    assert out.read_bytes()[:8] == _PNG_MAGIC
+
+
+def test_timeseries_static_empty_df_writes_nothing(tmp_path):
+    out = tmp_path / "ts.png"
+    TimeseriesRenderer(_ts_spec()).render_static(pl.DataFrame(), out)
     assert not out.exists()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # TrajectoryRenderer
-# ═══════════════════════════════════════════════════════════════════════════
-
 
 def _flat_traj_df() -> pl.DataFrame:
     """Single non-nested path per row."""
@@ -705,47 +621,47 @@ def test_trajectory_plotly_all_nan_path_skips_markers():
     assert html is not None
 
 
-# ── trajectory: seaborn ────────────────────────────────────────────────────
+# ── trajectory: static ────────────────────────────────────────────────────
 
 
-def test_trajectory_seaborn_single_agent_png(tmp_path):
+def test_trajectory_static_single_agent_png(tmp_path):
     out = tmp_path / "traj.png"
-    TrajectoryRenderer(_traj_spec()).render_seaborn(_flat_traj_df(), out)
+    TrajectoryRenderer(_traj_spec()).render_static(_flat_traj_df(), out)
     assert out.exists() and out.read_bytes()[:8] == _PNG_MAGIC
 
 
-def test_trajectory_seaborn_missing_data_key_writes_nothing(tmp_path):
+def test_trajectory_static_missing_data_key_writes_nothing(tmp_path):
     out = tmp_path / "traj.png"
     df = _flat_traj_df().drop("path")
-    TrajectoryRenderer(_traj_spec()).render_seaborn(df, out)
+    TrajectoryRenderer(_traj_spec()).render_static(df, out)
     assert not out.exists()
 
 
-def test_trajectory_seaborn_group_by_writes_suffixed_files(tmp_path):
+def test_trajectory_static_group_by_writes_suffixed_files(tmp_path):
     out = tmp_path / "traj.png"
     spec = _traj_spec(group_by=["episode"])
-    TrajectoryRenderer(spec).render_seaborn(_nested_traj_df(), out)
+    TrajectoryRenderer(spec).render_static(_nested_traj_df(), out)
     assert (tmp_path / "traj_1.png").exists()
     assert (tmp_path / "traj_2.png").exists()
     assert (tmp_path / "traj_1.png").stat().st_size > 0
 
 
-def test_trajectory_seaborn_group_by_two_cols_suffix(tmp_path):
+def test_trajectory_static_group_by_two_cols_suffix(tmp_path):
     out = tmp_path / "traj.png"
     spec = _traj_spec(group_by=["episode", "result"])
-    TrajectoryRenderer(spec).render_seaborn(_nested_traj_df(), out)
+    TrajectoryRenderer(spec).render_static(_nested_traj_df(), out)
     assert (tmp_path / "traj_1_SUCCESS.png").exists()
     assert (tmp_path / "traj_2_COLLISION.png").exists()
 
 
-def test_trajectory_seaborn_group_by_invalid_writes_single_file(tmp_path):
+def test_trajectory_static_group_by_invalid_writes_single_file(tmp_path):
     out = tmp_path / "traj.png"
     spec = _traj_spec(group_by=["bogus"])
-    TrajectoryRenderer(spec).render_seaborn(_flat_traj_df(), out)
+    TrajectoryRenderer(spec).render_static(_flat_traj_df(), out)
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_trajectory_seaborn_multi_agent_with_true_start_goal(tmp_path):
+def test_trajectory_static_multi_agent_with_true_start_goal(tmp_path):
     df = _nested_traj_df().with_columns(
         [
             pl.Series("start", [[0.0, 0.0], [0.5, 0.5], [0.0, 0.0]]),
@@ -753,21 +669,21 @@ def test_trajectory_seaborn_multi_agent_with_true_start_goal(tmp_path):
         ]
     )
     out = tmp_path / "traj.png"
-    TrajectoryRenderer(_traj_spec()).render_seaborn(df, out)
+    TrajectoryRenderer(_traj_spec()).render_static(df, out)
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_trajectory_seaborn_map_imshow(monkeypatch, tmp_path):
+def test_trajectory_static_map_imshow(monkeypatch, tmp_path):
     png = _tiny_png(tmp_path)
     monkeypatch.setattr(TrajectoryRenderer, "_load_map_image", lambda self, m, run_dir=None: _map_meta(png))
     df = _flat_traj_df().with_columns(pl.lit("map_empty").alias("map"))
     out = tmp_path / "traj.png"
     spec = PlotSpec(id="tr", type="trajectory", title="Paths", data_key="path", options={"show_map": True})
-    TrajectoryRenderer(spec).render_seaborn(df, out)
+    TrajectoryRenderer(spec).render_static(df, out)
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_trajectory_seaborn_map_imread_failure_warns(monkeypatch, tmp_path, capsys):
+def test_trajectory_static_map_imread_failure_warns(monkeypatch, tmp_path, capsys):
     bad_file = tmp_path / "bad.png"
     bad_file.write_text("not an image")
     meta = {"png_path": str(bad_file), "resolution": 0.1, "width": 8, "height": 8}
@@ -775,22 +691,22 @@ def test_trajectory_seaborn_map_imread_failure_warns(monkeypatch, tmp_path, caps
     df = _flat_traj_df().with_columns(pl.lit("map_empty").alias("map"))
     out = tmp_path / "traj.png"
     spec = PlotSpec(id="tr", type="trajectory", title="Paths", data_key="path", options={"show_map": True})
-    TrajectoryRenderer(spec).render_seaborn(df, out)
+    TrajectoryRenderer(spec).render_static(df, out)
     assert "Failed to overlay map" in capsys.readouterr().out
     assert out.exists()
 
 
-def test_trajectory_seaborn_gif_generated(tmp_path):
+def test_trajectory_static_gif_generated(tmp_path):
     renderer = TrajectoryRenderer(_traj_spec())
     renderer.generate_gifs = True
     out = tmp_path / "traj.png"
-    renderer.render_seaborn(_nested_traj_df(), out)
+    renderer.render_static(_nested_traj_df(), out)
     gif = out.with_suffix(".gif")
     assert gif.exists() and gif.stat().st_size > 0
     assert gif.read_bytes()[:6] == b"GIF89a"
 
 
-def test_trajectory_seaborn_gif_save_failure_warns(monkeypatch, tmp_path, capsys):
+def test_trajectory_static_gif_save_failure_warns(monkeypatch, tmp_path, capsys):
     class _FailingAnimation:
         def __init__(self, *args, **kwargs):
             pass
@@ -802,12 +718,12 @@ def test_trajectory_seaborn_gif_save_failure_warns(monkeypatch, tmp_path, capsys
     renderer = TrajectoryRenderer(_traj_spec())
     renderer.generate_gifs = True
     out = tmp_path / "traj.png"
-    renderer.render_seaborn(_nested_traj_df(), out)
+    renderer.render_static(_nested_traj_df(), out)
     assert "Failed to save GIF" in capsys.readouterr().out
     assert not out.with_suffix(".gif").exists()
 
 
-def test_trajectory_seaborn_no_lines_skips_gif(tmp_path):
+def test_trajectory_static_no_lines_skips_gif(tmp_path):
     df = pl.DataFrame(
         {"planner": ["dwb"], "path": [[]]},
         schema={"planner": pl.Utf8, "path": pl.List(pl.List(pl.Float64))},
@@ -815,22 +731,22 @@ def test_trajectory_seaborn_no_lines_skips_gif(tmp_path):
     renderer = TrajectoryRenderer(_traj_spec())
     renderer.generate_gifs = True
     out = tmp_path / "traj.png"
-    renderer.render_seaborn(df, out)
+    renderer.render_static(df, out)
     assert not out.with_suffix(".gif").exists()
 
 
-def test_trajectory_seaborn_skips_a_null_path(tmp_path):
+def test_trajectory_static_skips_a_null_path(tmp_path):
     df = pl.DataFrame(
         {"planner": ["dwb", "teb"], "path": [None, [[0.0, 0.0], [1.0, 1.0]]]},
         schema={"planner": pl.Utf8, "path": pl.List(pl.List(pl.Float64))},
     )
     out = tmp_path / "traj.png"
-    TrajectoryRenderer(_traj_spec()).render_seaborn(df, out)
+    TrajectoryRenderer(_traj_spec()).render_static(df, out)
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_trajectory_seaborn_empty_pdf_writes_nothing(tmp_path):
+def test_trajectory_static_empty_pdf_writes_nothing(tmp_path):
     out = tmp_path / "traj.png"
     spec = _traj_spec(filter={"planner": ["nobody"]})
-    TrajectoryRenderer(spec).render_seaborn(_flat_traj_df(), out)
+    TrajectoryRenderer(spec).render_static(_flat_traj_df(), out)
     assert not out.exists()

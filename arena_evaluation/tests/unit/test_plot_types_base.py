@@ -21,7 +21,7 @@ class _ConcreteRenderer(BasePlotRenderer):
     def render_plotly(self, df: pl.DataFrame) -> str | None:
         return "<div>concrete</div>"
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         out_path.write_bytes(b"png")
 
 

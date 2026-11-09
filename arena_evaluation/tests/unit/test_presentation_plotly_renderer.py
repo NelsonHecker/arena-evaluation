@@ -101,7 +101,7 @@ def test_render_trajectory_disables_gifs_and_sets_run_dir(monkeypatch, tmp_path)
     spec = _spec("trajectory")
     out = PlotlyRenderer().render(spec, _df(), run_dir=tmp_path)
     assert out == "<div>traj</div>"
-    assert seen["generate_gifs"] is False  # GIFs are seaborn-only
+    assert seen["generate_gifs"] is False  # GIFs are static-only
     assert seen["run_dir"] == tmp_path
     assert seen["units"] == {}
 

@@ -433,7 +433,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         html += '</div>'
         return html
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         work_df = self._prepared_df(df)
         if len(work_df) == 0:
             return
@@ -1210,7 +1210,7 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
 
     PLOT_TYPE = "acoustic_field_animation"
 
-    def render_seaborn(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
+    def render_static(self, df: pl.DataFrame, out_path: pathlib.Path) -> None:
         """Generate acoustic-field animations."""
         work_df = self._prepared_df(df)
         if len(work_df) == 0:
