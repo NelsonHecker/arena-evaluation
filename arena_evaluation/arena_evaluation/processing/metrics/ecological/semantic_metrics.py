@@ -62,14 +62,10 @@ class SemanticInteractionMetricsCalculator(BaseMetricCalculator):
         if len(events) == 0:
             return {"time_waiting_at_doors": 0.0, "elevator_rides": 0, "time_waiting_at_doors_robot": None, "elevator_rides_robot": None}
 
+        aligned = episode.data.collect() if isinstance(episode.data, pl.LazyFrame) else episode.data
         end_time_ns = None
-        if episode.data is not None and "time_ns" in episode.data.columns and len(episode.data) > 0:
-            end_time_ns = int(typing.cast("float", episode.data["time_ns"].max()))
-
-        if isinstance(episode.data, pl.LazyFrame):
-            episode.data = episode.data.collect()
-        if isinstance(episode.semantic_snapshot, pl.LazyFrame):
-            episode.semantic_snapshot = episode.semantic_snapshot.collect()
+        if aligned is not None and "time_ns" in aligned.columns and len(aligned) > 0:
+            end_time_ns = int(typing.cast("float", aligned["time_ns"].max()))
 
         identity = RobotIdentity(episode.robot_name) if episode.robot_name else None
         waiting = self._time_waiting_at_doors(events, end_time_ns)
