@@ -16,7 +16,6 @@ import polars as pl
 if typing.TYPE_CHECKING:
     import numpy as np
 
-    from arena_evaluation.processing.metrics.base import MetricScope
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import (
     AlignedEpisodeBundle,
@@ -291,6 +290,7 @@ from arena_evaluation.storage.manifest import MetadataWriter
 # Columns whose values are all-None (no kind in the recording) or all-empty
 # (no collisions) would otherwise infer as Null / List(Null) and clash with
 # an Int64 / List(String) run when frames from several runs are combined.
+from .metrics.base import MetricScope
 from .metrics.registry import MetricRegistry
 
 # EpisodeRecord.outcome_state -> (result, success)

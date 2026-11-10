@@ -898,8 +898,8 @@ def test_processing_pipeline_writes_episode_and_benchmark_star_schema(tmp_path: 
 
     fm = FolderManager(data_root=tmp_path)
     pipeline = ProcessingPipeline(fm, workers=1)
-    combined_path = pipeline.process_benchmark(bench_id)
-    assert combined_path is not None and combined_path.is_file()
+    bench_dir = pipeline.process_benchmark(bench_id)
+    assert bench_dir is not None and bench_dir.is_dir()
 
     # Check per-episode metrics dir has fact_*.parquet
     ep_metrics_dir = episode_dir / "metrics"
@@ -907,7 +907,6 @@ def test_processing_pipeline_writes_episode_and_benchmark_star_schema(tmp_path: 
         assert (ep_metrics_dir / f"{name}.parquet").is_file()
 
     # Check benchmark-level Star Schema tables
-    bench_dir = combined_path.parent
     scanned = scan_star_schema(bench_dir)
     dim_ep = scanned["dim_episodes"].collect()
     fact_ep = scanned["fact_episodes"].collect()

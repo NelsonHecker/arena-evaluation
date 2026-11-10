@@ -894,6 +894,7 @@ class ScopedEvaluator:
         # Without the recorded collision stream a zero would claim "no collision happened"; the
         # honest value is unknown, carried as null and explained by `null_reason`.
         collision_stream = _has_rows(_table(episode, COLLISION_EVENTS_TOPIC))
+        collision_known = collision_stream or bool(contact_rows)
         row: dict[str, object] = {
             "run_id": run_id,
             "episode_id": int(episode_id),
@@ -910,11 +911,11 @@ class ScopedEvaluator:
             "jerk_max_mps3": _float(metrics.get("jerk_max")),
             "min_obstacle_clearance_m": _float(metrics.get("min_obstacle_clearance")),
             "min_ped_clearance_m": _float(metrics.get("min_pedestrian_clearance")),
-            "total_collisions_ped": collisions_ped if collisions_ped is not None else (pedestrian_contacts if collision_stream else None),
+            "total_collisions_ped": collisions_ped if collisions_ped is not None else (pedestrian_contacts if collision_known else None),
             "total_collisions_static": (
                 (collisions_wall or 0) + (collisions_static or 0)
                 if collisions_wall is not None or collisions_static is not None
-                else (static_contacts if collision_stream else None)
+                else (static_contacts if collision_known else None)
             ),
             "success_no_robot_fault": None if success is None else bool(success) and robot_fault_contacts == 0,
             "mar": _float(metrics.get("mar")),
