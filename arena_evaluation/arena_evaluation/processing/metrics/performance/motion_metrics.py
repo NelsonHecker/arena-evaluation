@@ -154,6 +154,56 @@ def _speed_from_pose(x_m: np.ndarray, y_m: np.ndarray, time_ns: np.ndarray) -> n
     return speed
 
 
+def _smooth_position_kinematics(
+    time_ns: np.ndarray,
+    x_m: np.ndarray,
+    y_m: np.ndarray,
+) -> Kinematics | None:
+    """Savitzky-Golay kinematics of a position track on a uniform grid, None when the window does not fit.
+
+    Used where the recording has no speed stream: fitting the positions first keeps sample noise
+    out of the derived speed instead of amplifying it through finite differences.
+    """
+    unique = _unique_track(time_ns, x_m, y_m)
+    if unique is None:
+        return None
+    grid_time_ns, grid_x_m, grid_y_m = unique
+    step_s = max(
+        1.0 / KINEMATICS_GRID_HZ,
+        float(np.median(np.diff(grid_time_ns))) / NANOSECONDS_PER_SECOND,
+    )
+    step_ns = max(1, int(round(step_s * NANOSECONDS_PER_SECOND)))
+    grid = np.arange(grid_time_ns[0], grid_time_ns[-1] + 1, step_ns, dtype=np.int64)
+    if len(grid) < MIN_SMOOTHING_SAMPLES:
+        return None
+    sample_step_s = step_ns / NANOSECONDS_PER_SECOND
+    window = int(round(SMOOTHING_WINDOW_S / sample_step_s)) | 1
+    window = min(window, (len(grid) // 2) * 2 - 1)
+    if window < MIN_SMOOTHING_SAMPLES:
+        return None
+    grid_x = np.interp(grid, grid_time_ns, grid_x_m)
+    grid_y = np.interp(grid, grid_time_ns, grid_y_m)
+    velocity_x = savgol_filter(
+        grid_x, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
+    )
+    velocity_y = savgol_filter(
+        grid_y, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
+    )
+    speed_mps = np.hypot(velocity_x, velocity_y)
+    acceleration_mps2 = savgol_filter(
+        speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
+    )
+    jerk_mps3 = savgol_filter(
+        speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s
+    )
+    return Kinematics(
+        time_ns=grid,
+        speed_mps=speed_mps,
+        acceleration_mps2=acceleration_mps2,
+        jerk_mps3=jerk_mps3,
+    )
+
+
 def _smooth_speed_kinematics(
     time_ns: np.ndarray,
     speed_mps: np.ndarray,
@@ -247,10 +297,10 @@ def episode_kinematics(
     if unique is None:
         return _empty_kinematics()
     unique_time_ns, unique_x_m, unique_y_m = unique
-    derived_speed_mps = _speed_from_pose(unique_x_m, unique_y_m, unique_time_ns)
-    smoothed = _smooth_speed_kinematics(unique_time_ns, derived_speed_mps)
+    smoothed = _smooth_position_kinematics(unique_time_ns, unique_x_m, unique_y_m)
     if smoothed is not None:
         return smoothed
+    derived_speed_mps = _speed_from_pose(unique_x_m, unique_y_m, unique_time_ns)
     return _raw_kinematics(derived_speed_mps, unique_time_ns)
 
 
