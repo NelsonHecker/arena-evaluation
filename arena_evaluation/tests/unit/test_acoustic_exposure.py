@@ -455,6 +455,7 @@ def test_pedestrian_scope_reduces_to_that_pedestrian(calc, derived_map):
     expected_t_ns = int(near_rows.filter(pl.col("exposure_dba") == near_max).sort("t_ns")["t_ns"][0])
     assert near["worst_case_acoustic_t_ns"] == expected_t_ns
 
+
 def _pedestrian_scope_slice(episode: AlignedEpisodeBundle, ped_id: str) -> ScopeSlice:
     """A PEDESTRIAN slice whose window bundle carries only that pedestrian's track."""
     topics = dict(episode.topics or {})

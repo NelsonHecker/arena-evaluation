@@ -22,7 +22,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from arena_evaluation.processing.metrics import MetricRegistry, MetricScope, ScopeExecutionOutcome, ScopeSlice
+from arena_evaluation.processing.metrics import MetricRegistry, MetricScope, ScopeExecutionOutcome
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological import AcousticDoseCalculator, SurgeEnergyCalculator
 from arena_evaluation.processing.metrics.safety import ContactAttributionCalculator
@@ -46,8 +46,8 @@ from arena_evaluation.storage.declarations import (
     METRIC_DECLARATIONS,
     FactTable,
     MetricDeclaration,
-    declared_columns,
     declarations_for,
+    declared_columns,
 )
 from arena_evaluation.storage.exceptions import MetricInputError
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams

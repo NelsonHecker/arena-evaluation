@@ -475,10 +475,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             full_result = self._episode_result(scope_slice.full_episode, prior_results)
             ped_id = str(scope_slice.identity.get("ped_id") or scope_slice.slice_id)
             restricted = self._restrict_to_pedestrian(full_result, ped_id, self._door_names(scope_slice.full_episode, prior_results))
-            return {
-                key: restricted.scalars.get(key)
-                for key in self.output_keys_for_scope(MetricScope.PEDESTRIAN)
-            }
+            return {key: restricted.scalars.get(key) for key in self.output_keys_for_scope(MetricScope.PEDESTRIAN)}
         raise ValueError(f"acoustic_exposure does not serve the {scope_slice.scope.value} scope")
 
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
