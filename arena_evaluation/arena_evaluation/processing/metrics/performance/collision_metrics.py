@@ -9,7 +9,10 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
-from arena_evaluation.processing.path.theta_star import compute_theta_star_for_episode
+from arena_evaluation.processing.metrics.naturalness.trajectory import (
+    _route_geodesic_length,
+    _route_waypoints,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 logger = logging.getLogger(__name__)
@@ -203,7 +206,7 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         return int(inside.sum())
 
     def _episode_spl(self, episode: AlignedEpisodeBundle) -> float | None:
-        """The episode's success-weighted path length, reproduced from the full episode for a contact row."""
+        """The episode's success-weighted path length on the whole-mission route, reproduced for a contact row."""
         inputs = self._episode_spl_inputs(episode)
         if not self._episode_success(episode, inputs):
             return 0.0
@@ -261,26 +264,32 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
         return float(np.sum(np.linalg.norm(path_2d[1:] - path_2d[:-1], axis=1)))
 
     def _theta_star_length_m(self, episode: AlignedEpisodeBundle) -> float | None:
-        """trajectory_naturalness' theta* geodesic length, with its Euclidean fallback, in metres."""
+        """Whole-mission route geodesic from trajectory_naturalness, the shared SPL/path-efficiency reference."""
         start_point = self._episode_start_point_m(episode)
         goal = episode.goal_pos
         if start_point is None or not goal or len(goal) < 2:
             return None
         goal_point = (float(goal[0]), float(goal[1]))
         if episode.map:
-            try:
-                reference = compute_theta_star_for_episode(
-                    episode.map,
-                    start_point,
-                    goal_point,
-                    robot_radius=float(self.robot_params.robot_radius),
-                    run_dir=episode.run_dir,
+            pos_x, pos_y, _yaw, _time_ns = self.resolve_native_pose(episode)
+            if len(pos_x) == 0 and episode.data is not None and len(episode.data) > 0:
+                pos_x, pos_y, _yaw, _odom_x, _odom_y, _odom_yaw = self.resolve_robot_pose(episode)
+            if len(pos_x) > 0:
+                waypoints = _route_waypoints(
+                    start_pt=start_point,
+                    goal_pt=goal_point,
+                    phases=episode.phases,
+                    topics=episode.topics,
+                    track_x=pos_x,
+                    track_y=pos_y,
                 )
-            except (OSError, ValueError, RuntimeError, OverflowError) as error:
-                logger.info("theta* reference unavailable for episode %s: %r", episode.episode_id, error)
-            else:
-                if reference.success and len(reference.path_x) > 0:
-                    return float(reference.geodesic_length)
+                try:
+                    route_length = _route_geodesic_length(episode=episode, waypoints=waypoints, robot_radius=float(self.robot_params.robot_radius))
+                except (OSError, ValueError, RuntimeError, OverflowError) as error:
+                    logger.info("theta* mission route unavailable for episode %s: %r", episode.episode_id, error)
+                else:
+                    if route_length is not None:
+                        return route_length
         return float(np.sqrt((goal_point[0] - start_point[0]) ** 2 + (goal_point[1] - start_point[1]) ** 2))
 
     def _episode_start_point_m(self, episode: AlignedEpisodeBundle) -> tuple[float, float] | None:
