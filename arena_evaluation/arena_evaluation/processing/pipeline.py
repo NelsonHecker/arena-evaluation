@@ -199,9 +199,10 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
     if len(df) == 0 or "t_ns" not in df.columns:
         return None, None
-    df = df.sort("t_ns")
+    df = df.sort("t_ns", maintain_order=True)
     if "outcome_state" not in df.columns:
         return int(df["t_ns"][0]), int(df["t_ns"][-1])
+    df = _episode_rows(df)
     states = df["outcome_state"].to_list()
     stamps = df["t_ns"].to_list()
     start = next((int(t) for t, s in zip(stamps, states, strict=True) if s == _RECORD_RUNNING), None)
@@ -463,6 +464,11 @@ def _episode_rows(record: pl.DataFrame) -> pl.DataFrame:
     started = next((i for i, state in enumerate(states) if state == _RECORD_RUNNING), None)
     if started is None:
         return df
+    if "episode_id" in df.columns and df["episode_id"][started] is not None:
+        # the previous episode's latched result is not this episode's record
+        df = df.filter(pl.col("episode_id") == df["episode_id"][started])
+        states = df["outcome_state"].to_list()
+        started = states.index(_RECORD_RUNNING)
     end = next((i for i in range(started, len(states)) if states[i] is not None and states[i] >= _RECORD_SUCCESS), None)
     return df if end is None else df.head(end + 1)
 

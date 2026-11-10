@@ -14,7 +14,7 @@ def _bag_records() -> pl.DataFrame:
     """The previous episode's latched result, this episode's run and result, then the next episode's queued record."""
     return pl.DataFrame(
         {
-            "time_ns": [50, 100, 900, 950],
+            "t_ns": [50, 100, 900, 950],
             "episode_id": [22, 23, 23, 24],
             "outcome_state": [3, 1, 2, 0],
             "outcome_info": ["collision", "", "", ""],
@@ -36,7 +36,7 @@ def test_episode_window_spans_the_running_episode_only() -> None:
 def test_episode_window_keeps_its_end_on_equal_time_stamps() -> None:
     record = pl.DataFrame(
         {
-            "time_ns": [100, 100],
+            "t_ns": [100, 100],
             "episode_id": [23, 23],
             "outcome_state": [1, 2],
             "outcome_info": ["", ""],
@@ -57,4 +57,4 @@ def test_robot_phases_ignore_the_previous_episodes_latched_record() -> None:
 
 
 def test_record_integrity_ignores_the_next_episodes_queued_record() -> None:
-    assert _record_integrity(_bag_records(), None) == []
+    assert _record_integrity(_bag_records(), None, None) == []
