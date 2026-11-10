@@ -95,6 +95,10 @@ REFERENCE_MISSING: Final[str] = "reference_missing"
 ZERO_DENOMINATOR: Final[str] = "zero_denominator"
 TOPIC_MISSING: Final[str] = "topic_missing"
 
+# Registry provenance kinds that keep the legacy `field:no_samples` base reason; any other code
+# (e.g. `reference_exceeds_path`) replaces it as the field's distinct reason.
+_GENERIC_PROVENANCE_KINDS: Final[tuple[str, ...]] = (NO_SAMPLES, PEDSIM_UNAVAILABLE, TOPIC_MISSING, "exception")
+
 __all__ = [
     "COLLISION_FACT_SCHEMA",
     "CONTACT_FACT_SCHEMA",
@@ -204,9 +208,20 @@ def _int(value: object) -> int | None:
     return None if value is None else int(typing.cast(int, value))
 
 
-def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...]) -> str:
-    """``field:code`` provenance for every mapped field that stayed null."""
-    return ";".join(f"{field}:{NO_SAMPLES}" for field in nullable if row.get(field) is None)
+def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...], provenance: Mapping[str, str] | None = None) -> str:
+    """``field:code`` provenance for every mapped field that stayed null; a calculator code wins over no_samples."""
+    codes: list[str] = []
+    for field in nullable:
+        if row.get(field) is not None:
+            continue
+        override = (provenance or {}).get(field)
+        if isinstance(override, str) and override:
+            kind = override.partition(":")[2].partition(":")[0]
+            if kind not in _GENERIC_PROVENANCE_KINDS:
+                codes.append(override)
+                continue
+        codes.append(f"{field}:{NO_SAMPLES}")
+    return ";".join(codes)
 
 
 def _null_reason_expression(nullable: tuple[str, ...]) -> pl.Expr:
@@ -598,6 +613,7 @@ class ScopedEvaluator:
         run_id: str,
         episode_id: int,
         episode_metrics: Mapping[str, Any] | None = None,
+        episode_provenance: Mapping[str, str] | None = None,
     ) -> ScopedFactTables:
         """Evaluate one episode and return its five fact tables."""
         hierarchy = self.decompose_hierarchy(episode, run_id=run_id, episode_id=episode_id)
@@ -616,7 +632,7 @@ class ScopedEvaluator:
         encounter_rows = self._encounter_fact_rows(registry, materialized, hierarchy.encounters, contact_rows)
         pedestrians = self._pedestrian_fact_frame(registry, materialized, hierarchy.pedestrians, encounter_rows)
 
-        episode_provenance: dict[str, str] = {}
+        provenance: dict[str, str] = dict(episode_provenance or {})
         if episode_metrics is not None:
             metrics = dict(episode_metrics)
             if "total_acoustic_dose_pa2s" not in metrics or metrics["total_acoustic_dose_pa2s"] is None:
@@ -626,7 +642,7 @@ class ScopedEvaluator:
                     if dose_res.get("total_acoustic_dose_pa2s") is not None:
                         metrics["total_acoustic_dose_pa2s"] = dose_res["total_acoustic_dose_pa2s"]
                 elif not _has_rows(_table(materialized, ROBOT_ACOUSTICS_TOPIC)):
-                    episode_provenance["total_acoustic_dose_pa2s"] = f"total_acoustic_dose_pa2s:{TOPIC_MISSING}:{ROBOT_ACOUSTICS_TOPIC}"
+                    provenance["total_acoustic_dose_pa2s"] = f"total_acoustic_dose_pa2s:{TOPIC_MISSING}:{ROBOT_ACOUSTICS_TOPIC}"
         else:
             ep_outcome = registry.run_scope(
                 MetricScope.EPISODE,
@@ -636,7 +652,7 @@ class ScopedEvaluator:
                 scope_slice=episode_slice,
             )
             metrics = ep_outcome.results
-            episode_provenance = ep_outcome.provenance
+            provenance = dict(ep_outcome.provenance)
 
         episode_row = self._episode_fact_row(
             materialized,
@@ -645,9 +661,9 @@ class ScopedEvaluator:
             metrics,
             encounter_rows,
             contact_rows,
-            episode_provenance,
+            provenance,
         )
-        robots = self._robot_fact_frame(registry, hierarchy.robots[0], metrics, episode_provenance)
+        robots = self._robot_fact_frame(registry, hierarchy.robots[0], metrics, provenance)
         robot_id = self._robot_actor_id(materialized, _table(materialized, ROBOT_TRACKS_TOPIC))
         child_identity = {
             "run_id": run_id,
@@ -932,7 +948,7 @@ class ScopedEvaluator:
         provenance: Mapping[str, str],
     ) -> str:
         """Episode provenance: missing-field codes, missing trajectory/pedestrian stream topics, and calculator exceptions."""
-        reasons = [_row_null_reason(row, _EPISODE_NULLABLE)]
+        reasons = [_row_null_reason(row, _EPISODE_NULLABLE, provenance)]
         if not _has_rows(_table(episode, ROBOT_TRACKS_TOPIC)):
             reasons.append(f"{TOPIC_MISSING}:{ROBOT_TRACKS_TOPIC}")
         if not _has_rows(_table(episode, PEDESTRIAN_TRACKS_TOPIC)):
@@ -972,7 +988,7 @@ class ScopedEvaluator:
                 "fault_attributed_to": contact_res.get("fault_attributed_to", "unavoidable"),
             }
             row.update(_declared_fact_values(contact_res, FactTable.CONTACTS))
-            base_reason = _row_null_reason(row, _CONTACT_NULLABLE)
+            base_reason = _row_null_reason(row, _CONTACT_NULLABLE, outcome.provenance)
             row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
             rows.append(row)
         return rows
@@ -1157,7 +1173,7 @@ class ScopedEvaluator:
                 "round_trips_completed": int(ped_res.get("round_trips_completed") or 0),
             }
             row.update(_declared_fact_values(ped_res, FactTable.PEDESTRIANS))
-            base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE)
+            base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE, outcome.provenance)
             row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
             rows.append(row)
 
@@ -1221,7 +1237,7 @@ class ScopedEvaluator:
             "drivetrain_scrub_j": _float(robot_res.get("drivetrain_scrub_j")),
         }
         row.update(_declared_fact_values(robot_res, FactTable.ROBOTS))
-        base_reason = _row_null_reason(row, _ROBOT_NULLABLE)
+        base_reason = _row_null_reason(row, _ROBOT_NULLABLE, outcome.provenance)
         merged = _merge_provenance_reasons(base_reason, outcome.provenance, row)
         row["null_reason"] = _merge_provenance_reasons(merged, episode_provenance, row)
         return _frame([row], ROBOT_FACT_SCHEMA)

@@ -39,6 +39,7 @@ from arena_evaluation.processing.scoped_evaluator import (
     EpisodeScopeHierarchy,
     ScopedEvaluator,
     ScopedFactTables,
+    _row_null_reason,
     write_fact_tables,
 )
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, DetectorParams
@@ -444,8 +445,9 @@ def _evaluate(
     episode_metrics: Mapping[str, object] | None = None,
     metrics_config: Mapping[str, object] | None = None,
     detector_params: DetectorParams | None = None,
+    episode_provenance: Mapping[str, str] | None = None,
 ) -> ScopedFactTables:
-    """Evaluate one episode with the given metrics, config and detector parameters."""
+    """Evaluate one episode with the given metrics, config, detector parameters and provenance."""
     evaluator = ScopedEvaluator(
         _ROBOT_PARAMS,
         metrics_config=metrics_config,
@@ -456,6 +458,7 @@ def _evaluate(
         run_id=RUN_ID,
         episode_id=EPISODE_ID,
         episode_metrics=_COMPLETE_EPISODE_METRICS if episode_metrics is None else episode_metrics,
+        episode_provenance=episode_provenance,
     )
 
 
@@ -1373,3 +1376,19 @@ def test_child_fact_tables_are_empty_without_their_episode_lists(
         frame = tables.by_name()[name]
         assert frame.height == 0
         assert frame.schema == FACT_SCHEMAS[name]
+
+
+def test_row_null_reason_prefers_a_calculator_provenance_code():
+    row: dict[str, object] = {"path_efficiency": None}
+
+    assert _row_null_reason(row, ("path_efficiency",), {"path_efficiency": "path_efficiency:reference_exceeds_path"}) == "path_efficiency:reference_exceeds_path"
+    assert _row_null_reason(row, ("path_efficiency",)) == "path_efficiency:no_samples"
+
+
+def test_supplied_episode_provenance_survives_into_the_fact_row(episode: AlignedEpisodeBundle) -> None:
+    tables = _evaluate(episode, episode_metrics={}, episode_provenance={"path_efficiency": "path_efficiency:reference_exceeds_path"})
+
+    row = tables.episodes.row(0, named=True)
+
+    assert row["path_efficiency"] is None
+    assert "path_efficiency:reference_exceeds_path" in typing.cast(str, row["null_reason"])

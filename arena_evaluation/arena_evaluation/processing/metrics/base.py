@@ -15,6 +15,10 @@ if typing.TYPE_CHECKING:
 
 from ...storage.declarations import MetricScope, _coerce_scope
 
+# A calculator may return `<output>_null_reason` next to a null output; the registry turns that
+# companion string into the output's provenance code instead of the generic no_samples.
+NULL_REASON_SUFFIX: typing.Final[str] = "_null_reason"
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ScopeSlice:

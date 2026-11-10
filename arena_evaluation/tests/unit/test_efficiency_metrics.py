@@ -65,14 +65,6 @@ def test_missing_geodesic_reference_is_null_not_a_straight_line_fallback():
     assert results["path_efficiency"] is None
 
 
-def test_path_efficiency_reports_over_unity_without_clamping():
-    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[0.0, 0.0], goal_pos=[3.0, 4.0])
-
-    results = PathEfficiencyCalculator(_params()).calculate(episode, {"path_length": 4.0, "theta_star_length": 5.0})
-
-    assert results["path_efficiency"] == pytest.approx(1.25)
-
-
 def test_path_efficiency_is_null_for_a_non_positive_path_length():
     episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[0.0, 0.0], goal_pos=[3.0, 4.0])
 
@@ -118,3 +110,12 @@ def test_closed_loop_without_a_recorded_route_has_no_geodesic_reference():
 
     assert trajectory["theta_star_length"] is None
     assert efficiency["path_efficiency"] is None
+
+
+def test_reference_longer_than_the_travelled_path_is_null_with_a_distinct_reason():
+    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[0.0, 0.0], goal_pos=[3.0, 4.0])
+
+    results = PathEfficiencyCalculator(_params()).calculate(episode, {"path_length": 10.0, "theta_star_length": 11.0})
+
+    assert results["path_efficiency"] is None
+    assert results["path_efficiency_null_reason"] == "reference_exceeds_path"

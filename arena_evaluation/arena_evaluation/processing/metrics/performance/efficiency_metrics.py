@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import typing
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
+from arena_evaluation.processing.metrics.base import NULL_REASON_SUFFIX, BaseMetricCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -20,8 +20,17 @@ def _finite_positive(value: object) -> float | None:
     return number
 
 
+_REFERENCE_EXCEEDS_PATH: typing.Final[str] = "reference_exceeds_path"
+
+
 class PathEfficiencyCalculator(BaseMetricCalculator):
-    """Ratio of the Theta* mission-route geodesic length to the travelled path length."""
+    """Whole-mission route geodesic over travelled path length.
+
+    The reference is the mission route through every task goal the robot reached, not just the
+    current start -> goal leg. A null result carries its reason: ``no_samples`` when the reference
+    or the path is unavailable, ``reference_exceeds_path`` when the travelled path is shorter than
+    the route (physically impossible, a data anomaly rather than an efficiency above one).
+    """
 
     NAME = "path_efficiency"
     CATEGORY = "performance"
@@ -45,6 +54,8 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
         reference_length = _finite_positive(prior_results.get("theta_star_length"))
         if path_length is None or reference_length is None:
             return {"path_efficiency": None}
+        if reference_length > path_length:
+            return {"path_efficiency": None, f"path_efficiency{NULL_REASON_SUFFIX}": _REFERENCE_EXCEEDS_PATH}
         efficiency = reference_length / path_length
         if not math.isfinite(efficiency):
             return {"path_efficiency": None}

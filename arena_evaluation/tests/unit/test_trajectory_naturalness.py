@@ -7,6 +7,8 @@ import pytest
 from arena_evaluation.processing.metrics.naturalness.trajectory import (
     TrajectoryMetricsCalculator,
     _discrete_frechet,
+    _planned_waypoints,
+    _reached_waypoints,
 )
 from arena_evaluation.processing.path import theta_star
 from arena_evaluation.processing.path.theta_star import GeometricThetaStar
@@ -227,3 +229,38 @@ def test_unreached_first_leg_falls_back_to_the_commanded_mission_target():
     res = _calc().calculate(_episode(gt, [4.0, 0.0], map_name=OPEN_ROOM, plans=plans), {})
 
     assert res["theta_star_length"] == pytest.approx(4.0)
+
+
+def _plans(xs: list[float]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "t_ns": [SEC * (index + 1) for index in range(len(xs))],
+            "plan_id": [f"plan_{index}" for index in range(len(xs))],
+            "waypoint_idx": [0] * len(xs),
+            "x": [float(value) for value in xs],
+            "y": [0.0] * len(xs),
+            "yaw": [0.0] * len(xs),
+        }
+    )
+
+
+def test_planned_waypoints_merge_goals_closer_than_the_quarter_metre_tolerance():
+    assert _planned_waypoints({"robot_plans": _plans([3.0, 3.2])}) == ((3.0, 0.0),)
+
+
+def test_planned_waypoints_keep_goals_more_than_the_quarter_metre_apart():
+    assert _planned_waypoints({"robot_plans": _plans([3.0, 4.2])}) == ((3.0, 0.0), (4.2, 0.0))
+
+
+def test_reached_waypoints_count_a_ninety_centimetre_pass():
+    track_x = np.array([0.0, 0.0])
+    track_y = np.array([0.0, 0.0])
+
+    assert _reached_waypoints(track_x=track_x, track_y=track_y, waypoints=((0.0, 0.9),)) == ((0.0, 0.9),)
+
+
+def test_reached_waypoints_reject_a_one_point_one_metre_pass():
+    track_x = np.array([0.0, 0.0])
+    track_y = np.array([0.0, 0.0])
+
+    assert _reached_waypoints(track_x=track_x, track_y=track_y, waypoints=((0.0, 1.1),)) == ()
