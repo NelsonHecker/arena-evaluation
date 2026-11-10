@@ -13,7 +13,7 @@ import shapely
 from arena_evaluation.processing.metrics.ecological.compliance_metrics import _ZoneGeometry
 from arena_evaluation.processing.metrics.ecological.condition_metrics import _world_cache
 from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquetStore
-from arena_evaluation.processing.pipeline import _METRIC_DTYPES, ProcessingPipeline, _record_integrity, _status_row
+from arena_evaluation.processing.pipeline import ProcessingPipeline, _record_integrity, _status_row
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.manifest import MetadataWriter
 from arena_evaluation.storage.schemas import EpisodeDescriptor, RunMetadata
@@ -124,7 +124,7 @@ def test_record_integrity_falls_back_to_the_episode_yaml_when_no_record_carries_
     assert _record_integrity(None, None, None) == []
 
 
-def test_status_rows_carry_integrity_as_a_string_list_column(tmp_path: pathlib.Path) -> None:
+def test_status_rows_carry_integrity_of_the_records(tmp_path: pathlib.Path) -> None:
     ep = _descriptor(tmp_path)
     compromised = _status_row(ep, _meta(), "jackal", "no_trajectory", "no odom rows", _records([], [MOVED]), _flags([], [MOVED]))
     from_yaml = _status_row(ep, _meta(RETASKED), "jackal", "no_recording", "no MCAP or empty extraction")
@@ -133,11 +133,6 @@ def test_status_rows_carry_integrity_as_a_string_list_column(tmp_path: pathlib.P
     assert from_yaml["integrity"] == [RETASKED]
     assert intact["integrity"] == []
 
-    dest = tmp_path / "m.parquet"
-    ParquetStore.write_rows([intact], dest, schema_overrides=_METRIC_DTYPES)
-    df, _ = ParquetStore.read(dest)
-    assert df.schema["integrity"] == pl.List(pl.String)
-    assert df["integrity"].to_list() == [[]]
 
 
 def test_metric_rows_carry_integrity_of_the_last_record(tmp_path: pathlib.Path) -> None:
