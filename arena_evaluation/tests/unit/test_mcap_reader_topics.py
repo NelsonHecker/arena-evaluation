@@ -305,7 +305,7 @@ def test_arena_peds_win_over_engine_agent_states(every_topic: tuple[pathlib.Path
     out, bundles = every_topic
 
     peds = bundles["env_0_jackal"].pedestrian_tracks.collect()
-    physics = pl.read_parquet(out / "pedestrian_tracks_physics.parquet")
+    physics = pl.read_parquet(out / "pedestrians.parquet")
     assert peds.select("t_ns", "env_id", "ped_id", "ped_name", "x", "y", "yaw", "vx", "vy").to_dicts() == [
         {"t_ns": 2 * SEC, "env_id": "env_0", "ped_id": "Pedestrian_0", "ped_name": "alice", "x": 3.0, "y": 4.0, "yaw": pytest.approx(math.pi / 2), "vx": 0.3, "vy": -0.1},
     ]
@@ -349,7 +349,7 @@ def test_episode_record_of_an_older_schema_has_no_phases_or_params(every_topic: 
     assert record["phases_yaml"] == ""
     assert record["params_yaml"] == ""
     assert record["outcome_info"] == "old"
-    physics = pl.read_parquet(out / "pedestrian_tracks_physics.parquet").filter(pl.col("env_id") == "env_1")
+    physics = pl.read_parquet(out / "pedestrians.parquet").filter(pl.col("env_id") == "env_1")
     assert physics.select("x", "y").row(0) == (1.0, 2.0)
 
 

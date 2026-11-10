@@ -117,13 +117,13 @@ def topics(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def test_arena_peds_and_agent_states_land_in_separate_tables(topics: pathlib.Path) -> None:
-    peds = _table(topics, "pedestrian_tracks")
+    peds = _table(topics, "arena_peds")
     assert peds.height == 4
     assert peds.filter(pl.col("ped_id") == "Pedestrian_1")["x"].to_list() == [8.0, 8.5]
     assert peds["interaction_id"].to_list() == [4, -1, 4, -1]
     assert peds["interaction_type"].to_list() == [10, 0, 10, 0]
     assert peds["animation_state"].to_list() == [0, 1, 0, 1]
-    physics = _table(topics, "pedestrian_tracks_physics")
+    physics = _table(topics, "pedestrians")
     assert physics["ped_id"].to_list() == ["Pedestrian_1"]
     assert physics["x"].to_list() == [100.0]
 

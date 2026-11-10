@@ -30,8 +30,8 @@ def test_pedestrian_ids_and_names_survive_an_empty_first_frame(tmp_path: pathlib
 
     MCAPReader(bag).read(tmp_path / "raw")
 
-    path = tmp_path / "raw" / "pedestrian_tracks.parquet"
-    assert pq.read_schema(path).equals(TABLE_SCHEMAS["pedestrian_tracks"], check_metadata=False)
+    path = tmp_path / "raw" / "arena_peds.parquet"
+    assert pq.read_schema(path).equals(TABLE_SCHEMAS["arena_peds"], check_metadata=False)
     assert pl.read_parquet(path).select("t_ns", "ped_id", "ped_name", "x", "y").rows() == [
         (2, "Pedestrian_1", "env_0/Pedestrian_1", 1.0, 2.0),
         (2, "Pedestrian_2", "env_0/Pedestrian_2", 3.0, 4.0),
