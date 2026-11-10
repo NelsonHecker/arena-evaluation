@@ -1,0 +1,17 @@
+name: fleetbench_flow3
+contestants:
+- name: dwb
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+    params_overlay: social_cost_layer
+- name: mppi
+  mobile:
+    driver: nav2
+    local_planner: mppi
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+    params_overlay: social_cost_layer
+- name: attngraph
+  mobile: drl
+  mobile.planner: attngraph

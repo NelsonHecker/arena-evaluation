@@ -1,0 +1,54 @@
+name: fleetbench_crowd_flow
+launch:
+  sim: gazebo
+  headless: true
+  lockstep: true
+  lockstep.paused: false
+metrics:
+  max_collisions: 1
+stages:
+- name: flow_same
+  map: fleetbench_concourse
+  robot: jackal
+  episodes: 5
+  seed: 424200
+  timeout: 150s
+  modes: {robots: scenario, obstacles: scenario}
+  config:
+    scenario: {file: same_flow}
+- name: flow_counter
+  map: fleetbench_concourse
+  robot: jackal
+  episodes: 5
+  seed: 424200
+  timeout: 150s
+  modes: {robots: scenario, obstacles: scenario}
+  config:
+    scenario: {file: counter_flow}
+- name: flow_cross
+  map: fleetbench_concourse
+  robot: jackal
+  episodes: 5
+  seed: 424200
+  timeout: 150s
+  modes: {robots: scenario, obstacles: scenario}
+  config:
+    scenario: {file: cross_flow}
+- name: flow_merge
+  map: fleetbench_concourse
+  robot: jackal
+  episodes: 5
+  seed: 424200
+  timeout: 150s
+  modes: {robots: scenario, obstacles: scenario}
+  config:
+    scenario: {file: merge_flow}
+- name: flow_mixed
+  map: fleetbench_concourse
+  robot: jackal
+  episodes: 5
+  seed: 424200
+  timeout: 150s
+  modes: {robots: scenario, obstacles: scenario}
+  config:
+    scenario: {file: mixed_flow}
