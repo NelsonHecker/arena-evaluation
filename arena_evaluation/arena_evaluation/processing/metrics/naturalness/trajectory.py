@@ -20,9 +20,9 @@ from arena_evaluation.processing.path.theta_star import (
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 _TWO_PI: typing.Final[float] = 2.0 * np.pi
-# Two consecutive mission waypoints closer than this are one waypoint (replans to the same pose).
+# Waypoints closer than 0.25 m are the same goal: below the planner's 0.5 m arrival tolerance.
 _ROUTE_WAYPOINT_TOLERANCE_M: typing.Final[float] = 0.25
-# A commanded goal counts as visited when the ground-truth track comes this close to it.
+# A goal is visited when the ground-truth track comes within 1 m: planner arrival tolerance plus pose noise.
 _REACHED_WAYPOINT_TOLERANCE_M: typing.Final[float] = 1.0
 
 
@@ -207,6 +207,14 @@ def _route_geodesic_length(
 
 
 class TrajectoryMetricsCalculator(BaseMetricCalculator):
+    """Whole-mission route reference plus current-leg tracking errors.
+
+    ``theta_star_length`` is the whole-mission route geodesic: the sum of per-leg Theta* lengths
+    between the task goals the robot actually reached. ``path_efficiency`` divides it by the
+    travelled length. ``ade``/``fde``/``mhd``/``frechet_distance``/``adtw`` are tracking errors
+    against the current-leg start -> goal Theta* reference and deliberately stay single-leg.
+    """
+
     NAME = "trajectory_naturalness"
     CATEGORY = "naturalness"
     REQUIRES_PEDSIM = False

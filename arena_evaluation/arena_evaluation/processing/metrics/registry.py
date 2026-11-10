@@ -12,6 +12,7 @@ from collections.abc import Mapping
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import (
+    NULL_REASON_SUFFIX,
     BaseMetricCalculator,
     MetricScope,
     ScopeExecutionOutcome,
@@ -269,19 +270,24 @@ class MetricRegistry:
                         pass
 
                 try:
-                    calc_out = calc.calculate_for_scope(slice_episode, dict(results), scope_slice)
+                    calc_out = dict(calc.calculate_for_scope(slice_episode, dict(results), scope_slice))
                     expected_keys = set(scope_keys)
                     actual_keys = set(calc_out.keys())
                     if not expected_keys.issubset(actual_keys):
                         missing = expected_keys - actual_keys
                         raise ValueError(f"Calculator {calc_name} missing output keys: {missing}")
 
+                    null_reasons: dict[str, str] = {}
+                    for key in scope_keys:
+                        companion = calc_out.pop(f"{key}{NULL_REASON_SUFFIX}", None)
+                        if isinstance(companion, str) and companion:
+                            null_reasons[key] = companion
                     results.update(calc_out)
                     for key in scope_keys:
                         if calc_out.get(key) is not None:
                             provenance.pop(key, None)
                         elif key not in provenance:
-                            provenance[key] = f"{key}:no_samples"
+                            provenance[key] = f"{key}:{null_reasons.get(key, 'no_samples')}"
 
                 except MetricInputError:
                     raise

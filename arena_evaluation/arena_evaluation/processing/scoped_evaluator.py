@@ -204,9 +204,15 @@ def _int(value: object) -> int | None:
     return None if value is None else int(typing.cast(int, value))
 
 
-def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...]) -> str:
-    """``field:code`` provenance for every mapped field that stayed null."""
-    return ";".join(f"{field}:{NO_SAMPLES}" for field in nullable if row.get(field) is None)
+def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...], provenance: Mapping[str, str] | None = None) -> str:
+    """``field:code`` provenance for every mapped field that stayed null; a calculator code wins over no_samples."""
+    codes: list[str] = []
+    for field in nullable:
+        if row.get(field) is not None:
+            continue
+        override = (provenance or {}).get(field)
+        codes.append(override if isinstance(override, str) and override else f"{field}:{NO_SAMPLES}")
+    return ";".join(codes)
 
 
 def _null_reason_expression(nullable: tuple[str, ...]) -> pl.Expr:
@@ -932,7 +938,7 @@ class ScopedEvaluator:
         provenance: Mapping[str, str],
     ) -> str:
         """Episode provenance: missing-field codes, missing trajectory/pedestrian stream topics, and calculator exceptions."""
-        reasons = [_row_null_reason(row, _EPISODE_NULLABLE)]
+        reasons = [_row_null_reason(row, _EPISODE_NULLABLE, provenance)]
         if not _has_rows(_table(episode, ROBOT_TRACKS_TOPIC)):
             reasons.append(f"{TOPIC_MISSING}:{ROBOT_TRACKS_TOPIC}")
         if not _has_rows(_table(episode, PEDESTRIAN_TRACKS_TOPIC)):
@@ -972,7 +978,7 @@ class ScopedEvaluator:
                 "fault_attributed_to": contact_res.get("fault_attributed_to", "unavoidable"),
             }
             row.update(_declared_fact_values(contact_res, FactTable.CONTACTS))
-            base_reason = _row_null_reason(row, _CONTACT_NULLABLE)
+            base_reason = _row_null_reason(row, _CONTACT_NULLABLE, outcome.provenance)
             row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
             rows.append(row)
         return rows
@@ -1157,7 +1163,7 @@ class ScopedEvaluator:
                 "round_trips_completed": int(ped_res.get("round_trips_completed") or 0),
             }
             row.update(_declared_fact_values(ped_res, FactTable.PEDESTRIANS))
-            base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE)
+            base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE, outcome.provenance)
             row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
             rows.append(row)
 
@@ -1221,7 +1227,7 @@ class ScopedEvaluator:
             "drivetrain_scrub_j": _float(robot_res.get("drivetrain_scrub_j")),
         }
         row.update(_declared_fact_values(robot_res, FactTable.ROBOTS))
-        base_reason = _row_null_reason(row, _ROBOT_NULLABLE)
+        base_reason = _row_null_reason(row, _ROBOT_NULLABLE, outcome.provenance)
         merged = _merge_provenance_reasons(base_reason, outcome.provenance, row)
         row["null_reason"] = _merge_provenance_reasons(merged, episode_provenance, row)
         return _frame([row], ROBOT_FACT_SCHEMA)

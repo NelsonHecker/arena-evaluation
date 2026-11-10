@@ -39,6 +39,7 @@ from arena_evaluation.processing.scoped_evaluator import (
     EpisodeScopeHierarchy,
     ScopedEvaluator,
     ScopedFactTables,
+    _row_null_reason,
     write_fact_tables,
 )
 from arena_evaluation.processing.windows import DEFAULT_DETECTOR_PARAMS, DetectorParams
@@ -1329,3 +1330,10 @@ def test_child_fact_tables_are_empty_without_their_episode_lists(
         frame = tables.by_name()[name]
         assert frame.height == 0
         assert frame.schema == FACT_SCHEMAS[name]
+
+
+def test_row_null_reason_prefers_a_calculator_provenance_code():
+    row: dict[str, object] = {"path_efficiency": None}
+
+    assert _row_null_reason(row, ("path_efficiency",), {"path_efficiency": "path_efficiency:reference_exceeds_path"}) == "path_efficiency:reference_exceeds_path"
+    assert _row_null_reason(row, ("path_efficiency",)) == "path_efficiency:no_samples"

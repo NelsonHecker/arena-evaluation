@@ -1,8 +1,10 @@
+import polars as pl
 import pytest
-from arena_evaluation.storage.schemas import RobotParams
+
+from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope
 from arena_evaluation.processing.metrics.registry import MetricRegistry
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.storage.exceptions import CircularDependencyError
+from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 
 # Mock calculators for testing topological sort
@@ -64,3 +66,32 @@ def test_registry_ordering(monkeypatch):
 
     stages = registry.execution_order()
     assert stages == [["calc1"], ["calc2"], ["calc3"]]
+
+
+class CustomNullReasonCalc(BaseMetricCalculator):
+    NAME = "custom_null_reason"
+    DEPENDS_ON = []
+
+    @classmethod
+    def output_keys(cls):
+        return ["custom_null"]
+
+    def calculate(self, ep, prior):
+        return {"custom_null": None, "custom_null_null_reason": "custom_reason"}
+
+
+def test_registry_uses_a_calculators_companion_null_reason(monkeypatch):
+    monkeypatch.setattr(MetricRegistry, "discover_calculators_cls", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        MetricRegistry,
+        "_register_calculators",
+        lambda self: setattr(self, "calculators", {"custom_null_reason": CustomNullReasonCalc(self.robot_params)}),
+    )
+    registry = MetricRegistry(RobotParams(robot_radius=0.25))
+    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[])
+
+    outcome = registry.run_scope(MetricScope.EPISODE, episode, available_topics=set(), pedsim_available=True)
+
+    assert outcome.results["custom_null"] is None
+    assert "custom_null_null_reason" not in outcome.results
+    assert outcome.provenance["custom_null"] == "custom_null:custom_reason"
