@@ -154,50 +154,43 @@ def _speed_from_pose(x_m: np.ndarray, y_m: np.ndarray, time_ns: np.ndarray) -> n
     return speed
 
 
-def _smooth_kinematics(
+def _smooth_speed_kinematics(
     time_ns: np.ndarray,
-    x_m: np.ndarray,
-    y_m: np.ndarray,
-    window_s: float = SMOOTHING_WINDOW_S,
+    speed_mps: np.ndarray,
 ) -> Kinematics | None:
-    """Savitzky-Golay kinematics of a position track on a uniform grid, None when the window does not fit."""
-    unique = _unique_track(time_ns, x_m, y_m)
-    if unique is None:
+    """Savitzky-Golay derivatives of the recorded speed on a uniform grid, None when the window does not fit."""
+    order = np.argsort(time_ns, kind="stable")
+    time_sorted = time_ns[order]
+    speed_sorted = speed_mps[order]
+    keep = np.concatenate(([True], np.diff(time_sorted) > 0)) & np.isfinite(speed_sorted)
+    time_sorted, speed_sorted = time_sorted[keep], speed_sorted[keep]
+    if len(time_sorted) < 2:
         return None
-    grid_time_ns, grid_x_m, grid_y_m = unique
     # Never interpolate finer than the recorded samples: a coarser recording keeps its own step,
     # a finer one is thinned to the declared grid rate.
     step_s = max(
         1.0 / KINEMATICS_GRID_HZ,
-        float(np.median(np.diff(grid_time_ns))) / NANOSECONDS_PER_SECOND,
+        float(np.median(np.diff(time_sorted))) / NANOSECONDS_PER_SECOND,
     )
     step_ns = max(1, int(round(step_s * NANOSECONDS_PER_SECOND)))
-    grid = np.arange(grid_time_ns[0], grid_time_ns[-1] + 1, step_ns, dtype=np.int64)
+    grid = np.arange(time_sorted[0], time_sorted[-1] + 1, step_ns, dtype=np.int64)
     if len(grid) < MIN_SMOOTHING_SAMPLES:
         return None
     sample_step_s = step_ns / NANOSECONDS_PER_SECOND
-    window = int(round(window_s / sample_step_s)) | 1
+    window = int(round(SMOOTHING_WINDOW_S / sample_step_s)) | 1
     window = min(window, (len(grid) // 2) * 2 - 1)
     if window < MIN_SMOOTHING_SAMPLES:
         return None
-    grid_x = np.interp(grid, grid_time_ns, grid_x_m)
-    grid_y = np.interp(grid, grid_time_ns, grid_y_m)
-    velocity_x = savgol_filter(
-        grid_x, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
-    )
-    velocity_y = savgol_filter(
-        grid_y, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
-    )
-    speed_mps = np.hypot(velocity_x, velocity_y)
+    grid_speed_mps = np.interp(grid, time_sorted, speed_sorted)
     acceleration_mps2 = savgol_filter(
-        speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
+        grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
     )
     jerk_mps3 = savgol_filter(
-        speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s
+        grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s
     )
     return Kinematics(
         time_ns=grid,
-        speed_mps=speed_mps,
+        speed_mps=grid_speed_mps,
         acceleration_mps2=acceleration_mps2,
         jerk_mps3=jerk_mps3,
     )
@@ -234,22 +227,31 @@ def episode_speed_mps(
 def episode_kinematics(
     calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle
 ) -> Kinematics:
-    """Speed, acceleration and jerk of the scope view, from the smoothed ground-truth track when it has one."""
-    track = _pose_track(calculator, episode)
-    if track is not None:
-        smoothed = _smooth_kinematics(*track)
-        if smoothed is not None:
-            return smoothed
-        unique = _unique_track(*track)
-        if unique is not None:
-            unique_time_ns, unique_x_m, unique_y_m = unique
-            return _raw_kinematics(
-                _speed_from_pose(unique_x_m, unique_y_m, unique_time_ns), unique_time_ns
-            )
+    """Speed, acceleration and jerk of the scope view, smoothed over the declared window when it fits.
+
+    The recorded ground-truth speed stream is the signal (the same stream the metric always
+    reported); an episode without it derives the speed from the ground-truth pose track.
+    """
     speed_mps, time_ns = episode_speed_mps(calculator, episode)
-    if len(speed_mps) == 0:
+    if len(speed_mps) > 0:
+        if len(speed_mps) > 1:
+            smoothed = _smooth_speed_kinematics(time_ns, speed_mps)
+            if smoothed is not None:
+                return smoothed
+        return _raw_kinematics(speed_mps, time_ns)
+
+    track = _pose_track(calculator, episode)
+    if track is None:
         return _empty_kinematics()
-    return _raw_kinematics(speed_mps, time_ns)
+    unique = _unique_track(*track)
+    if unique is None:
+        return _empty_kinematics()
+    unique_time_ns, unique_x_m, unique_y_m = unique
+    derived_speed_mps = _speed_from_pose(unique_x_m, unique_y_m, unique_time_ns)
+    smoothed = _smooth_speed_kinematics(unique_time_ns, derived_speed_mps)
+    if smoothed is not None:
+        return smoothed
+    return _raw_kinematics(derived_speed_mps, unique_time_ns)
 
 
 def _summarize(kinematics: Kinematics) -> dict[str, float | None]:
