@@ -330,7 +330,13 @@ def _robot_bundle(tables: _Tables, env_id: str, robot_id: str) -> TopicBundle:
     physics = _first_present(pedestrians, legacy_physics)
     # arena_peds shares the robot-track frame; the engine table is offset by the env anchor and would
     # place every pedestrian a full map offset away from the robot, so encounter detection finds nothing.
-    frames["pedestrian_tracks"] = _first_present(arena_peds, physics, legacy_tracks)
+    # Provenance per column: poses and velocities stay arena_peds, while the static agent attributes
+    # (policy, desired_speed, radius_m, agent_type) are joined from the engine pedestrians table by
+    # pedestrian id. Its anchor-offset poses are never used for map-frame geometry.
+    tracks = _first_present(arena_peds, physics, legacy_tracks)
+    if arena_peds is not None and physics is not None:
+        tracks = _with_engine_pedestrian_metadata(tracks, physics)
+    frames["pedestrian_tracks"] = tracks
     frames["pedestrian_tracks_physics"] = physics
     return TopicBundle(**tables.global_frames, **frames)
 
@@ -426,3 +432,25 @@ def _whole_table(out_dir: pathlib.Path, name: str) -> pl.LazyFrame | None:
 
 def _first_present(*frames: pl.LazyFrame | None) -> pl.LazyFrame | None:
     return next((frame for frame in frames if frame is not None), None)
+
+
+_PEDESTRIAN_METADATA_COLUMNS: tuple[str, ...] = ("policy", "desired_speed", "radius_m", "agent_type")
+
+
+def _with_engine_pedestrian_metadata(tracks: pl.LazyFrame, engine: pl.LazyFrame) -> pl.LazyFrame:
+    """Attach the engine's static pedestrian attributes to the arena frame, one value per pedestrian id.
+
+    The arena table carries the map-frame poses but its attribute columns are empty; the engine table
+    carries the attributes but its poses are offset by the environment anchor. Only the attribute
+    columns are taken from the engine table, keyed by ``ped_id``; every pose and velocity column
+    stays arena_peds.
+    """
+    track_columns = set(tracks.collect_schema().names())
+    engine_columns = set(engine.collect_schema().names())
+    available = [column for column in _PEDESTRIAN_METADATA_COLUMNS if column in engine_columns]
+    if not available:
+        return tracks
+    metadata = engine.select("ped_id", *available).filter(pl.any_horizontal([pl.col(column).is_not_null() for column in available])).group_by("ped_id").agg([pl.col(column).drop_nulls().first().alias(column) for column in available])
+    joined = tracks.join(metadata.rename({column: f"_engine_{column}" for column in available}), on="ped_id", how="left")
+    expressions = [pl.coalesce(pl.col(column), pl.col(f"_engine_{column}")).alias(column) if column in track_columns else pl.col(f"_engine_{column}").alias(column) for column in available]
+    return joined.with_columns(expressions).drop([f"_engine_{column}" for column in available])
