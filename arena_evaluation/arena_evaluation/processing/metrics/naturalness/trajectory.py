@@ -125,7 +125,7 @@ def _planned_waypoints(topics: typing.Mapping[str, pl.DataFrame] | None) -> tupl
         .sort("t_ns")
     )
     waypoints: list[tuple[float, float]] = []
-    for raw_x, raw_y in zip(last_per_plan["x"].to_numpy(), last_per_plan["y"].to_numpy()):
+    for raw_x, raw_y in zip(last_per_plan["x"].to_numpy(), last_per_plan["y"].to_numpy(), strict=True):
         point = (float(raw_x), float(raw_y))
         if not (math.isfinite(point[0]) and math.isfinite(point[1])):
             continue
