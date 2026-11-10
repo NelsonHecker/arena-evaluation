@@ -20,7 +20,6 @@ from arena_evaluation.storage.schemas import EpisodeDescriptor
 
 UNHINDERED_PEDS: Final[str] = "unhindered_peds"
 UNOBSTRUCTED_ROBOT: Final[str] = "unobstructed_robot"
-PEDESTRIAN_TRACKS_TOPIC: Final[str] = "pedestrian_tracks"
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -68,25 +67,37 @@ def build_twin_index(episodes: Sequence[EpisodeDescriptor]) -> TwinIndex:
     )
 
 
-def episode_topic_path(episode: EpisodeDescriptor, topic: str) -> pathlib.Path:
-    """Extracted flat-table path of one topic inside an episode directory."""
-    return pathlib.Path(episode.episode_dir) / "topics" / f"{topic}.parquet"
+_PEDESTRIAN_TRACKS_CACHE: dict[str, pl.DataFrame | None] = {}
 
 
 def read_pedestrian_tracks(episode: EpisodeDescriptor | None) -> pl.DataFrame | None:
     """Flat pedestrian rows of a robot-free twin recording, None when it has not been extracted."""
     if episode is None:
         return None
-    path = episode_topic_path(episode, PEDESTRIAN_TRACKS_TOPIC)
-    if not path.is_file():
-        return None
-    return pl.read_parquet(path)
+    return read_pedestrian_tracks_from_dir(pathlib.Path(episode.episode_dir))
+
 
 def read_pedestrian_tracks_from_dir(episode_dir: pathlib.Path | None) -> pl.DataFrame | None:
-    """Flat pedestrian rows of a robot-free twin episode directory, None when it has not been extracted."""
+    """Flat pedestrian rows of a robot-free twin episode directory, None when it was never extracted.
+
+    The recording's topics are read through the canonical topic bundle (the same tables the
+    evaluation consumes) and cached per extraction directory, so a stage's twin is read once
+    per worker process instead of once per episode.
+    """
     if episode_dir is None:
         return None
-    path = episode_dir / "topics" / f"{PEDESTRIAN_TRACKS_TOPIC}.parquet"
-    if not path.is_file():
-        return None
-    return pl.read_parquet(path)
+    key = str(episode_dir)
+    if key in _PEDESTRIAN_TRACKS_CACHE:
+        return _PEDESTRIAN_TRACKS_CACHE[key]
+    from arena_evaluation.processing.parquet_store import TopicParquetStore
+
+    topics_dir = episode_dir / "topics"
+    bundles = TopicParquetStore.read(topics_dir) if topics_dir.is_dir() else None
+    tracks: pl.DataFrame | None = None
+    for bundle in (bundles or {}).values():
+        table = bundle.pedestrian_tracks
+        if table is not None:
+            tracks = table.collect() if isinstance(table, pl.LazyFrame) else table
+            break
+    _PEDESTRIAN_TRACKS_CACHE[key] = tracks
+    return tracks
