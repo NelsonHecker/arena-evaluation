@@ -115,7 +115,7 @@ def _planned_waypoints(topics: typing.Mapping[str, pl.DataFrame] | None) -> tupl
         return ()
     last_per_plan = (
         plans.sort(["t_ns", "plan_id", "waypoint_idx"])
-        .group_by("plan_id")
+        .group_by("plan_id", maintain_order=True)
         .agg(pl.col("t_ns").min().alias("t_ns"), pl.col("x").last().alias("x"), pl.col("y").last().alias("y"))
         .sort("t_ns")
     )
