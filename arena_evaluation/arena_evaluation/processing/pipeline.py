@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import dataclasses
 import logging
 import multiprocessing
 import os
@@ -15,6 +16,8 @@ import polars as pl
 
 if typing.TYPE_CHECKING:
     import numpy as np
+
+    from arena_evaluation.storage.star_schema import StarSchemaTables
 
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import (
@@ -118,11 +121,13 @@ def _process_worker(
     ep: EpisodeDescriptor,
     force_extract: bool,
     status_dict: typing.MutableMapping[int, tuple[str, str, str, int, int, float]] | None = None,
-) -> tuple[int, typing.Any]:
+    reference_pedestrian_episode_dir: str | None = None,
+) -> tuple[int, "EpisodeEvaluation"]:
     import pathlib
     import time
 
-    from arena_evaluation.processing.pipeline import ProcessingPipeline
+    from arena_evaluation.processing.pipeline import EpisodeEvaluation, ProcessingPipeline
+    from arena_evaluation.processing.reference_twins import read_pedestrian_tracks_from_dir
     from arena_evaluation.storage.folder_manager import FolderManager
 
     if status_dict is not None:
@@ -132,17 +137,31 @@ def _process_worker(
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
+    reference_pedestrian_tracks = read_pedestrian_tracks_from_dir(
+        None
+        if reference_pedestrian_episode_dir is None
+        else pathlib.Path(reference_pedestrian_episode_dir)
+    )
     try:
-        result = pipeline.process_episode(ep, force_extract=force_extract, status_dict=status_dict)
+        evaluation = pipeline.evaluate_episode(
+            ep,
+            force_extract=force_extract,
+            status_dict=status_dict,
+            reference_pedestrian_tracks=reference_pedestrian_tracks,
+        )
     except Exception as e:
         _log.exception(f"episode_{ep.episode_id:03d}: metrics failed")
-        result = [_status_row(ep, None, "", "error", repr(e))]
+        evaluation = EpisodeEvaluation(
+            episode_id=ep.episode_id,
+            rows=[_status_row(ep, None, "", "error", repr(e))],
+            metrics_dir=pathlib.Path(ep.episode_dir) / "metrics",
+        )
     if status_dict is not None:
         try:
             status_dict.pop(ep.episode_id, None)
         except Exception:
             pass
-    return ep.episode_id, result
+    return ep.episode_id, evaluation
 
 
 def _consistent_pose_segment(aligned_df: pl.DataFrame | None, ride_arrivals_ns: np.ndarray | None = None) -> pl.DataFrame | None:
@@ -296,6 +315,21 @@ from .metrics.registry import MetricRegistry
 # EpisodeRecord.outcome_state -> (result, success)
 _OUTCOME_VERDICTS: dict[int | None, tuple[str, bool]] = {2: ("GOAL_REACHED", True), 3: ("FAILED", False), 4: ("CANCELLED", False), 5: ("FATAL", False)}
 _STATUS_EVALUATED = "evaluated"
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class EpisodeEvaluation:
+    """One episode's metric rows and scoped Star Schema tables, held until the publication step.
+
+    Series tables are independent of the twin reconciliation and are written during evaluation;
+    the dimension and fact tables are published after the benchmark-level reconciliation, so the
+    reconciled twin values reach the facts in a single write.
+    """
+
+    episode_id: int
+    rows: list[dict[str, typing.Any]]
+    metrics_dir: pathlib.Path
+    star_tables: StarSchemaTables | None = None
 
 
 def _outcome_verdict(outcome_state: int | None, outcome_info: str | None) -> tuple[str, bool]:
@@ -533,29 +567,46 @@ class ProcessingPipeline:
         return self.extract_episode(self._describe_run_dir(run_dir), force_extract=force_extract)
 
     def process_run_dir(self, run_dir: pathlib.Path, force_extract: bool = False) -> pathlib.Path | None:
-        """Extract and evaluate one `episode_NNN` directory, returning its Star Schema directory."""
-        rows = self.process_episode(self._describe_run_dir(run_dir), force_extract=force_extract)
+        """Extract, evaluate and publish one `episode_NNN` directory, reconciling its stage twins when they exist."""
+        episode = self._describe_run_dir(run_dir)
+        self.process_episode(episode, force_extract=force_extract)
         out = pathlib.Path(run_dir) / "metrics"
-        return out if out.exists() else None
+        if not out.exists():
+            return None
+        self._reconcile_episodes(
+            [episode],
+            index_episodes=self.folder_manager.discover_episodes(episode.benchmark_id) or [episode],
+        )
+        return out
 
-    def process_episode(
+    def evaluate_episode(
         self,
         ep: EpisodeDescriptor,
         force_extract: bool = False,
         status_dict: typing.MutableMapping[int, tuple[str, str, str, int, int, float]] | None = None,
-    ) -> list[dict]:
-        """Extract and evaluate one episode: one row per robot, a status row where metrics are impossible."""
+        *,
+        reference_pedestrian_tracks: pl.DataFrame | None = None,
+    ) -> EpisodeEvaluation:
+        """Extract and evaluate one episode, holding its Star Schema tables for the publication step.
+
+        ``reference_pedestrian_tracks`` is the robot-free pedestrian recording of the episode's
+        stage; it is injected into the calculators so the per-encounter and per-pedestrian twin
+        metrics are computed during the one evaluation pass.
+        """
         from arena_evaluation.processing.scoped_evaluator import ScopedEvaluator
         from arena_evaluation.storage.star_schema import (
             StarSchemaBuilder,
             StarSchemaTables,
-            write_episode_star_tables,
         )
 
         episode_dir = pathlib.Path(ep.episode_dir)
 
         if not force_extract and (episode_dir / "metrics" / "dim_episodes.parquet").exists():
-            return []
+            return EpisodeEvaluation(
+                episode_id=ep.episode_id,
+                rows=[],
+                metrics_dir=episode_dir / "metrics",
+            )
 
         # Load episode metadata
         yaml_path = episode_dir / f"{episode_dir.name}.yaml"
@@ -573,27 +624,29 @@ class ProcessingPipeline:
             rows: list[dict],
             star_tables: list[StarSchemaTables] | None = None,
             series: list[dict[str, pl.DataFrame]] | None = None,
-        ) -> list[dict]:
-            try:
-                if star_tables:
-                    merged_star = StarSchemaBuilder.concat_tables(star_tables)
-                else:
-                    robot_token = str(rows[0].get("robot") or "") if rows else ""
-                    merged_star = StarSchemaBuilder().build_status_episode_tables(
-                        run_id=ep.benchmark_id,
-                        episode_id=ep.episode_id,
-                        descriptor=ep,
-                        metadata=metadata,
-                        robot_id=robot_token,
-                    )
-                write_episode_star_tables(merged_star, episode_dir / "metrics")
-            except Exception as e:
-                _log.warning(f"episode_{ep.episode_id:03d}: scoped star tables not written: {e!r}")
-            series_dir = episode_dir / "metrics"
+        ) -> EpisodeEvaluation:
+            """Fold the scoped tables into the evaluation and publish its series tables."""
+            if star_tables:
+                merged_star: StarSchemaTables | None = StarSchemaBuilder.concat_tables(star_tables)
+            else:
+                robot_token = str(rows[0].get("robot") or "") if rows else ""
+                merged_star = StarSchemaBuilder().build_status_episode_tables(
+                    run_id=ep.benchmark_id,
+                    episode_id=ep.episode_id,
+                    descriptor=ep,
+                    metadata=metadata,
+                    robot_id=robot_token,
+                )
+            metrics_dir = episode_dir / "metrics"
             for stem, frame in _merge_series_frames(series or []).items():
-                series_dir.mkdir(parents=True, exist_ok=True)
-                frame.write_parquet(series_dir / f"series_{stem}.parquet")
-            return rows
+                metrics_dir.mkdir(parents=True, exist_ok=True)
+                frame.write_parquet(metrics_dir / f"series_{stem}.parquet")
+            return EpisodeEvaluation(
+                episode_id=ep.episode_id,
+                rows=rows,
+                metrics_dir=metrics_dir,
+                star_tables=merged_star,
+            )
 
         bundles = self.extract_episode(ep, force_extract=force_extract)
         if bundles is None or len(bundles) == 0:
@@ -609,6 +662,10 @@ class ProcessingPipeline:
 
             robot_params = RobotParams.load(robot_model)
             suite_metrics_cfg = _suite_metrics(episode_dir, self.folder_manager.data_root)
+            if reference_pedestrian_tracks is not None:
+                # The robot-free twin of the episode's stage: what the encounter, pedestrian and
+                # mutual-accommodation calculators compare against, injected once per evaluation.
+                suite_metrics_cfg = {**suite_metrics_cfg, "reference_peds": reference_pedestrian_tracks}
             registry = MetricRegistry(robot_params, world=_metric_world(metadata, ep), metrics_config=suite_metrics_cfg)
             scoped_evaluator = ScopedEvaluator(robot_params, metrics_config=suite_metrics_cfg)
             star_builder = StarSchemaBuilder(robot_params=robot_params, metrics_config=suite_metrics_cfg)
@@ -788,6 +845,148 @@ class ProcessingPipeline:
 
             return finish(all_results, episode_star_tables, episode_series)
 
+    def process_episode(
+        self,
+        ep: EpisodeDescriptor,
+        force_extract: bool = False,
+        status_dict: typing.MutableMapping[int, tuple[str, str, str, int, int, float]] | None = None,
+    ) -> list[dict]:
+        """Extract, evaluate and publish one episode, resolving its stage twin from the run directory."""
+        from arena_evaluation.processing.reference_twins import read_pedestrian_tracks
+
+        twin_index = self._twin_index_for_episode(ep)
+        evaluation = self.evaluate_episode(
+            ep,
+            force_extract=force_extract,
+            status_dict=status_dict,
+            reference_pedestrian_tracks=read_pedestrian_tracks(twin_index.pedestrian_twin(ep)),
+        )
+        self.publish_evaluation(evaluation)
+        return evaluation.rows
+
+    def _twin_index_for_episode(self, episode: EpisodeDescriptor) -> "TwinIndex":
+        """Reference index of the run the episode belongs to, empty when the run is not discoverable."""
+        from arena_evaluation.processing.reference_twins import TwinIndex, build_twin_index
+
+        episodes = self.folder_manager.discover_episodes(episode.benchmark_id)
+        if not any(candidate.episode_id == episode.episode_id for candidate in episodes):
+            episodes = [*episodes, episode]
+        return build_twin_index(episodes)
+
+    @staticmethod
+    def publish_evaluation(evaluation: EpisodeEvaluation) -> None:
+        """Write one evaluation's Star Schema tables next to its already published series."""
+        if evaluation.star_tables is None:
+            return
+        from arena_evaluation.storage.star_schema import write_episode_star_tables
+
+        try:
+            write_episode_star_tables(evaluation.star_tables, evaluation.metrics_dir)
+        except Exception as error:
+            _log.warning(
+                f"episode_{evaluation.episode_id:03d}: scoped star tables not written: {error!r}"
+            )
+
+    def _reconcile_episodes(
+        self,
+        episodes: list[EpisodeDescriptor],
+        *,
+        index_episodes: list[EpisodeDescriptor] | None = None,
+    ) -> int:
+        """Patch the published twin-dependent facts of `episodes` against their stage references."""
+        from arena_evaluation.processing.reference_reconciliation import (
+            apply_plan_to_disk,
+            plan_reconciliation,
+        )
+        from arena_evaluation.processing.reference_twins import build_twin_index
+        from arena_evaluation.storage.star_schema import read_episode_star_tables
+
+        index_source = index_episodes or episodes
+        twin_index = build_twin_index(index_source)
+        if not twin_index.peds_by_stage and not twin_index.robot_by_stage_planner:
+            return 0
+        facts_by_episode: dict[int, pl.DataFrame] = {}
+        for candidate in index_source:
+            tables = read_episode_star_tables(pathlib.Path(candidate.episode_dir) / "metrics")
+            if tables is not None:
+                facts_by_episode[candidate.episode_id] = tables.fact_episodes
+        plan = plan_reconciliation(index_source, facts_by_episode, twin_index)
+        rewritten = sum(
+            1
+            for candidate in episodes
+            if apply_plan_to_disk(pathlib.Path(candidate.episode_dir), plan)
+        )
+        if plan.episodes:
+            print(
+                f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against "
+                f"{len(twin_index.peds_by_stage)} pedestrian and {len(twin_index.robot_by_stage_planner)} robot references, "
+                f"{rewritten} episode fact tables rewritten",
+                flush=True,
+            )
+        return rewritten
+
+    def _publish_and_consolidate(
+        self,
+        benchmark_id: str,
+        episodes: list[EpisodeDescriptor],
+        evaluations: list[EpisodeEvaluation],
+    ) -> pathlib.Path | None:
+        """Reconcile the twin metrics, publish every episode's tables once, then consolidate."""
+        from arena_evaluation.processing.reference_reconciliation import (
+            apply_plan_to_disk,
+            patch_fact_episodes,
+            patch_fact_pedestrians,
+            plan_reconciliation,
+        )
+        from arena_evaluation.processing.reference_twins import build_twin_index
+        from arena_evaluation.storage.star_schema import read_episode_star_tables
+
+        twin_index = build_twin_index(episodes)
+        evaluated = {evaluation.episode_id: evaluation for evaluation in evaluations}
+        facts_by_episode: dict[int, pl.DataFrame] = {}
+        for episode in episodes:
+            evaluation = evaluated.get(episode.episode_id)
+            if evaluation is not None and evaluation.star_tables is not None:
+                facts_by_episode[episode.episode_id] = evaluation.star_tables.fact_episodes
+                continue
+            tables = read_episode_star_tables(pathlib.Path(episode.episode_dir) / "metrics")
+            if tables is not None:
+                facts_by_episode[episode.episode_id] = tables.fact_episodes
+        plan = plan_reconciliation(episodes, facts_by_episode, twin_index)
+        published = 0
+        for evaluation in evaluations:
+            if evaluation.star_tables is not None:
+                evaluation = dataclasses.replace(
+                    evaluation,
+                    star_tables=dataclasses.replace(
+                        evaluation.star_tables,
+                        fact_episodes=patch_fact_episodes(evaluation.star_tables.fact_episodes, plan),
+                        fact_pedestrians=patch_fact_pedestrians(
+                            evaluation.star_tables.fact_pedestrians, plan
+                        ),
+                    ),
+                )
+                published += 1
+            self.publish_evaluation(evaluation)
+        evaluated_ids = {
+            evaluation.episode_id
+            for evaluation in evaluations
+            if evaluation.star_tables is not None
+        }
+        for episode in episodes:
+            if episode.episode_id in evaluated_ids:
+                continue
+            if apply_plan_to_disk(pathlib.Path(episode.episode_dir), plan):
+                published += 1
+        if plan.episodes:
+            print(
+                f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against "
+                f"{len(twin_index.peds_by_stage)} pedestrian and "
+                f"{len(twin_index.robot_by_stage_planner)} robot references, {published} fact tables published",
+                flush=True,
+            )
+        return self._consolidate_benchmark_star(benchmark_id, episodes)
+
     def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """Extract all episodes in a benchmark."""
         episodes = self.folder_manager.discover_episodes(benchmark_id)
@@ -855,11 +1054,23 @@ class ProcessingPipeline:
             print(f"No episodes found for benchmark '{benchmark_id}'")
             return None
 
+        from arena_evaluation.processing.reference_twins import build_twin_index
+
+        twin_index = build_twin_index(episodes)
+        reference_pedestrian_dirs: dict[int, str | None] = {
+            episode.episode_id: (
+                None
+                if (twin := twin_index.pedestrian_twin(episode)) is None
+                else twin.episode_dir
+            )
+            for episode in episodes
+        }
+
         _ctx_extract = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx_extract:
             self.extract_benchmark(benchmark_id, force_extract=force_extract)
 
-        all_metrics: list[dict] = []
+        evaluations: list[EpisodeEvaluation] = []
         data_root_str = str(self.folder_manager.data_root)
 
         from .progress_display import PipelineProgressDisplay
@@ -877,13 +1088,25 @@ class ProcessingPipeline:
                     for ep in episodes:
                         t_start = time.perf_counter()
                         try:
-                            ep_id, result = _process_worker(data_root_str, ep, False, local_status)
+                            ep_id, evaluation = _process_worker(
+                                data_root_str,
+                                ep,
+                                False,
+                                local_status,
+                                reference_pedestrian_dirs.get(ep.episode_id),
+                            )
                             elapsed = time.perf_counter() - t_start
-                            all_metrics.extend(result)
+                            evaluations.append(evaluation)
                             display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
                         except Exception as e:
                             display.log_error(ep.episode_id, str(e))
-                            all_metrics.append(_status_row(ep, None, "", "error", repr(e)))
+                            evaluations.append(
+                                EpisodeEvaluation(
+                                    episode_id=ep.episode_id,
+                                    rows=[_status_row(ep, None, "", "error", repr(e))],
+                                    metrics_dir=pathlib.Path(ep.episode_dir) / "metrics",
+                                )
+                            )
             else:
                 mp_ctx = multiprocessing.get_context("spawn")
                 manager = mp_ctx.Manager()
@@ -900,18 +1123,34 @@ class ProcessingPipeline:
                         initializer=_worker_init,
                     )
                     try:
-                        futures = {executor.submit(_process_worker, data_root_str, ep, False, status_dict): (ep, time.perf_counter()) for ep in episodes}
+                        futures = {
+                            executor.submit(
+                                _process_worker,
+                                data_root_str,
+                                ep,
+                                False,
+                                status_dict,
+                                reference_pedestrian_dirs.get(ep.episode_id),
+                            ): (ep, time.perf_counter())
+                            for ep in episodes
+                        }
 
                         for future in concurrent.futures.as_completed(futures):
                             ep, t_start = futures[future]
                             try:
-                                ep_id, result = future.result()
+                                ep_id, evaluation = future.result()
                                 elapsed = time.perf_counter() - t_start
-                                all_metrics.extend(result)
+                                evaluations.append(evaluation)
                                 display.log_completed(ep_id, f"{ep.planner}/{ep.stage}", elapsed)
                             except Exception as e:
                                 display.log_error(ep.episode_id, str(e))
-                                all_metrics.append(_status_row(ep, None, "", "error", repr(e)))
+                                evaluations.append(
+                                    EpisodeEvaluation(
+                                        episode_id=ep.episode_id,
+                                        rows=[_status_row(ep, None, "", "error", repr(e))],
+                                        metrics_dir=pathlib.Path(ep.episode_dir) / "metrics",
+                                    )
+                                )
                     except KeyboardInterrupt:
                         print("\n[KeyboardInterrupt] Metrics calculation interrupted by user. Terminating workers...", flush=True)
                         _shutdown_executor_cleanly(executor)
@@ -919,56 +1158,15 @@ class ProcessingPipeline:
                     finally:
                         _shutdown_executor_cleanly(executor)
 
+        all_metrics = [row for evaluation in evaluations for row in evaluation.rows]
         _print_status_summary(all_metrics)
         if not all_metrics:
             # Every episode was already evaluated: the per-episode Star Schema on disk is the result.
             # Consolidate it at benchmark level so the run is queryable without re-evaluating it.
-            print("All episodes already processed; consolidating the Star Schema.")
-            return self._consolidate_benchmark_star(benchmark_id, episodes)
+            print("All episodes already processed; reconciling the twin metrics and consolidating the Star Schema.")
+            return self._publish_and_consolidate(benchmark_id, episodes, evaluations)
 
-        ref_episodes_by_stage: dict[str | None, list[dict]] = {}
-        for row in all_metrics:
-            if row.get("is_reference") and row.get("reference_type") == "unhindered_peds":
-                stage = row.get("stage")
-                if stage not in ref_episodes_by_stage:
-                    ref_episodes_by_stage[stage] = []
-                ref_episodes_by_stage[stage].append(row)
-
-        ref_ped_by_stage: dict[str | None, list[dict]] = {}
-        ref_robot_by_stage: dict[str | None, list[dict]] = {}
-        for row in all_metrics:
-            if not row.get("is_reference"):
-                continue
-            stage = row.get("stage")
-            if row.get("reference_type") == "unhindered_peds":
-                ref_ped_by_stage.setdefault(stage, []).append(row)
-            elif row.get("reference_type") == "unobstructed_robot":
-                ref_robot_by_stage.setdefault(stage, []).append(row)
-
-        if ref_episodes_by_stage or ref_robot_by_stage:
-            print(f"Phase 2 Post-Processing: Cross-referencing {len(all_metrics)} episodes against {len(ref_ped_by_stage)} ped references and {len(ref_robot_by_stage)} robot references...", flush=True)
-
-        from .metrics.social.mutual_accommodation import MutualAccommodationCalculator
-
-        for row in all_metrics:
-            if row.get("is_reference"):
-                continue
-
-            stage = row.get("stage")
-            ref_robots = ref_robot_by_stage.get(stage, [])
-            ref_peds = ref_ped_by_stage.get(stage, [])
-
-            ref_robot_row = next((r for r in ref_robots if r.get("status") == _STATUS_EVALUATED), None)
-            ref_ped_row = next((r for r in ref_peds if r.get("status") == _STATUS_EVALUATED), None)
-
-            reconciled = MutualAccommodationCalculator.reconcile_stage_references(
-                dynamic_row=row,
-                ref_robot_row=ref_robot_row,
-                ref_ped_row=ref_ped_row,
-            )
-            row.update(reconciled)
-
-        return self._consolidate_benchmark_star(benchmark_id, episodes)
+        return self._publish_and_consolidate(benchmark_id, episodes, evaluations)
 
     def _consolidate_benchmark_star(self, benchmark_id: str, episodes: list[EpisodeDescriptor]) -> pathlib.Path | None:
         """Consolidate the per-episode Star Schema tables (and series) at benchmark level."""
