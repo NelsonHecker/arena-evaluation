@@ -4,7 +4,10 @@ import numpy as np
 import polars as pl
 import pytest
 
-from arena_evaluation.processing.metrics.naturalness.trajectory import TrajectoryMetricsCalculator, _discrete_frechet
+from arena_evaluation.processing.metrics.naturalness.trajectory import (
+    TrajectoryMetricsCalculator,
+    _discrete_frechet,
+)
 from arena_evaluation.processing.path import theta_star
 from arena_evaluation.processing.path.theta_star import GeometricThetaStar
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams

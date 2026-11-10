@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 import polars as pl
 from arena_evaluation.storage.schemas import RobotParams, AlignedEpisodeBundle

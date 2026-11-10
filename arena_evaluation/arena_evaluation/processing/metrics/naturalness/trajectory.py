@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import typing
 
@@ -7,7 +8,11 @@ import numpy as np
 import polars as pl
 from scipy.spatial.distance import cdist
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.base import (
+    BaseMetricCalculator,
+    MetricScope,
+    ScopeSlice,
+)
 from arena_evaluation.processing.path.theta_star import (
     ThetaStarResult,
     compute_theta_star_for_episode,
@@ -186,7 +191,7 @@ def _route_geodesic_length(
     if episode.map is None or len(waypoints) < 2:
         return None
     total = 0.0
-    for leg_start, leg_goal in zip(waypoints, waypoints[1:]):
+    for leg_start, leg_goal in itertools.pairwise(waypoints):
         leg = compute_theta_star_for_episode(episode.map, leg_start, leg_goal, robot_radius=robot_radius, run_dir=episode.run_dir)
         if not leg.success or len(leg.path_x) == 0:
             return None
