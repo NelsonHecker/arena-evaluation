@@ -1006,7 +1006,10 @@ class ScopedEvaluator:
             if has_power and len(typing.cast(pl.DataFrame, power_tbl).get_column("total_power_w").drop_nulls()) > 0
             else None
         )
-        has_reference = bool(self.metrics_config.get("reference_peds") or self.metrics_config.get("reference_episode"))
+        has_reference = (
+            self.metrics_config.get("reference_peds") is not None
+            or self.metrics_config.get("reference_episode") is not None
+        )
 
         contacts_by_encounter: dict[str, dict[str, object]] = {}
         for contact in contact_rows:
