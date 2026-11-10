@@ -254,6 +254,18 @@ class MetricRegistry:
                             provenance[key] = f"{key}:no_samples"
                     continue
 
+                missing_series = next(
+                    (stem for stem in calc.SERIES_DEPENDS_ON if (frame := (full_episode.series or {}).get(stem)) is None or frame.height == 0),
+                    None,
+                )
+                if missing_series is not None:
+                    for key in scope_keys:
+                        if key not in results:
+                            results[key] = None
+                        if results.get(key) is None:
+                            provenance[key] = f"{key}:series_missing:{missing_series}"
+                    continue
+
                 if calc.REQUIRES_PEDSIM and not pedsim_available:
                     for key in scope_keys:
                         if key not in results:
@@ -277,11 +289,12 @@ class MetricRegistry:
                         raise ValueError(f"Calculator {calc_name} missing output keys: {missing}")
 
                     results.update(calc_out)
+                    missing_inputs = calc.missing_input_provenance(slice_episode)
                     for key in scope_keys:
                         if calc_out.get(key) is not None:
                             provenance.pop(key, None)
                         elif key not in provenance:
-                            provenance[key] = f"{key}:no_samples"
+                            provenance[key] = missing_inputs.get(key, f"{key}:no_samples")
 
                 except MetricInputError:
                     raise

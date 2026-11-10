@@ -84,6 +84,14 @@ class BaseMetricCalculator(ABC):
     UNITS: dict[str, str] = {}
     PRIMARY_OUTPUTS: list[str] = []
     OUTPUT_DIRECTIONS: dict[str, str] = {}
+    # 1NF series tables this calculator reads. The pipeline publishes every series before scope
+    # evaluation; the registry skips a calculator whose declared table is absent or empty and
+    # explains the nulls with `series_missing:<stem>` provenance.
+    SERIES_DEPENDS_ON: typing.ClassVar[tuple[str, ...]] = ()
+    # Natural key of the series table this calculator publishes: one row per key tuple.
+    SERIES_KEY: typing.ClassVar[tuple[str, ...]] = ("t_ns",)
+    # Topics a series table needs to be emitted; empty when it derives from the aligned bundle alone.
+    SERIES_REQUIRED_TOPICS: typing.ClassVar[tuple[str, ...]] = ()
     world: str | None = None
 
     def __init__(self, robot_params: RobotParams):
@@ -190,6 +198,22 @@ class BaseMetricCalculator(ABC):
     def native_topics(self, episode: AlignedEpisodeBundle) -> dict:
         """Raw native-rate topic frames keyed by topic name; {} when absent."""
         return episode.topics if isinstance(episode.topics, dict) else {}
+
+    def series_frame(self, episode: AlignedEpisodeBundle, stem: str) -> pl.DataFrame | None:
+        """The episode's published 1NF series frame for `stem`, None when it is absent or empty."""
+        frame = episode.series.get(stem)
+        if frame is None or frame.height == 0:
+            return None
+        return frame
+
+    def missing_input_provenance(self, episode: AlignedEpisodeBundle) -> dict[str, str]:
+        """Output key -> typed null_reason for nulls caused by an absent optional input stream.
+
+        The registry uses these codes instead of the generic `no_samples` when a calculator ran but
+        an optional input (a world snapshot, markers, an interaction stream) was not recorded.
+        """
+        del episode
+        return {}
 
     def resolve_native_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Ground-truth robot pose on the native clock: (pos_x, pos_y, yaw, time_ns) float64 arrays, empty without ground truth.

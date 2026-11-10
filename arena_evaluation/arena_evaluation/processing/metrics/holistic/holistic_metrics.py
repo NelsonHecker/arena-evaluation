@@ -1,9 +1,11 @@
 """Holistic cross-domain metrics: acoustic exposure inside personal space, and the effective cost of transport.
 
-AEPS integrates the recorded level over the frames whose nearest pedestrian is inside the
-personal-space band. Its clearance series comes from the proxemics calculator when available,
-otherwise from the same vectorized pedestrian-frame geometry; a missing level source and a
-missing time axis leave the output null instead of substituting the historical 45 dBA floor.
+AEPS integrates the published acoustic-exposure series over the frames whose nearest pedestrian is
+inside the personal-space band. Both inputs are declared 1NF series dependencies: `acoustic_exposure`
+carries the per-pedestrian level and `proxemics_extended` the per-frame nearest-pedestrian clearance,
+so the metric reads the same tables the report consumes instead of retired nested list outputs. The
+registry publishes `series_missing:<stem>` and a null value when a declared table is absent or empty;
+the integral is never substituted with a nominal 45 dBA floor.
 """
 
 from __future__ import annotations
@@ -15,12 +17,6 @@ import numpy as np
 import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
-from arena_evaluation.processing.metrics.social.interaction_common import DEFAULT_PED_RADIUS_M
-from arena_evaluation.processing.pedestrian_frames import (
-    ALIGN_TOLERANCE_NS,
-    frame_geometry,
-    nearest_pedestrian_frames,
-)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 PERSONAL_SPACE_CLEARANCE_M: Final[float] = 1.2
@@ -30,29 +26,14 @@ COT_DECIMALS: Final[int] = 6
 MIN_EPISODE_TIME_S: Final[float] = 0.01
 
 
-def _level_values(series: object) -> np.ndarray | None:
-    """Per-frame dBA values of a nested or flat exposure series, NaN for frames without a level."""
-    if not isinstance(series, (list, tuple)) or len(series) == 0:
-        return None
-    values = np.full(len(series), np.nan, dtype=np.float64)
-    for index, frame in enumerate(series):
-        if isinstance(frame, (list, tuple, np.ndarray)):
-            if len(frame) > 0:
-                values[index] = float(np.max(np.asarray(frame, dtype=np.float64)))
-        elif frame is not None:
-            values[index] = float(frame)  # pyright: ignore[reportArgumentType]
-    return values
-
-
-def _clearance_values(clearance: object) -> np.ndarray | None:
-    """Per-frame edge clearances of a recorded series, NaN for frames without a measurement."""
-    if not isinstance(clearance, (list, tuple)):
-        return None
-    values = np.full(len(clearance), np.nan, dtype=np.float64)
-    for index, value in enumerate(clearance):
-        if value is not None:
-            values[index] = float(value)  # pyright: ignore[reportArgumentType]
-    return values
+def _aligned_values(time_ns: np.ndarray, frame: pl.DataFrame, column: str) -> np.ndarray:
+    """`frame[column]` reindexed onto the episode's sample times, NaN where the sample is absent."""
+    if frame.height == 0:
+        return np.full(len(time_ns), np.nan, dtype=np.float64)
+    values = frame.select(pl.col("t_ns").cast(pl.Int64), pl.col(column).cast(pl.Float64)).drop_nulls("t_ns")
+    values = values.unique(subset=["t_ns"], keep="last")
+    joined = pl.DataFrame({"t_ns": time_ns.astype(np.int64)}).join(values, on="t_ns", how="left")
+    return joined.get_column(column).to_numpy().astype(np.float64, copy=False)
 
 
 class HolisticMetricsCalculator(BaseMetricCalculator):
@@ -70,6 +51,8 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
         "time_metrics",
         "acoustic_exposure",
     ]
+    SERIES_DEPENDS_ON = ("acoustic_exposure", "proxemics_extended")
+    SERIES_KEY = ("t_ns", "ped_id")
     REQUIRED_TOPICS = [("robot_tracks", "robot_odom"), "pedestrian_tracks"]
 
     UNITS = {
@@ -84,40 +67,22 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
     def output_keys(cls) -> list[str]:
         return ["aeps_linear_s", "e_cot"]
 
-    @property
-    def _combined_radius_m(self) -> float:
-        """Robot radius plus the nominal pedestrian radius of the personal-space band."""
-        return float(self.robot_params.robot_radius) + DEFAULT_PED_RADIUS_M
-
-    def _clearance_series(
-        self,
-        episode: AlignedEpisodeBundle,
-        prior_results: typing.Mapping[str, typing.Any],
-    ) -> np.ndarray | None:
-        """Edge clearance of the nearest pedestrian per frame: the proxemics series, else the frame geometry."""
-        recorded = _clearance_values(prior_results.get("timeseries_min_ped_clearance"))
-        if recorded is not None:
-            return recorded
-        geometry = frame_geometry(
-            self.native_ped_frame(episode),
-            self.native_topics(episode).get("robot_tracks"),
-            tolerance_ns=ALIGN_TOLERANCE_NS,
-        )
-        nearest = nearest_pedestrian_frames(geometry)
-        if nearest.height == 0:
+    def _level_series(self, episode: AlignedEpisodeBundle, time_ns: np.ndarray) -> np.ndarray | None:
+        """Per-frame dBA: the loudest pedestrian exposure at each sample time from the published series."""
+        frame = self.series_frame(episode, "acoustic_exposure")
+        if frame is None:
             return None
-        return nearest.select((pl.col("distance_m") - self._combined_radius_m).alias("clearance_m")).get_column("clearance_m").to_numpy().astype(np.float64)
+        per_frame = frame.group_by("t_ns").agg(pl.col("exposure_dba").max().alias("level_dba")).sort("t_ns")
+        levels = _aligned_values(time_ns, per_frame, "level_dba")
+        return levels if np.isfinite(levels).any() else None
 
-    @staticmethod
-    def _level_series(
-        prior_results: typing.Mapping[str, typing.Any],
-    ) -> np.ndarray | None:
-        """Per-frame dBA values: the pedestrian exposure series, then the total level series."""
-        for key in ("timeseries_acoustic_exposure_dba", "timeseries_total_level_dba"):
-            recorded = _level_values(prior_results.get(key))
-            if recorded is not None:
-                return recorded
-        return None
+    def _clearance_series(self, episode: AlignedEpisodeBundle, time_ns: np.ndarray) -> np.ndarray | None:
+        """Per-frame nearest-pedestrian clearance from the published proxemics-extended series."""
+        frame = self.series_frame(episode, "proxemics_extended")
+        if frame is None:
+            return None
+        clearances = _aligned_values(time_ns, frame, "min_ped_clearance_m")
+        return clearances if np.isfinite(clearances).any() else None
 
     @staticmethod
     def _time_ns(episode: AlignedEpisodeBundle) -> np.ndarray | None:
@@ -126,26 +91,18 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
             return None
         return episode.data.get_column("time_ns").to_numpy().astype(np.int64)
 
-    def _aeps(
-        self,
-        episode: AlignedEpisodeBundle,
-        prior_results: typing.Mapping[str, typing.Any],
-    ) -> float | None:
+    def _aeps(self, episode: AlignedEpisodeBundle) -> float | None:
         """Integral of the linear pressure while a pedestrian stayed inside the personal space."""
-        clearance = self._clearance_series(episode, prior_results)
-        levels = self._level_series(prior_results)
         time_ns = self._time_ns(episode)
-        if clearance is None or levels is None or time_ns is None:
+        if time_ns is None or len(time_ns) == 0:
             return None
-        length = min(len(clearance), len(levels), len(time_ns))
-        if length == 0:
+        clearance = self._clearance_series(episode, time_ns)
+        levels = self._level_series(episode, time_ns)
+        if clearance is None or levels is None:
             return None
-        clearance = clearance[:length]
-        levels = levels[:length]
-        timestamps = time_ns[:length]
-        step_s = np.diff(timestamps, prepend=timestamps[0]) / 1e9
+        step_s = np.diff(time_ns, prepend=time_ns[0]) / 1e9
         step_s[step_s < 0.0] = 0.0
-        intruded = (clearance < PERSONAL_SPACE_CLEARANCE_M) & np.isfinite(levels)
+        intruded = (clearance < PERSONAL_SPACE_CLEARANCE_M) & np.isfinite(levels) & np.isfinite(clearance)
         if not np.any(intruded):
             return 0.0
         return float(np.sum(np.power(10.0, levels[intruded] / 10.0) * step_s[intruded]))
@@ -174,7 +131,7 @@ class HolisticMetricsCalculator(BaseMetricCalculator):
     ) -> dict[str, typing.Any]:
         """Both holistic outputs over the given episode view."""
         return {
-            "aeps_linear_s": self._aeps(episode, prior_results),
+            "aeps_linear_s": self._aeps(episode),
             "e_cot": self._effective_cost_of_transport(prior_results),
         }
 
