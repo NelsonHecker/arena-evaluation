@@ -48,9 +48,9 @@ of spawn warm-up and sink absorption.
 |---|---:|---|---:|---:|---:|---:|---:|---:|
 | same | **3/3** | GOAL x3 | **0** | - | 0.077 m | +0.090 / 0.517 m | 53.0 s | 57 |
 | merge | **3/3** | GOAL x3 | **0** | - | 0.241 m | -0.517 / 1.064 m | 45.5 s | 42 |
-| cross | **2/3** | GOAL x2, COLLISION x1 | 2 | 1.6 s | 0.000 m | -0.517 / 0.658 m | 60.4 s | 33 |
-| mixed | **0/3** | COLLISION x3 | 8 | 2.1 s | 0.000 m | -0.051 / 0.490 m | - | 87 |
-| counter | **0/3** | COLLISION x3 | **16** | 1.1 s | 0.000 m | -0.062 / 0.455 m | - | 132 |
+| cross | **2/3** | GOAL x2, COLLISION x1 | 2 | 27.0 s | 0.000 m | -0.517 / 0.658 m | 60.4 s | 33 |
+| mixed | **0/3** | COLLISION x3 | 8 | 18.1 s | 0.000 m | -0.051 / 0.490 m | - | 87 |
+| counter | **0/3** | COLLISION x3 | **16** | 20.8 s | 0.000 m | -0.062 / 0.455 m | - | 132 |
 
 **Per planner** across the five regimes: dwb 3/5 successes, 8 collisions; mppi 3/5, 10
 collisions; hateb 2/5, 8 collisions.
@@ -79,6 +79,33 @@ crossings.
 pedestrian collision counts) and per-regime success share/collisions. **n = 1 per cell**: a
 single collision flips a cell, so this is a descriptive map, not a significance claim.
 
+## Spawn and closing geometry (validity check)
+
+A collision within the first second of an episode would indicate a scenario artifact (a
+pedestrian spawned on the robot) rather than flow dynamics. We checked the recorded poses
+directly. This also corrected an earlier decoding bug: a first pass counted *empty*
+`collision_events` heartbeat messages as contacts, which produced the misleading
+1.1/1.6/2.1 s values; only messages with a non-empty `events` list are contacts, and the
+totals did not change (26 contacts across the grid). The corrected picture: collisions are
+late and every contact pedestrian starts far away.
+
+| regime | first collision (all cells) | contact ped first seen before contact | robot start -> contact ped at first sample | robot -> contact ped when first seen | all-ped spawn distance min / median |
+|---|---|---|---|---|---|
+| same | none | - | - | - | 0.77 / 2.00 m |
+| merge | none | - | - | - | 10.43 / 11.92 m |
+| cross | 27.0 s | 17.7 s | 11.43 m | 7.93 m | 11.18 / 11.92 m |
+| mixed | 18.1 s | 6.96-33.5 s | 11.45-21.11 m | 7.69-17.77 m | 0.77 / 11.28 m |
+| counter | 20.8 s | 7.8-36.1 s | 20.27-21.41 m | 9.99-18.54 m | 20.10 / 21.14 m |
+
+Every first-contact pedestrian is **at least 7.7 m from the robot when first recorded** and is
+seen 7-36 s before the contact; all of them enter the forward corridor (6.1-18.4 m ahead) and
+close over seconds. Impact speeds are 0.30-0.72 m/s (robot 0.02-0.90 m/s), and fault is
+attributed to the pedestrian in 5/7 contacts (robot 1, mutual 1). The only near-spawn
+pedestrians (0.77-1.14 m from the robot start) come from the `dock_start` source, which sits
+0.7 m *behind* the robot's start and flows in the robot's direction; they occur in
+same/merge/mixed and produce no collisions of their own. **The spawn-artifact hypothesis is
+rejected**: contact pedestrians walk toward the robot for seconds from 10-20 m, so the result
+is a flow-dynamics finding rather than a spawn-density artifact.
 ## Methods and limitations
 
 - **ROS-domain isolation.** The host shares ROS domain 1 with other users' long-lived runtimes;
