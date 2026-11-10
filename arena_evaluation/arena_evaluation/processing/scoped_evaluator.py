@@ -613,6 +613,7 @@ class ScopedEvaluator:
         run_id: str,
         episode_id: int,
         episode_metrics: Mapping[str, Any] | None = None,
+        episode_provenance: Mapping[str, str] | None = None,
     ) -> ScopedFactTables:
         """Evaluate one episode and return its five fact tables."""
         hierarchy = self.decompose_hierarchy(episode, run_id=run_id, episode_id=episode_id)
@@ -631,7 +632,7 @@ class ScopedEvaluator:
         encounter_rows = self._encounter_fact_rows(registry, materialized, hierarchy.encounters, contact_rows)
         pedestrians = self._pedestrian_fact_frame(registry, materialized, hierarchy.pedestrians, encounter_rows)
 
-        episode_provenance: dict[str, str] = {}
+        provenance: dict[str, str] = dict(episode_provenance or {})
         if episode_metrics is not None:
             metrics = dict(episode_metrics)
             if "total_acoustic_dose_pa2s" not in metrics or metrics["total_acoustic_dose_pa2s"] is None:
@@ -641,7 +642,7 @@ class ScopedEvaluator:
                     if dose_res.get("total_acoustic_dose_pa2s") is not None:
                         metrics["total_acoustic_dose_pa2s"] = dose_res["total_acoustic_dose_pa2s"]
                 elif not _has_rows(_table(materialized, ROBOT_ACOUSTICS_TOPIC)):
-                    episode_provenance["total_acoustic_dose_pa2s"] = f"total_acoustic_dose_pa2s:{TOPIC_MISSING}:{ROBOT_ACOUSTICS_TOPIC}"
+                    provenance["total_acoustic_dose_pa2s"] = f"total_acoustic_dose_pa2s:{TOPIC_MISSING}:{ROBOT_ACOUSTICS_TOPIC}"
         else:
             ep_outcome = registry.run_scope(
                 MetricScope.EPISODE,
@@ -651,7 +652,7 @@ class ScopedEvaluator:
                 scope_slice=episode_slice,
             )
             metrics = ep_outcome.results
-            episode_provenance = ep_outcome.provenance
+            provenance = dict(ep_outcome.provenance)
 
         episode_row = self._episode_fact_row(
             materialized,
@@ -660,9 +661,9 @@ class ScopedEvaluator:
             metrics,
             encounter_rows,
             contact_rows,
-            episode_provenance,
+            provenance,
         )
-        robots = self._robot_fact_frame(registry, hierarchy.robots[0], metrics, episode_provenance)
+        robots = self._robot_fact_frame(registry, hierarchy.robots[0], metrics, provenance)
         robot_id = self._robot_actor_id(materialized, _table(materialized, ROBOT_TRACKS_TOPIC))
         child_identity = {
             "run_id": run_id,

@@ -764,6 +764,7 @@ class ProcessingPipeline:
                         run_id=ep.benchmark_id,
                         episode_id=ep.episode_id,
                         episode_metrics=ep_metrics,
+                        episode_provenance=ep_outcome.provenance,
                     )
                     episode_star_tables.append(
                         star_builder.build_episode_tables(
