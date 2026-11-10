@@ -97,7 +97,9 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
 
             power_path = Path(get_package_share_directory("arena_robots")) / "robots" / model / "telemetry" / "power.yaml"
             data = yaml.safe_load(power_path.read_text())
-        except (OSError, ImportError, KeyError):
+        except (OSError, ImportError, KeyError, yaml.YAMLError):
+            return _DEFAULT_ROLLING_RESISTANCE
+        if not isinstance(data, dict):
             return _DEFAULT_ROLLING_RESISTANCE
         return float(data.get("power_system", {}).get("rolling_resistance_crr", _DEFAULT_ROLLING_RESISTANCE))
 
