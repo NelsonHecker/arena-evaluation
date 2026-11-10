@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 TRACK_ALIGN_TOLERANCE_NS: Final[int] = 100_000_000
 POSITION_EVALUATION_THRESHOLD_M: Final[float] = 0.5
 
+# Scalar exposure summaries; the pedestrian scope also publishes the worst frame's t_ns
+# discriminator instead of the nested frame struct.
+EXPOSURE_SCALAR_KEYS: Final[tuple[str, ...]] = (
+    "ped_max_exposure_dba",
+    "ped_leq_exposure_dba",
+    "ped_max_startle_factor",
+)
+EXPOSURE_FRAME_KEY: Final[str] = "worst_case_acoustic_frame"
+EXPOSURE_FRAME_T_NS_KEY: Final[str] = "worst_case_acoustic_t_ns"
+
 SERIES_SCHEMA: Final[dict[str, pl.DataType]] = {
     "run_id": pl.String,
     "episode_id": pl.Int64,
@@ -68,7 +78,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     Runs per episode and per pedestrian. Walls and doors are the only acoustic barriers, the
     solver charges a per-cell transmission loss, and a door counts as open from its semantic
     ``progress`` field. Per-sample values leave through :meth:`series_table` (including the
-    worst-case frame marker); only scalars enter the metric row.
+    worst-case frame marker); only scalars enter the metric row. The pedestrian scope
+    publishes ``worst_case_acoustic_t_ns`` as the worst frame's discriminator: that frame is
+    reconstructed by joining ``series_acoustic_exposure`` on ``(run_id, episode_id, t_ns)``,
+    never as a nested fact column.
     """
 
     NAME = "acoustic_exposure"
@@ -95,12 +108,14 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
     @classmethod
     def output_keys(cls) -> list[str]:
-        return [
-            "ped_max_exposure_dba",
-            "ped_leq_exposure_dba",
-            "ped_max_startle_factor",
-            "worst_case_acoustic_frame",
-        ]
+        return [*EXPOSURE_SCALAR_KEYS, EXPOSURE_FRAME_KEY]
+
+    @classmethod
+    def output_keys_for_scope(cls, scope: MetricScope) -> tuple[str, ...]:
+        """The pedestrian scope publishes the worst frame's t_ns discriminator, never the nested struct."""
+        if scope == MetricScope.PEDESTRIAN:
+            return (*EXPOSURE_SCALAR_KEYS, EXPOSURE_FRAME_T_NS_KEY)
+        return tuple(cls.output_keys())
 
     def _source_level(self, episode: AlignedEpisodeBundle, time_ns: np.ndarray) -> np.ndarray:
         """Emitted A-weighted level at the sample times, from the aligned row or the native acoustics topic."""
@@ -141,7 +156,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     def _null_result() -> AcousticExposureResult:
         empty = np.array([], dtype=np.float64)
         return AcousticExposureResult(
-            scalars=dict.fromkeys(AcousticExposureCalculator.output_keys(), None),
+            scalars=dict.fromkeys((*EXPOSURE_SCALAR_KEYS, EXPOSURE_FRAME_KEY, EXPOSURE_FRAME_T_NS_KEY), None),
             frame_times_ns=np.array([], dtype=np.int64),
             frame_robot_x_m=empty,
             frame_robot_y_m=empty.copy(),
@@ -396,7 +411,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
     def _episode_result(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
         """The episode's exposure frame series, solved once and reused by the pedestrian rollups and the series table."""
-        key = (int(episode.episode_id), str(episode.robot_name or ""), str(episode.map or ""), str(episode.run_dir or ""), str(episode.robot_name))
+        map_token = str(prior_results.get("map") or episode.map or self.world or "")
+        key = (int(episode.episode_id), str(episode.robot_name or ""), map_token, str(episode.run_dir or ""))
         cached = self._episode_frame_cache.get(key)
         if cached is None:
             cached = self._compute(episode, prior_results)
@@ -442,7 +458,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         return tuple(barrier_door_tl(load_barrier_map(map_name, run_dir=run_dir)).keys())
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        return dict(self._episode_result(episode, prior_results).scalars)
+        scalars = self._episode_result(episode, prior_results).scalars
+        return {key: scalars.get(key) for key in self.output_keys()}
 
     def calculate_for_scope(
         self,
@@ -457,7 +474,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             full_result = self._episode_result(scope_slice.full_episode, prior_results)
             ped_id = str(scope_slice.identity.get("ped_id") or scope_slice.slice_id)
             restricted = self._restrict_to_pedestrian(full_result, ped_id, self._door_names(scope_slice.full_episode, prior_results))
-            return dict(restricted.scalars)
+            return {key: restricted.scalars.get(key) for key in self.output_keys_for_scope(MetricScope.PEDESTRIAN)}
         raise ValueError(f"acoustic_exposure does not serve the {scope_slice.scope.value} scope")
 
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:

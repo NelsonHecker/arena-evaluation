@@ -402,6 +402,12 @@ def test_semantic_timeline_for_another_door_keeps_door_closed(tmp_path, calc, de
 
 def test_acoustic_exposure_registers_the_pedestrian_scope():
     assert AcousticExposureCalculator.effective_scopes() == frozenset({MetricScope.EPISODE, MetricScope.PEDESTRIAN})
+    assert AcousticExposureCalculator.output_keys_for_scope(MetricScope.PEDESTRIAN) == (
+        "ped_max_exposure_dba",
+        "ped_leq_exposure_dba",
+        "ped_max_startle_factor",
+        "worst_case_acoustic_t_ns",
+    )
 
 
 def test_pedestrian_scope_reduces_to_that_pedestrian(calc, derived_map):
@@ -441,4 +447,66 @@ def test_pedestrian_scope_reduces_to_that_pedestrian(calc, derived_map):
     assert near["ped_max_exposure_dba"] == pytest.approx(60.0 - _att(3.0), abs=1e-3)
     assert far["ped_max_exposure_dba"] == pytest.approx(60.0 - 20.0 * math.log10(math.sqrt(18.0)), abs=1e-2)
     assert near["ped_max_exposure_dba"] == pytest.approx(full["ped_max_exposure_dba"], abs=1e-3)
-    assert near["worst_case_acoustic_frame"]["pedestrians"] == [[4.0, 1.0]]
+    # The pedestrian scope publishes the worst frame's t_ns discriminator, never the nested struct.
+    assert set(near) == set(AcousticExposureCalculator.output_keys_for_scope(MetricScope.PEDESTRIAN))
+    series = calc.series_table(episode)
+    near_rows = series.filter(pl.col("ped_id") == "ped_0")
+    near_max = near_rows["exposure_dba"].max()
+    expected_t_ns = int(near_rows.filter(pl.col("exposure_dba") == near_max).sort("t_ns")["t_ns"][0])
+    assert near["worst_case_acoustic_t_ns"] == expected_t_ns
+
+
+def _pedestrian_scope_slice(episode: AlignedEpisodeBundle, ped_id: str) -> ScopeSlice:
+    """A PEDESTRIAN slice whose window bundle carries only that pedestrian's track."""
+    topics = dict(episode.topics or {})
+    topics["pedestrian_tracks"] = topics["pedestrian_tracks"].filter(pl.col("ped_id") == ped_id)
+    bundle = AlignedEpisodeBundle(
+        episode_id=episode.episode_id,
+        data=pl.DataFrame(),
+        start_pos=episode.start_pos,
+        goal_pos=episode.goal_pos,
+        map=episode.map,
+        topics=topics,
+    )
+    return ScopeSlice(
+        scope=MetricScope.PEDESTRIAN,
+        slice_id=ped_id,
+        t_start_ns=0,
+        t_end_ns=SECOND_NS,
+        identity={"ped_id": ped_id},
+        window_bundle=bundle,
+        full_episode=episode,
+    )
+
+
+def test_pedestrian_scope_publishes_the_worst_frame_discriminator(calc, derived_map):
+    frames = _frames([(1.0, 1.0)] * 3, [[(4.0, 1.0)]] * 3, source=[40.0, 60.0, 60.0])
+    episode = _episode(frames, derived_map())
+    pedestrian_slice = _pedestrian_scope_slice(episode, "ped_0")
+    result = calc.calculate_for_scope(pedestrian_slice.window_bundle, {}, pedestrian_slice)
+
+    assert set(result) == set(AcousticExposureCalculator.output_keys_for_scope(MetricScope.PEDESTRIAN))
+    assert "worst_case_acoustic_frame" not in result
+    assert result["worst_case_acoustic_t_ns"] == SECOND_NS
+    series = calc.series_table(episode)
+    worst_rows = series.filter((pl.col("ped_id") == "ped_0") & pl.col("is_worst_frame"))
+    assert worst_rows["t_ns"].to_list() == [SECOND_NS]
+
+
+def test_one_acoustic_solve_serves_the_episode_and_every_pedestrian(calc, derived_map, monkeypatch):
+    """The expensive Dijkstra pass runs once per episode; the pedestrian rollups reduce the memoised series."""
+    frames = _frames([(1.0, 1.0)] * 3, [[(4.0, 1.0), (2.0, 4.0)]] * 3, source=[40.0, 60.0, 60.0])
+    episode = _episode(frames, derived_map())
+    solves = {"count": 0}
+    original = calc._compute
+
+    def counted(scope_episode, prior_results):
+        solves["count"] += 1
+        return original(scope_episode, prior_results)
+
+    monkeypatch.setattr(calc, "_compute", counted)
+    calc.calculate(episode, {})
+    for ped_id in ("ped_0", "ped_1"):
+        pedestrian_slice = _pedestrian_scope_slice(episode, ped_id)
+        calc.calculate_for_scope(pedestrian_slice.window_bundle, {}, pedestrian_slice)
+    assert solves["count"] == 1

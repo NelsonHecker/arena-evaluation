@@ -579,10 +579,10 @@ mappings:
     star_column: ped_max_startle_factor
     legacy_columns: [ped_max_startle_factor]
     star_reduction: max
-    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's startle rise rate; the episode maximum is the max over pedestrians (per-pedestrian slicing pairs more consecutive frames, see expected_diff)"
+    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's startle rise rate; the episode value is the max over pedestrians. parity-g1-g2clock measured the reduction exact on 5 of 6 evaluated episodes and off by 4.69 dBA/s (14.93 vs 10.23) on the sixth because the legacy episode calculator pairs consecutive frames positionally, not by pedestrian identity; the reviewed bound is max_rel 0.33 in expected_diff"
   - metric_key: ped_leq_exposure_dba
     star_table: fact_pedestrians
     star_column: ped_leq_exposure_dba
     legacy_columns: [ped_leq_exposure_dba]
-    star_reduction: max
-    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's energy-average exposure; the legacy episode value is the energy average over all pedestrian-samples, which a plain row reduction cannot rebuild, see expected_diff"
+    star_reduction: mean
+    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's energy-equivalent Leq; the legacy episode value is the energy mean over all pedestrian-samples, so the mean of per-pedestrian dB values is a reviewed energy-weighted reduction. parity-g1-g2clock measured the series energy mean against legacy at 1.4e-14 and the per-pedestrian arithmetic mean within 1.27 dB (max_rel 0.028), reviewed at max_rel 0.03 in expected_diff; the exact episode-grain quantity is l_aeq_t (fact_robots) / total_acoustic_dose_pa2s (fact_episodes)"
