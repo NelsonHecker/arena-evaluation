@@ -29,7 +29,8 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
     The reference is the mission route through every task goal the robot reached, not just the
     current start -> goal leg. A null result carries its reason: ``no_samples`` when the reference
     or the path is unavailable, ``reference_exceeds_path`` when the travelled path is shorter than
-    the route (physically impossible, a data anomaly rather than an efficiency above one).
+    the route. The travelled length is sampled ground truth, so it can undercount by a few
+    percent; a route longer than the path is that sampling anomaly, not an efficiency above one.
     """
 
     NAME = "path_efficiency"
