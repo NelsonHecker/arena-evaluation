@@ -380,7 +380,7 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="hhi_pair_gap_hold", unit="m", fact_table=_CONTACTS, dtype=pl.Float64, direction="", description="social metric of the hhi_contact calculator"),
     MetricDeclaration(name="collision_amount", unit="", fact_table=_CONTACTS, dtype=pl.Int64, direction="lower", description="performance metric of the collision_metrics calculator"),
     MetricDeclaration(name="collision_amount_wall", unit="", fact_table=_CONTACTS, dtype=pl.Int64, direction="", description="performance metric of the collision_metrics calculator"),
-    MetricDeclaration(name="spl", unit="", fact_table=_CONTACTS, dtype=pl.Float64, direction="higher", description="performance metric of the collision_metrics calculator"),
+    MetricDeclaration(name="spl", unit="", fact_table=_CONTACTS, dtype=pl.Float64, direction="higher", description="mission-route success weighted by path length: the reference length is the whole-mission route geodesic, not the final leg"),
     # --- EDGE CASES -> fact_edge_cases (one row per case step / agent) ----------------------
     MetricDeclaration(name="edge_case_steps", unit="", fact_table=_EDGE_CASES, dtype=pl.String, direction="", description="one row per step the case provenance lists; the step name"),
     MetricDeclaration(name="edge_case_agents", unit="", fact_table=_EDGE_CASES, dtype=pl.String, direction="", description="one row per scored case agent; the agent name"),

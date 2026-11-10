@@ -1,6 +1,10 @@
+import numpy as np
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
+
+from arena_evaluation.processing.path import theta_star
+from arena_evaluation.processing.path.theta_star import GeometricThetaStar
 
 from arena_evaluation.processing.metrics.base import MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.performance.collision_metrics import CollisionMetricsCalculator
@@ -420,3 +424,49 @@ def test_other_scopes_are_rejected():
     )
     with pytest.raises(ValueError, match="does not serve the pedestrians scope"):
         CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0)).calculate_for_scope(pedestrian_slice.window_bundle, {}, pedestrian_slice)
+
+
+COLLISION_ROUTE_MAP = "collision_test_open_room"
+
+
+@pytest.fixture(autouse=True, scope="module")
+def collision_open_room_solver():
+    theta_star._solver_instances[f"{COLLISION_ROUTE_MAP}_0.25"] = GeometricThetaStar(np.zeros((200, 200), dtype=bool), resolution=0.1, robot_radius=0.25)
+
+
+def test_contact_scope_theta_star_uses_the_whole_mission_route():
+    time_ns = [index * SEC_NS for index in range(7)]
+    xs = [0.0, 1.0, 2.0, 3.0, 2.0, 1.0, 0.0]
+    data = pl.DataFrame(
+        {
+            "time_ns": time_ns,
+            "pos_x": xs,
+            "pos_y": [0.0] * 7,
+            "pos_x_gt": xs,
+            "pos_y_gt": [0.0] * 7,
+            "yaw_gt": [0.0] * 7,
+        },
+        schema=_ALIGNED_SCHEMA,
+    )
+    tracks = pl.DataFrame({"t_ns": time_ns, "x": xs, "y": [0.0] * 7, "yaw": [0.0] * 7}, schema=_EPISODE_TOPIC_SCHEMA)
+    plans = pl.DataFrame(
+        {
+            "t_ns": [SEC_NS, 2 * SEC_NS],
+            "plan_id": ["plan_0", "plan_1"],
+            "waypoint_idx": [0, 0],
+            "x": [3.0, 0.0],
+            "y": [0.0, 0.0],
+            "yaw": [0.0, 0.0],
+        }
+    )
+    episode = AlignedEpisodeBundle(
+        episode_id=1,
+        data=data,
+        start_pos=[0.0, 0.0, 0.0],
+        goal_pos=[0.0, 0.0],
+        outcome_state=2,
+        map=COLLISION_ROUTE_MAP,
+        topics={"robot_tracks": tracks, "robot_plans": plans},
+    )
+
+    assert CollisionMetricsCalculator(RobotParams(robot_radius=0.25))._theta_star_length_m(episode) == pytest.approx(6.0)
