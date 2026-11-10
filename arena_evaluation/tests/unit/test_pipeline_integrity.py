@@ -27,6 +27,14 @@ MOVED = "env_0/jackal_0 moved by hand"
 RETASKED = "task parameters changed mid-episode"
 
 
+def _write_acoustic_world(base: pathlib.Path, world: str) -> None:
+    """A minimal format-2 world snapshot so the acoustic barrier map resolves for a synthetic episode."""
+    world_dir = base / "worlds" / world
+    world_dir.mkdir(parents=True, exist_ok=True)
+    (world_dir / "world.yaml").write_text(
+        "format: arena-world/2\nlevels:\n  - id: '0'\n    zones:\n      - name: open\n        polygon: [[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0]]\n"
+    )
+
 def _meta(*integrity: str) -> RunMetadata:
     return RunMetadata(
         benchmark_id="run",
@@ -144,6 +152,7 @@ def test_metric_rows_carry_integrity_of_the_last_record(tmp_path: pathlib.Path) 
     _world_cache[WORLD] = [_ZoneGeometry(name="kitchen", polygon=shapely.Polygon([(0, 0), (0, 4), (4, 4), (4, 0)]), max_speed=None, quiet=False, restricted=False)]
     episode_dir = tmp_path / "run" / "episodes" / "nav2" / "episode_000"
     episode_dir.mkdir(parents=True)
+    _write_acoustic_world(tmp_path / "run", WORLD)
     (episode_dir / "episode_000.mcap").touch()
     MetadataWriter.write(_meta(), episode_dir / "episode_000.yaml")
     _write_topics(episode_dir / "topics", ([], [MOVED], [MOVED, RETASKED]))

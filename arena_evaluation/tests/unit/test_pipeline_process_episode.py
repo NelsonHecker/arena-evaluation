@@ -22,6 +22,14 @@ ROBOT = "env_0_jackal_0"
 PHASES = {"jackal_0": {"phases": [{"goto": [1.0, 1.0, 0.0], "tolerance_radius": 0.5, "tolerance_angle": 0.0, "hold_time": 0.0}], "conditions": [], "map_poses": [[1.0, 1.0, 0.0]]}}
 
 
+def _write_acoustic_world(base: pathlib.Path, world: str) -> None:
+    """A minimal format-2 world snapshot so the acoustic barrier map resolves for a synthetic episode."""
+    world_dir = base / "worlds" / world
+    world_dir.mkdir(parents=True, exist_ok=True)
+    (world_dir / "world.yaml").write_text(
+        "format: arena-world/2\nlevels:\n  - id: '0'\n    zones:\n      - name: open\n        polygon: [[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0]]\n"
+    )
+
 def _robot_frame(points: list[tuple[float, float, float]], columns: dict[str, str]) -> dict[str, list]:
     """Flat robot rows of a track: the time, identity and the columns named by the mapping."""
     return {"t_ns": [int(t * S) for t, _, _ in points], "env_id": [ENV] * len(points), "robot_id": [ROBOT] * len(points), **{column: [value(x, y) for _, x, y in points] for column, value in columns.items()}}
@@ -52,6 +60,7 @@ def _robot_rows(t: int, phase: str, met: str) -> list[tuple[int, str, str]]:
 def _episode(tmp_path: pathlib.Path) -> tuple[FolderManager, EpisodeDescriptor]:
     episode_dir = tmp_path / "run" / "episodes" / "nav2" / "episode_000"
     episode_dir.mkdir(parents=True)
+    _write_acoustic_world(tmp_path / "run", WORLD)
     (episode_dir / "episode_000.mcap").touch()
     track = [(t / 10, 5.0 - 0.4 * t, 5.0 - 0.4 * t) for t in range(11)] + [(t / 10, 1.0, 1.0) for t in range(11, 31)]
     topics = episode_dir / "topics"
