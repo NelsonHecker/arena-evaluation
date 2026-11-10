@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import math
 import typing
-
-import numpy as np
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
+def _finite_positive(value: object) -> float | None:
+    """The value as a finite float when it is positive, else None."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(typing.cast(float, value))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number <= 0.0:
+        return None
+    return number
+
+
 class PathEfficiencyCalculator(BaseMetricCalculator):
-    """Calculates ratio of Theta* optimal geodesic distance over actual path length."""
+    """Ratio of the Theta* mission-route geodesic length to the travelled path length."""
 
     NAME = "path_efficiency"
     CATEGORY = "performance"
@@ -27,30 +39,13 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
         ]
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-
-        path_length = prior_results.get("path_length", 0.0) or 0.0
-
-        if path_length <= 1e-9 or not episode.start_pos or not episode.goal_pos:
-            return {"path_efficiency": 0.0}
-
-        l0 = prior_results.get("theta_star_length")
-        if l0 is None or l0 <= 0:
-            start = np.array(episode.start_pos[:2])
-            goal = np.array(episode.goal_pos[:2])
-            l0 = float(np.linalg.norm(goal - start))
-
-        if np.isnan(l0) or np.isinf(l0) or np.isnan(path_length):
-            return {"path_efficiency": 0.0}
-
-        try:
-            efficiency = float(l0 / max(path_length, 0.001))
-            if np.isnan(efficiency):
-                efficiency = 0.0
-            else:
-                efficiency = min(max(efficiency, 0.0), 1.0)
-        except ZeroDivisionError:
-            efficiency = 0.0
-
-        return {
-            "path_efficiency": efficiency,
-        }
+        """Geodesic reference over travelled length; null when either side is unavailable, never a clamp."""
+        del episode
+        path_length = _finite_positive(prior_results.get("path_length"))
+        reference_length = _finite_positive(prior_results.get("theta_star_length"))
+        if path_length is None or reference_length is None:
+            return {"path_efficiency": None}
+        efficiency = reference_length / path_length
+        if not math.isfinite(efficiency):
+            return {"path_efficiency": None}
+        return {"path_efficiency": efficiency}

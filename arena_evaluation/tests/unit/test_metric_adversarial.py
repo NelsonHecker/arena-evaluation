@@ -30,22 +30,19 @@ def test_efficiency_adversarial_zero_length():
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PathEfficiencyCalculator(params)
 
-    prior = {"path_length": 0.0}
+    prior = {"path_length": 0.0, "theta_star_length": 5.0}
     results = calc.calculate(episode, prior)
-    assert results["path_efficiency"] == 0.0
+    assert results["path_efficiency"] is None
 
     # Near-zero (subnormal floats) that might explode during division
-    prior = {"path_length": 1e-320}
-    episode.start_pos = [0.0, 0.0, 0.0]
-    episode.goal_pos = [1.0, 1.0, 0.0]
+    prior = {"path_length": 1e-320, "theta_star_length": 5.0}
     results = calc.calculate(episode, prior)
-    assert not np.isnan(results["path_efficiency"])
+    assert results["path_efficiency"] is None
 
-    episode.start_pos = [float('inf'), float('inf'), 0.0]
-    episode.goal_pos = [float('nan'), float('nan'), 0.0]
+    # An unavailable geodesic reference is null, not a fabricated 0.0
     prior = {"path_length": 10.0}
     results = calc.calculate(episode, prior)
-    assert not np.isnan(results["path_efficiency"])
+    assert results["path_efficiency"] is None
 
 
 def test_pedestrian_disturbance_adversarial_chaotic():
