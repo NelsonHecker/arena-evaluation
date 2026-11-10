@@ -7,10 +7,10 @@ import pytest
 pytest.importorskip("arena_mcp")
 
 from arena_mcp.core import ToolError
+from arena_simulation_setup.tree import FallbackResolver
 
 from arena_evaluation.benchmark.tree import ConfigPathResolver, ContestIdentifier, ManifestIdentifier, SuiteIdentifier
 from arena_evaluation.mcp import authoring, catalog
-from arena_simulation_setup.tree import FallbackResolver
 
 
 def test_run_manifests_lists_only_the_valid_report_files(tmp_path: pathlib.Path):
@@ -43,7 +43,7 @@ def test_config_file_rejects_a_path_as_the_name():
         catalog.config_file("suite", "../secrets")
 
 
-def test_created_config_lands_in_the_writable_source_root(tmp_path: pathlib.Path, monkeypatch) -> None:
+def test_created_config_lands_in_the_writable_source_root(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bench = tmp_path / "configs" / "benchmark"
     monkeypatch.setattr(SuiteIdentifier, "_resolvers", [ConfigPathResolver(SuiteIdentifier, bench, writable=True)])
     path = authoring.write_config("suite", "gaps-authored", "stages: []\n", overwrite=True)
@@ -52,7 +52,7 @@ def test_created_config_lands_in_the_writable_source_root(tmp_path: pathlib.Path
     assert catalog.config_names("suite") == ["gaps-authored"]
 
 
-def test_a_read_only_root_is_never_the_write_target(tmp_path: pathlib.Path, monkeypatch) -> None:
+def test_a_read_only_root_is_never_the_write_target(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     installed = tmp_path / "install" / "configs" / "benchmark"
     installed.mkdir(parents=True)
     monkeypatch.setattr(

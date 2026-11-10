@@ -21,7 +21,6 @@ from arena_evaluation.benchmark.runner import _run_domain
 from arena_evaluation.benchmark.state import Manifest
 
 
-
 def _probe(busy: set[int]) -> collections.abc.Callable[[int], bool]:
     def probe(domain_id: int) -> bool:
         return domain_id in busy

@@ -38,8 +38,6 @@ from arena_runtime.env.task_layer import TM_AXES, TaskLayer, TaskModes, decode_m
 from arena_runtime_msgs.action import RunEpisode
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry, EpisodeRecord, HoldRegistry, LockstepStatus, SimState
 from arena_runtime_msgs.srv import DespawnEnv, QueueEpisode, SpawnEnv
-
-from .domain import DomainBusyError, DomainChoice, ROS_DOMAIN_ID_ENV, apply_domain, choose_domain, describe, runtime_on_domain
 from arena_simulation_setup.tree import ResolverVerdict
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import GetParameters, SetParameters
@@ -47,6 +45,8 @@ from rclpy.action.client import ClientGoalHandle
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 
 from arena_evaluation.processing.world_lookup import installed_world_dir
+
+from .domain import ROS_DOMAIN_ID_ENV, DomainBusyError, DomainChoice, apply_domain, choose_domain, describe, runtime_on_domain
 
 STATE_TOPIC = "/arena/benchmark/state"
 PREPARED = "benchmark: prepared run_id="
@@ -1922,10 +1922,7 @@ class BenchmarkRunner(ArenaMixinNode):
     async def _start_arena(self) -> None:
         domain = int(os.environ.get(ROS_DOMAIN_ID_ENV, "0"))
         if not self._domain_checked and runtime_on_domain(domain):
-            raise DomainBusyError(
-                f"ROS domain {domain} already has an arena runtime (another session shares this host network); "
-                f"shut it down or pass --ros-domain-id with a free domain, or omit it to let the runner pick one"
-            )
+            raise DomainBusyError(f"ROS domain {domain} already has an arena runtime (another session shares this host network); shut it down or pass --ros-domain-id with a free domain, or omit it to let the runner pick one")
         passthrough = dict(self._arena_passthrough)
         cmd = [
             "ros2",

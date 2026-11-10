@@ -90,10 +90,7 @@ def choose_domain(
     """The run's ROS domain: the explicit one when free, else the lowest candidate with no runtime on it."""
     if explicit is not None:
         if probe(explicit):
-            raise DomainBusyError(
-                f"ROS domain {explicit} already has an arena runtime (another session shares this host network); "
-                f"pass a free ros_domain_id=, shut that runtime down, or let the runner pick one by omitting it"
-            )
+            raise DomainBusyError(f"ROS domain {explicit} already has an arena runtime (another session shares this host network); pass a free ros_domain_id=, shut that runtime down, or let the runner pick one by omitting it")
         return DomainChoice(domain_id=explicit, source="explicit", probed=(explicit,))
 
     probed: list[int] = []
@@ -101,10 +98,7 @@ def choose_domain(
         if not probe(candidate):
             return DomainChoice(domain_id=candidate, source="probed", probed=tuple(probed))
         probed.append(candidate)
-    raise DomainBusyError(
-        f"every candidate ROS domain already has an arena runtime ({len(probed)} checked, e.g. {probed[:8]}); "
-        f"shut one down or pass an explicit ros_domain_id="
-    )
+    raise DomainBusyError(f"every candidate ROS domain already has an arena runtime ({len(probed)} checked, e.g. {probed[:8]}); shut one down or pass an explicit ros_domain_id=")
 
 
 def gz_partition(domain_id: int) -> str:

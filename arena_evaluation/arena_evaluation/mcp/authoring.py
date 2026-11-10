@@ -307,6 +307,7 @@ def _planner_availability_problems(contest: Any) -> list[str]:
                 problems.append(f"{contestant.name}: {cap} planner {planner!r} is not checked out, run `arena feature planners add {planner}` or pick one of {sorted(known)}")
     return problems
 
+
 def check_manifest(data: object) -> dict[str, Any]:
     from arena_evaluation.presentation.viz_manifest import VizManifest
 
