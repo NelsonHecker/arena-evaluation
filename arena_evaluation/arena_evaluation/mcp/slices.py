@@ -13,10 +13,10 @@ from typing import Annotated, Any, Final, Literal
 
 import polars as pl
 import pydantic
-from arena_mcp.core import ToolError
 
 from arena_evaluation.analytics.catalog import SERIES_TABLE_PREFIX, BenchmarkCatalog
 from arena_evaluation.storage.declarations import FACT_SCHEMAS, FactTable
+from arena_mcp.core import ToolError
 
 from .base import RunId, domain, run_path
 
@@ -144,17 +144,9 @@ def _pedestrian_ids(encounter_rows: pl.DataFrame, contact_rows: pl.DataFrame, pe
     if pedestrian_id is not None:
         ids.add(pedestrian_id)
     if len(encounter_rows) > 0:
-        ids.update(
-            str(value)
-            for kind, value in zip(encounter_rows.get_column("actor_2_kind"), encounter_rows.get_column("actor_2"), strict=True)
-            if kind == PEDESTRIAN_ACTOR_KIND and value
-        )
+        ids.update(str(value) for kind, value in zip(encounter_rows.get_column("actor_2_kind"), encounter_rows.get_column("actor_2"), strict=True) if kind == PEDESTRIAN_ACTOR_KIND and value)
     if len(contact_rows) > 0:
-        ids.update(
-            str(value)
-            for kind, value in zip(contact_rows.get_column("collider_kind"), contact_rows.get_column("obstacle_id"), strict=True)
-            if kind == PEDESTRIAN_ACTOR_KIND and value
-        )
+        ids.update(str(value) for kind, value in zip(contact_rows.get_column("collider_kind"), contact_rows.get_column("obstacle_id"), strict=True) if kind == PEDESTRIAN_ACTOR_KIND and value)
     return sorted(ids)
 
 
@@ -162,10 +154,7 @@ def _pedestrian_rows(pedestrians: pl.DataFrame, episode_id: int, pedestrian_ids:
     """The pedestrian fact rows of these identities inside this episode."""
     if not pedestrian_ids:
         return pedestrians.head(0)
-    identity_rows = pedestrians.filter(
-        (pl.col("episode_id") == episode_id)
-        & (pl.col("ped_id").is_in(pedestrian_ids) | pl.col("ped_name").is_in(pedestrian_ids))
-    )
+    identity_rows = pedestrians.filter((pl.col("episode_id") == episode_id) & (pl.col("ped_id").is_in(pedestrian_ids) | pl.col("ped_name").is_in(pedestrian_ids)))
     return identity_rows.sort("ped_id")
 
 

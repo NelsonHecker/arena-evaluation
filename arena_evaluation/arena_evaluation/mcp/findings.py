@@ -19,10 +19,10 @@ from typing import Annotated, Any, Final, Literal
 import polars as pl
 import pydantic
 import yaml
-from arena_mcp.core import ToolError
 
 from arena_evaluation.analytics.evidence import EvidenceStore
 from arena_evaluation.analytics.queries import QueryCatalog
+from arena_mcp.core import ToolError
 
 from .base import RunId, component, domain, run_path
 from .runs import Note, write_notes
@@ -102,7 +102,7 @@ def load_findings(path: pathlib.Path) -> list[Finding]:
         return []
     rows = raw.get("findings", []) if isinstance(raw, dict) else raw
     if not isinstance(rows, list):
-        raise ToolError(f"{path.name} is not a findings document", hint=f"delete it or fix it as a list under 'findings:'")
+        raise ToolError(f"{path.name} is not a findings document", hint="delete it or fix it as a list under 'findings:'")
     try:
         return [Finding.model_validate(row) for row in rows]
     except pydantic.ValidationError as exc:
