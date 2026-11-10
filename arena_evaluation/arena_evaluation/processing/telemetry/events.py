@@ -21,6 +21,13 @@ MEMBER_ROLE_NAMES = {0: "participant", 1: "queue"}
 INTERACTION_EVENT_NAMES = {0: "ACTIVATED", 1: "HOLD_ONSET", 2: "RELEASED", 3: "INTERRUPTED", 4: "CANCELED"}
 
 
+def _header_stamp_ns(envelope: Envelope) -> int | None:
+    """Header stamp of a message whose recorded schema carries a std_msgs/Header, None for trimmed old recordings."""
+    if b"std_msgs/Header" not in envelope.schema.data:
+        return None
+    return stamp_ns(envelope.body.header)
+
+
 def record_collision_events(sink: TableSink, envelope: Envelope[CollisionEvents]) -> None:
     events = envelope.body.events
     sink.append(
@@ -33,12 +40,14 @@ def record_collision_events(sink: TableSink, envelope: Envelope[CollisionEvents]
             ped_count=_count_kind(events, PEDESTRIAN_KIND),
         ),
     )
+    contact_stamp = _header_stamp_ns(envelope)
     for event in events:
         x, y, z = _position(event)
         sink.append(
             "collision_contacts",
             robot_row(
                 envelope,
+                stamp_ns=contact_stamp,
                 obstacle_id=str(event.obstacle_id),
                 kind=str(event.kind),
                 obstacle_x=x,
