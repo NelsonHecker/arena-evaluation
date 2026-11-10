@@ -99,11 +99,7 @@ class ReconciledEpisode:
                 return UNOBSTRUCTED_ROBOT
             return None
         reference_type = _COLUMN_REFERENCE[column]
-        present = (
-            self.has_pedestrian_twin
-            if reference_type == UNHINDERED_PEDS
-            else self.has_robot_twin
-        )
+        present = self.has_pedestrian_twin if reference_type == UNHINDERED_PEDS else self.has_robot_twin
         return None if present else reference_type
 
 
@@ -145,16 +141,13 @@ def robot_path(episode_dir: pathlib.Path, robot_id: str | None = None) -> list[P
     frame = _read_series(episode_dir, _PATH_SERIES_FILE)
     if frame is None or frame.height == 0:
         return None
-    if robot_id is not None and "robot_id" in frame.columns:
+    # The series contract carries the identity columns on every table, so `robot_id` is guaranteed.
+    if robot_id is not None:
         filtered = frame.filter(pl.col("robot_id") == robot_id)
         if filtered.height > 0:
             frame = filtered
     points = frame.sort("t_ns").select("x_m", "y_m").to_numpy().astype("float64")
-    return [
-        (float(x), float(y))
-        for x, y in points
-        if math.isfinite(float(x)) and math.isfinite(float(y))
-    ]
+    return [(float(x), float(y)) for x, y in points if math.isfinite(float(x)) and math.isfinite(float(y))]
 
 
 def pedestrian_paths(episode_dir: pathlib.Path) -> list[list[Point]] | None:
@@ -165,11 +158,7 @@ def pedestrian_paths(episode_dir: pathlib.Path) -> list[list[Point]] | None:
     paths: list[list[Point]] = []
     for pedestrian in frame.sort(["ped_id", "t_ns"]).partition_by("ped_id", maintain_order=True):
         points = pedestrian.select("x_m", "y_m").to_numpy().astype("float64")
-        path = [
-            (float(x), float(y))
-            for x, y in points
-            if math.isfinite(float(x)) and math.isfinite(float(y))
-        ]
+        path = [(float(x), float(y)) for x, y in points if math.isfinite(float(x)) and math.isfinite(float(y))]
         if path:
             paths.append(path)
     return paths
@@ -232,17 +221,9 @@ def plan_reconciliation(
             continue
         pedestrian_twin = twin_index.pedestrian_twin(episode)
         robot_twin = twin_index.robot_twin(episode)
-        robot_reference = (
-            None if robot_twin is None else reference_row(robot_twin, include_robot_path=True)
-        )
-        pedestrian_reference = (
-            None
-            if pedestrian_twin is None
-            else reference_row(pedestrian_twin, include_robot_path=False)
-        )
-        pedestrian_reasons[episode.episode_id] = (
-            f"reference_missing:{UNHINDERED_PEDS}" if pedestrian_twin is None else "no_samples"
-        )
+        robot_reference = None if robot_twin is None else reference_row(robot_twin, include_robot_path=True)
+        pedestrian_reference = None if pedestrian_twin is None else reference_row(pedestrian_twin, include_robot_path=False)
+        pedestrian_reasons[episode.episode_id] = f"reference_missing:{UNHINDERED_PEDS}" if pedestrian_twin is None else "no_samples"
         episode_dir = pathlib.Path(episode.episode_dir)
         for fact_row in frames.to_dicts():
             # Only read the path series the twins actually need; a run without references
@@ -282,9 +263,7 @@ def _optional_float(value: object) -> float | None:
     return None if value is None else float(typing.cast(float, value))
 
 
-def _episode_null_reason(
-    existing: object, reconciled: ReconciledEpisode, row: Mapping[str, typing.Any]
-) -> str:
+def _episode_null_reason(existing: object, reconciled: ReconciledEpisode, row: Mapping[str, typing.Any]) -> str:
     """Existing row reason without the stale reconciled codes, plus the current typed codes."""
     parts = [part for part in str(existing or "").split(";") if part]
     kept = [part for part in parts if part.split(":", maxsplit=1)[0] not in RECONCILED_COLUMNS]
@@ -295,11 +274,7 @@ def _episode_null_reason(
         if value is not None:
             continue
         missing_reference = reconciled.missing_reference(column)
-        code = (
-            f"reference_missing:{missing_reference}"
-            if missing_reference is not None
-            else "no_samples"
-        )
+        code = f"reference_missing:{missing_reference}" if missing_reference is not None else "no_samples"
         kept.append(f"{column}:{code}")
     return ";".join(kept)
 
@@ -307,19 +282,13 @@ def _episode_null_reason(
 def _pedestrian_null_reason(existing: object, reason: str, *, value: object) -> str:
     """Existing pedestrian row reason without the stale deflection code, plus the twin-aware code."""
     parts = [part for part in str(existing or "").split(";") if part]
-    kept = [
-        part
-        for part in parts
-        if part.split(":", maxsplit=1)[0] != PEDESTRIAN_DEFLECTION_COLUMN
-    ]
+    kept = [part for part in parts if part.split(":", maxsplit=1)[0] != PEDESTRIAN_DEFLECTION_COLUMN]
     if value is None:
         kept.append(f"{PEDESTRIAN_DEFLECTION_COLUMN}:{reason}")
     return ";".join(kept)
 
 
-def patch_fact_episodes(
-    frame: pl.DataFrame, plan: ReconciliationPlan
-) -> pl.DataFrame:
+def patch_fact_episodes(frame: pl.DataFrame, plan: ReconciliationPlan) -> pl.DataFrame:
     """Episode fact rows with the reconciled twin columns and their typed missingness codes."""
     if frame.height == 0 or not plan.episodes:
         return frame
@@ -332,16 +301,12 @@ def patch_fact_episodes(
         for column in RECONCILED_COLUMNS:
             if column in row:
                 row[column] = reconciled.column_value(column)
-        row["null_reason"] = _episode_null_reason(
-            row.get("null_reason"), reconciled, row
-        )
+        row["null_reason"] = _episode_null_reason(row.get("null_reason"), reconciled, row)
         patched = True
     return pl.DataFrame(rows, schema=frame.schema) if patched else frame
 
 
-def patch_fact_pedestrians(
-    frame: pl.DataFrame, plan: ReconciliationPlan
-) -> pl.DataFrame:
+def patch_fact_pedestrians(frame: pl.DataFrame, plan: ReconciliationPlan) -> pl.DataFrame:
     """Pedestrian fact rows with the twin-aware deflection missingness code."""
     if frame.height == 0 or not plan.pedestrian_reasons:
         return frame
@@ -353,9 +318,7 @@ def patch_fact_pedestrians(
         reason = plan.pedestrian_reasons.get(int(typing.cast(int, row.get("episode_id"))))
         if reason is None:
             continue
-        row["null_reason"] = _pedestrian_null_reason(
-            row.get("null_reason"), reason, value=row.get(PEDESTRIAN_DEFLECTION_COLUMN)
-        )
+        row["null_reason"] = _pedestrian_null_reason(row.get("null_reason"), reason, value=row.get(PEDESTRIAN_DEFLECTION_COLUMN))
         patched = True
     return pl.DataFrame(rows, schema=frame.schema) if patched else frame
 

@@ -124,7 +124,7 @@ def _process_worker(
     force_extract: bool,
     status_dict: typing.MutableMapping[int, tuple[str, str, str, int, int, float]] | None = None,
     reference_pedestrian_episode_dir: str | None = None,
-) -> tuple[int, "EpisodeEvaluation"]:
+) -> tuple[int, EpisodeEvaluation]:
     import pathlib
     import time
 
@@ -139,11 +139,7 @@ def _process_worker(
             pass
     fm = FolderManager(data_root=pathlib.Path(data_root_str))
     pipeline = ProcessingPipeline(fm, profiler=None, workers=1)
-    reference_pedestrian_tracks = read_pedestrian_tracks_from_dir(
-        None
-        if reference_pedestrian_episode_dir is None
-        else pathlib.Path(reference_pedestrian_episode_dir)
-    )
+    reference_pedestrian_tracks = read_pedestrian_tracks_from_dir(None if reference_pedestrian_episode_dir is None else pathlib.Path(reference_pedestrian_episode_dir))
     try:
         evaluation = pipeline.evaluate_episode(
             ep,
@@ -598,7 +594,6 @@ class ProcessingPipeline:
         from arena_evaluation.processing.scoped_evaluator import ScopedEvaluator
         from arena_evaluation.storage.star_schema import (
             StarSchemaBuilder,
-            StarSchemaTables,
         )
 
         episode_dir = pathlib.Path(ep.episode_dir)
@@ -867,9 +862,9 @@ class ProcessingPipeline:
         self.publish_evaluation(evaluation)
         return evaluation.rows
 
-    def _twin_index_for_episode(self, episode: EpisodeDescriptor) -> "TwinIndex":
+    def _twin_index_for_episode(self, episode: EpisodeDescriptor) -> TwinIndex:
         """Reference index of the run the episode belongs to, empty when the run is not discoverable."""
-        from arena_evaluation.processing.reference_twins import TwinIndex, build_twin_index
+        from arena_evaluation.processing.reference_twins import build_twin_index
 
         episodes = self.folder_manager.discover_episodes(episode.benchmark_id)
         if not any(candidate.episode_id == episode.episode_id for candidate in episodes):
@@ -886,9 +881,7 @@ class ProcessingPipeline:
         try:
             write_episode_star_tables(evaluation.star_tables, evaluation.metrics_dir)
         except Exception as error:
-            _log.warning(
-                f"episode_{evaluation.episode_id:03d}: scoped star tables not written: {error!r}"
-            )
+            _log.warning(f"episode_{evaluation.episode_id:03d}: scoped star tables not written: {error!r}")
 
     def _reconcile_episodes(
         self,
@@ -914,16 +907,10 @@ class ProcessingPipeline:
             if tables is not None:
                 facts_by_episode[candidate.episode_id] = tables.fact_episodes
         plan = plan_reconciliation(index_source, facts_by_episode, twin_index)
-        rewritten = sum(
-            1
-            for candidate in episodes
-            if apply_plan_to_disk(pathlib.Path(candidate.episode_dir), plan)
-        )
+        rewritten = sum(1 for candidate in episodes if apply_plan_to_disk(pathlib.Path(candidate.episode_dir), plan))
         if plan.episodes:
             print(
-                f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against "
-                f"{len(twin_index.peds_by_stage)} pedestrian and {len(twin_index.robot_by_stage_planner)} robot references, "
-                f"{rewritten} episode fact tables rewritten",
+                f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against {len(twin_index.peds_by_stage)} pedestrian and {len(twin_index.robot_by_stage_planner)} robot references, {rewritten} episode fact tables rewritten",
                 flush=True,
             )
         return rewritten
@@ -964,18 +951,12 @@ class ProcessingPipeline:
                     star_tables=dataclasses.replace(
                         evaluation.star_tables,
                         fact_episodes=patch_fact_episodes(evaluation.star_tables.fact_episodes, plan),
-                        fact_pedestrians=patch_fact_pedestrians(
-                            evaluation.star_tables.fact_pedestrians, plan
-                        ),
+                        fact_pedestrians=patch_fact_pedestrians(evaluation.star_tables.fact_pedestrians, plan),
                     ),
                 )
                 published += 1
             self.publish_evaluation(evaluation)
-        evaluated_ids = {
-            evaluation.episode_id
-            for evaluation in evaluations
-            if evaluation.star_tables is not None
-        }
+        evaluated_ids = {evaluation.episode_id for evaluation in evaluations if evaluation.star_tables is not None}
         for episode in episodes:
             if episode.episode_id in evaluated_ids:
                 continue
@@ -983,9 +964,7 @@ class ProcessingPipeline:
                 published += 1
         if plan.episodes:
             print(
-                f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against "
-                f"{len(twin_index.peds_by_stage)} pedestrian and "
-                f"{len(twin_index.robot_by_stage_planner)} robot references, {published} fact tables published",
+                f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against {len(twin_index.peds_by_stage)} pedestrian and {len(twin_index.robot_by_stage_planner)} robot references, {published} fact tables published",
                 flush=True,
             )
         return self._consolidate_benchmark_star(benchmark_id, episodes)
@@ -1060,14 +1039,7 @@ class ProcessingPipeline:
         from arena_evaluation.processing.reference_twins import build_twin_index
 
         twin_index = build_twin_index(episodes)
-        reference_pedestrian_dirs: dict[int, str | None] = {
-            episode.episode_id: (
-                None
-                if (twin := twin_index.pedestrian_twin(episode)) is None
-                else twin.episode_dir
-            )
-            for episode in episodes
-        }
+        reference_pedestrian_dirs: dict[int, str | None] = {episode.episode_id: (None if (twin := twin_index.pedestrian_twin(episode)) is None else twin.episode_dir) for episode in episodes}
 
         _ctx_extract = self.profiler.phase("extract") if self.profiler else contextlib.nullcontext()
         with _ctx_extract:
@@ -1175,7 +1147,6 @@ class ProcessingPipeline:
         """Consolidate the per-episode Star Schema tables (and series) at benchmark level."""
         from arena_evaluation.storage.star_schema import (
             StarSchemaBuilder,
-            StarSchemaTables,
             read_episode_star_tables,
             write_star_schema,
         )

@@ -86,9 +86,7 @@ def _dt_s(time_ns: np.ndarray) -> np.ndarray:
     return np.where(dt <= 0.0, MIN_DT_S, dt)
 
 
-def _pose_track(
-    calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle
-) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+def _pose_track(calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Ground-truth position samples of the scope view: the aligned teleport-free frame, else the native track."""
     frame = calculator.resolve_robot_frame(episode)
     if frame is not None and frame.height >= 2:
@@ -108,9 +106,7 @@ def _pose_track(
     )
 
 
-def _unique_track(
-    time_ns: np.ndarray, x_m: np.ndarray, y_m: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+def _unique_track(time_ns: np.ndarray, x_m: np.ndarray, y_m: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Samples in ascending time with one row per stamp and finite positions, None when fewer than two remain."""
     order = np.argsort(time_ns, kind="stable")
     time_sorted = time_ns[order]
@@ -183,19 +179,11 @@ def _smooth_position_kinematics(
         return None
     grid_x = np.interp(grid, grid_time_ns, grid_x_m)
     grid_y = np.interp(grid, grid_time_ns, grid_y_m)
-    velocity_x = savgol_filter(
-        grid_x, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
-    )
-    velocity_y = savgol_filter(
-        grid_y, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
-    )
+    velocity_x = savgol_filter(grid_x, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s)
+    velocity_y = savgol_filter(grid_y, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s)
     speed_mps = np.hypot(velocity_x, velocity_y)
-    acceleration_mps2 = savgol_filter(
-        speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
-    )
-    jerk_mps3 = savgol_filter(
-        speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s
-    )
+    acceleration_mps2 = savgol_filter(speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s)
+    jerk_mps3 = savgol_filter(speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s)
     return Kinematics(
         time_ns=grid,
         speed_mps=speed_mps,
@@ -232,12 +220,8 @@ def _smooth_speed_kinematics(
     if window < MIN_SMOOTHING_SAMPLES:
         return None
     grid_speed_mps = np.interp(grid, time_sorted, speed_sorted)
-    acceleration_mps2 = savgol_filter(
-        grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s
-    )
-    jerk_mps3 = savgol_filter(
-        grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s
-    )
+    acceleration_mps2 = savgol_filter(grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s)
+    jerk_mps3 = savgol_filter(grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s)
     return Kinematics(
         time_ns=grid,
         speed_mps=grid_speed_mps,
@@ -246,9 +230,7 @@ def _smooth_speed_kinematics(
     )
 
 
-def episode_speed_mps(
-    calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle
-) -> tuple[np.ndarray, np.ndarray]:
+def episode_speed_mps(calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray]:
     """Recorded speed (m/s) and sample times (ns) of an episode, the speed-only fallback stream.
 
     Used where the recording carries a speed stream but no ground-truth position track; the
@@ -274,9 +256,7 @@ def episode_speed_mps(
     )
 
 
-def episode_kinematics(
-    calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle
-) -> Kinematics:
+def episode_kinematics(calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle) -> Kinematics:
     """Speed, acceleration and jerk of the scope view, smoothed over the declared window when it fits.
 
     The recorded ground-truth speed stream is the signal (the same stream the metric always
@@ -339,9 +319,7 @@ def _motion_series_frame(
     sample_count = len(kinematics.speed_mps)
     if sample_count == 0:
         return pl.DataFrame(schema=SERIES_SCHEMA)
-    time_s = (
-        kinematics.time_ns.astype(np.float64) - float(kinematics.time_ns[0])
-    ) / NANOSECONDS_PER_SECOND
+    time_s = (kinematics.time_ns.astype(np.float64) - float(kinematics.time_ns[0])) / NANOSECONDS_PER_SECOND
     return pl.DataFrame(
         {
             "run_id": pl.Series("run_id", [run_id] * sample_count, dtype=pl.String),
@@ -350,9 +328,7 @@ def _motion_series_frame(
             "t_ns": pl.Series("t_ns", kinematics.time_ns, dtype=pl.Int64),
             "time_s": pl.Series("time_s", time_s, dtype=pl.Float64),
             "speed_mps": _null_float_series(kinematics.speed_mps, "speed_mps"),
-            "acceleration_mps2": _null_float_series(
-                kinematics.acceleration_mps2, "acceleration_mps2"
-            ),
+            "acceleration_mps2": _null_float_series(kinematics.acceleration_mps2, "acceleration_mps2"),
             "jerk_mps3": _null_float_series(kinematics.jerk_mps3, "jerk_mps3"),
         },
         schema=SERIES_SCHEMA,
@@ -373,9 +349,7 @@ class MotionMetricsCalculator(BaseMetricCalculator):
     REQUIRED_TOPICS = ["robot_tracks"]
 
     SCOPE = MetricScope.EPISODE
-    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset(
-        {MetricScope.EPISODE, MetricScope.ENCOUNTER}
-    )
+    SCOPES: typing.ClassVar[frozenset[MetricScope]] = frozenset({MetricScope.EPISODE, MetricScope.ENCOUNTER})
 
     UNITS = {
         "velocity_mean": "m/s",
@@ -400,9 +374,7 @@ class MotionMetricsCalculator(BaseMetricCalculator):
     def output_keys(cls) -> list[str]:
         return list(_SUMMARY_KEYS)
 
-    def calculate(
-        self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]
-    ) -> dict[str, typing.Any]:
+    def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         del prior_results
         return _summarize(episode_kinematics(self, episode))
 
@@ -419,9 +391,7 @@ class MotionMetricsCalculator(BaseMetricCalculator):
             return _summarize(episode_kinematics(self, episode))
         raise ValueError(f"motion_metrics does not serve the {scope_slice.scope.value} scope")
 
-    def series_table(
-        self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = ""
-    ) -> pl.DataFrame:
+    def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat motion series, one row per kinematics sample; schema-typed when empty."""
         return _motion_series_frame(
             episode_kinematics(self, episode),

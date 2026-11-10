@@ -107,8 +107,8 @@ def resolve_crowd_condition(
         if visible is not None:
             return "visible" if bool(visible) else "blind"
 
-    params = getattr(episode, "human_params", None)
-    if isinstance(params, dict):
+    params = episode.human_params
+    if params is not None:
         val = params.get(ROBOT_VISIBILITY_PARAM)
         if val is not None:
             return "visible" if bool(val) else "blind"
@@ -271,7 +271,9 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="specific_cost_of_transport", unit="", fact_table=_ROBOTS, dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
     MetricDeclaration(name="standstill_energy_penalty_wh", unit="Wh", fact_table=_ROBOTS, dtype=pl.Float64, direction="lower", description="ecological metric of the energy_extended calculator"),
     MetricDeclaration(name="acceleration_mean", unit="m/s²", fact_table=_ROBOTS, dtype=pl.Float64, direction="", description="smoothed ground-truth acceleration magnitude of the motion_metrics calculator: Savitzky-Golay derivatives of the recorded speed, 1.0 s window, order 2, at most 20 Hz"),
-    MetricDeclaration(name="jerk_mean", unit="m/s³", fact_table=_ROBOTS, dtype=pl.Float64, direction="lower", description="smoothed ground-truth jerk magnitude of the motion_metrics calculator: Savitzky-Golay derivatives of the recorded speed, 1.0 s window, order 2, at most 20 Hz (the episode jerk_max_mps3 uses the same estimator)"),
+    MetricDeclaration(
+        name="jerk_mean", unit="m/s³", fact_table=_ROBOTS, dtype=pl.Float64, direction="lower", description="smoothed ground-truth jerk magnitude of the motion_metrics calculator: Savitzky-Golay derivatives of the recorded speed, 1.0 s window, order 2, at most 20 Hz (the episode jerk_max_mps3 uses the same estimator)"
+    ),
     # --- PEDESTRIAN scope -> fact_pedestrians -----------------------------------------------
     MetricDeclaration(name="ped_round_trips_completed", unit="", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
     MetricDeclaration(name="ped_velocity_delay_ratio", unit="", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),

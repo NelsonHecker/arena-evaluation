@@ -127,10 +127,7 @@ def _write_episode(
         path_length_m=path_length_m,
         time_to_goal_s=time_to_goal_s,
         total_energy_wh=energy_wh,
-        null_reason=(
-            "mar:no_samples;pfi:no_samples;robot_path_dev_m:no_samples;"
-            "kcsc_wh:no_samples;relative_throughput:no_samples"
-        ),
+        null_reason=("mar:no_samples;pfi:no_samples;robot_path_dev_m:no_samples;kcsc_wh:no_samples;relative_throughput:no_samples"),
     )
     fact.write_parquet(episode_dir / "metrics" / "fact_episodes.parquet")
     _one_row(
@@ -152,9 +149,7 @@ def _write_episode(
             }
             for index, point in enumerate(robot_path_points)
         ]
-        pl.DataFrame(rows, schema=SERIES_PATH_SCHEMA).write_parquet(
-            episode_dir / "metrics" / "series_path_metrics.parquet"
-        )
+        pl.DataFrame(rows, schema=SERIES_PATH_SCHEMA).write_parquet(episode_dir / "metrics" / "series_path_metrics.parquet")
     if pedestrian_paths_points is not None:
         rows = []
         for ped_id, path in enumerate(pedestrian_paths_points):
@@ -170,9 +165,7 @@ def _write_episode(
                         "y_m": point[1],
                     }
                 )
-        pl.DataFrame(rows, schema=SERIES_PEDESTRIAN_PATH_SCHEMA).write_parquet(
-            episode_dir / "metrics" / "series_pedestrian_path_metrics.parquet"
-        )
+        pl.DataFrame(rows, schema=SERIES_PEDESTRIAN_PATH_SCHEMA).write_parquet(episode_dir / "metrics" / "series_pedestrian_path_metrics.parquet")
     return _descriptor(episode_dir, episode_id, planner=planner, reference_type=reference_type)
 
 
@@ -210,12 +203,7 @@ def _twin_benchmark(tmp_path: pathlib.Path) -> tuple[pathlib.Path, list[EpisodeD
 
 
 def _facts(descriptors: list[EpisodeDescriptor]) -> dict[int, pl.DataFrame]:
-    return {
-        descriptor.episode_id: pl.read_parquet(
-            pathlib.Path(descriptor.episode_dir) / "metrics" / "fact_episodes.parquet"
-        )
-        for descriptor in descriptors
-    }
+    return {descriptor.episode_id: pl.read_parquet(pathlib.Path(descriptor.episode_dir) / "metrics" / "fact_episodes.parquet") for descriptor in descriptors}
 
 
 def test_twin_index_uses_the_runner_keys(tmp_path: pathlib.Path):
@@ -247,9 +235,7 @@ def test_plan_reconciles_the_five_twin_columns(tmp_path: pathlib.Path):
 def test_plan_types_a_missing_pedestrian_twin(tmp_path: pathlib.Path):
     root = tmp_path / "benchmarks" / RUN_ID
     contestant = _write_episode(root, 1, robot_path_points=[(0.0, 0.0), (10.0, 0.0)])
-    robot_twin = _write_episode(
-        root, 2, reference_type=UNOBSTRUCTED_ROBOT, robot_path_points=[(0.0, 0.0), (10.0, 0.0)]
-    )
+    robot_twin = _write_episode(root, 2, reference_type=UNOBSTRUCTED_ROBOT, robot_path_points=[(0.0, 0.0), (10.0, 0.0)])
     descriptors = [contestant, robot_twin]
     plan = plan_reconciliation(descriptors, _facts(descriptors), build_twin_index(descriptors))
 
@@ -269,9 +255,7 @@ def test_plan_types_a_missing_pedestrian_twin(tmp_path: pathlib.Path):
 def test_plan_types_a_missing_robot_twin(tmp_path: pathlib.Path):
     root = tmp_path / "benchmarks" / RUN_ID
     contestant = _write_episode(root, 1, pedestrian_paths_points=[[(0.0, 1.0), (1.0, 1.0)]])
-    peds_twin = _write_episode(
-        root, 3, reference_type=UNHINDERED_PEDS, pedestrian_paths_points=[[(0.0, 0.0), (1.0, 0.0)]]
-    )
+    peds_twin = _write_episode(root, 3, reference_type=UNHINDERED_PEDS, pedestrian_paths_points=[[(0.0, 0.0), (1.0, 0.0)]])
     descriptors = [contestant, peds_twin]
     plan = plan_reconciliation(descriptors, _facts(descriptors), build_twin_index(descriptors))
 
@@ -288,9 +272,7 @@ def test_patch_fact_pedestrians_records_the_missing_reference(tmp_path: pathlib.
     contestant = _write_episode(root, 1)
     plan = plan_reconciliation([contestant], _facts([contestant]), build_twin_index([contestant]))
 
-    frame = pl.read_parquet(
-        pathlib.Path(contestant.episode_dir) / "metrics" / "fact_pedestrians.parquet"
-    )
+    frame = pl.read_parquet(pathlib.Path(contestant.episode_dir) / "metrics" / "fact_pedestrians.parquet")
     patched = patch_fact_pedestrians(frame, plan)
     reason = patched.to_dicts()[0]["null_reason"]
     assert reason == "ped_path_deflection_m:reference_missing:unhindered_peds"
@@ -301,9 +283,7 @@ def test_apply_plan_to_disk_round_trips_the_values(tmp_path: pathlib.Path):
     plan = plan_reconciliation(descriptors, _facts(descriptors), build_twin_index(descriptors))
 
     assert apply_plan_to_disk(pathlib.Path(descriptors[0].episode_dir), plan)
-    patched = pl.read_parquet(
-        pathlib.Path(descriptors[0].episode_dir) / "metrics" / "fact_episodes.parquet"
-    ).to_dicts()[0]
+    patched = pl.read_parquet(pathlib.Path(descriptors[0].episode_dir) / "metrics" / "fact_episodes.parquet").to_dicts()[0]
     assert patched["mar"] == pytest.approx(1.0)
     assert patched["pfi"] == pytest.approx(1.0)
     assert patched["robot_path_dev_m"] == pytest.approx(1.0)
