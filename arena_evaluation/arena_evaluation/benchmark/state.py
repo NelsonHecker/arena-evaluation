@@ -25,6 +25,7 @@ if typing.TYPE_CHECKING:
     from arena_runtime_msgs.msg import EpisodeRecord
 
 SUPERSEDED_PROGRESS = "superseded_progress.csv"
+_log = logging.getLogger(__name__)
 
 
 def compute_config_hash(suite: object, contest: object) -> str:
@@ -66,25 +67,41 @@ def find_most_recent_resumable(data_root: pathlib.Path) -> str | None:
     return candidates[0]
 
 
-def capture_git_sha(workspace: pathlib.Path) -> tuple[str | None, bool]:
+def capture_git_sha(workspace: pathlib.Path) -> tuple[str | None, bool | None]:
+    """HEAD sha and dirty flag of the Arena checkout that resolve_git_workspace finds from workspace.
+
+    (None, None) when rev-parse fails; (sha, None) when only git status fails.
+    """
+    from arena_evaluation.ingestion.metadata import IngestionMetadata
+
+    repo = IngestionMetadata.resolve_git_workspace(str(workspace))
     try:
         sha = subprocess.run(
-            ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+            ["git", "-C", repo, "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if sha.returncode != 0:
-            return None, False
+    except (OSError, subprocess.SubprocessError) as exc:
+        _log.warning("git rev-parse HEAD failed in %s: %s", repo, exc)
+        return None, None
+    if sha.returncode != 0:
+        _log.warning("git rev-parse HEAD failed in %s: %s", repo, sha.stderr.strip())
+        return None, None
+    try:
         dirty_out = subprocess.run(
-            ["git", "-C", str(workspace), "status", "--porcelain"],
+            ["git", "-C", repo, "status", "--porcelain"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return sha.stdout.strip(), bool(dirty_out.stdout.strip())
-    except Exception:
-        return None, False
+    except (OSError, subprocess.SubprocessError) as exc:
+        _log.warning("git status --porcelain failed in %s: %s", repo, exc)
+        return sha.stdout.strip(), None
+    if dirty_out.returncode != 0:
+        _log.warning("git status --porcelain failed in %s: %s", repo, dirty_out.stderr.strip())
+        return sha.stdout.strip(), None
+    return sha.stdout.strip(), bool(dirty_out.stdout.strip())
 
 
 @dataclasses.dataclass
@@ -92,7 +109,7 @@ class Manifest:
     run_id: str
     created_at: str
     arena_git_sha: str | None
-    arena_git_dirty: bool
+    arena_git_dirty: bool | None
     cli_args: list[str]
     env_n: int
     headless: bool

@@ -97,14 +97,33 @@ def _launch_scalar(key: str, value: object) -> LaunchScalar:
     raise ValueError(f"suite launch: {key!r} must be a boolean, number or string, got {type(value).__name__} {value!r}")
 
 
+def _check_robots_visible(stages: list[Suite.Stage]) -> None:
+    """humansim.robots_visible is a bool set on every stage or on none, since a set value carries over to later episodes."""
+    values: list[tuple[str, object]] = []
+    unset: list[str] = []
+    for stage in stages:
+        block = (stage.config or {}).get("humansim")
+        if isinstance(block, dict) and "robots_visible" in block:
+            values.append((stage.name, block["robots_visible"]))
+        else:
+            unset.append(stage.name)
+    wrong = [name for name, value in values if not isinstance(value, bool)]
+    if wrong:
+        raise ValueError(f"suite: humansim.robots_visible must be true or false, stages {wrong} give another value")
+    if values and unset:
+        raise ValueError(f"suite: humansim.robots_visible is set on {[name for name, _ in values]} but not on {unset}, a set value carries over to later episodes, so set it on every stage")
+
+
 class Suite(typing.NamedTuple):
     @classmethod
     def parse(cls, name: str, obj: dict) -> Suite:
         task_layer_key = str(obj.get("task_layer") or "")
         layer = _layer(task_layer_key)
+        stages = [cls.Stage.parse(stage, layer) for stage in obj["stages"]]
+        _check_robots_visible(stages)
         return cls(
             name=name,
-            stages=[cls.Stage.parse(stage, layer) for stage in obj["stages"]],
+            stages=stages,
             launch_args=cls._parse_launch(obj.get("launch") or {}),
             references=bool(obj.get("references", False)),
             metrics=cls._parse_metrics(obj.get("metrics") or {}),

@@ -238,15 +238,15 @@ def test_capture_git_sha_dirty(monkeypatch):
 def test_capture_git_sha_nonzero_returncode(monkeypatch):
     results = [subprocess.CompletedProcess([], 1, stdout="", stderr="fatal: not a git repo")]
     _install_fake_git(monkeypatch, results)
-    assert capture_git_sha(pathlib.Path("/ws")) == (None, False)
+    assert capture_git_sha(pathlib.Path("/ws")) == (None, None)
 
 
 def test_capture_git_sha_raises_returns_none(monkeypatch):
     def _boom(cmd, capture_output, text, timeout):  # noqa: ARG001
-        raise RuntimeError("git missing")
+        raise FileNotFoundError("git missing")
 
     monkeypatch.setattr("arena_evaluation.benchmark.state.subprocess.run", _boom)
-    assert capture_git_sha(pathlib.Path("/ws")) == (None, False)
+    assert capture_git_sha(pathlib.Path("/ws")) == (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +261,12 @@ def test_manifest_round_trip_all_fields():
     assert man2.run_id == "20260623-202509-basic-basic"
     assert man2.suite == {"stages": [{"name": "s1", "episodes": 3}]}
     assert man2.steps == [{"key": "c1/s1", "episodes_planned": 3}]
+
+
+def test_manifest_round_trip_keeps_unknown_dirty_as_null():
+    man = _make_manifest(arena_git_dirty=None)
+    assert "arena_git_dirty: null" in man.to_yaml()
+    assert Manifest.from_yaml(man.to_yaml()).arena_git_dirty is None
 
 
 def test_manifest_to_yaml_unicode_and_ordering():

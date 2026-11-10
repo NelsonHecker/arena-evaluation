@@ -736,3 +736,41 @@ def test_stage_fields_are_plain_yaml_once_task_modes_are_values():
     assert yaml.safe_load(yaml.dump({"stage": record}, sort_keys=False))["stage"] == record
     assert record["timeout"] == 90.0
     assert record["map"] == "map1"
+
+
+def test_suite_parse_accepts_robots_visible_on_every_stage():
+    from arena_evaluation.benchmark.config import Suite
+
+    obj = {"stages": [_make_stage_dict(name="visible", config={"humansim": {"robots_visible": True}}), _make_stage_dict(name="blind", config={"humansim": {"robots_visible": False}})]}
+    assert [stage.name for stage in Suite.parse("visibility", obj).stages] == ["visible", "blind"]
+
+
+def test_suite_parse_rejects_robots_visible_on_only_some_stages():
+    from arena_evaluation.benchmark.config import Suite
+
+    obj = {"stages": [_make_stage_dict(name="blind", config={"humansim": {"robots_visible": False}}), _make_stage_dict(name="unset")]}
+    with pytest.raises(ValueError, match="carries over"):
+        Suite.parse("visibility", obj)
+
+
+def test_suite_parse_rejects_a_non_bool_robots_visible():
+    from arena_evaluation.benchmark.config import Suite
+
+    obj = {"stages": [_make_stage_dict(config={"humansim": {"robots_visible": "false"}})]}
+    with pytest.raises(ValueError, match="true or false"):
+        Suite.parse("visibility", obj)
+
+
+def test_a_null_robots_visible_is_rejected():
+    from arena_evaluation.benchmark.config import Suite
+
+    obj = {"stages": [_make_stage_dict(config={"humansim": {"robots_visible": None}})]}
+    with pytest.raises(ValueError, match="true or false"):
+        Suite.parse("visibility", obj)
+
+
+def test_a_stage_with_an_empty_config_parses():
+    from arena_evaluation.benchmark.config import Suite
+
+    suite = Suite.parse("visibility", {"stages": [_make_stage_dict(config=None)]})
+    assert [stage.name for stage in suite.stages] == ["stage_one"]
