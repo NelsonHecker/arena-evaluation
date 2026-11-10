@@ -11,7 +11,8 @@ from arena_mcp.core import ToolError
 from .base import YamlText, config_stem, domain, parse_yaml, run_path
 from .catalog import config_identifier, config_names
 
-if TYPE_CHECKING:\n    from arena_evaluation.benchmark.config import Contest
+if TYPE_CHECKING:
+    from arena_evaluation.benchmark.config import Contest
     from arena_rclpy_mixins.ROSParamServer import ROSParamServer
     from arena_runtime.env.task_layer import TaskLayer, TaskModes
     from arena_simulation_setup.tree import DomainAssetIdentifier
