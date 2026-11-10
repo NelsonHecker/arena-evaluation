@@ -87,6 +87,16 @@ def stage_modes(stage: Suite.Stage, vocabulary: TaskModes) -> TaskModes:
     return {axis: [name for name in stage.modes.get(axis, "").split(",") if name] for axis in vocabulary}
 
 
+LaunchScalar = bool | int | float | str
+
+
+def _launch_scalar(key: str, value: object) -> LaunchScalar:
+    """A launch value as YAML typed it: booleans stay booleans, numbers stay numbers; only scalars are accepted."""
+    if isinstance(value, bool) or isinstance(value, int | float | str):
+        return value
+    raise ValueError(f"suite launch: {key!r} must be a boolean, number or string, got {type(value).__name__} {value!r}")
+
+
 class Suite(typing.NamedTuple):
     @classmethod
     def parse(cls, name: str, obj: dict) -> Suite:
@@ -102,8 +112,8 @@ class Suite(typing.NamedTuple):
         )
 
     @staticmethod
-    def _parse_launch(obj: dict) -> dict[str, str]:
-        launch = {str(k): str(v) for k, v in obj.items()}
+    def _parse_launch(obj: dict) -> dict[str, LaunchScalar]:
+        launch = {str(k): _launch_scalar(k, v) for k, v in obj.items()}
         owned = [k for k in launch if k in _STAGE_OWNED_KEYS or k.startswith(_STAGE_OWNED_PREFIXES)]
         if owned:
             raise ValueError(f"suite launch: {owned} are set per stage, not suite-wide")
@@ -186,7 +196,7 @@ class Suite(typing.NamedTuple):
 
     name: str
     stages: list[Suite.Stage]
-    launch_args: dict[str, str] = {}
+    launch_args: dict[str, LaunchScalar] = {}
     references: bool = False
     metrics: dict[str, typing.Any] = {}
     task_layer: str = ""

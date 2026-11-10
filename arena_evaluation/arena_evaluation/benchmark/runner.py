@@ -205,9 +205,25 @@ def _launch_key(k: str) -> str:
     return f"robot.{k}" if head in _CAP_KEYS else k
 
 
-def runtime_launch_args(suite_args: dict[str, str], passthrough: dict[str, str]) -> dict[str, str]:
-    """Suite launch args under the CLI passthrough, an autostarted lockstep stepping from bringup unless `lockstep.paused` is set."""
-    merged = {**suite_args, **passthrough}
+def launch_value(value: object) -> str:
+    """A launch arg value as the launcher parses it: YAML booleans become true/false, numbers their literals, strings stay as written."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return value
+    raise TypeError(f"launch arg value must be a boolean, number or string, got {type(value).__name__} {value!r}")
+
+
+def runtime_launch_args(suite_args: dict[str, object], passthrough: dict[str, str]) -> dict[str, str]:
+    """Suite launch args under the CLI passthrough, canonicalised so a typed YAML value cannot reach launch as `True`.
+
+    An autostarted lockstep steps from bringup unless `lockstep.paused` is set.
+    """
+    merged = {str(key): launch_value(value) for key, value in {**suite_args, **passthrough}.items()}
     if merged.get("lockstep", "false").lower() in ("true", "1"):
         merged.setdefault("lockstep.paused", "false")
     return merged
@@ -228,7 +244,7 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
     ]
     if s.optim:
         for k, v in s.optim.items():
-            args.append(f"optim.{k}:={v}")
+            args.append(f"optim.{k}:={launch_value(v)}")
     if step.record_dir is not None:
         args.append(f"record.dir:={step.record_dir}")
         args.append("record.auto:=false")
@@ -246,9 +262,9 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
                         driver,
                     )
                 else:
-                    args.append(f"{k}:={driver}")
+                    args.append(f"{k}:={launch_value(driver)}")
             for ik, iv in v.items():
-                if ik == "driver" or not iv:
+                if ik == "driver" or iv is None or iv == "":
                     continue
                 fk = f"{k}.{ik}"
                 if fk in own_keys:
@@ -259,7 +275,7 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
                         iv,
                     )
                     continue
-                args.append(f"{fk}:={iv}")
+                args.append(f"{fk}:={launch_value(iv)}")
         else:
             if not v:
                 continue
@@ -271,14 +287,14 @@ def build_launch_args(step: Step, simulator: str | None, passthrough: dict[str, 
                     v,
                 )
                 continue
-            args.append(f"{k}:={v}")
+            args.append(f"{k}:={launch_value(v)}")
 
     if passthrough:
         for k, v in passthrough.items():
             if k in ("headless", "env_n", "env.n"):
                 continue
             if k not in own_keys:
-                args.append(f"{k}:={v}")
+                args.append(f"{k}:={launch_value(v)}")
     return args
 
 
