@@ -6,6 +6,7 @@ import subprocess
 import time
 
 import pytest
+from rcl_interfaces.msg import ParameterType
 
 from arena_evaluation.benchmark.config import Contest, Suite
 from arena_evaluation.benchmark.runner import (
@@ -26,16 +27,15 @@ from arena_evaluation.benchmark.runner import (
     _walk_dict,
     _warn_config_drift,
     build_launch_args,
-    launch_value,
     build_pending,
     group_pending,
+    launch_value,
     resolve_planner_identity,
     robot_has_depth_camera,
     runtime_launch_args,
 )
 from arena_evaluation.benchmark.state import Manifest, RunDir, compute_config_hash
 from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult
-from rcl_interfaces.msg import ParameterType
 
 RANDOM_ROBOTS = "random"
 RANDOM_OBSTACLES = "random"
