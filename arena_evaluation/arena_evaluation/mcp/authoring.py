@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import pathlib
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
 import pydantic
 from arena_mcp.core import ToolError
@@ -194,6 +194,8 @@ def check_contest(data: object) -> dict[str, Any]:
         return {"valid": False, "problems": [f"{type(exc).__name__}: {exc}"]}
     drivers = registered_drivers()
     problems = list(_preflight_contest(contest))
+    problems.extend(_nav2_plugin_problems(contest))
+    problems.extend(_planner_availability_problems(contest))
     for contestant in contest.contestants:
         for cap, known in drivers.items():
             driver = _contest_drivers(contestant.args, cap)
@@ -201,6 +203,109 @@ def check_contest(data: object) -> dict[str, Any]:
                 problems.append(f"{contestant.name}: {cap} driver {driver!r} is not registered, known: {sorted(known)}")
     return {"valid": not problems, "n_contestants": len(contest.contestants), "contestants": [{"name": entry.name, "args": entry.args, "parts": entry.parts} for entry in contest.contestants], "problems": problems}
 
+
+_DRL_DRIVERS: Final = frozenset({"drl", "vla", "rosnav_rl"})
+
+
+def _cap_planner(args: dict[str, Any], cap: str) -> str | None:
+    """The planner a cap block names, e.g. ``mobile: {driver: drl, planner: cadrl}``."""
+    value = args.get(cap)
+    if isinstance(value, dict):
+        planner = value.get("planner")
+        return planner if isinstance(planner, str) else None
+    return None
+
+
+def _plugin_yaml(name: str, kind: str) -> dict[str, Any] | None:
+    """One nav2 controller or inter-planner config from the arena_robots share dir, None when it is absent."""
+    import pathlib
+
+    import yaml
+    from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+
+    try:
+        path = pathlib.Path(get_package_share_directory("arena_robots")) / "config" / "nav2" / kind / name / f"{kind.removesuffix('s')}_config.yaml"
+    except PackageNotFoundError:
+        return None
+    if not path.is_file():
+        return None
+    data = yaml.safe_load(path.read_text())
+    return data if isinstance(data, dict) else None
+
+
+def _plugins(node: object) -> list[str]:
+    """Every ``plugin`` string in a nested nav2 config mapping."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "plugin" and isinstance(value, str):
+                found.append(value)
+            else:
+                found.extend(_plugins(value))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_plugins(value))
+    return found
+
+
+def _nav2_plugin_problems(contest: Any) -> list[str]:
+    """nav2 contestants whose controller/inter-planner config needs a plugin this installation does not ship."""
+    from arena_planners import resolver
+
+    try:
+        installed = set(resolver.list_available()["nav2"])
+    except (OSError, RuntimeError):
+        return []
+    short = {name.rsplit("::", 1)[-1].lower() for name in installed}
+    problems: list[str] = []
+    for contestant in contest.contestants:
+        mobile = contestant.args.get("mobile")
+        if not isinstance(mobile, dict) or mobile.get("driver") != "nav2":
+            continue
+        for name, kind in ((mobile.get("local_planner"), "controllers"), (mobile.get("inter_planner"), "interplanners")):
+            if not isinstance(name, str) or name == "none":
+                continue
+            config = _plugin_yaml(name, kind)
+            if config is None:
+                continue
+            for plugin in _plugins(config):
+                if plugin.rsplit("::", 1)[-1].lower() not in short:
+                    problems.append(f"{contestant.name}: {kind[:-1]} {name!r} needs plugin {plugin!r}, which this installation does not ship (installed: {sorted(installed)}); install the nav2 stack or pick an installed {kind[:-1]}")
+    return problems
+
+
+def _training_available() -> bool:
+    """Whether the training feature is installed, detected by its rosnav_rl runtime."""
+    import importlib.util
+
+    return importlib.util.find_spec("rosnav_rl") is not None
+
+
+def _planner_availability_problems(contest: Any) -> list[str]:
+    """DRL-family contestants whose planner or the training feature is not installed, with the command that installs it."""
+    from arena_planners import resolver
+
+    try:
+        available = resolver.list_available()
+    except (OSError, RuntimeError) as exc:
+        return [f"the planner registry cannot be read, run `arena feature planners check`: {exc}"]
+    known = set(available["registry"]) | set(available["rosnav_rl"])
+    problems: list[str] = []
+    training_available: bool | None = None
+    for contestant in contest.contestants:
+        for cap in ("mobile", "arm", "gripper", "lift"):
+            driver = _contest_drivers(contestant.args, cap)
+            if driver not in _DRL_DRIVERS:
+                continue
+            if training_available is None:
+                training_available = _training_available()
+            if not training_available:
+                problems.append(f"{contestant.name}: {cap} driver {driver!r} needs rosnav_rl, run `arena feature training install`")
+                continue
+            planner = _cap_planner(contestant.args, cap)
+            if planner is not None and planner not in known:
+                problems.append(f"{contestant.name}: {cap} planner {planner!r} is not checked out, run `arena feature planners add {planner}` or pick one of {sorted(known)}")
+    return problems
 
 def check_manifest(data: object) -> dict[str, Any]:
     from arena_evaluation.presentation.viz_manifest import VizManifest

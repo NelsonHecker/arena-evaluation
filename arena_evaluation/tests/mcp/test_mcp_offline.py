@@ -42,6 +42,7 @@ def test_benchmark_argv_renders_runner_options_and_launch_args():
         spawn_budget=120.0,
         world_swap=True,
         lanes=3,
+        ros_domain_id=57,
         sim="flatsim",
         headless=False,
         env_n=4,
@@ -53,6 +54,7 @@ def test_benchmark_argv_renders_runner_options_and_launch_args():
     assert argv[argv.index("--retries") + 1] == "0"
     assert argv[argv.index("--efficacy") + 1] == "0.5"
     assert argv[argv.index("--lanes") + 1] == "3"
+    assert argv[argv.index("--ros-domain-id") + 1] == "57"
     assert {"sim:=flatsim", "headless:=false", "env.n:=4", "optim.obstacles:=bbox", "task.episode.fail_on_collision:=true", "complexity:=2"} <= set(argv)
 
 

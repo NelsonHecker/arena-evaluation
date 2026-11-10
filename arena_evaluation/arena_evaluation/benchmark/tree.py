@@ -88,7 +88,19 @@ class ManifestIdentifier(AssetIdentifier['VizManifest']):
 
 
 class ConfigPathResolver(SimplePathResolver):
-    """Flat `<name>.yaml` wins over the directory-bundle `<name>/<kind>.yaml`."""
+    """Flat `<name>.yaml` wins over the directory-bundle `<name>/<kind>.yaml`.
+
+    A `writable` resolver is the authoring target: new suites, contests and report manifests
+    are written into it, so the copy an agent creates is the reviewed copy in the source tree
+    instead of a file in the installed share directory that the next rebuild drops.
+    """
+
+    def __init__(self, _T: type[AssetIdentifier], /, path: Path, *, writable: bool = False) -> None:
+        super().__init__(_T, path)
+        self._writable = writable
+
+    def destination(self, identifier: AssetIdentifier) -> Path | None:
+        return self.path / identifier.relpath() if self._writable else None
 
     async def resolve(self, identifier: AssetIdentifier) -> Path | None:
         if identifier in self._cache:
@@ -131,6 +143,9 @@ def _bench_dirs() -> Iterator[Path]:
 
 
 def _register(cls: type[AssetIdentifier]) -> None:
+    source = source_tree_dir()
+    if source is not None:
+        cls.use(ConfigPathResolver(cls, source / 'configs' / 'benchmark', writable=True))
     cls.use(*(ConfigPathResolver(cls, d) for d in _bench_dirs()))
     cls.use(*NetResolver.all(cls, providers=BENCHMARK_PROVIDERS, formats=(), ttl=_BENCH_TTL_S, annotated=False, list_prefix=cls._asset_type))
     share = share_dir()

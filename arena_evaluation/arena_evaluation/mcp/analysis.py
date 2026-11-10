@@ -195,7 +195,7 @@ def correlation_frame(frame: pl.DataFrame, metrics: list[str]) -> dict[str, Any]
         raise ToolError("correlation needs at least two metrics")
     lists = [name for name in metrics if isinstance(frame.schema[name], pl.List)]
     if lists:
-        raise ToolError(f"{', '.join(lists)} hold one list per episode, correlate scalar metrics", hint="evaluation_read_combined_metrics shows each column's dtype")
+        raise ToolError(f"{', '.join(lists)} hold one list per episode, correlate scalar metrics", hint="evaluation_read_metrics shows each column's dtype")
     work = frame.select([pl.col(name).cast(pl.Float64) for name in metrics])
     correlation = work.corr()
     matrix: dict[str, dict[str, float | None]] = {}
@@ -271,7 +271,7 @@ def evaluation_describe_metric(metric_name: str) -> dict[str, Any]:
 
 
 @domain.tool(read_only=True)
-def evaluation_read_combined_metrics(run_id: RunId) -> dict[str, Any]:
+def evaluation_read_metrics(run_id: RunId) -> dict[str, Any]:
     """Shape, columns and per-column statistics of a run's canonical episode summary view."""
     frame = load_metrics(run_id)
     return {"run_id": run_id, "n_rows": len(frame), "n_columns": len(frame.columns), "columns": frame.columns, "column_stats": column_stats(frame)}

@@ -38,6 +38,8 @@ from arena_runtime.env.task_layer import TM_AXES, TaskLayer, TaskModes, decode_m
 from arena_runtime_msgs.action import RunEpisode
 from arena_runtime_msgs.msg import EnvRecord, EnvRegistry, EpisodeRecord, HoldRegistry, LockstepStatus, SimState
 from arena_runtime_msgs.srv import DespawnEnv, QueueEpisode, SpawnEnv
+
+from .domain import DomainBusyError, DomainChoice, ROS_DOMAIN_ID_ENV, apply_domain, choose_domain, describe, runtime_on_domain
 from arena_simulation_setup.tree import ResolverVerdict
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import GetParameters, SetParameters
@@ -849,6 +851,7 @@ class BenchmarkRunner(ArenaMixinNode):
         self._env_gone_events: dict[int, asyncio.Event] = {}
 
         self._arena_proc: subprocess.Popen | None = None
+        self._domain_checked = False
         self._arena_log_file = None
         self._total_groups = 0
         self._episode_action_clients: dict[int, ActionClientWrapper] = {}
@@ -1917,6 +1920,12 @@ class BenchmarkRunner(ArenaMixinNode):
         print("benchmark: arena runtime shutdown complete.", flush=True)
 
     async def _start_arena(self) -> None:
+        domain = int(os.environ.get(ROS_DOMAIN_ID_ENV, "0"))
+        if not self._domain_checked and runtime_on_domain(domain):
+            raise DomainBusyError(
+                f"ROS domain {domain} already has an arena runtime (another session shares this host network); "
+                f"shut it down or pass --ros-domain-id with a free domain, or omit it to let the runner pick one"
+            )
         passthrough = dict(self._arena_passthrough)
         cmd = [
             "ros2",
@@ -1947,6 +1956,7 @@ class BenchmarkRunner(ArenaMixinNode):
             start_new_session=True,
             env=proc_env,
         )
+        self._domain_checked = True
         self._arena_watch = asyncio.create_task(self._watch_arena_proc(self._arena_proc), name="arena_proc_watch")
 
         await self._await_alive(self._await_hb(self._runtime_up.wait(), "the new arena_runtime_node to report the sim alive"), what="arena_runtime_node startup")
@@ -2337,6 +2347,20 @@ _KV_RE = re.compile(r"^[\w\.\-]+:=.*$")
 _SHARED_NAME_RE = re.compile(r"^[\w\-][\w\.\-]*$")
 
 
+def _run_domain(explicit: int | None, *, stored: int | None, lane: str | None) -> DomainChoice:
+    """The ROS domain this runner uses: explicit first, a lane or isolated container keeps its own, a resumed run reuses its recorded domain, else the lowest free one."""
+    inherited = os.environ.get(ROS_DOMAIN_ID_ENV)
+    if lane is not None and inherited is not None:
+        return choose_domain(int(inherited))
+    if explicit is not None:
+        return choose_domain(explicit)
+    if inherited is not None:
+        return choose_domain(int(inherited))
+    if stored is not None and not runtime_on_domain(stored):
+        return DomainChoice(domain_id=stored, source="resume", probed=(stored,))
+    return choose_domain()
+
+
 def _shared_lane(shared: str | None, run_id: str | None, resume: str | None) -> tuple[str | None, str | None]:
     """Validate --shared arguments, returning (lane, error message)."""
     if shared is None:
@@ -2370,6 +2394,12 @@ def cli_main(argv: list[str] | None = None) -> int:
     p.add_argument("--scale-episodes", type=float, default=1.0)
     p.add_argument("--run-id", default=None)
     p.add_argument("--data-root", default=None)
+    p.add_argument(
+        "--ros-domain-id",
+        type=int,
+        default=None,
+        help="ROS domain for the runtime and its envs; the matching GZ_PARTITION is set too. Omitted, the runner keeps ROS_DOMAIN_ID when the environment already sets one (a fork container) and otherwise picks the lowest domain with no arena runtime on it",
+    )
     p.add_argument(
         "--resume",
         nargs="?",
@@ -2522,6 +2552,10 @@ def cli_main(argv: list[str] | None = None) -> int:
                 return 2
             seen.add(c.key)
 
+        domain_choice = _run_domain(args.ros_domain_id, stored=run_dir.manifest.ros_domain_id if run_dir is not None else None, lane=lane)
+        apply_domain(domain_choice)
+        print(describe(domain_choice), file=sys.stderr)
+
         if fresh is not None:
             suite_dict, contest_dict, suite_provenance, contest_provenance, cfg_hash = fresh
             run_id = args.run_id or _default_run_id(args.suite, args.contest, os.environ.get("ARENA_LANE"))
@@ -2547,6 +2581,7 @@ def cli_main(argv: list[str] | None = None) -> int:
                 headless=headless,
                 config_hash=cfg_hash,
                 simulator=simulator,
+                ros_domain_id=domain_choice.domain_id,
                 scale_episodes=scale_episodes,
                 suite_name=suite.name,
                 contest_name=contest.name,

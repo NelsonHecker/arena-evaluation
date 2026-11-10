@@ -105,6 +105,7 @@ class Manifest:
     contest: list | dict
     steps: list[dict]
     launch_args: dict = dataclasses.field(default_factory=dict)
+    ros_domain_id: int | None = None
     suite_provenance: dict | None = None
     contest_provenance: dict | None = None
 

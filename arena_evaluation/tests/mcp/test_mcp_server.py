@@ -130,7 +130,7 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
             ("written", "evaluation_write_notes", {"run_id": RUN_ID, "notes": [{"label": "a", "value": "1"}]}),
             ("insight", "evaluation_append_insight", {"run_id": RUN_ID, "label": "b", "value": "2"}),
             ("notes", "evaluation_read_notes", {"run_id": RUN_ID}),
-            ("combined", "evaluation_read_combined_metrics", {"run_id": RUN_ID}),
+            ("metrics", "evaluation_read_metrics", {"run_id": RUN_ID}),
             ("query", "evaluation_query_metrics", {"run_id": RUN_ID, "group_by": ["planner"], "metrics": ["time_to_goal_s"], "filter": {"stage": "s1"}, "sort_by": "time_to_goal_s"}),
             ("aggregate", "evaluation_aggregate", {"run_id": RUN_ID, "dimension": "stage", "metrics": ["success"]}),
             ("compare", "evaluation_compare_planners", {"run_id": RUN_ID, "metrics": ["success", "total_collisions_ped"]}),
@@ -144,7 +144,7 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
         ):
             out[key] = payload(await client.call_tool(name, args))
         out["missing_run"] = error_text(await client.call_tool("evaluation_status", {"run_id": "nope"}))
-        out["unprocessed"] = error_text(await client.call_tool("evaluation_read_combined_metrics", {"run_id": EMPTY_RUN_ID}))
+        out["unprocessed"] = error_text(await client.call_tool("evaluation_read_metrics", {"run_id": EMPTY_RUN_ID}))
         out["bad_column"] = error_text(await client.call_tool("evaluation_query_metrics", {"run_id": RUN_ID, "group_by": ["planner"], "metrics": ["zz"]}))
         for uri in (f"arena://evaluation/runs/{RUN_ID}/state", f"arena://evaluation/runs/{RUN_ID}/notes", f"arena://evaluation/runs/{RUN_ID}/report", f"arena://evaluation/runs/{RUN_ID}/metrics/schema", f"arena://evaluation/runs/{RUN_ID}/metrics/summary", "arena://evaluation/runs"):
             out[uri] = json.loads((await client.read_resource(uri)).contents[0].text)
