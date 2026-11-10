@@ -17,6 +17,7 @@ import polars as pl
 if typing.TYPE_CHECKING:
     import numpy as np
 
+    from arena_evaluation.processing.reference_twins import TwinIndex
     from arena_evaluation.storage.star_schema import StarSchemaTables
 
 from arena_evaluation.storage.folder_manager import FolderManager
