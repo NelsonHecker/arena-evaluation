@@ -1850,6 +1850,29 @@ def test_bundle_worlds_of_the_stages_land_where_evaluation_reads_maps(tmp_path: 
     assert _snapshot_bundle_worlds(None, ["used"], run) == []
 
 
+def test_a_map_the_bundle_lacks_is_snapshotted_from_the_installed_world(tmp_path: pathlib.Path, monkeypatch):
+    installed = tmp_path / "installed" / "hospital_1a"
+    installed.mkdir(parents=True)
+    (installed / "world.yaml").write_text("format: arena-world/2\n")
+    monkeypatch.setattr("arena_evaluation.benchmark.runner.installed_world_dir", lambda name: tmp_path / "installed" / name)
+    bundle = tmp_path / "suites" / "acme"
+    bundle.mkdir(parents=True)
+    run = tmp_path / "run"
+    run.mkdir()
+    assert _snapshot_bundle_worlds(bundle, ["hospital_1a"], run) == ["hospital_1a"]
+    assert (run / "worlds" / "hospital_1a" / "world.yaml").read_text() == "format: arena-world/2\n"
+
+
+def test_a_map_neither_bundled_nor_installed_is_an_error(tmp_path: pathlib.Path, monkeypatch):
+    monkeypatch.setattr("arena_evaluation.benchmark.runner.installed_world_dir", lambda name: None)
+    bundle = tmp_path / "suites" / "acme"
+    bundle.mkdir(parents=True)
+    run = tmp_path / "run"
+    run.mkdir()
+    with pytest.raises(FileNotFoundError, match="hospital_1a"):
+        _snapshot_bundle_worlds(bundle, ["hospital_1a"], run)
+
+
 def test_lanes_snapshotting_one_bundle_world_at_once_copy_it_once_and_whole(tmp_path: pathlib.Path):
     bundle = tmp_path / "suites" / "acme"
     files = {f"{level}/{part}.yaml": f"{level}-{part}\n" * 64 for level in range(8) for part in range(32)}

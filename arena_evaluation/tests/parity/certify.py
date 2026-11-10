@@ -735,7 +735,16 @@ def _legacy_value_frame(artifacts: BenchmarkArtifacts, mapping: MetricMapping) -
         raise ParitySchemaError(f"combined_metrics: missing join keys {missing_keys}")
     if any(column not in names for column in mapping.legacy_columns):
         return None
-    return artifacts.legacy.select([*_legacy_key_expressions(mapping.star_table), _legacy_value_expression(mapping)])
+    frame = artifacts.legacy.select([*_legacy_key_expressions(mapping.star_table), _legacy_value_expression(mapping)])
+    if mapping.star_table in _ROBOT_KEYED_TABLES:
+        return frame
+    # A legacy episode has one row per robot, but an episode-grain fact has one row per episode.
+    # Evaluated robots carry the value and the others are null, so reduce the duplicates the way
+    # the star side reduces its rows: the numeric extreme, else the first non-null.
+    keys = _star_keys(mapping.star_table)
+    dtype = frame.collect_schema()["legacy_value"]
+    aggregator = pl.col("legacy_value").max() if dtype.is_numeric() else pl.col("legacy_value").drop_nulls().first()
+    return frame.group_by(list(keys)).agg(aggregator.alias("legacy_value"))
 
 
 def _null_reason_frame(artifacts: BenchmarkArtifacts, star_table: str) -> pl.DataFrame:
@@ -808,6 +817,7 @@ def _numeric_stats(joined: pl.DataFrame, *, expected: ExpectedDiff | None, rel_t
         expected_observed = both_present & ~tolerance_equal & allowed_value
     elif expected is not None and expected.kind is DiffKind.GROUND_TRUTH:
         expected_observed = both_present & ~tolerance_equal
+        unexpected_value = unexpected_value & ~expected_observed
 
     legacy_zero_star_null = (legacy_value == pl.lit(0.0)) & star_value.is_null()
     unexpected_null = star_value.is_null() & legacy_value.is_not_null()

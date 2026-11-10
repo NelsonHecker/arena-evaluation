@@ -806,6 +806,14 @@ def test_evidence_store_content_addressed_determinism_and_persistence(
     assert_frame_equal(loaded_df, df, check_dtypes=True)
 
 
+def _write_acoustic_world(base: pathlib.Path, world: str) -> None:
+    """A minimal format-2 world snapshot so the acoustic barrier map resolves for a synthetic episode."""
+    world_dir = base / "worlds" / world
+    world_dir.mkdir(parents=True, exist_ok=True)
+    (world_dir / "world.yaml").write_text(
+        "format: arena-world/2\nlevels:\n  - id: '0'\n    zones:\n      - name: open\n        polygon: [[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0]]\n"
+    )
+
 def test_processing_pipeline_writes_episode_and_benchmark_star_schema(tmp_path: pathlib.Path) -> None:
     world_name = "synthetic_wp3_world"
     _world_cache[world_name] = [
@@ -822,6 +830,7 @@ def test_processing_pipeline_writes_episode_and_benchmark_star_schema(tmp_path: 
     episode_dir = tmp_path / bench_id / "episodes" / "episode_000"
     topics_dir = episode_dir / "topics"
     topics_dir.mkdir(parents=True)
+    _write_acoustic_world(tmp_path / bench_id, world_name)
     (episode_dir / "episode_000.mcap").touch()
 
     meta = RunMetadata(

@@ -18,6 +18,18 @@ from arena_evaluation.storage.schemas import PlotSpec
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
+def test_grid_extent_starts_half_a_source_cell_below_the_origin():
+    assert af_mod._cell_extent(origin_m=1.0, cells=10, cell_m=0.05, source_res_m=0.05) == pytest.approx((0.975, 1.475))
+
+
+def test_downsampled_grid_still_starts_half_a_source_cell_below_the_origin():
+    assert af_mod._cell_extent(origin_m=0.0, cells=5, cell_m=0.1, source_res_m=0.05) == pytest.approx((-0.025, 0.475))
+
+
+def test_contour_centres_sit_in_the_middle_of_each_cell():
+    assert af_mod._cell_centres(lower_m=0.975, cells=4, cell_m=0.05) == pytest.approx([1.0, 1.05, 1.1, 1.15])
+
+
 def _grid(n: int = 20) -> np.ndarray:
     grid = np.zeros((n, n), dtype=np.uint8)
     grid[0, :] = 1
@@ -29,7 +41,7 @@ def _grid(n: int = 20) -> np.ndarray:
 
 
 def _meta(n: int = 20) -> dict:
-    return {"png_path": "synthetic", "resolution": 0.1, "origin": [0.0, 0.0, 0.0], "width": n, "height": n}
+    return {"resolution": 0.1, "origin": (0.0, 0.0), "doors": {}, "width": n, "height": n}
 
 
 def _door_mask(n: int = 20) -> np.ndarray:
@@ -49,7 +61,16 @@ def _patch_grid(monkeypatch, n: int = 20) -> np.ndarray:
 
 
 def _patch_doors(monkeypatch, doors=None):
-    monkeypatch.setattr(af_mod, "door_segments", lambda *a, **k: doors or {})
+    load_grid_and_meta = af_mod.AcousticFieldRenderer._load_grid_and_meta
+
+    def with_doors(map_name, run_dir=None):
+        loaded = load_grid_and_meta(map_name, run_dir=run_dir)
+        if loaded is None:
+            return None
+        grid, meta = loaded
+        return grid, {**meta, "doors": doors or {}}
+
+    monkeypatch.setattr(af_mod.AcousticFieldRenderer, "_load_grid_and_meta", staticmethod(with_doors))
 
 
 def _af_df(**overrides) -> pl.DataFrame:

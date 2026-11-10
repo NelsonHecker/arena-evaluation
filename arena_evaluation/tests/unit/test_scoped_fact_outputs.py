@@ -49,6 +49,7 @@ from arena_evaluation.storage.declarations import (
     declared_columns,
     declarations_for,
 )
+from arena_evaluation.storage.exceptions import MetricInputError
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 NS_PER_S: typing.Final[int] = 1_000_000_000
@@ -1079,6 +1080,34 @@ def test_encounter_acoustics_attenuates_recorded_dba_and_fleet_encounter_has_cho
     assert peer_row["detour_time_s"] is not None
     assert float(typing.cast(float, peer_row["detour_time_s"])) >= 0.0
 
+
+def test_registry_reraises_metric_input_errors(episode: AlignedEpisodeBundle) -> None:
+    class _MissingInputCalculator(BaseMetricCalculator):
+        NAME = "missing_input_calc"
+        SCOPE = MetricScope.ENCOUNTER
+        SCOPES = frozenset({MetricScope.ENCOUNTER})
+
+        @classmethod
+        def output_keys(cls) -> list[str]:
+            return ["missing_input_metric"]
+
+        def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
+            raise MetricInputError("required map is missing")
+
+    registry = MetricRegistry(_ROBOT_PARAMS, {})
+    registry.register(_MissingInputCalculator)
+    evaluator = ScopedEvaluator(_ROBOT_PARAMS)
+    hierarchy = evaluator.decompose_hierarchy(episode, run_id=RUN_ID, episode_id=EPISODE_ID)
+    enc_slice = hierarchy.encounters[0]
+
+    with pytest.raises(MetricInputError, match="required map is missing"):
+        registry.run_scope(
+            MetricScope.ENCOUNTER,
+            enc_slice.window_bundle,
+            available_topics=set(enc_slice.window_bundle.topics or {}),
+            pedsim_available=True,
+            scope_slice=enc_slice,
+        )
 
 def test_registry_provenance_records_topic_missing_no_samples_and_exception(episode: AlignedEpisodeBundle) -> None:
     class _BrokenCalculator(BaseMetricCalculator):

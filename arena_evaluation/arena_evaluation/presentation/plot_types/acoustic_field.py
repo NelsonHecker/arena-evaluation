@@ -7,21 +7,21 @@ from collections.abc import Sequence
 
 import numpy as np
 import polars as pl
-from PIL import Image
 
 from arena_evaluation.presentation.plot_types.base import BasePlotRenderer
 from arena_evaluation.processing.acoustics.door_map import (
     _entity_matches_door,
+    barrier_door_tl,
     build_pixel_tl,
-    door_segments,
+    load_barrier_map,
 )
 from arena_evaluation.processing.acoustics.door_state import DoorStateTimeline
 from arena_evaluation.processing.acoustics.impedance_grid import (
-    compute_attenuations,
+    compute_acoustic_field,
     downsample_mask,
     downsample_occupancy,
 )
-from arena_evaluation.processing.map_registry import MapRegistry
+from arena_evaluation.storage.exceptions import AcousticsError
 
 if typing.TYPE_CHECKING:
     from matplotlib.artist import Artist
@@ -35,22 +35,31 @@ _CELL_DPI = 150
 _FIELD_VMIN_DBA = 20.0
 
 
+def _cell_extent(origin_m: float, cells: int, cell_m: float, source_res_m: float) -> tuple[float, float]:
+    """Edges of one grid axis. The origin is the centre of source cell 0, so the grid starts half a source cell below it."""
+    lower = origin_m - source_res_m / 2
+    return lower, lower + cells * cell_m
+
+
+def _cell_centres(lower_m: float, cells: int, cell_m: float) -> np.ndarray:
+    """Centres of the cells along one axis, where the wall and door contours are drawn."""
+    return lower_m + (np.arange(cells) + 0.5) * cell_m
+
+
+
+
 class AcousticFieldRenderer(BasePlotRenderer):
     PLOT_TYPE = "acoustic_field"
 
     @staticmethod
     def _load_grid_and_meta(map_name: str, run_dir: pathlib.Path | None = None) -> tuple[np.ndarray, dict] | None:
-        meta = MapRegistry.get_map(map_name, run_dir=run_dir)
-        if not meta or "png_path" not in meta:
-            logger.warning("Map %r not found in registry (run_dir=%s)", map_name, run_dir)
-            return None
         try:
-            img = Image.open(meta["png_path"]).convert("L")
-            grid = np.ascontiguousarray(np.flipud((np.array(img) < 200).astype(np.uint8)))
-        except Exception as e:
-            logger.warning("Could not load map image %r: %s", meta["png_path"], e)
+            barrier = load_barrier_map(map_name, run_dir=run_dir)
+        except AcousticsError as error:
+            logger.error("Acoustic plot skipped: %s", error)
             return None
-        return grid, meta
+        meta = {"resolution": barrier.resolution, "origin": barrier.origin, "doors": barrier_door_tl(barrier)}
+        return barrier.occupancy, meta
 
     def _compute_full_field(
         self,
@@ -75,23 +84,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
         rx_px = (rx_m - ox) / resolution
         ry_px = (ry_m - oy) / resolution
 
-        yy, xx = np.mgrid[0:h, 0:w]
-        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
-        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
-
-        attenuations = compute_attenuations(
+        att_grid = compute_acoustic_field(
             grid,
             resolution,
             rx_px,
             ry_px,
-            tx,
-            ty,
             wall_tl=47.0,
             mic_distance=1.0,
             pixel_tl=pixel_tl,
         )
-
-        att_grid = attenuations.reshape((h, w))
         field_dba = source_dba - att_grid
         field_dba = np.clip(field_dba, 0, None)
         logger.info("AcousticFieldRenderer: full-field done.")
@@ -159,11 +160,13 @@ class AcousticFieldRenderer(BasePlotRenderer):
         ax = plt.gca()
         ax.set_facecolor("black")
         ax.grid(False)
-        extent = (ox, ox + w * eff_res, oy, oy + h * eff_res)
+        left, right = _cell_extent(ox, w, eff_res, resolution)
+        bottom, top = _cell_extent(oy, h, eff_res, resolution)
+        extent = (left, right, bottom, top)
 
         im = plt.imshow(render_grid, cmap="inferno", origin="upper", extent=extent, vmin=vmin, vmax=vmax)
-        cy = np.linspace(extent[2], extent[3], grid_eval.shape[0])
-        cx = np.linspace(extent[0], extent[1], grid_eval.shape[1])
+        cy = _cell_centres(bottom, h, eff_res)
+        cx = _cell_centres(left, w, eff_res)
         wall_outline = (grid_eval == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"], linewidths=0.3, alpha=0.25)
         if door_overlay is not None:
@@ -292,7 +295,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
         mode = str(self.spec.options.get("mode", "grid")).lower()
 
-        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+        doors = meta["doors"]
 
         plots_dir = pathlib.Path(self.run_dir) / "plots" if self.run_dir else pathlib.Path("plots")
 
@@ -451,7 +454,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         downsample = int(self.spec.options.get("downsample", 1))
         vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
 
-        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+        doors = meta["doors"]
 
         worst = self._pick_worst_row(work_df)
         if worst is None:
@@ -840,10 +843,6 @@ class AcousticFieldRenderer(BasePlotRenderer):
             h,
         )
 
-        yy, xx = np.mgrid[0:h, 0:w]
-        tx = np.ascontiguousarray(xx.flatten().astype(np.float32))
-        ty = np.ascontiguousarray(yy.flatten().astype(np.float32))
-
         tl_cache: dict[tuple, np.ndarray] = {}
         results: list = []
         rows = df.rows(named=True)
@@ -876,19 +875,15 @@ class AcousticFieldRenderer(BasePlotRenderer):
             if source_dba is None or np.isnan(source_dba):
                 source_dba = _FIELD_VMIN_DBA
 
-            attenuations = compute_attenuations(
+            att_grid = compute_acoustic_field(
                 occupancy_grid=grid,
                 resolution=resolution,
                 start_x_px=rx_px,
                 start_y_px=ry_px,
-                target_xs_px=tx,
-                target_ys_px=ty,
                 wall_tl=47.0,
                 mic_distance=1.0,
                 pixel_tl=pixel_tl,
             )
-
-            att_grid = attenuations.reshape((h, w))
             field_dba = float(source_dba) - att_grid
             field_dba = np.clip(field_dba, 0, None)
             # (field, eff_res, (h, w), open_set, source_dba)
@@ -975,7 +970,9 @@ class AcousticFieldRenderer(BasePlotRenderer):
         fig, ax = plt.subplots(figsize=(5, 4))
         ax.set_facecolor("black")
         ax.grid(False)
-        extent = (ox, ox + w * eff_res, oy, oy + h * eff_res)
+        left, right = _cell_extent(ox, w, eff_res, resolution)
+        bottom, top = _cell_extent(oy, h, eff_res, resolution)
+        extent = (left, right, bottom, top)
 
         render_grids = []
         open_door_masks = []
@@ -997,8 +994,8 @@ class AcousticFieldRenderer(BasePlotRenderer):
         im = ax.imshow(render_grids[0], cmap="inferno", origin="upper", extent=extent, vmin=vmin, vmax=vmax)
         plt.colorbar(im, label="dBA", fraction=0.046, pad=0.04)
 
-        cy = np.linspace(extent[2], extent[3], mask_grid.shape[0])
-        cx = np.linspace(extent[0], extent[1], mask_grid.shape[1])
+        cy = _cell_centres(bottom, h, eff_res)
+        cx = _cell_centres(left, w, eff_res)
         wall_outline = (mask_grid == 1).astype(np.uint8)
         ax.contour(cx, cy, wall_outline, levels=[0.5], colors=["#ffffff"], linewidths=0.3, alpha=0.25)
 
@@ -1230,7 +1227,7 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         fmt = str(self.spec.options.get("format", "gif"))
         vmin = float(self.spec.options.get("vmin", _FIELD_VMIN_DBA))
 
-        doors = door_segments(map_name, grid, resolution, (ox, oy, 0.0), run_dir=self.run_dir)
+        doors = meta["doors"]
         benchmark_dir = self.run_dir if self.run_dir else pathlib.Path(".")
 
         self._rendered_gifs: list[str] = []

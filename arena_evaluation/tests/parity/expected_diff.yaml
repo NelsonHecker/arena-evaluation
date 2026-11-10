@@ -63,16 +63,16 @@ entries:
   # --- port-eco: acoustic exposure (no forward-fill, GT fix required) --------------
   - metric_key: ped_max_exposure_dba
     kind: ground_truth
-    reason: "acoustic exposure no longer forward-fills the robot position; frames without a GT fix produce no exposure (was fill_null then odom)"
+    reason: "acoustic exposure moved off wheel odometry/fill_null and onto the barrier-map solver: walls and doors are the only barriers, the solver charges per-cell transmission loss and a door counts as open from its semantic progress, and frames without a GT fix produce no exposure"
   - metric_key: ped_leq_exposure_dba
     kind: ground_truth
-    reason: "acoustic exposure no longer forward-fills the robot position; frames without a GT fix produce no exposure (was fill_null then odom)"
+    reason: "acoustic exposure moved off wheel odometry/fill_null and onto the barrier-map solver: walls and doors are the only barriers, the solver charges per-cell transmission loss and a door counts as open from its semantic progress, and frames without a GT fix produce no exposure"
   - metric_key: ped_max_startle_factor
     kind: ground_truth
-    reason: "acoustic exposure no longer forward-fills the robot position; frames without a GT fix produce no exposure (was fill_null then odom)"
+    reason: "acoustic exposure moved off wheel odometry/fill_null and onto the barrier-map solver: walls and doors are the only barriers, the solver charges per-cell transmission loss and a door counts as open from its semantic progress, and frames without a GT fix produce no exposure"
   - metric_key: worst_case_acoustic_frame
     kind: ground_truth
-    reason: "worst-case acoustic frame index changes because frames without a GT fix no longer receive forward-filled exposure"
+    reason: "worst-case acoustic frame index changes because frames without a GT fix no longer receive forward-filled exposure; the frame is now published as 1NF series rows (is_worst_frame marker, robot pose, source level, pedestrian positions, open doors)"
 
   # --- port-eco: motion metrics (all-null input -> null, not 0.0) ------------------
   - metric_key: velocity_mean
@@ -194,6 +194,9 @@ relocated_series:
     metric_keys:
       - timeseries_acoustic_exposure_dba
       - timeseries_acoustic_attenuation_db
+  - reason: "the worst-case acoustic frame struct moved to the 1NF acoustic exposure series table: is_worst_frame marks the frame, robot_x_m/robot_y_m/source_dba carry the robot state, ped_x_m/ped_y_m the pedestrians and open_doors the door states, so it is not a scalar fact column"
+    metric_keys:
+      - worst_case_acoustic_frame
   - reason: "clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended"
     metric_keys:
       - clearance_timeseries

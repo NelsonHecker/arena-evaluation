@@ -2,16 +2,19 @@ import logging
 import math
 import pathlib
 import uuid
+from collections.abc import Callable
 
 import numpy as np
 import polars as pl
 import pytest
 import yaml
-from PIL import Image
-from polars.testing import assert_series_equal
 
+from arena_evaluation.processing.acoustics.barrier_map import BarrierMap
 from arena_evaluation.processing.acoustics.impedance_grid import compute_attenuations
+from arena_evaluation.processing.metrics.base import MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.ecological import acoustic_exposure as acoustic_exposure_module
 from arena_evaluation.processing.metrics.ecological.acoustic_exposure import AcousticExposureCalculator
+from arena_evaluation.storage.exceptions import AcousticsError
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, EpisodeDescriptor, RobotParams
 
@@ -89,30 +92,48 @@ def _walled(size: int = 50, column: int = 25) -> np.ndarray:
     return pixels
 
 
-@pytest.fixture
-def calc(tmp_path: pathlib.Path) -> AcousticExposureCalculator:
-    calculator = AcousticExposureCalculator(RobotParams())
-    calculator.maps_cache = tmp_path / "maps_cache"
-    calculator.maps_cache.mkdir()
-    return calculator
+def _front_door_mask(size: int = 50) -> np.ndarray:
+    """The door of ``_door_run`` (x = 2.5 m, y 2.0-3.0 m) as a 0.1 m grid: three columns across the wall."""
+    mask = np.zeros((size, size), dtype=bool)
+    mask[20:31, 24:27] = True
+    return mask
 
 
 @pytest.fixture
-def cached_map(calc: AcousticExposureCalculator):
-    cache = calc.maps_cache
+def calc() -> AcousticExposureCalculator:
+    return AcousticExposureCalculator(RobotParams())
 
-    def make(pixels: np.ndarray | None = None, *, resolution: float = 0.1, origin: tuple[float, float, float] = (0.0, 0.0, 0.0), png_bytes: bytes | None = None, with_png_path: bool = True) -> str:
+
+@pytest.fixture
+def derived_map(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
+    """Register a barrier grid under a fresh map name; the metric loads it by that name."""
+    registry: dict[str, BarrierMap] = {}
+
+    def load(map_name: str, run_dir=None, resolution=None) -> BarrierMap:  # noqa: ARG001
+        if map_name not in registry:
+            raise AcousticsError(f"no world declares map {map_name!r}")
+        return registry[map_name]
+
+    monkeypatch.setattr(acoustic_exposure_module, "load_barrier_map", load)
+
+    def make(
+        pixels: np.ndarray | None = None,
+        *,
+        resolution: float = 0.1,
+        origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        doors: dict[str, np.ndarray] | None = None,
+    ) -> str:
         name = f"acx-{uuid.uuid4().hex}"
-        png = cache / f"{name}.png"
-        meta_path = cache / f"{name}.yaml"
-        if png_bytes is not None:
-            png.write_bytes(png_bytes)
-        else:
-            Image.fromarray(_white() if pixels is None else pixels).save(png)
-        meta = {"resolution": resolution, "origin": list(origin)}
-        if with_png_path:
-            meta["png_path"] = str(png)
-        meta_path.write_text(yaml.dump(meta))
+        barrier = np.flipud((_white() if pixels is None else pixels) < 200).astype(np.uint8)
+        door_masks = doors or {}
+        registry[name] = BarrierMap(
+            occupancy=np.ascontiguousarray(barrier),
+            resolution=resolution,
+            origin=(origin[0], origin[1]),
+            door_masks=door_masks,
+            # The door masks used in these tests are three cells across.
+            door_cells_across={door: 3 for door in door_masks},
+        )
         return name
 
     return make
@@ -154,10 +175,10 @@ def _semantic(rows: list[tuple[int, str, bool]]) -> pl.DataFrame:
             "t_ns": [row[0] for row in rows],
             "kind": ["door"] * len(rows),
             "entity_name": [row[1] for row in rows],
-            "field_name": ["open"] * len(rows),
-            "value_bool": [row[2] for row in rows],
+            "field_name": ["progress"] * len(rows),
+            "value_bool": [None] * len(rows),
             "value_str": [None] * len(rows),
-            "value_num": [None] * len(rows),
+            "value_num": [1.0 if row[2] else 0.0 for row in rows],
         },
         schema={"t_ns": pl.Int64, "kind": pl.Utf8, "entity_name": pl.Utf8, "field_name": pl.Utf8, "value_bool": pl.Boolean, "value_str": pl.Utf8, "value_num": pl.Float64},
     )
@@ -189,86 +210,66 @@ def _episode(data: pl.DataFrame | None, map_name: str | None, **kwargs) -> Align
                         peds_rows.append({"t_ns": int(stamp), "ped_id": f"ped_{index}", "x": float(point[0]), "y": float(point[1])})
         schema = {"t_ns": pl.Int64, "ped_id": pl.Utf8, "x": pl.Float64, "y": pl.Float64}
         topics["pedestrian_tracks"] = pl.DataFrame(peds_rows, schema=schema) if peds_rows else pl.DataFrame(schema=schema)
+    if data is not None and "total_level_af_dba" in data.columns and "robot_acoustics" not in topics:
+        topics["robot_acoustics"] = pl.DataFrame({"t_ns": data["time_ns"].cast(pl.Int64), "total_level_af_dba": data["total_level_af_dba"].cast(pl.Float64)})
     if data is not None and "time_ns" in data.columns and "robot_tracks" not in topics:
-        tracks = pl.DataFrame(
-            {
-                "t_ns": data["time_ns"].cast(pl.Int64),
-                "x": data["pos_x_gt"].cast(pl.Float64),
-                "y": data["pos_y_gt"].cast(pl.Float64),
-                "yaw": [0.0] * len(data),
-            }
-        ).drop_nulls(["x", "y"])
-        topics["robot_tracks"] = tracks
+        topics["robot_tracks"] = (
+            pl.DataFrame(
+                {
+                    "t_ns": data["time_ns"].cast(pl.Int64),
+                    "x": data["pos_x_gt"].cast(pl.Float64),
+                    "y": data["pos_y_gt"].cast(pl.Float64),
+                    "yaw": [0.0] * len(data),
+                }
+            )
+            .drop_nulls(["x", "y"])
+            .sort("t_ns")
+        )
     return AlignedEpisodeBundle(episode_id=7, data=data, start_pos=[0.0, 0.0], goal_pos=[0.0, 0.0], map=map_name, topics=topics, **kwargs)
 
 
-def test_map_occupancy_marks_dark_pixels_and_flips_rows(calc, cached_map):
-    pixels = np.full((3, 4), 255, dtype=np.uint8)
-    pixels[0, 0] = 0
-    pixels[1, 2] = 199
-    pixels[2, 1] = 200
-    name = cached_map(pixels, resolution=0.25, origin=(-1.0, 2.0, 0.0))
-    grid, resolution, origin = calc._get_map_occupancy(name)
-    assert grid.dtype == np.uint8
-    assert grid.flags["C_CONTIGUOUS"]
-    assert grid.tolist() == [[0, 0, 0, 0], [0, 0, 1, 0], [1, 0, 0, 0]]
-    assert resolution == 0.25
-    assert list(origin) == [-1.0, 2.0, 0.0]
+def _series_by_time(calc: AcousticExposureCalculator, episode: AlignedEpisodeBundle) -> dict[int, list[tuple[str, float, float]]]:
+    table = calc.series_table(episode)
+    frames: dict[int, list[tuple[str, float, float]]] = {}
+    for t_ns, ped_id, exposure, attenuation in zip(table["t_ns"], table["ped_id"], table["exposure_dba"], table["attenuation_db"], strict=True):
+        frames.setdefault(int(t_ns), []).append((str(ped_id), float(exposure), float(attenuation)))
+    return frames
 
 
-def test_map_occupancy_is_none_for_unknown_map():
-    assert AcousticExposureCalculator(RobotParams())._get_map_occupancy("unknown") is None
+def test_metric_raises_when_no_barrier_map_exists(calc, derived_map):
+    with pytest.raises(AcousticsError, match="unknown"):
+        calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {})
 
 
-def test_map_occupancy_is_none_without_png_path(calc, cached_map):
-    assert calc._get_map_occupancy(cached_map(with_png_path=False)) is None
-
-
-def test_map_occupancy_is_none_for_unreadable_image(calc, cached_map, module_log):
-    assert calc._get_map_occupancy(cached_map(png_bytes=b"not a png")) is None
-    assert any(message.startswith("Failed to load map image for acoustics") for message in module_log)
-
-
-def test_reference_run_yields_nulls(calc, cached_map):
+def test_reference_run_yields_nulls(calc, derived_map):
     run = EpisodeDescriptor(episode_dir="ep", benchmark_id="bench", episode_id=7, planner="p", stage="s", is_reference=True)
-    assert calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), cached_map(), run=run), {}) == NULLS
+    episode = _episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), derived_map(), run=run)
+    assert calc.calculate(episode, {}) == NULLS
 
 
 @pytest.mark.parametrize("data", [None, pl.DataFrame()], ids=["none", "empty"])
-def test_missing_episode_data_yields_nulls(data, calc, cached_map):
-    assert calc.calculate(_episode(data, cached_map()), {}) == NULLS
+def test_missing_episode_data_yields_nulls(data, calc, derived_map):
+    assert calc.calculate(_episode(data, derived_map()), {}) == NULLS
 
 
 def test_missing_map_name_yields_nulls():
     assert AcousticExposureCalculator(RobotParams()).calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), None), {}) == NULLS
 
 
-def test_unloadable_map_yields_nulls():
-    assert AcousticExposureCalculator(RobotParams()).calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {}) == NULLS
-
-
-@pytest.mark.parametrize("dropped", ["robot_tracks", "pedestrian_tracks"])
-def test_missing_required_topic_yields_nulls(dropped, calc, cached_map):
-    episode = _episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), cached_map())
-    topics = {name: table for name, table in episode.topics.items() if name != dropped}
-    episode = AlignedEpisodeBundle(episode_id=7, data=episode.data, start_pos=[0.0, 0.0], goal_pos=[0.0, 0.0], map=episode.map, topics=topics)
-    assert calc.calculate(episode, {}) == NULLS
-
-
-def test_world_fallback_supplies_the_map(calc, cached_map):
-    calc.world = cached_map()
+def test_world_fallback_supplies_the_map(calc, derived_map):
+    calc.world = derived_map()
     result = calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), None), {})
     assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
 
 
-def test_prior_map_overrides_episode_map(calc, cached_map):
-    result = calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {"map": cached_map()})
+def test_prior_map_overrides_episode_map(calc, derived_map):
+    result = calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {"map": derived_map()})
     assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
 
 
-def test_scalars_follow_the_exposure_series(calc, cached_map):
+def test_scalars_follow_the_exposure_series(calc, derived_map):
     frames = _frames([(1.0, 1.0)] * 4, [[(4.0, 1.0)], [(4.0, 1.0)], [(4.0, 1.0), (1.0, 4.0)], [(4.0, 1.0), (1.0, 4.0)]], source=[42.0, 60.0, 60.0, 60.0])
-    episode = _episode(frames, cached_map())
+    episode = _episode(frames, derived_map())
     result = calc.calculate(episode, {})
     table = calc.series_table(episode, run_id="run", robot_id="robot")
     assert table.schema == pl.Schema(
@@ -280,6 +281,13 @@ def test_scalars_follow_the_exposure_series(calc, cached_map):
             "ped_id": pl.String,
             "exposure_dba": pl.Float64,
             "attenuation_db": pl.Float64,
+            "robot_x_m": pl.Float64,
+            "robot_y_m": pl.Float64,
+            "source_dba": pl.Float64,
+            "ped_x_m": pl.Float64,
+            "ped_y_m": pl.Float64,
+            "is_worst_frame": pl.Boolean,
+            "open_doors": pl.String,
         }
     )
     values = table["exposure_dba"].drop_nulls()
@@ -294,45 +302,52 @@ def test_scalars_follow_the_exposure_series(calc, cached_map):
     assert worst["source_dba"] == 60.0
     assert worst["pedestrians"] == [[4.0, 1.0]]
     assert worst["door_states"] == {}
+    # The legacy worst-case struct is now the is_worst_frame marker on the 1NF series.
+    worst_rows = table.filter(pl.col("is_worst_frame"))
+    assert len(worst_rows) == 1
+    assert int(worst_rows["t_ns"][0]) == SECOND_NS
+    assert float(worst_rows["robot_x_m"][0]) == 1.0
+    assert float(worst_rows["ped_x_m"][0]) == 4.0
 
 
-def test_frames_without_ground_truth_produce_no_exposure(calc, cached_map):
+def test_frames_without_ground_truth_produce_no_exposure(calc, derived_map):
     frames = _frames([(None, None), (0.0, 0.0), (0.0, 0.0)], [[], [(3.0, 4.0)], [(3.0, 4.0)]])
-    episode = _episode(frames, cached_map())
+    episode = _episode(frames, derived_map())
     result = calc.calculate(episode, {})
     expected = 42.0 - _att(5.0)
     assert result["ped_max_exposure_dba"] == pytest.approx(expected, abs=1e-3)
     assert result["ped_leq_exposure_dba"] == pytest.approx(expected, abs=1e-3)
     assert result["ped_max_startle_factor"] == 0.0
     assert result["worst_case_acoustic_frame"]["robot_x"] == 0.0
-    assert result["worst_case_acoustic_frame"]["robot_y"] == 0.0
     assert result["worst_case_acoustic_frame"]["pedestrians"] == [[3.0, 4.0]]
     table = calc.series_table(episode)
     assert table["t_ns"].unique().to_list() == [SECOND_NS, 2 * SECOND_NS]
 
 
-def test_repeated_timestamp_contributes_no_startle(calc, cached_map):
+def test_repeated_timestamp_contributes_no_startle(calc, derived_map):
     frames = _frames([(1.0, 2.0), (1.0, 1.0)], [[(4.0, 1.0)], [(4.0, 1.0)]], times=[0, 0])
-    result = calc.calculate(_episode(frames, cached_map()), {})
+    result = calc.calculate(_episode(frames, derived_map()), {})
     assert result["ped_max_startle_factor"] == 0.0
     assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
 
 
-def test_unreachable_pedestrians_are_dropped(calc, cached_map):
+def test_unreachable_pedestrians_are_dropped(calc, derived_map):
     frames = _frames([(1.0, 1.0), (1.0, 1.0)], [[(4.0, 1.0), (9.0, 9.0)], [(9.0, 9.0)]])
-    episode = _episode(frames, cached_map())
+    episode = _episode(frames, derived_map())
     result = calc.calculate(episode, {})
     assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
-    assert result["worst_case_acoustic_frame"]["pedestrians"] == [[4.0, 1.0], [9.0, 9.0]]
+    # The worst-case frame now lives on the 1NF series, which carries the reachable pedestrians only.
+    assert result["worst_case_acoustic_frame"]["pedestrians"] == [[4.0, 1.0]]
     assert calc.series_table(episode)["ped_id"].unique().to_list() == ["ped_0"]
 
 
-def test_robot_off_map_yields_nulls(calc, cached_map):
-    assert calc.calculate(_episode(_frames([(9.0, 9.0), (9.0, 9.0)], [[(4.0, 1.0)], []]), cached_map()), {}) == NULLS
+def test_robot_off_map_yields_nulls(calc, derived_map):
+    result = calc.calculate(_episode(_frames([(9.0, 9.0), (9.0, 9.0)], [[(4.0, 1.0)], []]), derived_map()), {})
+    assert result == NULLS
 
 
-def test_static_scene_logs_progress_every_fifty_evaluations(calc, cached_map, module_log):
-    episode = _episode(_frames([(1.0, 1.0)] * 50, [[(4.0, 1.0)]] * 50), cached_map())
+def test_static_scene_logs_progress_every_fifty_evaluations(calc, derived_map, module_log):
+    episode = _episode(_frames([(1.0, 1.0)] * 50, [[(4.0, 1.0)]] * 50), derived_map())
     result = calc.calculate(episode, {})
     assert [message for message in module_log if "Evaluated" in message] == ["AcousticExposureCalculator: Evaluated 50 frames... (50/50 total frames processed)"]
     assert "AcousticExposureCalculator: Finished episode 7 with 2 unique solver evaluations." in module_log
@@ -340,29 +355,34 @@ def test_static_scene_logs_progress_every_fifty_evaluations(calc, cached_map, mo
     assert len(calc.series_table(episode)) == 50
 
 
-def test_door_opening_switches_attenuation_and_marks_worst_frame_open(tmp_path, calc, cached_map):
-    name = cached_map(_walled())
+def test_door_opening_switches_attenuation_and_marks_worst_frame_open(tmp_path, calc, derived_map):
+    name = derived_map(_walled(), doors={"front_door": _front_door_mask()})
     folder_manager, run = _door_run(tmp_path, name)
     frames = _frames([(1.0, 2.5)] * 3, [[(4.0, 2.5)]] * 3, source=[60.0] * 3)
     semantic = _semantic([(SECOND_NS, "env_0/front_door/0", True)])
-    result = calc.calculate(_episode(frames, name, run=run, folder_manager=folder_manager, semantic_snapshot=semantic), {})
+    episode = _episode(frames, name, run=run, folder_manager=folder_manager, semantic_snapshot=semantic)
+    result = calc.calculate(episode, {})
     closed, opened = _att(3.0) + 25.0, _att(3.0)
+    attenuation_by_time = _series_by_time(calc, episode)
+    assert [values[0][2] for values in attenuation_by_time.values()] == pytest.approx([closed, opened, opened], abs=1e-3)
     assert result["ped_max_exposure_dba"] == pytest.approx(60.0 - opened, abs=1e-3)
     assert result["ped_leq_exposure_dba"] == pytest.approx(_leq([60.0 - closed, 60.0 - opened, 60.0 - opened]), abs=1e-3)
     assert result["ped_max_startle_factor"] == pytest.approx(25.0, abs=1e-3)
     assert result["worst_case_acoustic_frame"]["door_states"] == {"world/front_door": "open"}
+    worst_rows = calc.series_table(episode).filter(pl.col("is_worst_frame"))
+    assert worst_rows["open_doors"][0] == "world/front_door"
 
 
-def test_the_pipeline_run_dir_reads_the_doors_of_the_run_snapshot(tmp_path, calc, cached_map):
-    name = cached_map(_walled())
+def test_the_pipeline_run_dir_reads_the_doors_of_the_run_snapshot(tmp_path, calc, derived_map):
+    name = derived_map(_walled(), doors={"front_door": _front_door_mask()})
     _door_run(tmp_path, name)
-    result = calc.calculate(_episode(_frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0]), name, run_dir=tmp_path / "bench"), {})
-    assert result["worst_case_acoustic_frame"]["door_states"] == {"world/front_door": "closed"}
-    assert calc.series_table(_episode(_frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0]), name, run_dir=tmp_path / "bench"))["attenuation_db"][0] == pytest.approx(_att(3.0) + 25.0, abs=1e-3)
+    episode = _episode(_frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0]), name, run_dir=tmp_path / "bench")
+    assert calc.calculate(episode, {})["worst_case_acoustic_frame"]["door_states"] == {"world/front_door": "closed"}
+    assert calc.series_table(episode)["attenuation_db"][0] == pytest.approx(_att(3.0) + 25.0, abs=1e-3)
 
 
-def test_doors_without_semantic_timeline_stay_closed(tmp_path, calc, cached_map):
-    name = cached_map(_walled())
+def test_doors_without_semantic_timeline_stay_closed(tmp_path, calc, derived_map):
+    name = derived_map(_walled(), doors={"front_door": _front_door_mask()})
     folder_manager, run = _door_run(tmp_path, name)
     frames = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
     episode = _episode(frames, name, run=run, folder_manager=folder_manager)
@@ -370,8 +390,8 @@ def test_doors_without_semantic_timeline_stay_closed(tmp_path, calc, cached_map)
     assert calc.series_table(episode)["attenuation_db"][0] == pytest.approx(_att(3.0) + 25.0, abs=1e-3)
 
 
-def test_semantic_timeline_for_another_door_keeps_door_closed(tmp_path, calc, cached_map):
-    name = cached_map(_walled())
+def test_semantic_timeline_for_another_door_keeps_door_closed(tmp_path, calc, derived_map):
+    name = derived_map(_walled(), doors={"front_door": _front_door_mask()})
     folder_manager, run = _door_run(tmp_path, name)
     semantic = _semantic([(0, "env_0/back_door/0", True)])
     frames = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
@@ -380,11 +400,45 @@ def test_semantic_timeline_for_another_door_keeps_door_closed(tmp_path, calc, ca
     assert calc.series_table(episode)["attenuation_db"][0] == pytest.approx(_att(3.0) + 25.0, abs=1e-3)
 
 
-@pytest.mark.parametrize("benchmark_id", [None, ""], ids=["no_run", "no_benchmark_id"])
-def test_run_worlds_need_a_benchmark_id(benchmark_id, tmp_path, calc, cached_map):
-    name = cached_map(_walled())
-    folder_manager, _ = _door_run(tmp_path, name)
-    run = None if benchmark_id is None else EpisodeDescriptor(episode_dir="ep", benchmark_id=benchmark_id, episode_id=7, planner="p", stage="s")
-    frames = _frames([(1.0, 2.5)], [[(4.0, 2.5)]], source=[60.0])
-    episode = _episode(frames, name, run=run, folder_manager=folder_manager)
-    assert calc.series_table(episode)["attenuation_db"][0] == pytest.approx(_att(3.0) + 47.0, abs=1e-3)
+def test_acoustic_exposure_registers_the_pedestrian_scope():
+    assert AcousticExposureCalculator.effective_scopes() == frozenset({MetricScope.EPISODE, MetricScope.PEDESTRIAN})
+
+
+def test_pedestrian_scope_reduces_to_that_pedestrian(calc, derived_map):
+    map_name = derived_map()
+    frames = _frames(
+        [(1.0, 1.0), (1.0, 1.0)],
+        [[(4.0, 1.0), (4.0, 4.0)], [(4.0, 1.0), (4.0, 4.0)]],
+        source=[60.0, 60.0],
+    )
+    episode = _episode(frames, map_name)
+    full = calc.calculate(episode, {})
+
+    def pedestrian_result(ped_id: str) -> dict[str, object]:
+        ped_topics = dict(episode.topics)
+        ped_topics["pedestrian_tracks"] = episode.topics["pedestrian_tracks"].filter(pl.col("ped_id") == ped_id)
+        bundle = AlignedEpisodeBundle(
+            episode_id=episode.episode_id,
+            data=pl.DataFrame(),
+            start_pos=episode.start_pos,
+            goal_pos=episode.goal_pos,
+            map=episode.map,
+            topics=ped_topics,
+        )
+        scope_slice = ScopeSlice(
+            scope=MetricScope.PEDESTRIAN,
+            slice_id=ped_id,
+            t_start_ns=0,
+            t_end_ns=SECOND_NS,
+            identity={"ped_id": ped_id},
+            window_bundle=bundle,
+            full_episode=episode,
+        )
+        return calc.calculate_for_scope(bundle, {}, scope_slice)
+
+    near = pedestrian_result("ped_0")
+    far = pedestrian_result("ped_1")
+    assert near["ped_max_exposure_dba"] == pytest.approx(60.0 - _att(3.0), abs=1e-3)
+    assert far["ped_max_exposure_dba"] == pytest.approx(60.0 - 20.0 * math.log10(math.sqrt(18.0)), abs=1e-2)
+    assert near["ped_max_exposure_dba"] == pytest.approx(full["ped_max_exposure_dba"], abs=1e-3)
+    assert near["worst_case_acoustic_frame"]["pedestrians"] == [[4.0, 1.0]]
