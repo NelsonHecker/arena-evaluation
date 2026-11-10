@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import os
 
@@ -20,7 +21,8 @@ from arena_evaluation.benchmark.runner import _run_domain
 from arena_evaluation.benchmark.state import Manifest
 
 
-def _probe(busy: set[int]):
+
+def _probe(busy: set[int]) -> collections.abc.Callable[[int], bool]:
     def probe(domain_id: int) -> bool:
         return domain_id in busy
 
@@ -57,7 +59,7 @@ def test_gz_partition_follows_the_domain():
     assert gz_partition(57) == "arena_57"
 
 
-def test_apply_domain_exports_domain_and_gz_partition(monkeypatch):
+def test_apply_domain_exports_domain_and_gz_partition(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(domain_module.ROS_DOMAIN_ID_ENV, raising=False)
     monkeypatch.delenv(domain_module.GZ_PARTITION_ENV, raising=False)
     apply_domain(DomainChoice(domain_id=57, source="explicit", probed=(57,)))
@@ -70,26 +72,26 @@ def test_describe_reports_where_the_domain_came_from():
     assert "no arena runtime" in describe(DomainChoice(domain_id=8, source="probed", probed=(1, 2, 3, 4, 5, 6, 7)))
 
 
-def test_run_domain_keeps_a_lane_domain_from_the_environment(monkeypatch):
+def test_run_domain_keeps_a_lane_domain_from_the_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ROS_DOMAIN_ID", "21")
     monkeypatch.setattr("arena_evaluation.benchmark.runner.choose_domain", lambda explicit=None: choose_domain(explicit, probe=_probe(set()), candidates=[9]))
     choice = _run_domain(None, stored=None, lane="p1")
     assert choice.domain_id == 21
 
 
-def test_run_domain_prefers_an_explicit_domain(monkeypatch):
+def test_run_domain_prefers_an_explicit_domain(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ROS_DOMAIN_ID", raising=False)
     monkeypatch.setattr("arena_evaluation.benchmark.runner.choose_domain", lambda explicit=None: choose_domain(explicit, probe=_probe(set()), candidates=[9]))
     assert _run_domain(57, stored=None, lane=None).source == "explicit"
 
 
-def test_run_domain_reuses_a_recorded_domain_on_resume(monkeypatch):
+def test_run_domain_reuses_a_recorded_domain_on_resume(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ROS_DOMAIN_ID", raising=False)
     monkeypatch.setattr("arena_evaluation.benchmark.runner.runtime_on_domain", lambda domain_id: False)
     assert _run_domain(None, stored=42, lane=None) == DomainChoice(domain_id=42, source="resume", probed=(42,))
 
 
-def test_run_domain_picks_a_domain_when_a_resumed_one_is_busy(monkeypatch):
+def test_run_domain_picks_a_domain_when_a_resumed_one_is_busy(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ROS_DOMAIN_ID", raising=False)
     monkeypatch.setattr("arena_evaluation.benchmark.runner.runtime_on_domain", lambda domain_id: True)
     monkeypatch.setattr("arena_evaluation.benchmark.runner.choose_domain", lambda explicit=None: choose_domain(explicit, probe=_probe(set()), candidates=[7]))
