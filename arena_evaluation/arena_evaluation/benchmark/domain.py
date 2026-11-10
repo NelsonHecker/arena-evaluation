@@ -34,8 +34,9 @@ try:
 finally:
     node.destroy_node()
     rclpy.shutdown()
-sys.exit(0 if present else 1)
+sys.exit(0 if present else 3)
 """
+_PROBE_ABSENT_EXIT: typing.Final[int] = 3
 
 
 DomainSource = typing.Literal["explicit", "inherited", "resume", "probed"]
@@ -73,7 +74,11 @@ def runtime_on_domain(domain_id: int, *, timeout_s: float = _PROBE_TIMEOUT_S) ->
         timeout=timeout_s + 30.0,
         check=False,
     )
-    return done.returncode == 0
+    if done.returncode == 0:
+        return True
+    if done.returncode == _PROBE_ABSENT_EXIT:
+        return False
+    raise RuntimeError(f"the ROS domain probe for domain {domain_id} failed with exit code {done.returncode}; the ROS environment is not usable")
 
 
 def choose_domain(
