@@ -45,7 +45,8 @@ class VizManifest(BaseModel):
     name: str | None = None
     title: str | None = None
     description: str | None = None
-    # metrics | characterization_samples | characterization_summary | <parquet filename>
+    # "metrics"/"episode_summary" alias the episode summary view; a v_* name must be a
+    # declared catalog view (canonical or published series view); anything else resolves at render time.
     data_source: str = "metrics"
     groups: list[ManifestGroup] = Field(default_factory=list)
     summary: list[SummarySpec] = Field(default_factory=list)
@@ -79,6 +80,14 @@ class VizManifest(BaseModel):
                 d["plots"] = plots
             return d
         return data
+
+    @model_validator(mode="after")
+    def _validate_data_source(self) -> VizManifest:
+        """A view-shaped source must be a view the package declares, so a manifest cannot drift from the catalog."""
+        from .data_sources import validate_data_source
+
+        validate_data_source(self.data_source)
+        return self
 
     @classmethod
     def load(cls, path: pathlib.Path | None) -> VizManifest:

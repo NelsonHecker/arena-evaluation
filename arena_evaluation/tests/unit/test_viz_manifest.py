@@ -1,8 +1,17 @@
 """Unit tests for VizManifest YAML parsing/round-trip with the declarative fields."""
 
+import pathlib
+
 import pytest
 import yaml
 
+from arena_evaluation.presentation.data_sources import (
+    data_source_table,
+    declared_data_sources,
+    declared_series_stems,
+    declared_view_names,
+    series_view_name,
+)
 from arena_evaluation.presentation.manifest_registry import available_manifests, find_manifest_file
 from arena_evaluation.presentation.viz_manifest import VizManifest
 
@@ -15,7 +24,8 @@ def test_all_bundled_manifests_load_and_roundtrip(manifest_name: str):
 
     manifest = VizManifest.load(p)
     assert manifest.name == manifest_name
-    assert manifest.data_source in ("metrics", "characterization_samples")
+    # A manifest names a declared table or view; a view nothing publishes fails at load.
+    assert data_source_table(manifest.data_source) in declared_data_sources()
     assert manifest.units, f"Manifest {manifest_name} must declare units"
     assert manifest.groups, f"Manifest {manifest_name} must declare layout groups"
     assert len(manifest.plots) > 0, f"Manifest {manifest_name} must have plots"
@@ -52,15 +62,52 @@ def test_characterization_manifest_loads():
 
     manifest = VizManifest.load(p)
     assert manifest.name == "characterization"
-    assert manifest.data_source == "metrics"
-    assert manifest.summary_group_by == ["timeseries_char_phase_kind", "timeseries_char_speed_target"]
+    # The report reads the 1NF series table the pipeline publishes, not the episode summary.
+    assert manifest.data_source == series_view_name("characterization")
+    assert "characterization" in declared_series_stems()
+    assert manifest.data_source in declared_view_names()
+    assert manifest.summary_group_by == ["phase_kind", "speed_target_mps"]
     assert manifest.summary  # declarative summary table
     line_specs = [s for s in manifest.plots if s.type == "line"]
     assert line_specs, "characterization manifest must use line charts"
     # Curves aggregate per working point from the long per-sample frame.
     assert any(s.options.get("aggregate") for s in manifest.plots)
-    assert manifest.units.get("timeseries_char_power_total_w") == "W"
-    assert manifest.units.get("timeseries_char_dba") == "dBA"
+    assert manifest.units.get("power_total_w") == "W"
+    assert manifest.units.get("dba") == "dBA"
+
+
+def test_manifest_view_sources_are_declared_by_the_package():
+    """Every bundled manifest names a declared source, so a renamed view cannot silently orphan it."""
+    for manifest_name in available_manifests():
+        manifest_path = find_manifest_file(manifest_name)
+        assert manifest_path is not None
+        manifest = VizManifest.load(manifest_path)
+        assert data_source_table(manifest.data_source) in declared_data_sources(), manifest_name
+
+
+def test_a_manifest_referencing_an_unknown_view_fails_at_load(tmp_path: pathlib.Path):
+    """A view-shaped data source is a declaration: an undeclared view fails at load, not at render."""
+    path = tmp_path / "unknown_view.yaml"
+    path.write_text(
+        yaml.safe_dump({"name": "unknown_view", "data_source": "v_series_not_a_published_table", "plots": []}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown report data source"):
+        VizManifest.load(path)
+
+
+def test_characterization_manifest_columns_are_published_by_the_series():
+    """Pin the report columns to the characterization series schema so the view and manifest cannot drift."""
+    from arena_evaluation.processing.metrics.ecological.characterization import SERIES_SCHEMA
+
+    manifest = VizManifest.load(find_manifest_file("characterization"))
+    series_columns = set(SERIES_SCHEMA)
+    assert set(manifest.units) <= series_columns
+    assert {spec.metric for spec in manifest.summary} <= series_columns
+    group_by = manifest.summary_group_by
+    assert isinstance(group_by, list)
+    assert set(group_by) <= series_columns
+    assert {spec.data_key for spec in manifest.plots if spec.data_key and spec.data_key != "*"} <= series_columns
 
 
 def test_standard_manifest_modernized_recipes_and_channels():

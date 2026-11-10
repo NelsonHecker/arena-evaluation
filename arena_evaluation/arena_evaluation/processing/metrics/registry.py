@@ -29,6 +29,16 @@ def _series_table_stem(class_name: str) -> str:
     return _SERIES_STEM_BOUNDARY.sub("_", class_name.removesuffix("Calculator")).lower()
 
 
+def _leaf_calculator_classes(root: type[BaseMetricCalculator]) -> list[type[BaseMetricCalculator]]:
+    """Concrete calculator subclasses, test-local classes excluded."""
+    leaves: list[type[BaseMetricCalculator]] = []
+    for sub in root.__subclasses__():
+        if not inspect.isabstract(sub) and "<locals>" not in sub.__qualname__:
+            leaves.append(sub)
+        leaves.extend(_leaf_calculator_classes(sub))
+    return leaves
+
+
 def _topic_row_count(table: pl.DataFrame | pl.LazyFrame | None) -> int:
     """Row count of a materialized or lazy topic table, 0 when None."""
     if table is None:
@@ -79,24 +89,12 @@ class MetricRegistry:
 
     def _register_calculators(self) -> None:
         """Register all non-abstract subclasses, indexed by name and by scope."""
-
-        def _get_leaf_subclasses(cls: type[BaseMetricCalculator]) -> list[type[BaseMetricCalculator]]:
-            leaves: list[type[BaseMetricCalculator]] = []
-            for sub in cls.__subclasses__():
-                if inspect.isabstract(sub):
-                    leaves.extend(_get_leaf_subclasses(sub))
-                else:
-                    leaves.append(sub)
-                    leaves.extend(_get_leaf_subclasses(sub))
-            return leaves
-
-        for calc_cls in set(_get_leaf_subclasses(BaseMetricCalculator)):
-            if not inspect.isabstract(calc_cls) and "<locals>" not in calc_cls.__qualname__:
-                if not calc_cls.NAME:
-                    raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
-                if calc_cls.NAME in self.calculators:
-                    raise ValueError(f"Duplicate calculator NAME: {calc_cls.NAME}")
-                self.register(calc_cls)
+        for calc_cls in set(_leaf_calculator_classes(BaseMetricCalculator)):
+            if not calc_cls.NAME:
+                raise ValueError(f"Calculator {calc_cls.__name__} must define a NAME")
+            if calc_cls.NAME in self.calculators:
+                raise ValueError(f"Duplicate calculator NAME: {calc_cls.NAME}")
+            self.register(calc_cls)
 
     def register(self, calculator: type[BaseMetricCalculator] | BaseMetricCalculator) -> None:
         """Register a calculator class or instance across all of its effective scopes."""
@@ -115,6 +113,16 @@ class MetricRegistry:
             ((calc.SERIES_TABLE_STEM or _series_table_stem(type(calc).__name__), calc) for calc in self.calculators.values() if type(calc).series_table is not BaseMetricCalculator.series_table),
             key=lambda item: item[0],
         )
+
+    @classmethod
+    def series_table_stems(cls) -> tuple[str, ...]:
+        """Stems of the 1NF series tables the discovered calculators publish, sorted.
+
+        Class-level so a report manifest can be validated without constructing calculators;
+        the pipeline's series writer derives the same stems from the registered instances.
+        """
+        cls.discover_calculators_cls()
+        return tuple(sorted({calc_cls.SERIES_TABLE_STEM or _series_table_stem(calc_cls.__name__) for calc_cls in _leaf_calculator_classes(BaseMetricCalculator) if calc_cls.series_table is not BaseMetricCalculator.series_table}))
 
     @classmethod
     def get_all_units(cls) -> dict[str, str]:
