@@ -1,8 +1,8 @@
 """Robot speed, acceleration and jerk over the scope window's ground truth.
 
-Peak acceleration and jerk are estimated from the ground-truth track with a local
+Peak acceleration and jerk are estimated from the recorded ground-truth speed with a local
 polynomial (Savitzky-Golay) fit over a declared **1.0 s** window and **polynomial order 2**
-on a uniform grid of at most 20 Hz. Differentiating raw ground-truth samples at the
+on a uniform grid of at most 20 Hz (a coarser recording keeps its own step). Differentiating the raw speed samples at the
 recording rate amplifies sample noise into physically impossible peaks — a jackal with a
 2.5 m/s² actuator limit showed median peak accelerations near 28 m/s² and median peak jerk
 near 900 m/s³ — so the declared window is what the reported peaks measure. An episode with
