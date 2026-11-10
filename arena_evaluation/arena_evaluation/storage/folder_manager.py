@@ -112,4 +112,3 @@ class FolderManager:
     def extracted_topics_path_for_episode(self, episode_dir: pathlib.Path) -> pathlib.Path:
         """Return topics directory for an episode."""
         return self._safe_resolve(episode_dir / "topics")
-

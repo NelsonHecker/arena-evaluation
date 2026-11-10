@@ -912,11 +912,7 @@ class ScopedEvaluator:
             "min_obstacle_clearance_m": _float(metrics.get("min_obstacle_clearance")),
             "min_ped_clearance_m": _float(metrics.get("min_pedestrian_clearance")),
             "total_collisions_ped": collisions_ped if collisions_ped is not None else (pedestrian_contacts if collision_known else None),
-            "total_collisions_static": (
-                (collisions_wall or 0) + (collisions_static or 0)
-                if collisions_wall is not None or collisions_static is not None
-                else (static_contacts if collision_known else None)
-            ),
+            "total_collisions_static": ((collisions_wall or 0) + (collisions_static or 0) if collisions_wall is not None or collisions_static is not None else (static_contacts if collision_known else None)),
             "success_no_robot_fault": None if success is None else bool(success) and robot_fault_contacts == 0,
             "mar": _float(metrics.get("mar")),
             "pfi": _float(metrics.get("pfi")),
