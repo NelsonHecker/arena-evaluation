@@ -24,7 +24,7 @@ def test_run_manifests_lists_only_the_valid_report_files(tmp_path: pathlib.Path)
 
 
 @pytest.mark.parametrize(("kind", "identifier"), [("suite", SuiteIdentifier), ("contest", ContestIdentifier), ("manifest", ManifestIdentifier)])
-def test_config_identifier_maps_each_kind(kind, identifier):
+def test_config_identifier_maps_each_kind(kind: str, identifier: type[SuiteIdentifier | ContestIdentifier | ManifestIdentifier]) -> None:
     assert catalog.config_identifier(kind) is identifier
 
 

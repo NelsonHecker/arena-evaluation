@@ -11,7 +11,7 @@ from arena_mcp.core import ToolError
 from .base import YamlText, config_stem, domain, parse_yaml, run_path
 from .catalog import config_identifier, config_names
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:\n    from arena_evaluation.benchmark.config import Contest
     from arena_rclpy_mixins.ROSParamServer import ROSParamServer
     from arena_runtime.env.task_layer import TaskLayer, TaskModes
     from arena_simulation_setup.tree import DomainAssetIdentifier
@@ -248,7 +248,7 @@ def _plugins(node: object) -> list[str]:
     return found
 
 
-def _nav2_plugin_problems(contest: Any) -> list[str]:
+def _nav2_plugin_problems(contest: Contest) -> list[str]:
     """nav2 contestants whose controller/inter-planner config needs a plugin this installation does not ship."""
     from arena_planners import resolver
 
@@ -281,7 +281,7 @@ def _training_available() -> bool:
     return "training" in common._reg_list()
 
 
-def _planner_availability_problems(contest: Any) -> list[str]:
+def _planner_availability_problems(contest: Contest) -> list[str]:
     """DRL-family contestants whose planner or the training feature is not installed, with the command that installs it."""
     from arena_planners import resolver
 
