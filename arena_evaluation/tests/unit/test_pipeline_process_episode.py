@@ -60,7 +60,7 @@ def _robot_rows(t: int, phase: str, met: str) -> list[tuple[int, str, str]]:
 def _episode(tmp_path: pathlib.Path) -> tuple[FolderManager, EpisodeDescriptor]:
     episode_dir = tmp_path / "run" / "episodes" / "nav2" / "episode_000"
     episode_dir.mkdir(parents=True)
-    _write_acoustic_world(tmp_path / "run", WORLD)
+    _write_acoustic_world(tmp_path / "run" / "episodes", WORLD)
     (episode_dir / "episode_000.mcap").touch()
     track = [(t / 10, 5.0 - 0.4 * t, 5.0 - 0.4 * t) for t in range(11)] + [(t / 10, 1.0, 1.0) for t in range(11, 31)]
     topics = episode_dir / "topics"

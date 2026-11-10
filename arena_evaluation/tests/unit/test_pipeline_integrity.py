@@ -152,7 +152,7 @@ def test_metric_rows_carry_integrity_of_the_last_record(tmp_path: pathlib.Path) 
     _world_cache[WORLD] = [_ZoneGeometry(name="kitchen", polygon=shapely.Polygon([(0, 0), (0, 4), (4, 4), (4, 0)]), max_speed=None, quiet=False, restricted=False)]
     episode_dir = tmp_path / "run" / "episodes" / "nav2" / "episode_000"
     episode_dir.mkdir(parents=True)
-    _write_acoustic_world(tmp_path / "run", WORLD)
+    _write_acoustic_world(tmp_path / "run" / "episodes", WORLD)
     (episode_dir / "episode_000.mcap").touch()
     MetadataWriter.write(_meta(), episode_dir / "episode_000.yaml")
     _write_topics(episode_dir / "topics", ([], [MOVED], [MOVED, RETASKED]))
