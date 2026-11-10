@@ -171,9 +171,16 @@ def _route_waypoints(
     if commanded:
         reached = _reached_waypoints(track_x=track_x, track_y=track_y, waypoints=commanded)
         points: list[tuple[float, float]] = [start_pt]
-        for waypoint in reached:
-            if math.dist(waypoint, points[-1]) > _ROUTE_WAYPOINT_TOLERANCE_M:
-                points.append(waypoint)
+        if reached:
+            for waypoint in reached:
+                if math.dist(waypoint, points[-1]) > _ROUTE_WAYPOINT_TOLERANCE_M:
+                    points.append(waypoint)
+        else:
+            # Failed before the first leg (e.g. a timeout en route): the last commanded goal is the
+            # mission target, so the reference is start -> mission target rather than degenerate.
+            mission_target = commanded[-1]
+            if math.dist(mission_target, start_pt) > _ROUTE_WAYPOINT_TOLERANCE_M:
+                points.append(mission_target)
         return tuple(points)
     points = [start_pt]
     if goal_pt is not None and math.dist(goal_pt, start_pt) > _ROUTE_WAYPOINT_TOLERANCE_M:

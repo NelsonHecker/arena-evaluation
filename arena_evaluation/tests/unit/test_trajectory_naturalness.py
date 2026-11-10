@@ -210,3 +210,20 @@ def test_unvisited_commanded_goals_do_not_inflate_the_reference_route():
     res = _calc().calculate(_episode(gt, [0.0, 0.0], map_name=OPEN_ROOM, plans=plans), {})
 
     assert res["theta_star_length"] is None
+
+def test_unreached_first_leg_falls_back_to_the_commanded_mission_target():
+    plans = pl.DataFrame(
+        {
+            "t_ns": [SEC],
+            "plan_id": ["plan_0"],
+            "waypoint_idx": [0],
+            "x": [4.0],
+            "y": [0.0],
+            "yaw": [0.0],
+        }
+    )
+    gt = _gt([0.0, 1.0, 2.0], [0.0, 0.0, 0.0])
+
+    res = _calc().calculate(_episode(gt, [4.0, 0.0], map_name=OPEN_ROOM, plans=plans), {})
+
+    assert res["theta_star_length"] == pytest.approx(4.0)
