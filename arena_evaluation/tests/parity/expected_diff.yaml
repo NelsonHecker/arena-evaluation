@@ -60,19 +60,18 @@ entries:
     kind: null_fill
     reason: "characterization radiated-power level is null where total_power_w is missing (was a filled 0.0)"
 
-  # --- port-eco: acoustic exposure (no forward-fill, GT fix required) --------------
-  - metric_key: ped_max_exposure_dba
-    kind: ground_truth
-    reason: "acoustic exposure moved off wheel odometry/fill_null and onto the barrier-map solver: walls and doors are the only barriers, the solver charges per-cell transmission loss and a door counts as open from its semantic progress, and frames without a GT fix produce no exposure"
+  # --- port-eco: acoustic exposure (barrier-map solver, per-pedestrian reduction) ---
   - metric_key: ped_leq_exposure_dba
-    kind: ground_truth
-    reason: "acoustic exposure moved off wheel odometry/fill_null and onto the barrier-map solver: walls and doors are the only barriers, the solver charges per-cell transmission loss and a door counts as open from its semantic progress, and frames without a GT fix produce no exposure"
+    kind: derived
+    max_rel: 0.03
+    reason: "acoustic exposure moved onto the barrier-map solver, and the legacy episode value is the energy mean over all pedestrian-samples while fact_pedestrians holds one energy-equivalent Leq per pedestrian: the arithmetic mean of per-pedestrian dB values is an energy-weighted reduction, not the sample mean. parity-g1-g2clock measured the series energy mean against legacy at 1.4e-14 and this per-pedestrian mean within 1.27 dB (max_rel 0.028), so the reviewed bound is max_rel 0.03 (about 1.3 dB at 45 dBA). The exact episode-grain quantity is l_aeq_t (fact_robots) and total_acoustic_dose_pa2s (fact_episodes)"
   - metric_key: ped_max_startle_factor
-    kind: ground_truth
-    reason: "acoustic exposure moved off wheel odometry/fill_null and onto the barrier-map solver: walls and doors are the only barriers, the solver charges per-cell transmission loss and a door counts as open from its semantic progress, and frames without a GT fix produce no exposure"
+    kind: derived
+    max_rel: 0.33
+    reason: "the per-pedestrian max startle rate reduces to the episode value by max over pedestrians, but the legacy episode calculator pairs consecutive frames positionally rather than by pedestrian identity. parity-g1-g2clock measured this reduction exact on 5 of 6 evaluated episodes and off by 4.69 dBA/s (14.93 vs 10.23, max_rel 0.314) on the sixth, so the reviewed bound is max_rel 0.33; the per-pedestrian column itself is the correct identity-paired quantity"
   - metric_key: worst_case_acoustic_frame
     kind: ground_truth
-    reason: "worst-case acoustic frame index changes because frames without a GT fix no longer receive forward-filled exposure; the frame is now published as 1NF series rows (is_worst_frame marker, robot pose, source level, pedestrian positions, open doors)"
+    reason: "worst-case acoustic frame index changes because frames without a GT fix no longer receive forward-filled exposure; the frame is now published as 1NF series rows (is_worst_frame marker, robot pose, source level, pedestrian positions, open doors) and worst_case_acoustic_t_ns is the scalar discriminator"
 
   # --- port-eco: motion metrics (all-null input -> null, not 0.0) ------------------
   - metric_key: velocity_mean
@@ -194,7 +193,7 @@ relocated_series:
     metric_keys:
       - timeseries_acoustic_exposure_dba
       - timeseries_acoustic_attenuation_db
-  - reason: "the worst-case acoustic frame struct moved to the 1NF acoustic exposure series table: is_worst_frame marks the frame, robot_x_m/robot_y_m/source_dba carry the robot state, ped_x_m/ped_y_m the pedestrians and open_doors the door states, so it is not a scalar fact column"
+  - reason: "the worst-case acoustic frame struct moved to the 1NF acoustic exposure series table: is_worst_frame marks the frame, robot_x_m/robot_y_m/source_dba carry the robot state, ped_x_m/ped_y_m the pedestrians and open_doors the door states, and worst_case_acoustic_t_ns is the published scalar discriminator; join series_acoustic_exposure on (run_id, episode_id, t_ns) to reconstruct the frame"
     metric_keys:
       - worst_case_acoustic_frame
   - reason: "clearance per-sample array moved to the 1NF robot series table; no scalar fact column is intended"
@@ -224,6 +223,8 @@ relocated_series:
       - time
 
 structural_replacements:
+  - metric_key: worst_case_acoustic_t_ns
+    reason: "new scalar discriminator for the relocated worst-case acoustic frame: it names the t_ns whose series_acoustic_exposure row carries robot_x_m/robot_y_m/source_dba/ped_x_m/ped_y_m/open_doors (is_worst_frame marks it), so the frame is reconstructed by joining the series on (run_id, episode_id, t_ns); not a legacy parity key"
   - metric_key: char_total_energy_j
     reason: "new 1NF characterization total, replaces the legacy list-endpoint convention; not a parity key"
   - metric_key: char_mean_efficiency

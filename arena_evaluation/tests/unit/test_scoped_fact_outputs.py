@@ -89,6 +89,28 @@ ALICE_TOTAL_DISTANCE_M: typing.Final[float] = 6.0 * ALICE_SPEED_MPS
 ALICE_SPAWN_Y_M: typing.Final[float] = -3.0 * ALICE_SPEED_MPS
 ALICE_MIN_CLEARANCE_M: typing.Final[float] = -0.55  # robot radius 0.25 + pedestrian radius 0.3
 ENCOUNTER_ENERGY_J: typing.Final[float] = ROBOT_POWER_W * ALICE_DURATION_S
+WINDOW_ENERGY_ACOUSTIC_COLUMNS: typing.Final[tuple[str, ...]] = (
+    "l_aeq_t",
+    "l_a10",
+    "l_a50",
+    "l_a90",
+    "acoustic_startle_factor",
+    "acoustic_surge_index",
+    "acoustic_cost",
+    "energy_static_wh",
+    "energy_mechanical_wh",
+    "energy_thermal_wh",
+    "energy_total_wh",
+    "power_peak_w",
+    "battery_soc_final",
+    "battery_soc_drop_pct",
+    "specific_cost_of_transport",
+    "energy_per_meter",
+    "peak_to_mean_power_ratio",
+    "standstill_energy_penalty_wh",
+    "kinetic_energy_demand_j",
+    "friction_dissipation_j",
+)
 
 _EPISODE_METRICS: typing.Final[dict[str, object]] = {
     "result": "success",
@@ -676,6 +698,28 @@ def test_encounter_fact_publishes_the_windowed_social_columns(tables: ScopedFact
     assert isinstance(intrusion, float)
     assert intrusion > 0.0
     assert row["total_time_looking_at_pedestrians"] is not None
+
+
+def test_window_energy_and_acoustic_columns_are_declared() -> None:
+    """The encounter window's acoustics and energy reductions are part of the frozen fact schema."""
+    encounter_schema = FACT_SCHEMAS["encounters"]
+    for name in WINDOW_ENERGY_ACOUSTIC_COLUMNS:
+        assert name in encounter_schema.names(), name
+        assert encounter_schema[name] == pl.Float64, name
+    assert FACT_SCHEMAS["pedestrians"]["worst_case_acoustic_t_ns"] == pl.Int64
+
+
+def test_encounter_fact_publishes_the_window_energy_and_acoustic_columns(tables: ScopedFactTables) -> None:
+    """The window's own power and acoustics samples become the encounter's energy and level facts."""
+    row = _encounter_row(tables, "Pedestrian_1")
+    duration_s = typing.cast(float, row["duration_s"])
+    assert row["power_peak_w"] == pytest.approx(ROBOT_POWER_W)
+    assert row["energy_total_wh"] == pytest.approx(ROBOT_POWER_W * duration_s / 3600.0, abs=0.01)
+    assert row["l_aeq_t"] == pytest.approx(ACOUSTIC_LEVEL_DBA, abs=1e-6)
+    assert row["acoustic_startle_factor"] == pytest.approx(0.0)
+    assert isinstance(row["acoustic_cost"], float)
+    assert isinstance(row["energy_per_meter"], float)
+    assert row["energy_per_meter"] > 0.0
 
 
 def test_contact_fact_publishes_the_windowed_hhi_columns(tables: ScopedFactTables) -> None:
