@@ -116,12 +116,17 @@ def _preview(table: str, frame: pl.DataFrame, limit: int) -> TablePreview:
 
 
 def _null_reasons(frames: list[pl.DataFrame]) -> list[str]:
-    """Every distinct non-empty ``null_reason`` provenance code across the sliced tables, sorted."""
+    """Every distinct ``field:code`` provenance token across the sliced tables, sorted.
+
+    A fact row carries its missing fields as one ``field:code;field:code`` string; the slice
+    reports the individual tokens so an analyst can filter and count them.
+    """
     reasons: set[str] = set()
     for frame in frames:
         if len(frame) == 0:
             continue
-        reasons.update(str(value) for value in frame.get_column("null_reason").drop_nulls() if value)
+        for value in frame.get_column("null_reason").drop_nulls():
+            reasons.update(token for token in str(value).split(";") if token)
     return sorted(reasons)
 
 
@@ -157,10 +162,9 @@ def _pedestrian_rows(pedestrians: pl.DataFrame, episode_id: int, pedestrian_ids:
     """The pedestrian fact rows of these identities inside this episode."""
     if not pedestrian_ids:
         return pedestrians.head(0)
-    identities = pl.Series("identity", pedestrian_ids, dtype=pl.String)
     identity_rows = pedestrians.filter(
         (pl.col("episode_id") == episode_id)
-        & (pl.col("ped_id").is_in(identities) | pl.col("ped_name").is_in(identities))
+        & (pl.col("ped_id").is_in(pedestrian_ids) | pl.col("ped_name").is_in(pedestrian_ids))
     )
     return identity_rows.sort("ped_id")
 
@@ -267,7 +271,7 @@ def evaluation_slice(
     return SliceResponse(
         identity=identity,
         episode=_preview("fact_episodes", episode_rows, preview_limit),
-        encounter=None if encounter_row is None else _preview("fact_encounters", encounter_rows, preview_limit),
+        encounter=None if len(encounter_rows) == 0 or (encounter_row is None and contact_row is not None) else _preview("fact_encounters", encounter_rows, preview_limit),
         contacts=_preview("fact_contacts", contact_rows, preview_limit),
         pedestrians=_preview("fact_pedestrians", pedestrian_rows, preview_limit),
         collisions=_preview("fact_collisions", collision_rows, preview_limit),
