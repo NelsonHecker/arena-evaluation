@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+import dataclasses
 import enum
 import functools
 import importlib
