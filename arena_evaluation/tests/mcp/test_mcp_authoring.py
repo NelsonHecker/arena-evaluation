@@ -24,6 +24,7 @@ def test_contest_rejects_a_drl_driver_without_the_training_feature(monkeypatch):
 def test_contest_rejects_a_drl_planner_that_is_not_checked_out(monkeypatch):
     monkeypatch.setattr(authoring, "_training_available", lambda: True)
     monkeypatch.setattr("arena_planners.resolver.list_available", lambda **_: _availability(["sicnav"]))
+    monkeypatch.setattr("arena_planners.resolver.installed_in_registry", lambda name: False)
     verdict = authoring.check_contest([{"name": "cadrl", "mobile": {"driver": "drl", "planner": "cadrl"}}])
     assert not verdict["valid"]
     assert any("cadrl" in problem and "arena feature planners add cadrl" in problem for problem in verdict["problems"])
@@ -32,6 +33,7 @@ def test_contest_rejects_a_drl_planner_that_is_not_checked_out(monkeypatch):
 def test_contest_accepts_a_drl_planner_that_is_checked_out(monkeypatch):
     monkeypatch.setattr(authoring, "_training_available", lambda: True)
     monkeypatch.setattr("arena_planners.resolver.list_available", lambda **_: _availability(["cadrl"]))
+    monkeypatch.setattr("arena_planners.resolver.installed_in_registry", lambda name: True)
     verdict = authoring.check_contest([{"name": "cadrl", "mobile": {"driver": "drl", "planner": "cadrl"}}])
     assert verdict["valid"], verdict["problems"]
 

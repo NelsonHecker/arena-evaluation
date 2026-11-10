@@ -275,10 +275,10 @@ def _nav2_plugin_problems(contest: Any) -> list[str]:
 
 
 def _training_available() -> bool:
-    """Whether the training feature is installed, detected by its rosnav_rl runtime."""
-    import importlib.util
+    """Whether the training feature is installed, the feature registry being the authority for this workspace."""
+    from arena_cli import common
 
-    return importlib.util.find_spec("rosnav_rl") is not None
+    return "training" in common._reg_list()
 
 
 def _planner_availability_problems(contest: Any) -> list[str]:
@@ -289,7 +289,7 @@ def _planner_availability_problems(contest: Any) -> list[str]:
         available = resolver.list_available()
     except (OSError, RuntimeError) as exc:
         return [f"the planner registry cannot be read, run `arena feature planners check`: {exc}"]
-    known = set(available["registry"]) | set(available["rosnav_rl"])
+    known = sorted(set(available["registry"]) | set(available["rosnav_rl"]))
     problems: list[str] = []
     training_available: bool | None = None
     for contestant in contest.contestants:
@@ -303,8 +303,8 @@ def _planner_availability_problems(contest: Any) -> list[str]:
                 problems.append(f"{contestant.name}: {cap} driver {driver!r} needs rosnav_rl, run `arena feature training install`")
                 continue
             planner = _cap_planner(contestant.args, cap)
-            if planner is not None and planner not in known:
-                problems.append(f"{contestant.name}: {cap} planner {planner!r} is not checked out, run `arena feature planners add {planner}` or pick one of {sorted(known)}")
+            if planner is not None and not resolver.installed_in_registry(planner):
+                problems.append(f"{contestant.name}: {cap} planner {planner!r} is not checked out, run `arena feature planners add {planner}` or pick one of {known}")
     return problems
 
 
