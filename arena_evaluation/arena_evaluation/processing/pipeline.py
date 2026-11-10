@@ -921,8 +921,10 @@ class ProcessingPipeline:
 
         _print_status_summary(all_metrics)
         if not all_metrics:
-            print("No valid results were generated.")
-            return None
+            # Every episode was already evaluated: the per-episode Star Schema on disk is the result.
+            # Consolidate it at benchmark level so the run is queryable without re-evaluating it.
+            print("All episodes already processed; consolidating the Star Schema.")
+            return self._consolidate_benchmark_star(benchmark_id, episodes)
 
         ref_episodes_by_stage: dict[str | None, list[dict]] = {}
         for row in all_metrics:
@@ -966,8 +968,10 @@ class ProcessingPipeline:
             )
             row.update(reconciled)
 
-        benchmark_dir = self.folder_manager.benchmark_dir(benchmark_id)
+        return self._consolidate_benchmark_star(benchmark_id, episodes)
 
+    def _consolidate_benchmark_star(self, benchmark_id: str, episodes: list[EpisodeDescriptor]) -> pathlib.Path | None:
+        """Consolidate the per-episode Star Schema tables (and series) at benchmark level."""
         from arena_evaluation.storage.star_schema import (
             StarSchemaBuilder,
             StarSchemaTables,
@@ -975,6 +979,7 @@ class ProcessingPipeline:
             write_star_schema,
         )
 
+        benchmark_dir = self.folder_manager.benchmark_dir(benchmark_id)
         collected_star: list[StarSchemaTables] = []
         fallback_builder = StarSchemaBuilder()
         for ep in episodes:
@@ -1001,5 +1006,5 @@ class ProcessingPipeline:
             for stem, frames in series_parts.items():
                 pl.concat(frames, how="vertical_relaxed").write_parquet(series_dir / f"series_{stem}.parquet")
 
-        print(f"Done. {len(all_metrics)} episode rows -> {benchmark_dir}")
+        print(f"Done. {len(collected_star)} episodes -> {benchmark_dir}")
         return benchmark_dir

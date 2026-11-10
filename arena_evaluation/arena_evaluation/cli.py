@@ -259,7 +259,7 @@ Examples:
                 else:
                     print(f"Processing benchmark: {benchmark_dir.name}")
                     if pipeline.process_benchmark(benchmark_dir.name, force_extract=force_extract) is None:
-                        print(f"Processing failed for {benchmark_dir} - no combined metrics written.")
+                        print(f"Processing failed for {benchmark_dir} - no Star Schema written.")
                         failed.append(benchmark_dir)
 
     if args.command in ("run", "report", "plot"):
