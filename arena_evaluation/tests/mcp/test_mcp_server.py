@@ -169,7 +169,7 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
     assert out["lane_console"]["logs"] == {"runner.p2.log": ["lane p2 started", "lane p2 sim died"]}
     assert out["episode"]["metadata"]["planner"] == "dwb"
     assert out["notes"]["notes"] == [{"label": "a", "value": "1"}, {"label": "b", "value": "2"}]
-    assert out["combined"]["column_stats"]["success"]["dtype"] == "Boolean"
+    assert out["metrics"]["column_stats"]["success"]["dtype"] == "Boolean"
     assert [row["planner"] for row in out["query"]["data"]] == ["dwb_social", "dwb"]
     assert {row["stage"] for row in out["aggregate"]["data"]} == {"s1", "s2"}
     assert [row["planner"] for row in out["compare"]["rankings"]] == ["dwb", "dwb_social"]
