@@ -12,7 +12,7 @@ from arena_evaluation.processing.pipeline import _crowd_visibility, _pose_frame,
 def _record(*human_params: str | None) -> pl.DataFrame:
     """This episode's records, RUNNING first and results after, each carrying the given human_params JSON."""
     n = len(human_params)
-    return pl.DataFrame({"time_ns": list(range(100, 100 + n)), "episode_id": [5] * n, "outcome_state": [1] + [2] * (n - 1), "human_params": list(human_params)})
+    return pl.DataFrame({"t_ns": list(range(100, 100 + n)), "episode_id": [5] * n, "outcome_state": [1] + [2] * (n - 1), "human_params": list(human_params)})
 
 
 def test_crowd_visibility_comes_from_the_episodes_accepted_param() -> None:
@@ -36,7 +36,7 @@ def test_crowd_visibility_defaults_to_visible_and_says_so() -> None:
 
 
 def test_crowd_visibility_ignores_the_previous_episodes_latched_param() -> None:
-    record = pl.DataFrame({"time_ns": [50, 100, 900], "episode_id": [4, 5, 5], "outcome_state": [3, 1, 2], "human_params": ['{"humansim.robots_visible": false}', "{}", "{}"]})
+    record = pl.DataFrame({"t_ns": [50, 100, 900], "episode_id": [4, 5, 5], "outcome_state": [3, 1, 2], "human_params": ['{"humansim.robots_visible": false}', "{}", "{}"]})
     assert _crowd_visibility(record, {"cli_args": [], "suite": {"stages": []}})["crowd_visibility_source"] == "default"
 
 
@@ -52,7 +52,7 @@ def test_run_manifest_is_the_one_above_the_episode_dir(tmp_path: pathlib.Path) -
 
 
 def test_pose_frame_is_the_most_frequent_parent_inside_the_window() -> None:
-    tf_gt = pl.DataFrame({"time_ns": [1, 2, 3, 4], "frame_id": ["map", "env_0/jackal/odom", "env_0/jackal/odom", "map"]})
+    tf_gt = pl.DataFrame({"t_ns": [1, 2, 3, 4], "frame_id": ["map", "env_0/jackal/odom", "env_0/jackal/odom", "map"]})
     assert _pose_frame(tf_gt, (2, 3)) == "env_0/jackal/odom"
     assert _pose_frame(tf_gt, (None, None)) == "env_0/jackal/odom"
     assert _pose_frame(tf_gt.lazy(), (4, None)) == "map"
@@ -83,12 +83,12 @@ def test_run_manifest_is_none_when_the_file_is_not_text(tmp_path: pathlib.Path) 
 
 
 def test_pose_frame_is_none_when_the_window_excludes_every_row() -> None:
-    tf_gt = pl.DataFrame({"time_ns": [1, 2], "frame_id": ["map", "map"]})
+    tf_gt = pl.DataFrame({"t_ns": [1, 2], "frame_id": ["map", "map"]})
     assert _pose_frame(tf_gt, (10, 20)) is None
 
 
 def test_pose_frame_ignores_null_frame_ids() -> None:
-    tf_gt = pl.DataFrame({"time_ns": [1, 2, 3], "frame_id": [None, None, "map"]})
+    tf_gt = pl.DataFrame({"t_ns": [1, 2, 3], "frame_id": [None, None, "map"]})
     assert _pose_frame(tf_gt, (None, None)) == "map"
 
 

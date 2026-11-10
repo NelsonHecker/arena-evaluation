@@ -210,16 +210,17 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     return start, end
 
 
+_MANIFEST_PARENT_DEPTH = 6
 _CROWD_PARAM_KEY = "humansim.robots_visible"
 _CROWD_LAUNCH_KEY = "human.robots.visible"
 
 
-def _run_manifest(episode_dir: pathlib.Path, data_root: pathlib.Path) -> dict[str, typing.Any] | None:
+def _run_manifest(episode_dir: pathlib.Path, data_root: pathlib.Path | None = None) -> dict[str, typing.Any] | None:
     """The manifest.yaml of the run above episode_dir, None for bare episode dirs and unreadable files."""
     import yaml
 
-    root = pathlib.Path(data_root).resolve()
-    for parent in pathlib.Path(episode_dir).resolve().parents:
+    root = pathlib.Path(data_root).resolve() if data_root is not None else None
+    for parent in list(pathlib.Path(episode_dir).resolve().parents)[:_MANIFEST_PARENT_DEPTH]:
         manifest_path = parent / "manifest.yaml"
         if manifest_path.is_file():
             try:
@@ -248,8 +249,8 @@ def _accepted_robots_visible(record: pl.DataFrame | pl.LazyFrame | None) -> bool
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
     if len(df) == 0 or "human_params" not in df.columns:
         return None
-    if "outcome_state" in df.columns and "time_ns" in df.columns:
-        df = df.sort("time_ns", maintain_order=True)
+    if "outcome_state" in df.columns and "t_ns" in df.columns:
+        df = df.sort("t_ns", maintain_order=True)
         states = df["outcome_state"].to_list()
         started = next((i for i, state in enumerate(states) if state == _RECORD_RUNNING), None)
         if started is not None and "episode_id" in df.columns and df["episode_id"][started] is not None:
@@ -307,6 +308,14 @@ def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict
     return {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
 
 
+def _tf_parents(tf: pl.DataFrame | pl.LazyFrame | None) -> pl.DataFrame | None:
+    """The transform table as the pose-frame reader expects it: one parent frame per stamp."""
+    if tf is None:
+        return None
+    frame = tf.collect() if isinstance(tf, pl.LazyFrame) else tf
+    return frame.select(pl.col("t_ns"), pl.col("parent_frame").alias("frame_id"))
+
+
 def _pose_frame(tf_gt: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> str | None:
     """The TF parent the robot pose came from: the most frequent frame_id inside the episode window."""
     if tf_gt is None:
@@ -316,9 +325,9 @@ def _pose_frame(tf_gt: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | N
         return None
     start, end = window
     if start is not None:
-        df = df.filter(pl.col("time_ns") >= start)
+        df = df.filter(pl.col("t_ns") >= start)
     if end is not None:
-        df = df.filter(pl.col("time_ns") <= end)
+        df = df.filter(pl.col("t_ns") <= end)
     df = df.filter(pl.col("frame_id").is_not_null())
     if len(df) == 0:
         return None
@@ -563,8 +572,11 @@ def _status_row(
     reason: str,
     record: pl.DataFrame | pl.LazyFrame | None = None,
     flags: pl.DataFrame | pl.LazyFrame | None = None,
+    manifest: dict[str, typing.Any] | None = None,
 ) -> dict:
     """Identity and runtime verdict of an episode without metrics."""
+    if manifest is None and ep.episode_dir:
+        manifest = _run_manifest(pathlib.Path(ep.episode_dir))
     local_planner, inter_planner = _planner_split(ep, metadata)
     outcome_state, outcome_info = _record_outcome(record, metadata)
     result, success = _outcome_verdict(outcome_state, outcome_info)
@@ -584,6 +596,8 @@ def _status_row(
         "status": status,
         "status_reason": reason,
         "pose_source": None,
+        "pose_frame": None,
+        **_crowd_visibility(record, manifest),
         "outcome_info": outcome_info,
         "integrity": _record_integrity(record, flags, metadata),
         "result": result,
@@ -788,6 +802,7 @@ class ProcessingPipeline:
                 # mutual-accommodation calculators compare against, injected once per evaluation.
                 suite_metrics_cfg = {**suite_metrics_cfg, "reference_peds": reference_pedestrian_tracks}
             registry = MetricRegistry(robot_params, world=_metric_world(metadata, ep), metrics_config=suite_metrics_cfg)
+            episode_manifest = _run_manifest(episode_dir, self.folder_manager.data_root)
             scoped_evaluator = ScopedEvaluator(robot_params, metrics_config=suite_metrics_cfg)
             star_builder = StarSchemaBuilder(robot_params=robot_params, metrics_config=suite_metrics_cfg)
 
@@ -939,6 +954,8 @@ class ProcessingPipeline:
                     ep_metrics["reference_type"] = ep.reference_type
                     ep_metrics["integrity"] = integrity
                     ep_metrics["pose_source"] = pose_source.kind
+                    ep_metrics["pose_frame"] = _pose_frame(_tf_parents(bundle.tf), window)
+                    ep_metrics.update(_crowd_visibility(bundle.episode_lifecycle, episode_manifest))
                     ep_metrics["pose_samples"] = pose_source.samples
                     ep_metrics["status"] = _STATUS_EVALUATED
                     ep_metrics["status_reason"] = None
