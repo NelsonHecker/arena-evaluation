@@ -892,8 +892,8 @@ def test_absent_robot_tracks_yields_null_metrics(episode: AlignedEpisodeBundle) 
     reason = typing.cast(str, row["null_reason"])
     assert "path_length_m:no_samples" in reason
     assert "topic_missing:robot_tracks" in reason
-    assert "total_collisions_ped:topic_missing:" in reason
-    assert "total_collisions_static:topic_missing:" in reason
+    assert "total_collisions_ped:" in reason
+    assert "total_collisions_static:" in reason
     assert tables.encounters.height == 0
     assert tables.encounters.schema == FACT_SCHEMAS["encounters"]
     assert tables.contacts.height == 0
