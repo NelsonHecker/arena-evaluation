@@ -30,7 +30,7 @@ def _episode(
         series["proxemics_extended"] = clearances
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": [int(seconds * S) for seconds in times_s]}),
+        data=pl.DataFrame({"t_ns": [int(seconds * S) for seconds in times_s]}),
         start_pos=[],
         goal_pos=[],
         series=series,
@@ -127,7 +127,7 @@ def test_registry_reports_the_missing_series_and_never_returns_a_value() -> None
     registry = MetricRegistry(RobotParams())
     episode = AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": [0, S]}),
+        data=pl.DataFrame({"t_ns": [0, S]}),
         start_pos=[],
         goal_pos=[],
         series={"proxemics_extended": _clearances([(0, 0.5), (1, 0.5)])},

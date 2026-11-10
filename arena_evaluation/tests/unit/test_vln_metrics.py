@@ -81,7 +81,7 @@ def _episode(
         yaw = np.concatenate((yaw, np.full(len(extra), yaw[-1])))
     data = pl.DataFrame(
         {
-            "time_ns": (t * 1e9).astype(np.int64),
+            "t_ns": (t * 1e9).astype(np.int64),
             "pos_x": pts[:, 0],
             "pos_y": pts[:, 1],
             "yaw": yaw,
@@ -226,11 +226,11 @@ def test_stuck_window_detects_stationary_stretch() -> None:
     x = np.where(t < 5.0, t, 5.0)
     y = np.zeros_like(t)
     yaw = np.zeros_like(t)
-    time_ns = (t * 1e9).astype(np.int64)
-    assert stuck_window(x, y, yaw, time_ns, 10.0, 0.2, math.radians(15.0))
-    assert not stuck_window(t, y, yaw, time_ns, 10.0, 0.2, math.radians(15.0))
+    t_ns = (t * 1e9).astype(np.int64)
+    assert stuck_window(x, y, yaw, t_ns, 10.0, 0.2, math.radians(15.0))
+    assert not stuck_window(t, y, yaw, t_ns, 10.0, 0.2, math.radians(15.0))
     turning = np.where(t < 5.0, 0.0, (t - 5.0) * 0.5)
-    assert not stuck_window(x, y, turning, time_ns, 10.0, 0.2, math.radians(15.0))
+    assert not stuck_window(x, y, turning, t_ns, 10.0, 0.2, math.radians(15.0))
 
 
 def test_stuck_flags_failed_dwell_and_ignores_success() -> None:

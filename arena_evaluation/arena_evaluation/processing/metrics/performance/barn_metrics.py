@@ -121,12 +121,12 @@ class BARNScoreCalculator(BaseMetricCalculator):
         reference = self.metrics_config.get("barn")
         if reference is None or episode.map not in reference["path_length"]:
             return nulls
-        x, y, _, time_ns = self.resolve_native_pose(episode)
-        if len(time_ns) == 0:
+        x, y, _, t_ns = self.resolve_native_pose(episode)
+        if len(t_ns) == 0:
             return nulls
 
         path_length = reference["path_length"][episode.map]
-        run = replay(time_ns / 1e9, x, y, reference["start"], reference["goal"], _first_collision_s(episode))
+        run = replay(t_ns / 1e9, x, y, reference["start"], reference["goal"], _first_collision_s(episode))
         return {
             "barn_score": 0.0 if run.time is None else score(run.success, run.time, path_length),
             "barn_optimal_time": path_length / MAX_SPEED_MPS,

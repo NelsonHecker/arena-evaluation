@@ -66,7 +66,7 @@ def _data(points, step_s=1.0, peds=None, **columns):
     """Robot samples on a 1 Hz clock: odometry and ground truth at the given points, with optional pedestrians."""
     n = len(points)
     frame = {
-        "time_ns": [int(i * step_s * T) for i in range(n)],
+        "t_ns": [int(i * step_s * T) for i in range(n)],
         "pos_x": [float(p[0]) for p in points],
         "pos_y": [float(p[1]) for p in points],
         "yaw": [0.0] * n,
@@ -103,7 +103,7 @@ def _ctx(episode, world=None):
         view=SemanticView.from_episode(episode),
         world=world,
         identity=robot_identity(episode),
-        peds=ped_tracks(episode.peds, track.time_ns),
+        peds=ped_tracks(episode.peds, track.t_ns),
         robot_radius=0.25,
     )
 
@@ -248,7 +248,7 @@ def test_no_snapshot_all_none():
 
 def test_empty_episode_all_none():
     calc = _calc()
-    empty = pl.DataFrame({"time_ns": [], "pos_x": [], "pos_y": [], "yaw": []}, schema={"time_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64, "yaw": pl.Float64})
+    empty = pl.DataFrame({"t_ns": [], "pos_x": [], "pos_y": [], "yaw": []}, schema={"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64, "yaw": pl.Float64})
     results = calc.calculate(_episode(empty, _snap([(0, DOOR, "door", "state", "discrete", "closed")])), {})
     assert all(v is None for v in results.values())
 

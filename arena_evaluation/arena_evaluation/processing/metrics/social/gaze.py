@@ -32,7 +32,7 @@ SAMPLE_SCHEMA: Final[pl.Schema] = pl.Schema(
 
 ROBOT_SAMPLE_SCHEMA: Final[pl.Schema] = pl.Schema(
     {
-        "time_ns": pl.Int64,
+        "t_ns": pl.Int64,
         "robot_x_m": pl.Float64,
         "robot_y_m": pl.Float64,
         "robot_yaw_rad": pl.Float64,
@@ -61,7 +61,7 @@ def gaze_counts(robot: pl.DataFrame, peds: pl.DataFrame | None) -> pl.DataFrame:
     """Per robot sample: how many pedestrians it looks at, and how many look back."""
     if peds is None or peds.height == 0 or robot.height == 0:
         return pl.DataFrame(schema=SAMPLE_SCHEMA)
-    matched = pedestrians_at(robot.get_column("time_ns"), peds).join(robot, on="time_ns", how="inner")
+    matched = pedestrians_at(robot.get_column("t_ns"), peds).join(robot, on="t_ns", how="inner")
     if matched.height == 0:
         return pl.DataFrame(schema=SAMPLE_SCHEMA)
     directions = matched.with_columns(
@@ -75,13 +75,13 @@ def gaze_counts(robot: pl.DataFrame, peds: pl.DataFrame | None) -> pl.DataFrame:
     looked_at = pl.col("yaw").is_not_null() & (_angle_difference(pl.col("yaw").cast(pl.Float64), pl.col("angle_to_robot_rad")) <= GAZE_CONE_RAD)
     return (
         directions.with_columns(looking_at=looking_at, looked_at=looked_at)
-        .group_by("time_ns")
+        .group_by("t_ns")
         .agg(
             looking_at_peds=pl.col("looking_at").sum().cast(pl.Int64),
             looked_at_by_peds=pl.col("looked_at").sum().cast(pl.Int64),
         )
         .select(
-            t_ns=pl.col("time_ns"),
+            t_ns=pl.col("t_ns"),
             looking_at_peds=pl.col("looking_at_peds"),
             looked_at_by_peds=pl.col("looked_at_by_peds"),
         )
@@ -130,11 +130,11 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         if frame is None or frame.height == 0:
             return pl.DataFrame(schema=ROBOT_SAMPLE_SCHEMA)
         return frame.select(
-            time_ns=pl.col("time_ns").cast(pl.Int64),
+            t_ns=pl.col("t_ns").cast(pl.Int64),
             robot_x_m=pl.col("pos_x_gt").cast(pl.Float64),
             robot_y_m=pl.col("pos_y_gt").cast(pl.Float64),
             robot_yaw_rad=pl.col("yaw_gt").cast(pl.Float64),
-        ).drop_nulls(["time_ns", "robot_x_m", "robot_y_m", "robot_yaw_rad"])
+        ).drop_nulls(["t_ns", "robot_x_m", "robot_y_m", "robot_yaw_rad"])
 
     def _native_robot_rows(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
         """The window's own robot samples in the native topic frame, one row per sample."""
@@ -142,7 +142,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
         if frame is None or frame.height == 0:
             return pl.DataFrame(schema=ROBOT_SAMPLE_SCHEMA)
         return frame.select(
-            time_ns=pl.col("t_ns"),
+            t_ns=pl.col("t_ns"),
             robot_x_m=pl.col("x"),
             robot_y_m=pl.col("y"),
             robot_yaw_rad=pl.col("yaw"),
@@ -155,7 +155,7 @@ class GazeMetricsCalculator(BaseMetricCalculator):
             return pl.DataFrame(schema=SAMPLE_SCHEMA)
         counts = gaze_counts(robot, peds)
         return (
-            robot.select(pl.col("time_ns").alias("t_ns"))
+            robot.select(pl.col("t_ns").alias("t_ns"))
             .join(counts, on="t_ns", how="left")
             .select(
                 t_ns=pl.col("t_ns"),

@@ -13,10 +13,10 @@ def _episode(levels_dba, dt_s=1.0):
     times = [int(i * dt_s * SEC) for i in range(len(levels_dba))]
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": times}),
+        data=pl.DataFrame({"t_ns": times}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[5.0, 0.0],
-        topics={"robot_acoustics": pl.DataFrame({"t_ns": times, "time_ns": times, "total_level_af_dba": levels_dba})},
+        topics={"robot_acoustics": pl.DataFrame({"t_ns": times, "t_ns": times, "total_level_af_dba": levels_dba})},
     )
 
 

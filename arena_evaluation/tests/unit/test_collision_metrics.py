@@ -256,7 +256,7 @@ _EVENTS_SCHEMA = {
     "ped_count": pl.Int64,
 }
 _ALIGNED_SCHEMA = {
-    "time_ns": pl.Int64,
+    "t_ns": pl.Int64,
     "pos_x": pl.Float64,
     "pos_y": pl.Float64,
     "pos_x_gt": pl.Float64,
@@ -267,10 +267,10 @@ _ALIGNED_SCHEMA = {
 
 def _spl_episode(outcome_state: int = 2, span_s: float = 3.0) -> AlignedEpisodeBundle:
     """A straight 3 m ground-truth track to a goal 2 m away: native theta* is the 2 m straight line."""
-    time_ns = [int(index * span_s * SEC_NS / 3.0) for index in range(4)]
+    t_ns = [int(index * span_s * SEC_NS / 3.0) for index in range(4)]
     data = pl.DataFrame(
         {
-            "time_ns": time_ns,
+            "t_ns": t_ns,
             "pos_x": [0.0, 1.0, 2.0, 3.0],
             "pos_y": [0.0, 0.0, 0.0, 0.0],
             "pos_x_gt": [0.0, 1.0, 2.0, 3.0],
@@ -280,7 +280,7 @@ def _spl_episode(outcome_state: int = 2, span_s: float = 3.0) -> AlignedEpisodeB
         schema=_ALIGNED_SCHEMA,
     )
     tracks = pl.DataFrame(
-        {"t_ns": time_ns, "x": [0.0, 1.0, 2.0, 3.0], "y": [0.0] * 4, "yaw": [0.0] * 4},
+        {"t_ns": t_ns, "x": [0.0, 1.0, 2.0, 3.0], "y": [0.0] * 4, "yaw": [0.0] * 4},
         schema=_EPISODE_TOPIC_SCHEMA,
     )
     return AlignedEpisodeBundle(
@@ -295,10 +295,10 @@ def _spl_episode(outcome_state: int = 2, span_s: float = 3.0) -> AlignedEpisodeB
 
 def _events_episode(event_count, wall_count) -> AlignedEpisodeBundle:
     count = len(event_count)
-    time_ns = [index * SEC_NS for index in range(count)]
+    t_ns = [index * SEC_NS for index in range(count)]
     events = pl.DataFrame(
         {
-            "t_ns": time_ns,
+            "t_ns": t_ns,
             "event_count": event_count,
             "wall_count": wall_count,
             "static_count": [0] * count,
@@ -435,11 +435,11 @@ def collision_open_room_solver():
 
 
 def test_contact_scope_theta_star_uses_the_whole_mission_route():
-    time_ns = [index * SEC_NS for index in range(7)]
+    t_ns = [index * SEC_NS for index in range(7)]
     xs = [0.0, 1.0, 2.0, 3.0, 2.0, 1.0, 0.0]
     data = pl.DataFrame(
         {
-            "time_ns": time_ns,
+            "t_ns": t_ns,
             "pos_x": xs,
             "pos_y": [0.0] * 7,
             "pos_x_gt": xs,
@@ -448,7 +448,7 @@ def test_contact_scope_theta_star_uses_the_whole_mission_route():
         },
         schema=_ALIGNED_SCHEMA,
     )
-    tracks = pl.DataFrame({"t_ns": time_ns, "x": xs, "y": [0.0] * 7, "yaw": [0.0] * 7}, schema=_EPISODE_TOPIC_SCHEMA)
+    tracks = pl.DataFrame({"t_ns": t_ns, "x": xs, "y": [0.0] * 7, "yaw": [0.0] * 7}, schema=_EPISODE_TOPIC_SCHEMA)
     plans = pl.DataFrame(
         {
             "t_ns": [SEC_NS, 2 * SEC_NS],

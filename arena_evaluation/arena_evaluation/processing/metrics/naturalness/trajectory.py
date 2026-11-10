@@ -67,14 +67,14 @@ def _path_irregularity(pos_x: np.ndarray, pos_y: np.ndarray, yaw: np.ndarray, go
     return float((np.sum(np.abs(delta_yaw)) - np.abs(rotation_to_target)) / length_m)
 
 
-def _topological_complexity(peds_df: pl.DataFrame | None, pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> float:
+def _topological_complexity(peds_df: pl.DataFrame | None, pos_x: np.ndarray, pos_y: np.ndarray, t_ns: np.ndarray) -> float:
     """Total absolute net winding of every pedestrian around the robot's path."""
-    if peds_df is None or len(peds_df) == 0 or len(pos_x) < 2 or len(time_ns) < 2:
+    if peds_df is None or len(peds_df) == 0 or len(pos_x) < 2 or len(t_ns) < 2:
         return 0.0
     required = {"t_ns", "ped_id", "x", "y"}
     if not required <= set(peds_df.columns):
         return 0.0
-    robot = pl.LazyFrame({"t_ns": time_ns, "rx": pos_x, "ry": pos_y}).sort("t_ns")
+    robot = pl.LazyFrame({"t_ns": t_ns, "rx": pos_x, "ry": pos_y}).sort("t_ns")
     pedestrians = peds_df.lazy().select("t_ns", "ped_id", "x", "y").drop_nulls(["t_ns", "ped_id", "x", "y"]).sort("t_ns")
     rel_x = pl.col("rx") - pl.col("x")
     rel_y = pl.col("ry") - pl.col("y")
@@ -262,15 +262,15 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
 
     def _episode_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Ground-truth pose of the episode on the native /tf clock, falling back to the aligned ground-truth segment."""
-        pos_x, pos_y, yaw, time_ns = self.resolve_native_pose(episode)
+        pos_x, pos_y, yaw, t_ns = self.resolve_native_pose(episode)
         if len(pos_x) > 0:
-            return pos_x, pos_y, yaw, time_ns
+            return pos_x, pos_y, yaw, t_ns
         if episode.data is None or len(episode.data) == 0:
             empty = np.array([])
             return empty, empty, empty, np.array([], dtype=np.int64)
         pos_x, pos_y, yaw, _odom_x, _odom_y, _odom_yaw = self.resolve_robot_pose(episode)
-        time_ns = episode.data["time_ns"].to_numpy().astype(np.int64) if "time_ns" in episode.data.columns else np.arange(len(pos_x), dtype=np.int64)
-        return pos_x, pos_y, yaw, time_ns
+        t_ns = episode.data["t_ns"].to_numpy().astype(np.int64) if "t_ns" in episode.data.columns else np.arange(len(pos_x), dtype=np.int64)
+        return pos_x, pos_y, yaw, t_ns
 
     @staticmethod
     def _goal_point(episode: AlignedEpisodeBundle) -> tuple[float, float] | None:
@@ -278,14 +278,14 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         del prior_results
-        pos_x, pos_y, yaw, time_ns = self._episode_pose(episode)
+        pos_x, pos_y, yaw, t_ns = self._episode_pose(episode)
         if len(pos_x) == 0:
             return {key: None for key in self.output_keys()}
 
         goal_pt = self._goal_point(episode)
         results: dict[str, typing.Any] = {key: None for key in self.output_keys()}
         results["path_irregularity"] = _path_irregularity(pos_x, pos_y, yaw, goal_pt)
-        results["topological_complexity"] = _topological_complexity(self.native_ped_frame(episode), pos_x, pos_y, time_ns)
+        results["topological_complexity"] = _topological_complexity(self.native_ped_frame(episode), pos_x, pos_y, t_ns)
 
         reference = None
         route_waypoints: tuple[tuple[float, float], ...] = ()
@@ -414,11 +414,11 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
             return self.calculate(episode, prior_results)
         if scope_slice.scope == MetricScope.ENCOUNTER:
-            pos_x, pos_y, yaw, time_ns = self.resolve_native_pose(episode)
+            pos_x, pos_y, yaw, t_ns = self.resolve_native_pose(episode)
             if len(pos_x) == 0:
                 return {key: None for key in self.output_keys_for_scope(MetricScope.ENCOUNTER)}
             return {
                 "path_irregularity": _path_irregularity(pos_x, pos_y, yaw, self._goal_point(episode)),
-                "topological_complexity": _topological_complexity(self.native_ped_frame(episode), pos_x, pos_y, time_ns),
+                "topological_complexity": _topological_complexity(self.native_ped_frame(episode), pos_x, pos_y, t_ns),
             }
         raise ValueError(f"trajectory_naturalness does not serve the {scope_slice.scope.value} scope")

@@ -17,8 +17,8 @@ def _calculator() -> TimeMetricsCalculator:
     return TimeMetricsCalculator(RobotParams(robot_radius=0.2))
 
 
-def _episode(time_ns: list[int], vel_linear: list[float | None] | None = None) -> AlignedEpisodeBundle:
-    columns: dict[str, pl.Series] = {"time_ns": pl.Series("time_ns", time_ns, dtype=pl.Int64)}
+def _episode(t_ns: list[int], vel_linear: list[float | None] | None = None) -> AlignedEpisodeBundle:
+    columns: dict[str, pl.Series] = {"t_ns": pl.Series("t_ns", t_ns, dtype=pl.Int64)}
     if vel_linear is not None:
         columns["vel_linear"] = pl.Series("vel_linear", vel_linear, dtype=pl.Float64)
     return AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(columns), start_pos=[], goal_pos=[])

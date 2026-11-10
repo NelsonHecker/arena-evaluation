@@ -10,7 +10,7 @@ def test_registry_skipping_with_available_topics():
 
     df_odom_only = pl.DataFrame(
         {
-            "time_ns": [1000, 2000, 3000],
+            "t_ns": [1000, 2000, 3000],
             "pos_x": [0.0, 1.0, 2.0],
             "pos_y": [0.0, 0.0, 0.0],
             "yaw": [0.0, 0.0, 0.0],
@@ -46,7 +46,7 @@ def test_registry_skipping_with_all_topics():
 
     df_all = pl.DataFrame(
         {
-            "time_ns": [1000, 2000, 3000],
+            "t_ns": [1000, 2000, 3000],
             "pos_x": [0.0, 1.0, 2.0],
             "pos_y": [0.0, 0.0, 0.0],
             "yaw": [0.0, 0.0, 0.0],

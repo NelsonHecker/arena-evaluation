@@ -35,7 +35,7 @@ _ODOM_SCHEMA = pl.Schema({"t_ns": pl.Int64, "env_id": pl.String, "robot_id": pl.
 
 _ALIGNED_SCHEMA = pl.Schema(
     {
-        "time_ns": pl.Int64,
+        "t_ns": pl.Int64,
         "pos_x": pl.Float64,
         "pos_y": pl.Float64,
         "yaw": pl.Float64,
@@ -95,7 +95,7 @@ def _aligned(n: int = 6, start: int = 1_000, step: int = 100, null_pos: bool = F
     ys = [None] * n if null_pos else [float(i) * 2.0 for i in range(n)]
     return pl.DataFrame(
         {
-            "time_ns": [start + i * step for i in range(n)],
+            "t_ns": [start + i * step for i in range(n)],
             "pos_x": xs,
             "pos_y": ys,
             "yaw": [0.0] * n,
@@ -139,10 +139,10 @@ class _FakeAligner:
         self.callable_result = callable_result
         self.calls: list[tuple[int | None, int | None]] = []
 
-    def align(self, bundle, start_time_ns=None, end_time_ns=None):
-        self.calls.append((start_time_ns, end_time_ns))
+    def align(self, bundle, start_t_ns=None, end_t_ns=None):
+        self.calls.append((start_t_ns, end_t_ns))
         if self.callable_result is not None:
-            return self.callable_result(start_time_ns, end_time_ns)
+            return self.callable_result(start_t_ns, end_t_ns)
         return self.result
 
 
@@ -449,11 +449,11 @@ def test_split_no_records_null_positions():
 def test_split_no_records_yaw_defaults_to_zero():
     df = pl.DataFrame(
         {
-            "time_ns": [1000 + i * 100 for i in range(6)],
+            "t_ns": [1000 + i * 100 for i in range(6)],
             "pos_x_gt": [float(i) for i in range(6)],
             "pos_y_gt": [float(i) for i in range(6)],
         },
-        schema=pl.Schema({"time_ns": pl.Int64, "pos_x_gt": pl.Float64, "pos_y_gt": pl.Float64}),
+        schema=pl.Schema({"t_ns": pl.Int64, "pos_x_gt": pl.Float64, "pos_y_gt": pl.Float64}),
     )
     ep = _splitter(_FakeAligner(df)).split(TopicBundle(robot_odom=_odom()))[0]
     assert ep.start_pos == [0.0, 0.0, 0.0]
@@ -606,8 +606,8 @@ def test_split_initialpose_last_row_before_start():
     assert ep.start_pos == [2.0, 4.0, 0.7]
 
 
-def _init_at(time_ns: int, x: float, y: float, yaw: float) -> pl.DataFrame:
-    return pl.DataFrame({"t_ns": [time_ns], "pos_x": [x], "pos_y": [y], "yaw": [yaw]}, schema=_INIT_SCHEMA)
+def _init_at(t_ns: int, x: float, y: float, yaw: float) -> pl.DataFrame:
+    return pl.DataFrame({"t_ns": [t_ns], "pos_x": [x], "pos_y": [y], "yaw": [yaw]}, schema=_INIT_SCHEMA)
 
 
 @pytest.mark.parametrize(("plan_yaw", "start_yaw"), [(2.0, 2.0), (0.5, 0.0), (0.0, 0.0)])

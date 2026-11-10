@@ -50,18 +50,18 @@ class TimeMetricsCalculator(BaseMetricCalculator):
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         del prior_results
-        if episode.data is None or "time_ns" not in episode.data.columns:
+        if episode.data is None or "t_ns" not in episode.data.columns:
             return dict.fromkeys(_SUMMARY_KEYS)
 
-        time_ns = episode.data["time_ns"].to_numpy()
-        if len(time_ns) < 2:
+        t_ns = episode.data["t_ns"].to_numpy()
+        if len(t_ns) < 2:
             return {"time_diff": 0, "time_to_goal": 0.0, "idling_time": 0.0}
 
-        duration_ns = int(time_ns[-1] - time_ns[0])
+        duration_ns = int(t_ns[-1] - t_ns[0])
         speed_mps, _speed_time_ns = episode_speed_mps(self, episode)
         idling_time_s = 0.0
-        if len(speed_mps) == len(time_ns):
-            dt_s = np.diff(time_ns) / NANOSECONDS_PER_SECOND
+        if len(speed_mps) == len(t_ns):
+            dt_s = np.diff(t_ns) / NANOSECONDS_PER_SECOND
             idling_time_s = float(np.sum(dt_s[speed_mps[:-1] < IDLE_SPEED_MPS]))
         return {
             "time_diff": duration_ns,

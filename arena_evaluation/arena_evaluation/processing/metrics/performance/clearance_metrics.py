@@ -86,23 +86,23 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
         ]
 
     @staticmethod
-    def _scan_arrays(scan_df: pl.DataFrame | None, time_ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Scan minimum and maximum range interpolated onto ``time_ns``, NaN where no scan sample is in tolerance."""
+    def _scan_arrays(scan_df: pl.DataFrame | None, t_ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Scan minimum and maximum range interpolated onto ``t_ns``, NaN where no scan sample is in tolerance."""
         if scan_df is None or "scan_min_m" not in scan_df.columns:
-            empty = np.full(len(time_ns), np.nan)
+            empty = np.full(len(t_ns), np.nan)
             return empty, empty.copy()
         columns = ["t_ns", "scan_min_m"]
         if "range_max_m" in scan_df.columns:
             columns.append("range_max_m")
         scan = scan_df.select([pl.col("t_ns").cast(pl.Int64), *[pl.col(name).cast(pl.Float64) for name in columns[1:]]]).drop_nulls("t_ns").sort("t_ns")
-        joined = pl.DataFrame({"t_ns": time_ns.astype(np.int64)}).join_asof(scan, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS).sort("t_ns")
+        joined = pl.DataFrame({"t_ns": t_ns.astype(np.int64)}).join_asof(scan, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS).sort("t_ns")
         scan_min = joined["scan_min_m"].to_numpy().astype(np.float64)
-        scan_max = joined["range_max_m"].to_numpy().astype(np.float64) if "range_max_m" in joined.columns else np.full(len(time_ns), np.nan)
+        scan_max = joined["range_max_m"].to_numpy().astype(np.float64) if "range_max_m" in joined.columns else np.full(len(t_ns), np.nan)
         return scan_min, scan_max
 
     def _clearance_arrays(
         self,
-        time_ns: np.ndarray,
+        t_ns: np.ndarray,
         pos_x: np.ndarray,
         pos_y: np.ndarray,
         scan_df: pl.DataFrame | None,
@@ -110,15 +110,15 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
     ) -> tuple[np.ndarray, np.ndarray]:
         """Per-sample obstacle and pedestrian clearance in metres, NaN where that source has no valid sample."""
         robot_radius_m = self.robot_params.robot_radius
-        scan_min, scan_max = self._scan_arrays(scan_df, time_ns)
+        scan_min, scan_max = self._scan_arrays(scan_df, t_ns)
         undetected = np.isnan(scan_max) | (scan_min < scan_max - _RANGE_EPSILON_M)
         obstacle_valid = np.isfinite(scan_min) & (scan_min > 0.0) & undetected
         obstacle_clearance_m = np.where(obstacle_valid, np.maximum(0.0, scan_min - robot_radius_m), np.nan)
 
         if peds_df is None or len(peds_df) == 0:
-            pedestrian_clearance_m = np.full(len(time_ns), np.nan)
+            pedestrian_clearance_m = np.full(len(t_ns), np.nan)
         else:
-            distance_m = nearest_pedestrian_distance(time_ns, pos_x, pos_y, peds_df, TRACK_ALIGN_TOLERANCE_NS)
+            distance_m = nearest_pedestrian_distance(t_ns, pos_x, pos_y, peds_df, TRACK_ALIGN_TOLERANCE_NS)
             pedestrian_clearance_m = np.where(
                 np.isnan(distance_m),
                 np.nan,
@@ -140,7 +140,7 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
 
     def _episode_arrays(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Aligned sample times, ground-truth robot position and the two clearance series of the episode."""
-        if episode.data is None or "time_ns" not in episode.data.columns:
+        if episode.data is None or "t_ns" not in episode.data.columns:
             empty_int = np.array([], dtype=np.int64)
             empty = np.array([], dtype=np.float64)
             return empty_int, empty, empty.copy(), empty.copy()
@@ -150,7 +150,7 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
         if frame is None or len(frame) == 0 or len(pos_x) == 0:
             return np.array([], dtype=np.int64), np.array([], dtype=np.float64), np.array([], dtype=np.float64), np.array([], dtype=np.float64)
 
-        aligned_times_ns = frame["time_ns"].to_numpy().astype(np.int64)
+        aligned_times_ns = frame["t_ns"].to_numpy().astype(np.int64)
         topic_scan = self.native_topics(episode).get("robot_scan_summary")
         peds_df = self.native_ped_frame(episode)
         obstacle, pedestrian = self._clearance_arrays(aligned_times_ns, pos_x, pos_y, topic_scan, peds_df)
@@ -163,19 +163,19 @@ class ClearanceMetricsCalculator(BaseMetricCalculator):
 
     def _native_arrays(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Native-clock sample times, ground-truth robot position and the two clearance series of a scope window."""
-        pos_x, pos_y, _yaw, time_ns = self.resolve_native_pose(episode)
-        if len(time_ns) == 0:
+        pos_x, pos_y, _yaw, t_ns = self.resolve_native_pose(episode)
+        if len(t_ns) == 0:
             empty = np.array([], dtype=np.float64)
             return np.array([], dtype=np.int64), empty, empty.copy(), empty.copy()
         topics = self.native_topics(episode)
         obstacle, pedestrian = self._clearance_arrays(
-            time_ns,
+            t_ns,
             pos_x,
             pos_y,
             topics.get("robot_scan_summary"),
             self.native_ped_frame(episode),
         )
-        return time_ns, self._combined(obstacle, pedestrian), obstacle, pedestrian
+        return t_ns, self._combined(obstacle, pedestrian), obstacle, pedestrian
 
     def calculate_for_scope(
         self,

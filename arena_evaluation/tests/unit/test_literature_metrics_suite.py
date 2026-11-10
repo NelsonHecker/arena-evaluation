@@ -22,7 +22,7 @@ from flat_peds import flat_peds
 def _robot_tracks(df: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(
         {
-            "t_ns": df["time_ns"],
+            "t_ns": df["t_ns"],
             "x": df["pos_x_gt"],
             "y": df["pos_y_gt"],
             "yaw": df["yaw_gt"],
@@ -67,7 +67,7 @@ def test_literature_path_irregularity_straight_vs_weaving():
     # Case A: Straight line trajectory
     df_straight = pl.DataFrame(
         {
-            "time_ns": [0, SEC, 2 * SEC],
+            "t_ns": [0, SEC, 2 * SEC],
             "pos_x_gt": [0.0, 5.0, 10.0],
             "pos_y_gt": [0.0, 0.0, 0.0],
             "yaw_gt": [0.0, 0.0, 0.0],
@@ -80,7 +80,7 @@ def test_literature_path_irregularity_straight_vs_weaving():
     # Case B: Weaving trajectory (zigzagging yaw changes)
     df_weave = pl.DataFrame(
         {
-            "time_ns": [0, SEC, 2 * SEC, 3 * SEC, 4 * SEC],
+            "t_ns": [0, SEC, 2 * SEC, 3 * SEC, 4 * SEC],
             "pos_x_gt": [0.0, 2.5, 5.0, 7.5, 10.0],
             "pos_y_gt": [0.0, 1.0, 0.0, 1.0, 0.0],
             "yaw_gt": [0.38, -0.38, 0.38, -0.38, 0.0],
@@ -101,7 +101,7 @@ def test_literature_topological_complexity_winding_loops():
     ry = 5.0 + 2.0 * np.sin(angles)
     t_ns = np.linspace(0, 10 * SEC, 50, dtype=int)
 
-    df_tf = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": rx, "pos_y_gt": ry, "yaw_gt": angles})
+    df_tf = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": rx, "pos_y_gt": ry, "yaw_gt": angles})
     tracks = _robot_tracks(df_tf)
     df_peds = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 5.0, "y": 5.0}]) for t in t_ns])
 
@@ -122,7 +122,7 @@ def test_literature_proxemics_four_zones_and_monotonic_psii():
     calc = ProxemicsExtendedCalculator(RobotParams(robot_radius=0.35))
 
     t_ns = [0, SEC]
-    tf_df = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    tf_df = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
     tracks = _robot_tracks(tf_df)
 
     # Case A: Intimate Intrusion
@@ -153,9 +153,9 @@ def test_literature_social_forces_anisotropic_potential():
     calc = SocialForcesCalculator(RobotParams(robot_radius=0.35))
 
     t_ns = [0, SEC]
-    tf_front = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [1.0, 1.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [np.pi, np.pi]})
+    tf_front = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": [1.0, 1.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [np.pi, np.pi]})
     tracks_front = _robot_tracks(tf_front)
-    tf_side = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [1.0, 1.0], "yaw_gt": [-np.pi / 2, -np.pi / 2]})
+    tf_side = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [1.0, 1.0], "yaw_gt": [-np.pi / 2, -np.pi / 2]})
     tracks_side = _robot_tracks(tf_side)
 
     peds_df = flat_peds([(int(t), [{"ped_id": "ped_0", "x": 0.0, "y": 0.0, "yaw": 0.0}]) for t in t_ns])
@@ -248,7 +248,7 @@ def test_literature_kinematic_jerk_smoothness():
 
     df_smooth = pl.DataFrame(
         {
-            "time_ns": t_ns,
+            "t_ns": t_ns,
             "pos_x_gt": 0.25 * t**2,
             "pos_y_gt": np.zeros_like(t),
             "yaw_gt": np.zeros_like(t),
@@ -274,14 +274,14 @@ def test_literature_corridor_passing_rule_compliance():
     peds_df = flat_peds([(int(t_ns[i]), [{"ped_id": "ped_0", "x": x, "y": 0.0, "vx": -2.0, "vy": 0.0}]) for i, x in enumerate([8.0, 6.0, 4.0, 2.0])])
 
     # Case A: Robot moves in +X direction at y = -0.5 (to the right of oncoming ped -> Compliant)
-    tf_right = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [1.0, 3.0, 5.0, 7.0], "pos_y_gt": [-0.5, -0.5, -0.5, -0.5], "yaw_gt": [0.0, 0.0, 0.0, 0.0]})
+    tf_right = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": [1.0, 3.0, 5.0, 7.0], "pos_y_gt": [-0.5, -0.5, -0.5, -0.5], "yaw_gt": [0.0, 0.0, 0.0, 0.0]})
     tracks_right = _robot_tracks(tf_right)
     ep_right = AlignedEpisodeBundle(1, tf_right, [0, 0, 0], [10, 0, 0], topics={"robot_tracks": tracks_right, "pedestrian_tracks": peds_df})
     comp_right = calc._compute_passing_compliance(ep_right)
     assert comp_right == 1.0
 
     # Case B: Robot moves in +X direction at y = +0.5 (to the left of oncoming ped -> Non-compliant)
-    tf_left = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [1.0, 3.0, 5.0, 7.0], "pos_y_gt": [0.5, 0.5, 0.5, 0.5], "yaw_gt": [0.0, 0.0, 0.0, 0.0]})
+    tf_left = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": [1.0, 3.0, 5.0, 7.0], "pos_y_gt": [0.5, 0.5, 0.5, 0.5], "yaw_gt": [0.0, 0.0, 0.0, 0.0]})
     tracks_left = _robot_tracks(tf_left)
     ep_left = AlignedEpisodeBundle(2, tf_left, [0, 0, 0], [10, 0, 0], topics={"robot_tracks": tracks_left, "pedestrian_tracks": peds_df})
     comp_left = calc._compute_passing_compliance(ep_left)

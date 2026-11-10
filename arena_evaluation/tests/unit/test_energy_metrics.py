@@ -15,7 +15,7 @@ def _episode(**columns):
     n = len(next(iter(columns.values())))
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": [i * SEC for i in range(n)], **columns}),
+        data=pl.DataFrame({"t_ns": [i * SEC for i in range(n)], **columns}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[1.0, 0.0],
     )
@@ -124,7 +124,7 @@ def _encounter_episode() -> AlignedEpisodeBundle:
     times = [0, SEC, 2 * SEC]
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": times}),
+        data=pl.DataFrame({"t_ns": times}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[2.0, 0.0],
         topics={"robot_power": pl.DataFrame({"t_ns": times, "total_power_w": [36.0, 36.0, 36.0]})},

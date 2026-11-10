@@ -796,7 +796,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             ce_sub = ce_lf.select(["t_ns", (pl.col("event_count") > 0).alias("has_collision")]).sort("t_ns")
             base_lf = base_lf.join_asof(ce_sub, on="t_ns", strategy="nearest")
 
-        return base_lf.with_columns(pl.col("t_ns").alias("time_ns")).collect()
+        return base_lf.with_columns(pl.col("t_ns").alias("t_ns")).collect()
 
     def compute_field_timeseries(
         self,
@@ -851,7 +851,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
             rx_m = row.get("pos_x_gt")
             ry_m = row.get("pos_y_gt")
             source_dba = row.get("total_level_af_dba") or row.get("source_dba") or _FIELD_VMIN_DBA
-            time_ns = int(row.get("time_ns", 0))
+            t_ns = int(row.get("t_ns", 0))
 
             if rx_m is None or ry_m is None or np.isnan(rx_m) or np.isnan(ry_m):
                 results.append(None)
@@ -862,7 +862,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
 
             open_set: frozenset = frozenset()
             if state_timeline is not None:
-                open_set = state_timeline.open_doors_at(time_ns)
+                open_set = state_timeline.open_doors_at(t_ns)
 
             tl_key = tuple(sorted(open_set))
             pixel_tl = tl_cache.get(tl_key)
@@ -1094,7 +1094,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
                 open_door_contour = ax.contour(cx, cy, open_door_masks[rg_idx].astype(np.uint8), levels=[0.5], colors=["#00ff00"], linewidths=2.0, alpha=0.9)
 
             collision_label = " COLLISION 100dBA!" if is_collision else ""
-            title_text.set_text(f"t={row.get('time_ns', 0) / 1e9:.1f}s  |  source={source_dba:.0f} dBA  |  {len(open_set)} doors open{collision_label}")
+            title_text.set_text(f"t={row.get('t_ns', 0) / 1e9:.1f}s  |  source={source_dba:.0f} dBA  |  {len(open_set)} doors open{collision_label}")
 
             artists = [im, robot_dot, ped_dots, title_text]
             if trail_line is not None:
@@ -1133,7 +1133,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
                     row = rows[min(row_idx, total_rows - 1)]
                     rx_frame = float(row.get("pos_x_gt", 0) or 0)
                     ry_frame = float(row.get("pos_y_gt", 0) or 0)
-                    t_s = float(row.get("time_ns", 0)) / 1e9
+                    t_s = float(row.get("t_ns", 0)) / 1e9
                     ax_frame.plot(rx_frame, ry_frame, marker="o", color="#00e5ff", markeredgecolor="#ffffff", markeredgewidth=0.7, markersize=5.5, linestyle="None", label="Robot")
 
                     peds = peds_per_frame[fi]

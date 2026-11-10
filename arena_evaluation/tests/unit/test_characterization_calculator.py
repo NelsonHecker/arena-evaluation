@@ -27,7 +27,7 @@ def _episode(frame: pl.DataFrame, **kwargs) -> AlignedEpisodeBundle:
     """Bundle whose native /tf ground truth follows the aligned pos_x/pos_y columns."""
     tracks = pl.DataFrame(
         {
-            "t_ns": frame["time_ns"].cast(pl.Int64),
+            "t_ns": frame["t_ns"].cast(pl.Int64),
             "x": frame["pos_x"].cast(pl.Float64),
             "y": frame["pos_y"].cast(pl.Float64),
             "yaw": [0.0] * len(frame),
@@ -67,7 +67,7 @@ def _sample_episode() -> AlignedEpisodeBundle:
     """A small aligned frame: odom + power + joints + phase labels."""
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
             "pos_x": [0.0, 0.25, 0.75, 1.75],
             "pos_y": [0.0, 0.0, 0.0, 0.0],
             "vel_linear": [0.0, 0.25, 0.5, 1.0],
@@ -146,7 +146,7 @@ def test_speed_falls_back_to_path_rate_without_vel_linear():
 def test_steady_state_transient_filtering():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
             "pos_x": [0.0, 0.25, 0.50, 0.75],
             "pos_y": [0.0, 0.0, 0.0, 0.0],
             "vel_linear": [0.0, 0.25, 0.25, 0.25],
@@ -162,7 +162,7 @@ def test_steady_state_transient_filtering():
 def test_arc_and_lateral_characterization_phases():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
             "pos_x": [0.0, 0.5, 1.0, 1.5],
             "pos_y": [0.0, 0.1, 0.3, 0.6],
             "vel_linear": [0.5, 0.5, 1.0, 1.0],
@@ -201,7 +201,7 @@ def test_calculate_empty_returns_none_keys():
 def test_energy_intensity_speed_threshold_gating():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000],
             "pos_x": [0.0, 0.01, 0.50],
             "pos_y": [0.0, 0.0, 0.0],
             "vel_linear": [0.0, 0.01, 0.49],
@@ -219,7 +219,7 @@ def test_energy_intensity_speed_threshold_gating():
 def test_accel_target_is_signed_by_direction_of_change():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 500_000_000, 1_000_000_000, 1_500_000_000],
+            "t_ns": [0, 500_000_000, 1_000_000_000, 1_500_000_000],
             "pos_x": [0.0, 0.5, 1.0, 1.5],
             "pos_y": [0.0, 0.0, 0.0, 0.0],
             "vel_linear": [1.0, 0.5, -1.0, -0.5],
@@ -242,7 +242,7 @@ def test_accel_target_is_signed_by_direction_of_change():
 def test_unmatched_labels_lower_phase_coverage():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [0.0, 0.5],
             "pos_y": [0.0, 0.0],
             "vel_linear": [0.5, 0.5],
@@ -261,7 +261,7 @@ def test_unmatched_labels_lower_phase_coverage():
 def test_recorded_schedule_beats_the_rebuild():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [0.0, 0.5],
             "pos_y": [0.0, 0.0],
             "vel_linear": [0.33, -0.75],
@@ -302,7 +302,7 @@ def test_recorded_schedule_beats_the_rebuild():
 def test_duplicate_recorded_schedule_rows_do_not_duplicate_samples():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [0.0, 0.5],
             "pos_y": [0.0, 0.0],
             "vel_linear": [0.5, 0.5],
@@ -340,7 +340,7 @@ def test_duplicate_recorded_schedule_rows_do_not_duplicate_samples():
 def test_steady_state_bidirectional_windowing():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000, 4_000_000_000, 5_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000, 4_000_000_000, 5_000_000_000],
             "pos_x": [0.0, 0.25, 0.50, 0.75, 1.0, 1.25],
             "pos_y": [0.0] * 6,
             "vel_linear": [0.0, 0.25, 0.25, 0.25, 0.25, 0.0],
@@ -356,7 +356,7 @@ def test_steady_state_bidirectional_windowing():
 def test_without_ground_truth_the_series_has_null_step_distances():
     frame = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000],
             "pos_x": [0.0, 1.0, 2.0],
             "pos_y": [0.0, 0.0, 0.0],
             "total_power_w": [50.0, 50.0, 50.0],

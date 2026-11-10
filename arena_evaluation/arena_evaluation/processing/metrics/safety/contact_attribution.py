@@ -126,8 +126,8 @@ def compute_closing_speeds(event: ContactEvent, context: ContactContext) -> tupl
     win_start_ns = int(event.t0_ns - round(context.pre_window_s * NS_PER_S))
     r_win = context.robot.slice_ns(win_start_ns, event.t0_ns)
 
-    if event.track is not None and len(event.track.time_ns) > 0:
-        p_win = event.track.trajectory.resample_onto(r_win.time_ns)
+    if event.track is not None and len(event.track.t_ns) > 0:
+        p_win = event.track.trajectory.resample_onto(r_win.t_ns)
         dx = p_win.x - r_win.x
         dy = p_win.y - r_win.y
         dist = np.hypot(dx, dy)
@@ -157,16 +157,16 @@ def evaluate_frozen_robot_counterfactual(
 ) -> tuple[CounterfactualRegime, float | None, bool | None]:
     """Frozen-robot counterfactual test over [t0 - pre_window_s, t0 + post_window_s]."""
     track = event.track
-    if event.obstacle_kind != PEDESTRIAN_KIND or track is None or len(track.time_ns) == 0 or len(context.robot.time_ns) == 0:
+    if event.obstacle_kind != PEDESTRIAN_KIND or track is None or len(track.t_ns) == 0 or len(context.robot.t_ns) == 0:
         return "unavailable", None, None
 
     win_start_ns = int(event.t0_ns - round(context.pre_window_s * NS_PER_S))
     win_end_ns = int(event.t0_ns + round(context.post_window_s * NS_PER_S))
-    ped_in_win = (track.time_ns >= win_start_ns) & (track.time_ns <= win_end_ns)
+    ped_in_win = (track.t_ns >= win_start_ns) & (track.t_ns <= win_end_ns)
     if not np.any(ped_in_win):
         return "unavailable", None, None
 
-    t_freeze_ns = max(int(context.robot.time_ns[0]), win_start_ns)
+    t_freeze_ns = max(int(context.robot.t_ns[0]), win_start_ns)
     frozen_pose = context.robot.resample_onto(np.asarray([t_freeze_ns], dtype=np.int64))
     freeze_x, freeze_y = float(frozen_pose.x[0]), float(frozen_pose.y[0])
 
@@ -192,7 +192,7 @@ def attribute_single_contact(
     rvx_0, rvy_0 = float(r_at_t0.vx[0]), float(r_at_t0.vy[0])
     v_robot_impact = float(np.hypot(rvx_0, rvy_0))
 
-    if event.obstacle_kind == PEDESTRIAN_KIND and event.track is not None and len(event.track.time_ns) > 0:
+    if event.obstacle_kind == PEDESTRIAN_KIND and event.track is not None and len(event.track.t_ns) > 0:
         p_at_t0 = event.track.trajectory.resample_onto(t0_arr)
         pvx_0, pvy_0 = float(p_at_t0.vx[0]), float(p_at_t0.vy[0])
         v_target_impact = float(np.hypot(pvx_0, pvy_0))
@@ -206,7 +206,7 @@ def attribute_single_contact(
     is_robot_fault: bool | None = bool(fault_predicate) if regime == "blind_exact" else None
     is_robot_fault_lb: bool | None = bool(fault_predicate) if regime == "reactive_approx" else None
 
-    ep_start_ns = int(context.robot.time_ns[0]) if len(context.robot.time_ns) > 0 else event.t0_ns
+    ep_start_ns = int(context.robot.t_ns[0]) if len(context.robot.t_ns) > 0 else event.t0_ns
     return ContactAttributionRecord(
         contact_id=contact_id,
         t0_ns=int(event.t0_ns),
@@ -271,15 +271,15 @@ def _track_by_numeric_suffix(base: str, tracks: Mapping[str, PedTrack]) -> PedTr
 
 def _nearest_track(tracks: Mapping[str, PedTrack], robot_at_t0: Trajectory2D) -> PedTrack | None:
     """Pedestrian whose resampled position is nearest to the robot pose at t0."""
-    if len(robot_at_t0.time_ns) == 0:
+    if len(robot_at_t0.t_ns) == 0:
         return None
     robot_x, robot_y = float(robot_at_t0.x[0]), float(robot_at_t0.y[0])
     nearest: PedTrack | None = None
     nearest_distance_m = float("inf")
     for track in tracks.values():
-        if len(track.time_ns) == 0:
+        if len(track.t_ns) == 0:
             continue
-        pedestrian_at_t0 = track.trajectory.resample_onto(robot_at_t0.time_ns)
+        pedestrian_at_t0 = track.trajectory.resample_onto(robot_at_t0.t_ns)
         distance_m = float(np.hypot(pedestrian_at_t0.x[0] - robot_x, pedestrian_at_t0.y[0] - robot_y))
         if distance_m < nearest_distance_m:
             nearest_distance_m = distance_m
@@ -399,22 +399,22 @@ def _contacts_from_clearance(
     """Detect pedestrian contacts from surface-to-surface clearance <= 0."""
     events: list[ContactEvent] = []
     for track in tracks.values():
-        if len(track.time_ns) == 0 or len(robot.time_ns) == 0:
+        if len(track.t_ns) == 0 or len(robot.t_ns) == 0:
             continue
-        t_lo = max(int(robot.time_ns[0]), int(track.time_ns[0]))
-        t_hi = min(int(robot.time_ns[-1]), int(track.time_ns[-1]))
+        t_lo = max(int(robot.t_ns[0]), int(track.t_ns[0]))
+        t_hi = min(int(robot.t_ns[-1]), int(track.t_ns[-1]))
         if t_hi < t_lo:
             continue
 
         robot_window = robot.slice_ns(t_lo, t_hi)
-        pedestrian_window = track.trajectory.resample_onto(robot_window.time_ns)
+        pedestrian_window = track.trajectory.resample_onto(robot_window.t_ns)
         ped_radius_m = track.radius_m if track.radius_m is not None else DEFAULT_PED_RADIUS_M
         clearance_m = np.hypot(pedestrian_window.x - robot_window.x, pedestrian_window.y - robot_window.y) - (robot.radius_m + ped_radius_m)
-        spans = contiguous_spans(clearance_m <= 0.0, robot_window.time_ns, merge_gap_ns)
+        spans = contiguous_spans(clearance_m <= 0.0, robot_window.t_ns, merge_gap_ns)
         events.extend(
             ContactEvent(
-                t0_ns=int(robot_window.time_ns[start]),
-                t_end_ns=int(robot_window.time_ns[end]),
+                t0_ns=int(robot_window.t_ns[start]),
+                t_end_ns=int(robot_window.t_ns[end]),
                 obstacle_kind=PEDESTRIAN_KIND,
                 obstacle_id=track.ped_id,
                 track=track,
@@ -614,7 +614,7 @@ class ContactAttributionCalculator(BaseMetricCalculator):
     def attribute_all_contacts(self, episode: AlignedEpisodeBundle) -> list[ContactAttributionRecord]:
         """Detect and attribute every contact in the episode."""
         robot, _yaw = resolve_robot_trajectory(self, episode)
-        if len(robot.time_ns) == 0:
+        if len(robot.t_ns) == 0:
             return []
         tracks = extract_episode_ped_tracks(episode)
         detected = self._detect_contacts(episode, robot, tracks)
@@ -732,7 +732,7 @@ class ContactAttributionCalculator(BaseMetricCalculator):
         crowd_condition: CrowdCondition = "blind" if configured_crowd == "blind" else ("visible" if configured_crowd == "visible" else resolve_crowd_condition(episode, self.metrics_config))
 
         robot, _yaw = resolve_robot_trajectory(self, episode)
-        if len(robot.time_ns) == 0:
+        if len(robot.t_ns) == 0:
             empty_res = self.summarize_records([])
             empty_res.update(
                 {

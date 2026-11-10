@@ -145,9 +145,9 @@ class SemanticView:
         if len(events) == 0:
             return
         for (entity, kind, field), group in events.group_by(["entity", "kind", "field"]):
-            g = group.sort("time_ns")
+            g = group.sort("t_ns")
             self.kinds.setdefault(entity, kind)
-            self.series[(entity, field)] = FieldSeries(g["time_ns"].to_numpy().astype(np.int64), g["current"].to_list())
+            self.series[(entity, field)] = FieldSeries(g["t_ns"].to_numpy().astype(np.int64), g["current"].to_list())
 
     @classmethod
     def from_episode(cls, episode: AlignedEpisodeBundle) -> SemanticView:
@@ -389,20 +389,20 @@ def in_polygon(px: np.ndarray, py: np.ndarray, polygon: list[tuple[float, float]
 class RobotTrack:
     """Map-frame robot samples on the episode odom axis; dt[i] is the hold until sample i+1 (s)."""
 
-    time_ns: np.ndarray
+    t_ns: np.ndarray
     x: np.ndarray
     y: np.ndarray
     speed: np.ndarray
     dt: np.ndarray
 
     def __len__(self) -> int:
-        return len(self.time_ns)
+        return len(self.t_ns)
 
 
-def hold_dt(time_ns: np.ndarray) -> np.ndarray:
-    dt = np.zeros(len(time_ns))
-    if len(time_ns) > 1:
-        dt[:-1] = np.clip(np.diff(time_ns) / 1e9, 0.0, None)
+def hold_dt(t_ns: np.ndarray) -> np.ndarray:
+    dt = np.zeros(len(t_ns))
+    if len(t_ns) > 1:
+        dt[:-1] = np.clip(np.diff(t_ns) / 1e9, 0.0, None)
     return dt
 
 
@@ -414,12 +414,12 @@ def robot_track(calc: BaseMetricCalculator, episode: AlignedEpisodeBundle) -> Ro
     if frame is None or len(frame) == 0:
         return None
     pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
-    time_ns = frame["time_ns"].to_numpy().astype(np.int64)
+    t_ns = frame["t_ns"].to_numpy().astype(np.int64)
     if "vel_linear" in frame.columns:
         speed = np.abs(np.nan_to_num(frame["vel_linear"].to_numpy().astype(np.float64), nan=0.0))
     else:
-        speed = calc.speed_from_pose(pos_x, pos_y, time_ns)
-    return RobotTrack(time_ns, np.asarray(pos_x, dtype=np.float64), np.asarray(pos_y, dtype=np.float64), speed, hold_dt(time_ns))
+        speed = calc.speed_from_pose(pos_x, pos_y, t_ns)
+    return RobotTrack(t_ns, np.asarray(pos_x, dtype=np.float64), np.asarray(pos_y, dtype=np.float64), speed, hold_dt(t_ns))
 
 
 @dataclasses.dataclass
@@ -439,7 +439,7 @@ class PedTracks:
         return float(self.xy[i][j, 0]), float(self.xy[i][j, 1])
 
 
-def ped_tracks(peds: pl.DataFrame | None, time_ns: np.ndarray) -> PedTracks | None:
+def ped_tracks(peds: pl.DataFrame | None, t_ns: np.ndarray) -> PedTracks | None:
     """Pedestrian tracks held at each robot time, from the flat pedestrian table; None when no pedestrians were recorded."""
     if peds is None or len(peds) == 0:
         return None
@@ -448,7 +448,7 @@ def ped_tracks(peds: pl.DataFrame | None, time_ns: np.ndarray) -> PedTracks | No
     keys: list[list[str]] = []
     xy: list[np.ndarray] = []
     vel: list[np.ndarray] = []
-    for t in time_ns:
+    for t in t_ns:
         idx = int(np.searchsorted(frame_times, t, side="right")) - 1
         if idx < 0 or int(t) - int(frame_times[idx]) > ALIGN_TOLERANCE_NS:
             keys.append([])

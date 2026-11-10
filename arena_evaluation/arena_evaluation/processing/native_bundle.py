@@ -14,7 +14,7 @@ import polars as pl
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import TopicBundle
 
-TIME_COLUMN = "time_ns"
+TIME_COLUMN = "t_ns"
 
 # The ground-truth track is both the trajectory and the reference it is compared against, so the
 # legacy `pos_x`/`pos_y`/`yaw` names carry ground truth and the `_gt` aliases mirror it.
@@ -52,18 +52,18 @@ class NativeBundle:
     def align(
         self,
         bundle: TopicBundle,
-        start_time_ns: int | None = None,
-        end_time_ns: int | None = None,
+        start_t_ns: int | None = None,
+        end_t_ns: int | None = None,
     ) -> pl.DataFrame | pl.LazyFrame | None:
-        """Align the robot's tables onto its ground-truth track, optionally filtered to [start_time_ns, end_time_ns]."""
+        """Align the robot's tables onto its ground-truth track, optionally filtered to [start_t_ns, end_t_ns]."""
         if bundle.robot_tracks is None or _is_empty(bundle.robot_tracks):
             return None
-        track = _window(_lazy(bundle.robot_tracks), "t_ns", start_time_ns, end_time_ns)
+        track = _window(_lazy(bundle.robot_tracks), "t_ns", start_t_ns, end_t_ns)
         if _is_empty(track):
             return None
         frame = _primary(track)
         for table, renames in _secondary_tables(bundle):
-            frame = self._join(frame, table, renames, start_time_ns, end_time_ns)
+            frame = self._join(frame, table, renames, start_t_ns, end_t_ns)
         if bundle.robot_characterization_phase is not None and not _is_empty(bundle.robot_characterization_phase):
             markers = _select_aligned(_lazy(bundle.robot_characterization_phase), _MARKERS).sort(TIME_COLUMN)
             frame = frame.join_asof(markers, on=TIME_COLUMN, strategy="backward")
@@ -76,13 +76,13 @@ class NativeBundle:
         primary: pl.LazyFrame,
         table: pl.DataFrame | pl.LazyFrame | None,
         renames: dict[str, str],
-        start_time_ns: int | None,
-        end_time_ns: int | None,
+        start_t_ns: int | None,
+        end_t_ns: int | None,
     ) -> pl.LazyFrame:
         if table is None or _is_empty(table):
             return primary
         tolerance = self.tolerance_ns
-        secondary = _window(_lazy(table), "t_ns", _widen(start_time_ns, -tolerance), _widen(end_time_ns, tolerance))
+        secondary = _window(_lazy(table), "t_ns", _widen(start_t_ns, -tolerance), _widen(end_t_ns, tolerance))
         if _is_empty(secondary):
             return primary
         secondary = _select_aligned(secondary, renames).sort(TIME_COLUMN)

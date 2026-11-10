@@ -30,7 +30,7 @@ def test_ground_truth_track_is_the_clock_and_the_pose() -> None:
 
     assert aligned is not None
     frame = aligned.collect() if isinstance(aligned, pl.LazyFrame) else aligned
-    assert frame["time_ns"].to_list() == [0, SEC]
+    assert frame["t_ns"].to_list() == [0, SEC]
     assert frame["pos_x"].to_list() == [1.0, 3.0]
     assert frame["pos_y"].to_list() == [2.0, 4.0]
     assert frame["yaw"].to_list() == [0.5, 0.6]
@@ -73,10 +73,10 @@ def test_secondary_tables_join_backwards_within_the_tolerance() -> None:
 def test_window_bounds_filter_the_ground_truth_clock() -> None:
     bundle = TopicBundle(robot_tracks=_track([(0, 0.0, 0.0, 0.0, 0.0, 0.0), (SEC, 1.0, 1.0, 0.0, 0.0, 0.0), (2 * SEC, 2.0, 2.0, 0.0, 0.0, 0.0)]))
 
-    aligned = NativeBundle().align(bundle, start_time_ns=SEC, end_time_ns=2 * SEC)
+    aligned = NativeBundle().align(bundle, start_t_ns=SEC, end_t_ns=2 * SEC)
 
     frame = aligned if isinstance(aligned, pl.DataFrame) else aligned.collect()
-    assert frame["time_ns"].to_list() == [SEC, 2 * SEC]
+    assert frame["t_ns"].to_list() == [SEC, 2 * SEC]
 
 
 def test_without_ground_truth_the_bundle_is_absent() -> None:

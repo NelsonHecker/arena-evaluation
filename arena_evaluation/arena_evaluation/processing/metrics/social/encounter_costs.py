@@ -115,8 +115,8 @@ def _recorded_acoustics_series(robot_time_ns: np.ndarray, episode: AlignedEpisod
 
 def _kinematic_rates(robot: Trajectory2D, yaw: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute (v_lin, v_ang, a_lin, a_ang) along the robot trajectory."""
-    n = len(robot.time_ns)
-    dt = np.diff(robot.time_ns).astype(np.float64) / 1e9
+    n = len(robot.t_ns)
+    dt = np.diff(robot.t_ns).astype(np.float64) / 1e9
     dt_safe = np.where(dt <= 0.0, 1e-6, dt)
 
     v_lin = np.hypot(robot.vx, robot.vy)
@@ -138,10 +138,10 @@ def compute_robot_power_series(
     episode: AlignedEpisodeBundle | None = None,
 ) -> np.ndarray:
     """Instantaneous total electrical power P_total(t) in Watts on the robot time grid."""
-    n = len(robot.time_ns)
+    n = len(robot.t_ns)
     if n == 0:
         return np.array([], dtype=np.float64)
-    recorded = _recorded_power_series(robot.time_ns, episode)
+    recorded = _recorded_power_series(robot.t_ns, episode)
     if recorded is not None:
         return recorded
     if n < 2:
@@ -168,7 +168,7 @@ def compute_ped_sound_spl_dba(
     ped_xy: np.ndarray,
 ) -> np.ndarray:
     """Instantaneous A-weighted sound pressure level L_p(t) in dBA at the pedestrian."""
-    n = len(robot.time_ns)
+    n = len(robot.t_ns)
     if n == 0:
         return np.array([], dtype=np.float64)
     dist = np.maximum(np.hypot(ped_xy[:, 0] - robot.x, ped_xy[:, 1] - robot.y), MIN_ACOUSTIC_DIST_M)
@@ -195,18 +195,18 @@ def compare_pedestrian_to_reference_by_name(
 ) -> tuple[float | None, float | None, float | None]:
     """Compare a pedestrian trajectory to its same-named counterpart in the robot-free twin episode."""
     reference_track = reference_tracks_by_name.get(actual_track.ped_name)
-    if reference_track is None or len(actual_track.time_ns) < 2 or len(reference_track.time_ns) < 2:
+    if reference_track is None or len(actual_track.t_ns) < 2 or len(reference_track.t_ns) < 2:
         return None, None, None
 
     actual_window = actual_track.trajectory.slice_ns(bounds_ns[0], bounds_ns[1]) if bounds_ns is not None else actual_track.trajectory
-    if len(actual_window.time_ns) < 2:
+    if len(actual_window.t_ns) < 2:
         actual_window = actual_track.trajectory
 
-    relative_start_ns = int(actual_window.time_ns[0] - actual_track.time_ns[0])
-    relative_end_ns = int(actual_window.time_ns[-1] - actual_track.time_ns[0])
-    reference_start_ns = int(reference_track.time_ns[0])
+    relative_start_ns = int(actual_window.t_ns[0] - actual_track.t_ns[0])
+    relative_end_ns = int(actual_window.t_ns[-1] - actual_track.t_ns[0])
+    reference_start_ns = int(reference_track.t_ns[0])
     reference_window = reference_track.trajectory.slice_ns(reference_start_ns + relative_start_ns, reference_start_ns + relative_end_ns)
-    if len(reference_window.time_ns) < 2:
+    if len(reference_window.t_ns) < 2:
         reference_window = reference_track.trajectory
 
     actual_length_m = _polyline_length(actual_window.x, actual_window.y)
@@ -214,10 +214,10 @@ def compare_pedestrian_to_reference_by_name(
     detour_m = float(max(0.0, actual_length_m - reference_length_m))
     deflection_m = PedestrianDisturbanceCalculator._compute_trajectory_deflection(actual_window.xy, reference_track.trajectory.xy)
 
-    reference_duration_s = float(reference_track.time_ns[-1] - reference_track.time_ns[0]) / 1e9
+    reference_duration_s = float(reference_track.t_ns[-1] - reference_track.t_ns[0]) / 1e9
     reference_total_length_m = _polyline_length(reference_track.x, reference_track.y)
     reference_speed_mps = (reference_total_length_m / reference_duration_s) if reference_duration_s > 1e-6 else 0.0
-    actual_duration_s = float(actual_window.time_ns[-1] - actual_window.time_ns[0]) / 1e9
+    actual_duration_s = float(actual_window.t_ns[-1] - actual_window.t_ns[0]) / 1e9
     chord_length_m = float(np.hypot(actual_window.x[-1] - actual_window.x[0], actual_window.y[-1] - actual_window.y[0]))
     delay_s = float(max(0.0, actual_duration_s - (chord_length_m / reference_speed_mps))) if reference_speed_mps > 1e-3 else 0.0
     return detour_m, deflection_m, delay_s
@@ -271,16 +271,16 @@ def evaluate_single_encounter_costs(
 ) -> EncounterCostRecord:
     """Compute time, path, energy, sound dose and named-pedestrian reference detour for one encounter."""
     t_start_ns, t_end_ns = bounds_ns
-    mask = (context.robot.time_ns >= t_start_ns) & (context.robot.time_ns <= t_end_ns)
+    mask = (context.robot.t_ns >= t_start_ns) & (context.robot.t_ns <= t_end_ns)
     if not np.any(mask):
-        nearest = int(np.argmin(np.abs(context.robot.time_ns - t_start_ns)))
-        mask = np.zeros(len(context.robot.time_ns), dtype=bool)
+        nearest = int(np.argmin(np.abs(context.robot.t_ns - t_start_ns)))
+        mask = np.zeros(len(context.robot.t_ns), dtype=bool)
         mask[nearest] = True
 
     robot_window = context.robot.slice_ns(t_start_ns, t_end_ns)
     yaw_window = context.yaw[mask]
     power_window = context.power_w[mask]
-    window_time_ns = robot_window.time_ns
+    window_time_ns = robot_window.t_ns
 
     cost_time_s = float(max(0, int(window_time_ns[-1] - window_time_ns[0]))) / 1e9
     cost_path_m = _polyline_length(robot_window.x, robot_window.y)
@@ -289,7 +289,7 @@ def evaluate_single_encounter_costs(
     cost_energy_j = float(np.sum(0.5 * (power_window[:-1] + power_window[1:]) * dt_s)) if len(dt_s) > 0 else 0.0
 
     ped_window = track.trajectory.resample_onto(window_time_ns)
-    if context.acoustics_dba is not None and len(context.acoustics_dba) == len(context.robot.time_ns):
+    if context.acoustics_dba is not None and len(context.acoustics_dba) == len(context.robot.t_ns):
         acoustics_window = context.acoustics_dba[mask]
         dist = np.maximum(np.hypot(ped_window.x - robot_window.x, ped_window.y - robot_window.y), MIN_ACOUSTIC_DIST_M)
         spl_dba = np.maximum(0.0, acoustics_window - 20.0 * np.log10(dist))
@@ -361,9 +361,9 @@ def rollup_encounter_cost_records(
     union_energy_j = 0.0
     for span_start_ns, span_end_ns in merged_spans:
         union_time_s += float(max(0, span_end_ns - span_start_ns)) / 1e9
-        mask = (context.robot.time_ns >= span_start_ns) & (context.robot.time_ns <= span_end_ns)
+        mask = (context.robot.t_ns >= span_start_ns) & (context.robot.t_ns <= span_end_ns)
         if int(np.sum(mask)) >= 2:
-            span_time_ns = context.robot.time_ns[mask]
+            span_time_ns = context.robot.t_ns[mask]
             span_power_w = context.power_w[mask]
             union_path_m += _polyline_length(context.robot.x[mask], context.robot.y[mask])
             span_dt_s = np.maximum(0.0, np.diff(span_time_ns).astype(np.float64) / 1e9)
@@ -521,7 +521,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
             robot_params=self.robot_params,
             reference_tracks_by_name=extract_reference_tracks_by_name(episode, metrics_config),
             default_ped_radius_m=float(metrics_config.get("default_ped_radius_m", DEFAULT_PED_RADIUS_M)),
-            acoustics_dba=_recorded_acoustics_series(robot.time_ns, episode),
+            acoustics_dba=_recorded_acoustics_series(robot.t_ns, episode),
         )
         return context, tracks
 
@@ -529,8 +529,8 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         """Encounter cost records of the explicitly scoped pedestrian, else of every detected encounter."""
         target_track = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id"), self.metrics_config.get("target_agent_name"))
         if target_track is not None:
-            window_start_ns = int(self.metrics_config.get("window_start_ns", max(int(context.robot.time_ns[0]), int(target_track.time_ns[0]))))
-            window_end_ns = int(self.metrics_config.get("window_end_ns", min(int(context.robot.time_ns[-1]), int(target_track.time_ns[-1]))))
+            window_start_ns = int(self.metrics_config.get("window_start_ns", max(int(context.robot.t_ns[0]), int(target_track.t_ns[0]))))
+            window_end_ns = int(self.metrics_config.get("window_end_ns", min(int(context.robot.t_ns[-1]), int(target_track.t_ns[-1]))))
             return [evaluate_single_encounter_costs(target_track, (window_start_ns, window_end_ns), context)]
 
         spec = EncounterSpec(
@@ -547,7 +547,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
     ) -> list[EncounterCostRecord]:
         """Compute an EncounterCostRecord for every encounter in the episode."""
         context, tracks = self._build_context(episode, reference_episode)
-        if len(context.robot.time_ns) < 2 or not tracks:
+        if len(context.robot.t_ns) < 2 or not tracks:
             return []
         return self._records(context, tracks)
 
@@ -559,7 +559,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         """Compute encounter costs for a scoped encounter or rolled up across episode encounters."""
         del prior_results
         context, tracks = self._build_context(episode)
-        if len(context.robot.time_ns) < 2 or not tracks:
+        if len(context.robot.t_ns) < 2 or not tracks:
             return {key: None for key in self.output_keys()}
         records = self._records(context, tracks)
         if len(records) == 1:
@@ -577,7 +577,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
             return self.calculate(episode, prior_results)
 
         context, tracks = self._build_context(episode)
-        if len(context.robot.time_ns) < 2 or not tracks:
+        if len(context.robot.t_ns) < 2 or not tracks:
             return {key: None for key in self.output_keys()}
 
         actor_2 = scope_slice.identity.get("actor_2")
@@ -599,7 +599,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
             robot_window = context.robot.slice_ns(int(scope_slice.t_start_ns), int(scope_slice.t_end_ns))
             chord_m = float(np.hypot(robot_window.x[-1] - robot_window.x[0], robot_window.y[-1] - robot_window.y[0])) if len(robot_window.x) >= 2 else 0.0
             full_robot, _ = resolve_robot_trajectory(self, scope_slice.full_episode)
-            v_nominal_mps = float(self.robot_params.max_linear_velocity) if self.robot_params.max_linear_velocity > 0.0 else (float(np.max(np.hypot(full_robot.vx, full_robot.vy))) if len(full_robot.time_ns) >= 2 else 1.0)
+            v_nominal_mps = float(self.robot_params.max_linear_velocity) if self.robot_params.max_linear_velocity > 0.0 else (float(np.max(np.hypot(full_robot.vx, full_robot.vy))) if len(full_robot.t_ns) >= 2 else 1.0)
             if v_nominal_mps <= 1e-3:
                 v_nominal_mps = 1.0
             out["path_deviation_m"] = float(max(0.0, record.cost_path_m - chord_m))

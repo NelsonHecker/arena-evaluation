@@ -89,7 +89,7 @@ def test_psii_penetration_depth_monotonicity():
     # Ped 2: Shallow skimming at (1.5, 0.0) -> d_center = 1.5, d_eff = 1.5 - 0.6 = 0.9 -> penetration depth = 1.2 - 0.9 = 0.3
 
     t_ns = [0, 1_000_000_000]
-    tf_df = pl.DataFrame({"time_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    tf_df = pl.DataFrame({"t_ns": t_ns, "pos_x_gt": [0.0, 0.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
     robot_tracks = pl.DataFrame({"t_ns": t_ns, "x": [0.0, 0.0], "y": [0.0, 0.0], "yaw": [0.0, 0.0], "pose_source": ["tf_gt", "tf_gt"]})
 
     # Case A: Deep

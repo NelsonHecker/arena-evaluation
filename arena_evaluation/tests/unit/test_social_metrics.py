@@ -61,10 +61,10 @@ WINDOW_RATE_NS = 100_000_000
 
 def _window_bundle(*, ped_x_m: float, count: int = 3) -> AlignedEpisodeBundle:
     """A window slice's own telemetry: a robot at the origin and one stationary pedestrian ahead of it."""
-    time_ns = np.arange(count, dtype=np.int64) * WINDOW_RATE_NS
+    t_ns = np.arange(count, dtype=np.int64) * WINDOW_RATE_NS
     robot = pl.DataFrame(
         {
-            "t_ns": time_ns,
+            "t_ns": t_ns,
             "x": np.zeros(count, dtype=np.float64),
             "y": np.zeros(count, dtype=np.float64),
             "yaw": np.zeros(count, dtype=np.float64),
@@ -82,7 +82,7 @@ def _window_bundle(*, ped_x_m: float, count: int = 3) -> AlignedEpisodeBundle:
     )
     peds = pl.DataFrame(
         {
-            "t_ns": time_ns,
+            "t_ns": t_ns,
             "ped_id": ["Pedestrian_1"] * count,
             "ped_name": ["alice"] * count,
             "x": np.full(count, ped_x_m, dtype=np.float64),

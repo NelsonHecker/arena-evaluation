@@ -36,14 +36,14 @@ PERSONAL_SPACE_SERIES_SCHEMA: Final[pl.Schema] = pl.Schema(
 
 def personal_space_counts(robot_frame: pl.DataFrame, peds: pl.DataFrame, radius_m: float) -> pl.DataFrame:
     """One row per robot ground-truth sample with the number of pedestrians inside ``radius_m`` of it."""
-    time_ns = robot_frame.get_column("time_ns").to_numpy().astype(np.int64)
+    t_ns = robot_frame.get_column("t_ns").to_numpy().astype(np.int64)
     pos_x = robot_frame.get_column("pos_x_gt").to_numpy().astype(np.float64)
     pos_y = robot_frame.get_column("pos_y_gt").to_numpy().astype(np.float64)
-    within = distances_to_pedestrians(time_ns, pos_x, pos_y, peds).filter(pl.col("distance") < radius_m).group_by("row").len()
-    counts = np.zeros(len(time_ns), dtype=np.int64)
+    within = distances_to_pedestrians(t_ns, pos_x, pos_y, peds).filter(pl.col("distance") < radius_m).group_by("row").len()
+    counts = np.zeros(len(t_ns), dtype=np.int64)
     counts[within["row"].to_numpy()] = within["len"].to_numpy()
     return pl.DataFrame(
-        {"t_ns": time_ns, "count": counts},
+        {"t_ns": t_ns, "count": counts},
         schema={"t_ns": pl.Int64, "count": pl.Int64},
     )
 
@@ -86,9 +86,9 @@ class ProxemicsCalculator(BaseMetricCalculator):
         if robot_frame is None or robot_frame.height == 0 or peds_df is None or peds_df.height == 0:
             return dict.fromkeys(self.output_keys())
         counts = personal_space_counts(robot_frame, peds_df, self.PERSONAL_SPACE_RADIUS)
-        time_ns = counts.get_column("t_ns").to_numpy()
+        t_ns = counts.get_column("t_ns").to_numpy()
         occupancy = counts.get_column("count").to_numpy()
-        dt = np.append(np.diff(time_ns) / 1e9, 0.0)
+        dt = np.append(np.diff(t_ns) / 1e9, 0.0)
         inside = np.flatnonzero(occupancy > 0)
         total_time_s = float(dt[inside].sum()) if len(inside) > 0 else 0.0
         velocity = prior_results.get("velocity", [])
@@ -106,10 +106,10 @@ class ProxemicsCalculator(BaseMetricCalculator):
         peds = self.native_ped_frame(window)
         if robot is None or robot.height == 0 or peds is None or peds.height == 0:
             return dict.fromkeys(self.output_keys())
-        time_ns = robot.get_column("t_ns").to_numpy().astype(np.int64)
+        t_ns = robot.get_column("t_ns").to_numpy().astype(np.int64)
         counts = personal_space_counts(
             robot.select(
-                time_ns=pl.col("t_ns"),
+                t_ns=pl.col("t_ns"),
                 pos_x_gt=pl.col("x"),
                 pos_y_gt=pl.col("y"),
             ),
@@ -117,7 +117,7 @@ class ProxemicsCalculator(BaseMetricCalculator):
             self.PERSONAL_SPACE_RADIUS,
         )
         occupancy = counts.get_column("count").to_numpy()
-        step_s = np.append(np.diff(time_ns) / 1e9, 0.0)
+        step_s = np.append(np.diff(t_ns) / 1e9, 0.0)
         inside = occupancy > 0
         speed_mps = np.hypot(robot.get_column("vx").to_numpy(), robot.get_column("vy").to_numpy())
         return {

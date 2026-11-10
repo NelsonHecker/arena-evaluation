@@ -51,7 +51,7 @@ def native_robot_frame(episode: AlignedEpisodeBundle) -> pl.DataFrame | None:
 class Trajectory2D:
     """Planar trajectory (x, y, vx, vy) on a sorted nanosecond time axis."""
 
-    time_ns: np.ndarray
+    t_ns: np.ndarray
     x: np.ndarray
     y: np.ndarray
     vx: np.ndarray
@@ -71,17 +71,17 @@ class Trajectory2D:
     @property
     def times_s(self) -> np.ndarray:
         """Timestamps in seconds."""
-        return self.time_ns.astype(np.float64) / NS_PER_S
+        return self.t_ns.astype(np.float64) / NS_PER_S
 
     def slice_ns(self, t_start_ns: int, t_end_ns: int) -> Trajectory2D:
         """Sub-trajectory within [t_start_ns, t_end_ns]; the nearest sample when the window holds none."""
-        mask = (self.time_ns >= t_start_ns) & (self.time_ns <= t_end_ns)
-        if not np.any(mask) and len(self.time_ns) > 0:
-            nearest = int(np.argmin(np.abs(self.time_ns - t_start_ns)))
-            mask = np.zeros(len(self.time_ns), dtype=bool)
+        mask = (self.t_ns >= t_start_ns) & (self.t_ns <= t_end_ns)
+        if not np.any(mask) and len(self.t_ns) > 0:
+            nearest = int(np.argmin(np.abs(self.t_ns - t_start_ns)))
+            mask = np.zeros(len(self.t_ns), dtype=bool)
             mask[nearest] = True
         return Trajectory2D(
-            time_ns=self.time_ns[mask],
+            t_ns=self.t_ns[mask],
             x=self.x[mask],
             y=self.y[mask],
             vx=self.vx[mask],
@@ -91,13 +91,13 @@ class Trajectory2D:
 
     def resample_onto(self, query_time_ns: np.ndarray) -> Trajectory2D:
         """Linearly interpolate trajectory onto query_time_ns."""
-        if len(self.time_ns) == 0 or len(query_time_ns) == 0:
+        if len(self.t_ns) == 0 or len(query_time_ns) == 0:
             zeros = np.zeros(len(query_time_ns), dtype=np.float64)
             return Trajectory2D(query_time_ns, zeros, zeros.copy(), zeros.copy(), zeros.copy(), self.radius_m)
-        t_src = self.time_ns.astype(np.float64)
+        t_src = self.t_ns.astype(np.float64)
         t_dst = query_time_ns.astype(np.float64)
         return Trajectory2D(
-            time_ns=query_time_ns,
+            t_ns=query_time_ns,
             x=np.interp(t_dst, t_src, self.x),
             y=np.interp(t_dst, t_src, self.y),
             vx=np.interp(t_dst, t_src, self.vx),
@@ -117,9 +117,9 @@ class PedTrack:
     desired_speed: float | None = None
 
     @property
-    def time_ns(self) -> np.ndarray:
+    def t_ns(self) -> np.ndarray:
         """Sorted nanosecond timestamps."""
-        return self.trajectory.time_ns
+        return self.trajectory.t_ns
 
     @property
     def x(self) -> np.ndarray:
@@ -179,7 +179,7 @@ def resolve_robot_trajectory(calc: BaseMetricCalculator, episode: AlignedEpisode
     """Robot ground-truth Trajectory2D and yaw array from the flat robot_tracks table."""
     radius_m = float(calc.robot_params.robot_radius)
     empty = np.array([], dtype=np.float64)
-    empty_trajectory = Trajectory2D(time_ns=np.array([], dtype=np.int64), x=empty, y=empty.copy(), vx=empty.copy(), vy=empty.copy(), radius_m=radius_m)
+    empty_trajectory = Trajectory2D(t_ns=np.array([], dtype=np.int64), x=empty, y=empty.copy(), vx=empty.copy(), vy=empty.copy(), radius_m=radius_m)
     tracks = episode_table(episode, ROBOT_TRACKS_TOPIC)
     if tracks is None:
         return empty_trajectory, empty
@@ -190,7 +190,7 @@ def resolve_robot_trajectory(calc: BaseMetricCalculator, episode: AlignedEpisode
 
     return (
         Trajectory2D(
-            time_ns=rows["t_ns"].to_numpy().astype(np.int64),
+            t_ns=rows["t_ns"].to_numpy().astype(np.int64),
             x=rows["x"].to_numpy().astype(np.float64),
             y=rows["y"].to_numpy().astype(np.float64),
             vx=_finite_velocity(rows["vx"].to_numpy().astype(np.float64)),
@@ -246,7 +246,7 @@ def _identity_aliases(value: str) -> set[str]:
 def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
     """PedTrack of one pedestrian's frames, in time order."""
     ped_id = str(frame["ped_id"][0])
-    time_ns = frame["t_ns"].to_numpy().astype(np.int64)
+    t_ns = frame["t_ns"].to_numpy().astype(np.int64)
     x = frame["x"].to_numpy().astype(np.float64)
     y = frame["y"].to_numpy().astype(np.float64)
     vx = _finite_velocity(frame["vx"].fill_null(0.0).to_numpy().astype(np.float64))
@@ -255,14 +255,14 @@ def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
     twist_is_zero = not bool(np.any(np.hypot(vx, vy) > 1e-9))
     position_moved = len(x) >= 2 and bool(np.any(np.hypot(np.diff(x), np.diff(y)) > 1e-6))
     if twist_is_zero and position_moved:
-        vx, vy = BaseMetricCalculator.velocity_from_pose(x, y, time_ns)
+        vx, vy = BaseMetricCalculator.velocity_from_pose(x, y, t_ns)
         vx[0], vy[0] = vx[1], vy[1]
 
     radius_m = _first_float(frame["radius_m"])
     if radius_m is None or not np.isfinite(radius_m) or radius_m <= 0.0:
         radius_m = None
     effective_radius_m = radius_m if radius_m is not None else DEFAULT_PED_RADIUS_M
-    trajectory = Trajectory2D(time_ns=time_ns, x=x, y=y, vx=vx, vy=vy, radius_m=effective_radius_m)
+    trajectory = Trajectory2D(t_ns=t_ns, x=x, y=y, vx=vx, vy=vy, radius_m=effective_radius_m)
     return PedTrack(
         ped_id=ped_id,
         ped_name=_first_text(frame["ped_name"], ped_id),
@@ -327,37 +327,37 @@ def _recorded_robot_visibility(episode: AlignedEpisodeBundle) -> bool | None:
     return None
 
 
-def contiguous_spans(mask: np.ndarray, time_ns: np.ndarray, merge_gap_ns: int) -> list[tuple[int, int]]:
+def contiguous_spans(mask: np.ndarray, t_ns: np.ndarray, merge_gap_ns: int) -> list[tuple[int, int]]:
     """Inclusive index spans of the True runs of a mask, bridging gaps of at most merge_gap_ns."""
     hits = np.flatnonzero(mask)
     if len(hits) == 0:
         return []
-    breaks = np.flatnonzero(np.diff(time_ns[hits]) > merge_gap_ns) + 1
+    breaks = np.flatnonzero(np.diff(t_ns[hits]) > merge_gap_ns) + 1
     edges = np.concatenate(([0], breaks, [len(hits)]))
     return [(int(hits[start]), int(hits[end - 1])) for start, end in zip(edges[:-1], edges[1:], strict=True)]
 
 
 def _agent_encounters(robot: Trajectory2D, track: PedTrack, spec: EncounterSpec) -> list[EncounterWindow]:
     """Encounter windows between the robot and a single pedestrian."""
-    if len(robot.time_ns) == 0 or len(track.time_ns) == 0:
+    if len(robot.t_ns) == 0 or len(track.t_ns) == 0:
         return []
-    t_lo = max(int(robot.time_ns[0]), int(track.time_ns[0]))
-    t_hi = min(int(robot.time_ns[-1]), int(track.time_ns[-1]))
+    t_lo = max(int(robot.t_ns[0]), int(track.t_ns[0]))
+    t_hi = min(int(robot.t_ns[-1]), int(track.t_ns[-1]))
     if t_hi < t_lo:
         return []
 
     robot_window = robot.slice_ns(t_lo, t_hi)
-    pedestrian_window = track.trajectory.resample_onto(robot_window.time_ns)
+    pedestrian_window = track.trajectory.resample_onto(robot_window.t_ns)
     distances = np.hypot(pedestrian_window.x - robot_window.x, pedestrian_window.y - robot_window.y)
     merge_gap_ns = int(round(spec.merge_gap_s * NS_PER_S))
-    spans = contiguous_spans(distances <= spec.distance_threshold_m, robot_window.time_ns, merge_gap_ns)
+    spans = contiguous_spans(distances <= spec.distance_threshold_m, robot_window.t_ns, merge_gap_ns)
 
     pedestrian_radius_m = track.radius_m if track.radius_m is not None else spec.default_ped_radius_m
     surface_margin_m = robot.radius_m + pedestrian_radius_m
     windows: list[EncounterWindow] = []
     for start, end in spans:
         span_distances = distances[start : end + 1]
-        span_time_ns = robot_window.time_ns[start : end + 1]
+        span_time_ns = robot_window.t_ns[start : end + 1]
         nearest = int(np.argmin(span_distances))
         min_dist_m = float(span_distances[nearest])
         windows.append(

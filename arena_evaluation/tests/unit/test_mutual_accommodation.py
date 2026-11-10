@@ -226,7 +226,7 @@ def test_reconcile_pfi_ignores_samples_before_first_pedestrian_message():
             if row is not None:
                 frames.append((i * 1_000_000_000, [{"ped_id": "ped_0", "x": row[0], "y": row[1], "z": row[2] if len(row) > 2 else 0.0}]))
         peds = flat_peds(frames)
-        data = pl.DataFrame({"time_ns": [i * 1_000_000_000 for i in range(len(rows))]})
+        data = pl.DataFrame({"t_ns": [i * 1_000_000_000 for i in range(len(rows))]})
         ep = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], topics={"pedestrian_tracks": peds})
         table = calc.series_table(ep)
         if table.height == 0:

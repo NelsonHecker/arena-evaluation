@@ -11,10 +11,10 @@ def _calc():
     return SemanticInteractionMetricsCalculator(RobotParams(0.2, 0.0, 10.0))
 
 
-def _episode(snapshot, end_time_ns=6_000_000_000):
+def _episode(snapshot, end_t_ns=6_000_000_000):
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": [0, end_time_ns]}),
+        data=pl.DataFrame({"t_ns": [0, end_t_ns]}),
         start_pos=[],
         goal_pos=[],
         semantic_snapshot=snapshot,
@@ -82,7 +82,7 @@ def test_no_semantic_snapshot_returns_zero_defaults():
 def test_empty_semantic_snapshot_returns_zero_defaults():
     snapshot = pl.DataFrame(
         {
-            "time_ns": [],
+            "t_ns": [],
             "entity": [],
             "kind": [],
             "field": [],
@@ -105,7 +105,7 @@ def test_empty_semantic_snapshot_returns_zero_defaults():
 
 
 def _members(rows):
-    """Members rows: (time_ns, entity, kind, [names])."""
+    """Members rows: (t_ns, entity, kind, [names])."""
     return snapshot_frame([(r[0], r[1], r[2], "members", "members", r[3]) for r in rows])
 
 

@@ -81,9 +81,9 @@ def ndtw(reference: np.ndarray, query: np.ndarray, threshold: float, spacing: fl
     return float(np.exp(-cost[n, m] / (n * threshold)))
 
 
-def stuck_window(xs: np.ndarray, ys: np.ndarray, yaw: np.ndarray, time_ns: np.ndarray, window_s: float, max_shift_m: float, max_turn_rad: float) -> bool:
+def stuck_window(xs: np.ndarray, ys: np.ndarray, yaw: np.ndarray, t_ns: np.ndarray, window_s: float, max_shift_m: float, max_turn_rad: float) -> bool:
     """True if some pose and the first pose `window_s` or more later differ by under both thresholds."""
-    t = np.asarray(time_ns, dtype=np.float64) / 1e9
+    t = np.asarray(t_ns, dtype=np.float64) / 1e9
     later = np.searchsorted(t, t + window_s, side="left")
     first = np.nonzero(later < len(t))[0]
     later = later[first]
@@ -179,12 +179,12 @@ class VlnMetricsCalculator(BaseMetricCalculator):
         goals, threshold = route(episode.phases)
         results["goal_inputs"] = goal_inputs(episode.phases)
 
-        if success is not None and "time_ns" in episode.data.columns:
+        if success is not None and "t_ns" in episode.data.columns:
             results["stuck"] = not bool(success) and stuck_window(
                 pos_x,
                 pos_y,
                 yaw,
-                episode.data["time_ns"].to_numpy(),
+                episode.data["t_ns"].to_numpy(),
                 self.STUCK_WINDOW_S,
                 self.STUCK_SHIFT_M,
                 math.radians(self.STUCK_TURN_DEG),

@@ -39,10 +39,10 @@ class MechanismStatesCalculator(BaseMetricCalculator):
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         del prior_results
         frame = episode.data
-        if frame is None or "time_ns" not in frame.columns or len(frame) == 0:
+        if frame is None or "t_ns" not in frame.columns or len(frame) == 0:
             return {"mechanism_states": None}
         view = SemanticView.from_episode(episode)
-        query = frame["time_ns"].to_numpy().astype(np.int64)
+        query = frame["t_ns"].to_numpy().astype(np.int64)
         states = []
         for kind, field in PROGRESS_FIELD.items():
             for entity in view.entities(kind):

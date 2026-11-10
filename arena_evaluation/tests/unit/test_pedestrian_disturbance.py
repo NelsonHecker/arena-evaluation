@@ -27,7 +27,7 @@ def _frame(rows: list, seconds: list[float] | None = None) -> pl.DataFrame:
 def _calc(peds: pl.DataFrame | None) -> dict:
     """The robot's time axis is the pedestrian frames' own times here."""
     topics = {} if peds is None else {"pedestrian_tracks": peds}
-    data = None if peds is None else pl.DataFrame({"time_ns": peds["t_ns"].unique().sort()})
+    data = None if peds is None else pl.DataFrame({"t_ns": peds["t_ns"].unique().sort()})
     episode = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], peds=peds, topics=topics)
     return PedestrianDisturbanceCalculator(RobotParams()).calculate(episode, {})
 

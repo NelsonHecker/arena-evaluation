@@ -51,7 +51,7 @@ def test_world_not_threaded_returns_none_defaults():
     calc = _calc()
     assert calc.world is None
 
-    results = calc.calculate(_episode(pl.DataFrame({"time_ns": [0, 1_000_000_000], "pos_x": [0.0, 1.0], "pos_y": [0.0, 1.0], "yaw": [0.0, 0.0]})), {})
+    results = calc.calculate(_episode(pl.DataFrame({"t_ns": [0, 1_000_000_000], "pos_x": [0.0, 1.0], "pos_y": [0.0, 1.0], "yaw": [0.0, 0.0]})), {})
 
     assert all(v is None for v in results.values())
     assert set(results) == set(calc.output_keys())
@@ -73,7 +73,7 @@ def test_world_not_locally_present_returns_none_and_warns():
     try:
         calc = _calc()
         calc.world = "definitely_nonexistent_world_xyz"
-        results = calc.calculate(_episode(pl.DataFrame({"time_ns": [0, 1_000_000_000], "pos_x": [0.0, 1.0], "pos_y": [0.0, 1.0], "yaw": [0.0, 0.0]})), {})
+        results = calc.calculate(_episode(pl.DataFrame({"t_ns": [0, 1_000_000_000], "pos_x": [0.0, 1.0], "pos_y": [0.0, 1.0], "yaw": [0.0, 0.0]})), {})
     finally:
         cm.logger.removeHandler(handler)
 
@@ -155,7 +155,7 @@ def test_restricted_zone_entries_ignores_start_inside():
 def test_door_open_series_and_query():
     events = pl.DataFrame(
         {
-            "time_ns": [1_000_000_000, 3_000_000_000],
+            "t_ns": [1_000_000_000, 3_000_000_000],
             "entity": ["env_0/door_1", "env_0/door_1"],
             "kind": ["door", "door"],
             "field": ["state", "state"],
@@ -181,7 +181,7 @@ def test_doorway_blocking_time_requires_stationary_and_open():
     )
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000, 3_000_000_000],
             "pos_x": [0.0, 0.0, 0.0, 0.0],
             "pos_y": [0.0, 0.0, 0.0, 0.0],
             "yaw": [0.0, 0.0, 0.0, 0.0],
@@ -193,9 +193,9 @@ def test_doorway_blocking_time_requires_stationary_and_open():
     calc = _calc()
     pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
     speed = np.abs(episode.data["vel_linear"].to_numpy())
-    time_ns = episode.data["time_ns"].to_numpy()
+    t_ns = episode.data["t_ns"].to_numpy()
 
-    total = calc._doorway_blocking_time(episode, pos_x, pos_y, speed, time_ns, doors)
+    total = calc._doorway_blocking_time(episode, pos_x, pos_y, speed, t_ns, doors)
 
     # stationary intervals [0,1) and [1,2) both qualify, [2,3) does not (moving)
     assert total == pytest.approx(2.0)
@@ -205,7 +205,7 @@ def test_doorway_blocking_degrades_to_zero_without_snapshot():
     doors = [_DoorGeometry(name="door_1", center_x=0.0, center_y=0.0, radius=1.0)]
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [0.0, 0.0],
             "pos_y": [0.0, 0.0],
             "yaw": [0.0, 0.0],
@@ -217,9 +217,9 @@ def test_doorway_blocking_degrades_to_zero_without_snapshot():
 
     pos_x, pos_y, _yaw, _ox, _oy, _oyaw = calc.resolve_robot_pose(episode)
     speed = np.abs(episode.data["vel_linear"].to_numpy())
-    time_ns = episode.data["time_ns"].to_numpy()
+    t_ns = episode.data["t_ns"].to_numpy()
 
-    total = calc._doorway_blocking_time(episode, pos_x, pos_y, speed, time_ns, doors)
+    total = calc._doorway_blocking_time(episode, pos_x, pos_y, speed, t_ns, doors)
 
     assert total == pytest.approx(0.0)
 
@@ -309,7 +309,7 @@ def test_calculate_end_to_end_with_cached_world():
 
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000],
             "pos_x": [1.0, 1.0, 1.0],
             "pos_y": [1.0, 1.0, 1.0],
             "yaw": [0.0, 0.0, 0.0],
@@ -359,11 +359,11 @@ def test_reconstruct_events_empty_without_snapshot():
     events = _reconstruct_events(None)
 
     assert len(events) == 0
-    assert events.columns == ["time_ns", "entity", "kind", "field", "previous", "current"]
+    assert events.columns == ["t_ns", "entity", "kind", "field", "previous", "current"]
 
     empty_snapshot = pl.DataFrame(
         {
-            "time_ns": [],
+            "t_ns": [],
             "entity": [],
             "kind": [],
             "field": [],
@@ -386,11 +386,11 @@ def test_reconstruct_events_seeds_first_row_and_collapses_duplicates():
     )
 
     events = _reconstruct_events(snapshot)
-    rows = events.sort("time_ns").to_dicts()
+    rows = events.sort("t_ns").to_dicts()
 
     assert rows == [
-        {"time_ns": 0, "entity": "env_0/door_1", "kind": "door", "field": "state", "previous": "", "current": "closed"},
-        {"time_ns": 2_000_000_000, "entity": "env_0/door_1", "kind": "door", "field": "state", "previous": "closed", "current": "open"},
+        {"t_ns": 0, "entity": "env_0/door_1", "kind": "door", "field": "state", "previous": "", "current": "closed"},
+        {"t_ns": 2_000_000_000, "entity": "env_0/door_1", "kind": "door", "field": "state", "previous": "closed", "current": "open"},
     ]
 
 
@@ -405,7 +405,7 @@ def test_reconstruct_events_stringifies_predicate_and_continuous():
     )
 
     events = _reconstruct_events(snapshot)
-    by_field = {(r["entity"], r["field"], r["time_ns"]): r["current"] for r in events.to_dicts()}
+    by_field = {(r["entity"], r["field"], r["t_ns"]): r["current"] for r in events.to_dicts()}
 
     assert by_field[("env_0/door_1", "open", 0)] == "false"
     assert by_field[("env_0/door_1", "open", 1_000_000_000)] == "true"
@@ -425,10 +425,10 @@ def test_reconstruct_events_keeps_members_as_sorted_joined_names():
     )
 
     events = _reconstruct_events(snapshot)
-    member_rows = events.filter(pl.col("field") == "members").sort("time_ns")
+    member_rows = events.filter(pl.col("field") == "members").sort("t_ns")
 
     assert member_rows["current"].to_list() == ["", "env_0/human_1,env_0/robot_0", ""]
-    assert member_rows["time_ns"].to_list() == [0, 1_000_000_000, 3_000_000_000]
+    assert member_rows["t_ns"].to_list() == [0, 1_000_000_000, 3_000_000_000]
     assert len(events.filter(pl.col("field") == "cap")) == 1
 
 
@@ -447,7 +447,7 @@ def test_reconstruct_events_members_without_value_list_column():
 def test_door_open_series_keys_by_authored_name_with_level_suffix():
     events = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "entity": ["env_3/main_door/0", "env_3/main_door/0"],
             "kind": ["door", "door"],
             "field": ["state", "state"],
@@ -473,7 +473,7 @@ def test_reconstruct_events_independent_per_entity_and_field():
 
     events = _reconstruct_events(snapshot)
     door_1 = events.filter(pl.col("entity") == "env_0/door_1")
-    door_2 = events.filter(pl.col("entity") == "env_0/door_2").sort("time_ns")
+    door_2 = events.filter(pl.col("entity") == "env_0/door_2").sort("t_ns")
 
     assert door_1["current"].to_list() == ["closed"]
     assert door_2["current"].to_list() == ["open", "closed"]
@@ -496,7 +496,7 @@ def test_zone_metrics_are_null_without_recorded_world_semantics():
     calc._world_cache["synthetic_world"] = (_extract_zone_geometry(level), _extract_door_geometry(level))
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000, 2_000_000_000],
+            "t_ns": [0, 1_000_000_000, 2_000_000_000],
             "pos_x": [1.0, 1.0, 1.0],
             "pos_y": [1.0, 1.0, 1.0],
             "yaw": [0.0, 0.0, 0.0],

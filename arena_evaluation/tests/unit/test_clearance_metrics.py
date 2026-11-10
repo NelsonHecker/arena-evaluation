@@ -18,7 +18,7 @@ def _episode(times_ns, scan=None, peds=None):
     n = len(times_ns)
     data = pl.DataFrame(
         {
-            "time_ns": times_ns,
+            "t_ns": times_ns,
             "pos_x": [0.0] * n,
             "pos_y": [0.0] * n,
             "yaw": [0.0] * n,

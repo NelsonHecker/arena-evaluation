@@ -246,12 +246,12 @@ class CollisionMetricsCalculator(BaseMetricCalculator):
     def _aligned_duration_s(episode: AlignedEpisodeBundle) -> float | None:
         """time_metrics' time_to_goal: the span of the aligned episode clock."""
         frame = episode.data
-        if frame is None or "time_ns" not in frame.columns:
+        if frame is None or "t_ns" not in frame.columns:
             return None
-        time_ns = frame["time_ns"].to_numpy()
-        if len(time_ns) < 2:
+        t_ns = frame["t_ns"].to_numpy()
+        if len(t_ns) < 2:
             return 0.0
-        return float(time_ns[-1] - time_ns[0]) / 1e9
+        return float(t_ns[-1] - t_ns[0]) / 1e9
 
     def _ground_truth_path_length_m(self, episode: AlignedEpisodeBundle) -> float:
         """path_metrics' path_length on the same teleport-free ground-truth segment, in metres."""

@@ -121,9 +121,9 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
     def _episode_series(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Velocity (m/s), total power (W) and elapsed time (s) of the episode on the aligned clock."""
         frame = episode.data
-        if frame is None or len(frame) == 0 or "time_ns" not in frame.columns:
+        if frame is None or len(frame) == 0 or "t_ns" not in frame.columns:
             return np.array([]), np.array([]), np.array([])
-        time_s = (frame["time_ns"].to_numpy().astype(np.float64) - float(frame["time_ns"][0])) / NANOSECONDS_PER_SECOND
+        time_s = (frame["t_ns"].to_numpy().astype(np.float64) - float(frame["t_ns"][0])) / NANOSECONDS_PER_SECOND
         power = _filled(frame["total_power_w"].cast(pl.Float64).to_numpy().astype(np.float64)) if "total_power_w" in frame.columns else np.full(len(frame), np.nan)
         velocity = np.asarray(prior_results.get("velocity") or [], dtype=np.float64)
         if len(velocity) != len(time_s):
@@ -143,10 +143,10 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
             power = power.join_asof(reference, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
         else:
             power = power.with_columns(pl.lit(None, dtype=pl.Float64).alias("speed_mps"))
-        time_ns = power["t_ns"].to_numpy().astype(np.int64)
+        t_ns = power["t_ns"].to_numpy().astype(np.int64)
         power_w = power["total_power_w"].to_numpy().astype(np.float64)
         velocity = _filled(power["speed_mps"].to_numpy().astype(np.float64))
-        time_s = (time_ns.astype(np.float64) - float(time_ns[0])) / NANOSECONDS_PER_SECOND
+        time_s = (t_ns.astype(np.float64) - float(t_ns[0])) / NANOSECONDS_PER_SECOND
         return velocity, power_w, time_s
 
     def _summarize(

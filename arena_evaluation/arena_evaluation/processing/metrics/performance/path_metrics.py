@@ -55,7 +55,7 @@ _SUMMARY_KEYS: typing.Final[tuple[str, ...]] = (
 class _PathGeometry:
     """Per-sample path arrays of the teleport-free track and the scalar aggregates they yield."""
 
-    time_ns: np.ndarray
+    t_ns: np.ndarray
     pos_x_m: np.ndarray
     pos_y_m: np.ndarray
     yaw_rad: np.ndarray
@@ -128,7 +128,7 @@ def _curvature_arrays(pos_x_m: np.ndarray, pos_y_m: np.ndarray) -> tuple[np.ndar
 
 def _build_geometry(
     *,
-    time_ns: np.ndarray,
+    t_ns: np.ndarray,
     pos_x_m: np.ndarray,
     pos_y_m: np.ndarray,
     yaw_rad: np.ndarray,
@@ -153,7 +153,7 @@ def _build_geometry(
     valid_curvature = curvature_inv_m[~np.isnan(curvature_inv_m)]
     valid_roughness = roughness[~np.isnan(roughness)]
     return _PathGeometry(
-        time_ns=time_ns,
+        t_ns=t_ns,
         pos_x_m=pos_x_m,
         pos_y_m=pos_y_m,
         yaw_rad=yaw_rad,
@@ -217,14 +217,14 @@ class PathMetricsCalculator(BaseMetricCalculator):
             return None
         frame = self.resolve_robot_frame(episode)
         pos_x_m, pos_y_m, yaw_rad, odom_x_m, odom_y_m, odom_yaw_rad = self.resolve_robot_pose(episode)
-        time_ns = np.array([], dtype=np.int64) if frame is None else frame["time_ns"].to_numpy().astype(np.int64)
-        if len(time_ns) != len(pos_x_m):
-            raise ValueError(f"path_metrics: {len(time_ns)} sample times for {len(pos_x_m)} resolved poses")
+        t_ns = np.array([], dtype=np.int64) if frame is None else frame["t_ns"].to_numpy().astype(np.int64)
+        if len(t_ns) != len(pos_x_m):
+            raise ValueError(f"path_metrics: {len(t_ns)} sample times for {len(pos_x_m)} resolved poses")
         if len(odom_x_m) != len(pos_x_m):
             # No wheel-odometry stream: the odom columns are null at every sample, not absent from the row axis.
             odom_x_m, odom_y_m, odom_yaw_rad = _nan_array(len(pos_x_m)), _nan_array(len(pos_x_m)), _nan_array(len(pos_x_m))
         return _build_geometry(
-            time_ns=time_ns,
+            t_ns=t_ns,
             pos_x_m=pos_x_m,
             pos_y_m=pos_y_m,
             yaw_rad=yaw_rad,
@@ -250,16 +250,16 @@ class PathMetricsCalculator(BaseMetricCalculator):
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat path series, one row per resolved track sample; schema-typed when empty."""
         geometry = self._path_geometry(episode)
-        if geometry is None or len(geometry.time_ns) == 0:
+        if geometry is None or len(geometry.t_ns) == 0:
             return pl.DataFrame(schema=SERIES_SCHEMA)
-        sample_count = len(geometry.time_ns)
-        time_s = (geometry.time_ns.astype(np.float64) - float(geometry.time_ns[0])) / NANOSECONDS_PER_SECOND
+        sample_count = len(geometry.t_ns)
+        time_s = (geometry.t_ns.astype(np.float64) - float(geometry.t_ns[0])) / NANOSECONDS_PER_SECOND
         return pl.DataFrame(
             {
                 "run_id": pl.Series("run_id", [run_id] * sample_count, dtype=pl.String),
                 "episode_id": pl.Series("episode_id", [int(episode.episode_id)] * sample_count, dtype=pl.Int64),
                 "robot_id": pl.Series("robot_id", [robot_id or (episode.robot_name or "robot")] * sample_count, dtype=pl.String),
-                "t_ns": pl.Series("t_ns", geometry.time_ns, dtype=pl.Int64),
+                "t_ns": pl.Series("t_ns", geometry.t_ns, dtype=pl.Int64),
                 "time_s": pl.Series("time_s", time_s, dtype=pl.Float64),
                 "x_m": _null_float_series(geometry.pos_x_m, "x_m"),
                 "y_m": _null_float_series(geometry.pos_y_m, "y_m"),

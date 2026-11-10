@@ -72,7 +72,7 @@ def _episode(
         episode_id=1,
         data=pl.DataFrame(
             {
-                "time_ns": times_ns,
+                "t_ns": times_ns,
                 "pos_x_gt": [p[0] for p in robot_xy],
                 "pos_y_gt": [p[1] for p in robot_xy],
                 "yaw_gt": [0.0] * n,

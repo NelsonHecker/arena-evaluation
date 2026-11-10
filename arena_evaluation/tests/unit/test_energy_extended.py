@@ -15,7 +15,7 @@ SEC = 1_000_000_000
 
 
 def _episode(power_w: list[float] | None = None):
-    columns = {"time_ns": [index * SEC for index in range(len(power_w or []))]}
+    columns = {"t_ns": [index * SEC for index in range(len(power_w or []))]}
     if power_w is not None:
         columns["total_power_w"] = power_w
     return AlignedEpisodeBundle(
@@ -98,7 +98,7 @@ def test_short_standstill_blocks_are_ignored(calc):
     prior = {"velocity": [1.0, 0.0, 1.0, 1.0]}
     episode = AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": [0, 100_000_000, 200_000_000, 300_000_000], "total_power_w": [10.0, 10.0, 10.0, 10.0]}),
+        data=pl.DataFrame({"t_ns": [0, 100_000_000, 200_000_000, 300_000_000], "total_power_w": [10.0, 10.0, 10.0, 10.0]}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[1.0, 0.0],
     )
@@ -133,7 +133,7 @@ def _encounter_episode() -> AlignedEpisodeBundle:
     times = [0, SEC, 2 * SEC]
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": times}),
+        data=pl.DataFrame({"t_ns": times}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[2.0, 0.0],
         topics={

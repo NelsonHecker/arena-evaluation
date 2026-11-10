@@ -31,9 +31,9 @@ def compute_acoustic_dose_pa2s(
         frame = frame.filter(pl.col("t_ns") <= t_end_ns)
     if len(frame) < 2:
         return None
-    time_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
+    t_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
     level_dba = frame.get_column("total_level_af_dba").to_numpy().astype(np.float64)
-    dt_s = np.diff(time_ns).astype(np.float64) / 1e9
+    dt_s = np.diff(t_ns).astype(np.float64) / 1e9
     linear_pressure_sq = ACOUSTIC_REFERENCE_PRESSURE_SQ_PA2 * np.power(10.0, level_dba / 10.0)
     return float(np.sum(0.5 * (linear_pressure_sq[:-1] + linear_pressure_sq[1:]) * dt_s))
 
@@ -139,11 +139,11 @@ class AcousticsCalculator(BaseMetricCalculator):
             return {k: None for k in self.output_keys()}
 
         dba = np.maximum(dba, self._MIN_DBA)
-        time_ns = acous["t_ns"].to_numpy()
-        if len(time_ns) < 2:
+        t_ns = acous["t_ns"].to_numpy()
+        if len(t_ns) < 2:
             return {k: None for k in self.output_keys()}
 
-        dt = np.diff(time_ns) / 1e9
+        dt = np.diff(t_ns) / 1e9
         dt = np.append(dt, dt[-1] if len(dt) > 0 else 0.01)
         dt = np.where(dt <= 0.0, 1e-6, dt)
 
@@ -164,7 +164,7 @@ class AcousticsCalculator(BaseMetricCalculator):
 
         dba_filt = self._median_filter_3(dba)
         dL = np.diff(dba_filt)
-        dt_diff = np.diff(time_ns) / 1e9
+        dt_diff = np.diff(t_ns) / 1e9
         dt_diff = np.where(dt_diff <= 0.0, 1e-6, dt_diff)
         with np.errstate(divide="ignore", invalid="ignore"):
             rates = dL / dt_diff

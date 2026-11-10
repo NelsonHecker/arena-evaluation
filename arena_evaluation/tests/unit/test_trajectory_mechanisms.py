@@ -115,7 +115,7 @@ def test_mechanism_states_sampled_on_the_time_grid():
             (0, "env_0/plate/0", "pressure_plate", "pressed", "predicate", False),
         ]
     )
-    data = pl.DataFrame({"time_ns": [i * T for i in range(6)], "pos_x": [0.0] * 6, "pos_y": [0.0] * 6, "yaw": [0.0] * 6})
+    data = pl.DataFrame({"t_ns": [i * T for i in range(6)], "pos_x": [0.0] * 6, "pos_y": [0.0] * 6, "yaw": [0.0] * 6})
     episode = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[0, 0, 0], goal_pos=[], robot_name="env_0_jackal", semantic_snapshot=snapshot)
     out = MechanismStatesCalculator(RobotParams()).calculate(episode, {"time": [i * T for i in range(6)]})["mechanism_states"]
     by_name = {s["entity"]: s for s in out}

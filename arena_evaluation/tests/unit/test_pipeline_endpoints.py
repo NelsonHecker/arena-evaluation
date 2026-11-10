@@ -7,7 +7,7 @@ from arena_evaluation.processing.pipeline import _episode_endpoints, _episode_wi
 
 def _aligned(with_gt: bool) -> pl.DataFrame:
     cols = {
-        "time_ns": [0, 1_000_000_000],
+        "t_ns": [0, 1_000_000_000],
         "pos_x": [0.05, 3.0],
         "pos_y": [0.02, 1.0],
         "yaw": [0.5, 0.6],
@@ -98,7 +98,7 @@ def test_episode_window_stays_open_without_a_terminal_or_running_record():
 
 
 def test_start_is_the_first_ground_truth_pose_not_the_odometry_origin():
-    aligned = pl.DataFrame({"time_ns": [0, 1_000_000_000], "pos_x": [0.0, 10.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0], "pos_x_gt": [3.0, 13.0], "pos_y_gt": [-2.0, -2.0], "yaw_gt": [0.7, 0.7]})
+    aligned = pl.DataFrame({"t_ns": [0, 1_000_000_000], "pos_x": [0.0, 10.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0], "pos_x_gt": [3.0, 13.0], "pos_y_gt": [-2.0, -2.0], "yaw_gt": [0.7, 0.7]})
 
     start, _ = _episode_endpoints(aligned, None)
     assert start == pytest.approx([3.0, -2.0, 0.7])

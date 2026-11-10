@@ -98,7 +98,7 @@ class EnergyMetricCalculator(BaseMetricCalculator):
         if frame is None or len(frame) == 0:
             return pl.DataFrame(schema=SERIES_SCHEMA)
 
-        time_ns = frame["time_ns"].cast(pl.Int64)
+        t_ns = frame["t_ns"].cast(pl.Int64)
         columns: dict[str, pl.Series] = {}
         for target, source in _POWER_COLUMNS.items():
             values = frame[source].cast(pl.Float64).to_numpy() if source in frame.columns else np.full(len(frame), np.nan)
@@ -109,7 +109,7 @@ class EnergyMetricCalculator(BaseMetricCalculator):
         columns["battery_soc_pct"] = pl.Series("battery_soc_pct", battery).fill_nan(None)
         columns["velocity_linear_mps"] = pl.Series("velocity_linear_mps", velocity).fill_nan(None)
 
-        series = pl.DataFrame({"t_ns": time_ns, **columns})
+        series = pl.DataFrame({"t_ns": t_ns, **columns})
         return series.with_columns(
             ((pl.col("t_ns").cast(pl.Float64) - pl.col("t_ns").cast(pl.Float64).min()) / NANOSECONDS_PER_SECOND).alias("time_s"),
             pl.lit("").alias("run_id"),

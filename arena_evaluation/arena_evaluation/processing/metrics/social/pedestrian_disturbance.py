@@ -222,7 +222,7 @@ class PedestrianDisturbanceCalculator(BaseMetricCalculator):
         """Wall seconds the episode's aligned rows cover, the denominator the delay ratio used."""
         if episode.data is None or episode.data.height < 2:
             return None
-        span_ns = episode.data.select(pl.col("time_ns").max() - pl.col("time_ns").min()).item()
+        span_ns = episode.data.select(pl.col("t_ns").max() - pl.col("t_ns").min()).item()
         duration_s = float(span_ns) / 1e9
         return duration_s if duration_s > 0.0 else None
 

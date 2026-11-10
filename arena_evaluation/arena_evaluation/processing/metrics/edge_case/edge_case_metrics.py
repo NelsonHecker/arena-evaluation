@@ -80,18 +80,18 @@ def _first_fired(fired: Mapping[str, Mapping[str, float]], agents: Iterable[str]
 
 def episode_samples(calc: BaseMetricCalculator, episode: AlignedEpisodeBundle, radii: Mapping[str, float]) -> list[Sample]:
     """The robot on a SAMPLE_HZ grid with the pedestrians of a peds message at most 0.1 s old, by scenario name and `radii`."""
-    pos_x, pos_y, _yaw, time_ns = calc.resolve_native_pose(episode)
-    if len(time_ns) < 2:
+    pos_x, pos_y, _yaw, t_ns = calc.resolve_native_pose(episode)
+    if len(t_ns) < 2:
         return []
-    grid = np.arange(int(time_ns[0]), int(time_ns[-1]) + 1, int(1e9 / SAMPLE_HZ), dtype=np.int64)
-    rx = np.interp(grid, time_ns, pos_x)
-    ry = np.interp(grid, time_ns, pos_y)
+    grid = np.arange(int(t_ns[0]), int(t_ns[-1]) + 1, int(1e9 / SAMPLE_HZ), dtype=np.int64)
+    rx = np.interp(grid, t_ns, pos_x)
+    ry = np.interp(grid, t_ns, pos_y)
     vx, vy = calc.velocity_from_pose(rx, ry, grid)
     rows: list[dict[str, tuple[tuple[float, float], tuple[float, float], float]]] = [{} for _ in grid]
     peds = calc.native_ped_frame(episode)
     if peds is not None and peds.height > 0:
-        held = pedestrians_at(pl.Series("time_ns", grid), peds, PEDS_TOLERANCE_NS).with_columns(
-            frame_ix=((pl.col("time_ns") - int(grid[0])) // _grid_step_ns()).cast(pl.Int64),
+        held = pedestrians_at(pl.Series("t_ns", grid), peds, PEDS_TOLERANCE_NS).with_columns(
+            frame_ix=((pl.col("t_ns") - int(grid[0])) // _grid_step_ns()).cast(pl.Int64),
             bare_name=_bare_ped_name_expression(),
         )
         for frame_ix, bare, ped_x, ped_y, ped_vx, ped_vy in zip(

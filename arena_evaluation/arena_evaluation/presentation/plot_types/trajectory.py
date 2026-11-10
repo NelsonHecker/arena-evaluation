@@ -107,34 +107,34 @@ def _sub_paths(path: object) -> list[np.ndarray]:
 
 def _row_time_ns(row: typing.Mapping[str, object], n: int) -> np.ndarray | None:
     """The row's `time` samples when they line up with its path, else None."""
-    time_ns = row.get("time")
-    if time_ns is None or len(time_ns) != n:  # type: ignore[arg-type]
+    t_ns = row.get("time")
+    if t_ns is None or len(t_ns) != n:  # type: ignore[arg-type]
         return None
-    return np.asarray(time_ns, dtype=np.int64)
+    return np.asarray(t_ns, dtype=np.int64)
 
 
-def _jump_indices(x: np.ndarray, y: np.ndarray, time_ns: np.ndarray | None) -> np.ndarray:
+def _jump_indices(x: np.ndarray, y: np.ndarray, t_ns: np.ndarray | None) -> np.ndarray:
     """Steps that are teleports (resets, elevator rides)."""
-    if time_ns is not None:
-        return teleport_jumps(x, y, time_ns)
+    if t_ns is not None:
+        return teleport_jumps(x, y, t_ns)
     dists = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
     return np.where(dists > LEGACY_JUMP_M)[0]
 
 
-def _break_at_teleports(x: np.ndarray, y: np.ndarray, time_ns: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
+def _break_at_teleports(x: np.ndarray, y: np.ndarray, t_ns: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
     """Copies of x, y with NaN at every sample that lands a teleport, so lines stop there."""
     bx, by = x.astype(float).copy(), y.astype(float).copy()
-    jumps = _jump_indices(x, y, time_ns)
+    jumps = _jump_indices(x, y, t_ns)
     if len(jumps):
         bx[jumps + 1] = np.nan
         by[jumps + 1] = np.nan
     return bx, by
 
 
-def _first_moving_index(x: np.ndarray, y: np.ndarray, time_ns: np.ndarray | None) -> int:
+def _first_moving_index(x: np.ndarray, y: np.ndarray, t_ns: np.ndarray | None) -> int:
     """Index where the first segment longer than 0.1 m starts (spawn jumps skipped)."""
     dists = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
-    jumps = _jump_indices(x, y, time_ns)
+    jumps = _jump_indices(x, y, t_ns)
     starts = np.concatenate([[0], jumps + 1]).astype(int)
     ends = np.concatenate([jumps, [len(dists)]]).astype(int)
     for s_idx, e_idx in zip(starts, ends, strict=True):
@@ -261,7 +261,7 @@ class TrajectoryRenderer(BasePlotRenderer):
                 if path is None or isinstance(path, float) or len(path) == 0:  # type: ignore[arg-type]
                     continue
                 for k, path_arr in enumerate(_sub_paths(path)):
-                    time_ns = _row_time_ns(row, len(path_arr))
+                    t_ns = _row_time_ns(row, len(path_arr))
                     while len(all_x_by_agent) <= k:
                         all_x_by_agent.append([])
                         all_y_by_agent.append([])
@@ -272,11 +272,11 @@ class TrajectoryRenderer(BasePlotRenderer):
                                 indices.append([])
 
                     if overlay_markers:
-                        self._record_markers(markers, marker_indices, k, row, path_arr, time_ns, len(all_x_by_agent[k]))
+                        self._record_markers(markers, marker_indices, k, row, path_arr, t_ns, len(all_x_by_agent[k]))
                     if len(all_x_by_agent[k]) > 0:
                         all_x_by_agent[k].append(None)
                         all_y_by_agent[k].append(None)
-                    bx, by = _break_at_teleports(path_arr[:, 0], path_arr[:, 1], time_ns)
+                    bx, by = _break_at_teleports(path_arr[:, 0], path_arr[:, 1], t_ns)
                     all_x_by_agent[k].extend([None if np.isnan(v) else float(v) for v in bx])
                     all_y_by_agent[k].extend([None if np.isnan(v) else float(v) for v in by])
 
@@ -332,12 +332,12 @@ class TrajectoryRenderer(BasePlotRenderer):
         return self._inject_slider_js(fig)
 
     @staticmethod
-    def _record_markers(markers: dict[str, list[list[float]]], indices: dict[str, list[list[int]]], agent: int, row: typing.Mapping[str, object], path_arr: np.ndarray, time_ns: np.ndarray | None, current_len: int) -> None:
+    def _record_markers(markers: dict[str, list[list[float]]], indices: dict[str, list[list[int]]], agent: int, row: typing.Mapping[str, object], path_arr: np.ndarray, t_ns: np.ndarray | None, current_len: int) -> None:
         valid_mask = ~np.isnan(path_arr[:, 0])
         if not np.any(valid_mask):
             return
         clean_indices = np.where(valid_mask)[0]
-        clean_t = time_ns[clean_indices] if time_ns is not None else None
+        clean_t = t_ns[clean_indices] if t_ns is not None else None
         first_idx = int(clean_indices[_first_moving_index(path_arr[clean_indices, 0], path_arr[clean_indices, 1], clean_t)])
         last_idx = int(clean_indices[-1])
         markers["start_x"][agent].append(path_arr[first_idx, 0])
@@ -945,9 +945,9 @@ class _Track:
     """One episode path on a panel: broken at teleports, on its own relative sim clock."""
 
     def __init__(self, row: typing.Mapping[str, object], arr: np.ndarray, label: str | None, color: str, alpha: float) -> None:
-        time_ns = _row_time_ns(row, len(arr))
-        self.x, self.y = _break_at_teleports(arr[:, 0], arr[:, 1], time_ns)
-        self.t = (time_ns - time_ns[0]) / 1e9 if time_ns is not None else np.arange(len(arr), dtype=float)
+        t_ns = _row_time_ns(row, len(arr))
+        self.x, self.y = _break_at_teleports(arr[:, 0], arr[:, 1], t_ns)
+        self.t = (t_ns - t_ns[0]) / 1e9 if t_ns is not None else np.arange(len(arr), dtype=float)
         self.label = label
         self.color = color
         self.alpha = alpha
@@ -956,7 +956,7 @@ class _Track:
         self.start: tuple[float, float] | None = None
         self.end: tuple[float, float] | None = None
         if len(valid):
-            first = int(valid[_first_moving_index(arr[valid, 0], arr[valid, 1], time_ns[valid] if time_ns is not None else None)])
+            first = int(valid[_first_moving_index(arr[valid, 0], arr[valid, 1], t_ns[valid] if t_ns is not None else None)])
             last = int(valid[-1])
             start_point = _point_or_none(row.get("start"))
             goal_point = _point_or_none(row.get("goal"))

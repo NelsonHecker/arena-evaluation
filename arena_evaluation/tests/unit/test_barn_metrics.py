@@ -67,10 +67,10 @@ def _drive(speed: float, wait: float = 0.0, stop_at: float | None = None):
 def _episode(position, duration: float, collision_at: float | None = None, world: str = "barn_0", t0: float = 5.0) -> AlignedEpisodeBundle:
     stamps = t0 + np.arange(0.0, duration + 1e-9, 1.0 / RATE_HZ)
     xy = np.array([position(t - t0) for t in stamps])
-    time_ns = np.round(stamps * 1e9).astype(np.int64)
-    robot_tracks = pl.DataFrame({"t_ns": time_ns, "x": xy[:, 0], "y": xy[:, 1], "yaw": np.full(len(stamps), math.pi / 2), "pose_source": ["tf_gt"] * len(stamps)})
+    t_ns = np.round(stamps * 1e9).astype(np.int64)
+    robot_tracks = pl.DataFrame({"t_ns": t_ns, "x": xy[:, 0], "y": xy[:, 1], "yaw": np.full(len(stamps), math.pi / 2), "pose_source": ["tf_gt"] * len(stamps)})
     hits = np.zeros(len(stamps), dtype=np.int64) if collision_at is None else (stamps - t0 >= collision_at).astype(np.int64)
-    collisions = pl.DataFrame({"t_ns": time_ns, "event_count": hits})
+    collisions = pl.DataFrame({"t_ns": t_ns, "event_count": hits})
     return AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[*START, math.pi / 2], goal_pos=list(GOAL), map=world, topics={"robot_tracks": robot_tracks, "collision_events": collisions})
 
 

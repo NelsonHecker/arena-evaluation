@@ -138,7 +138,7 @@ class BaseMetricCalculator(ABC):
         start, end = consistent_segment(
             frame["pos_x_gt"].to_numpy().copy(),
             frame["pos_y_gt"].to_numpy().copy(),
-            frame["time_ns"].to_numpy(),
+            frame["t_ns"].to_numpy(),
             self._ride_arrivals(episode),
         )
         return frame, start, end
@@ -220,7 +220,7 @@ class BaseMetricCalculator(ABC):
         return {}
 
     def resolve_native_pose(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Ground-truth robot pose on the native clock: (pos_x, pos_y, yaw, time_ns) float64 arrays, empty without ground truth.
+        """Ground-truth robot pose on the native clock: (pos_x, pos_y, yaw, t_ns) float64 arrays, empty without ground truth.
 
         The robot's /tf track is the only trajectory source; wheel odometry never stands in for it.
         """
@@ -249,20 +249,20 @@ class BaseMetricCalculator(ABC):
         pos_x: np.ndarray,
         pos_y: np.ndarray,
         yaw: np.ndarray,
-        time_ns: np.ndarray,
+        t_ns: np.ndarray,
         tolerance_ns: int | None = 100_000_000,
         continuous: bool = False,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Interpolate pose arrays onto query timestamps ``times_ns``."""
-        if len(time_ns) == 0 or len(times_ns) == 0:
+        if len(t_ns) == 0 or len(times_ns) == 0:
             return (
                 np.zeros(len(times_ns)),
                 np.zeros(len(times_ns)),
                 np.zeros(len(times_ns)),
             )
 
-        order = np.argsort(time_ns)
-        t_sorted = time_ns[order]
+        order = np.argsort(t_ns)
+        t_sorted = t_ns[order]
         x_sorted = np.asarray(pos_x, dtype=np.float64)[order]
         y_sorted = np.asarray(pos_y, dtype=np.float64)[order]
         yaw_sorted = np.asarray(yaw, dtype=np.float64)[order]
@@ -277,14 +277,14 @@ class BaseMetricCalculator(ABC):
 
         df_ref = pl.DataFrame(
             {
-                "time_ns": t_sorted,
+                "t_ns": t_sorted,
                 "pos_x": x_sorted,
                 "pos_y": y_sorted,
                 "yaw": yaw_sorted,
             }
         )
-        df_query = pl.DataFrame({"time_ns": times_ns})
-        merged = df_query.join_asof(df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
+        df_query = pl.DataFrame({"t_ns": times_ns})
+        merged = df_query.join_asof(df_ref, on="t_ns", strategy="backward", tolerance=tolerance_ns)
         px = np.nan_to_num(merged["pos_x"].to_numpy(), nan=0.0)
         py = np.nan_to_num(merged["pos_y"].to_numpy(), nan=0.0)
         ya = np.nan_to_num(merged["yaw"].to_numpy(), nan=0.0)
@@ -313,35 +313,35 @@ class BaseMetricCalculator(ABC):
 
         df_ref = pl.DataFrame(
             {
-                "time_ns": t_sorted,
+                "t_ns": t_sorted,
                 "val": v_sorted,
             }
         )
-        df_query = pl.DataFrame({"time_ns": query_times_ns})
-        merged = df_query.join_asof(df_ref, on="time_ns", strategy="backward", tolerance=tolerance_ns)
+        df_query = pl.DataFrame({"t_ns": query_times_ns})
+        merged = df_query.join_asof(df_ref, on="t_ns", strategy="backward", tolerance=tolerance_ns)
         return merged["val"].to_numpy()
 
     @staticmethod
-    def speed_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> np.ndarray:
+    def speed_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, t_ns: np.ndarray) -> np.ndarray:
         """GT speed (m/s) by finite-differencing GT positions."""
         n = len(pos_x)
         speed = np.zeros(n)
         if n < 2:
             return speed
-        dt = np.diff(time_ns) / 1e9
+        dt = np.diff(t_ns) / 1e9
         dt_safe = np.where(dt <= 0.0, 1e-6, dt)
         speed[1:] = np.sqrt(np.diff(pos_x) ** 2 + np.diff(pos_y) ** 2) / dt_safe
         return np.nan_to_num(speed, nan=0.0)
 
     @staticmethod
-    def velocity_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, time_ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def velocity_from_pose(pos_x: np.ndarray, pos_y: np.ndarray, t_ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """GT velocity vector (m/s) by finite-differencing GT positions."""
         n = len(pos_x)
         vx = np.zeros(n)
         vy = np.zeros(n)
         if n < 2:
             return vx, vy
-        dt = np.diff(time_ns) / 1e9
+        dt = np.diff(t_ns) / 1e9
         dt_safe = np.where(dt <= 0.0, 1e-6, dt)
         vx[1:] = np.diff(pos_x) / dt_safe
         vy[1:] = np.diff(pos_y) / dt_safe

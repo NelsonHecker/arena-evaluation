@@ -110,16 +110,16 @@ def _ped_row(
 
 
 def _trajectory(x: list[float], t_s: list[float], *, vx: list[float] | None = None, radius_m: float = DEFAULT_PED_RADIUS_M) -> Trajectory2D:
-    time_ns = (np.asarray(t_s, dtype=np.float64) * NS_PER_S).astype(np.int64)
+    t_ns = (np.asarray(t_s, dtype=np.float64) * NS_PER_S).astype(np.int64)
     x_array = np.asarray(x, dtype=np.float64)
     zeros = np.zeros(len(x_array), dtype=np.float64)
     vx_array = zeros.copy() if vx is None else np.asarray(vx, dtype=np.float64)
-    return Trajectory2D(time_ns=time_ns, x=x_array, y=zeros.copy(), vx=vx_array, vy=zeros.copy(), radius_m=radius_m)
+    return Trajectory2D(t_ns=t_ns, x=x_array, y=zeros.copy(), vx=vx_array, vy=zeros.copy(), radius_m=radius_m)
 
 
 def test_trajectory2d_exposes_xy_vel_and_seconds() -> None:
     trajectory = Trajectory2D(
-        time_ns=np.array([0, NS_PER_S], dtype=np.int64),
+        t_ns=np.array([0, NS_PER_S], dtype=np.int64),
         x=np.array([0.0, 1.0]),
         y=np.array([2.0, 3.0]),
         vx=np.array([0.5, 0.5]),
@@ -152,7 +152,7 @@ def test_trajectory2d_slice_ns_selects_the_window_or_the_nearest_sample(window_s
 
 def test_trajectory2d_resample_interpolates_positions_and_velocities() -> None:
     trajectory = Trajectory2D(
-        time_ns=np.array([0, 2 * NS_PER_S], dtype=np.int64),
+        t_ns=np.array([0, 2 * NS_PER_S], dtype=np.int64),
         x=np.array([0.0, 10.0]),
         y=np.array([0.0, -10.0]),
         vx=np.array([1.0, 3.0]),
@@ -162,7 +162,7 @@ def test_trajectory2d_resample_interpolates_positions_and_velocities() -> None:
 
     resampled = trajectory.resample_onto(query)
 
-    np.testing.assert_array_equal(resampled.time_ns, query)
+    np.testing.assert_array_equal(resampled.t_ns, query)
     np.testing.assert_allclose(resampled.x, [2.5, 7.5])
     np.testing.assert_allclose(resampled.y, [-2.5, -7.5])
     np.testing.assert_allclose(resampled.vx, [1.5, 2.5])
@@ -171,7 +171,7 @@ def test_trajectory2d_resample_interpolates_positions_and_velocities() -> None:
 
 def test_trajectory2d_resample_of_empty_trajectory_is_zero_filled() -> None:
     empty = Trajectory2D(
-        time_ns=np.array([], dtype=np.int64),
+        t_ns=np.array([], dtype=np.int64),
         x=np.array([]),
         y=np.array([]),
         vx=np.array([]),
@@ -182,7 +182,7 @@ def test_trajectory2d_resample_of_empty_trajectory_is_zero_filled() -> None:
 
     resampled = empty.resample_onto(query)
 
-    np.testing.assert_array_equal(resampled.time_ns, query)
+    np.testing.assert_array_equal(resampled.t_ns, query)
     np.testing.assert_allclose(resampled.x, [0.0, 0.0])
     np.testing.assert_allclose(resampled.vx, [0.0, 0.0])
     assert resampled.radius_m == 0.3
@@ -200,7 +200,7 @@ def test_resolve_robot_trajectory_reads_the_flat_robot_tracks_table() -> None:
 
     trajectory, yaw = resolve_robot_trajectory(_calculator(), _episode({"robot_tracks": frame}))
 
-    np.testing.assert_array_equal(trajectory.time_ns, [0, NS_PER_S, 2 * NS_PER_S])
+    np.testing.assert_array_equal(trajectory.t_ns, [0, NS_PER_S, 2 * NS_PER_S])
     np.testing.assert_allclose(trajectory.x, [0.0, 1.0, 2.0])
     np.testing.assert_allclose(trajectory.y, [0.0, 0.5, 1.0])
     np.testing.assert_allclose(trajectory.vx, [1.0, 1.0, 1.0])
@@ -221,7 +221,7 @@ def test_resolve_robot_trajectory_without_rows_is_empty(frame: pl.DataFrame | No
 
     trajectory, yaw = resolve_robot_trajectory(_calculator(), _episode(topics))
 
-    assert len(trajectory.time_ns) == 0
+    assert len(trajectory.t_ns) == 0
     assert len(trajectory.x) == 0
     assert len(trajectory.vx) == 0
     assert len(yaw) == 0
@@ -353,9 +353,9 @@ def test_contiguous_spans_bridges_gaps_within_the_merge_window(
     merge_gap_s: float,
     expected: list[tuple[int, int]],
 ) -> None:
-    time_ns = (np.asarray(times_s, dtype=np.float64) * NS_PER_S).astype(np.int64)
+    t_ns = (np.asarray(times_s, dtype=np.float64) * NS_PER_S).astype(np.int64)
 
-    assert contiguous_spans(np.asarray(mask, dtype=bool), time_ns, int(merge_gap_s * NS_PER_S)) == expected
+    assert contiguous_spans(np.asarray(mask, dtype=bool), t_ns, int(merge_gap_s * NS_PER_S)) == expected
 
 
 @pytest.mark.parametrize(

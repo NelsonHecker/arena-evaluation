@@ -18,7 +18,7 @@ SEC = 1_000_000_000
 
 def _episode(times: list[int], frames: list[tuple[int, list[dict]]] | None = None) -> AlignedEpisodeBundle:
     """Robot samples at the given times, with the pedestrian table of the given frames."""
-    data = pl.DataFrame({"time_ns": times}, schema={"time_ns": pl.Int64})
+    data = pl.DataFrame({"t_ns": times}, schema={"t_ns": pl.Int64})
     if frames is None:
         return AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[])
     peds = flat_peds(frames)
@@ -118,7 +118,7 @@ def test_leading_robot_samples_before_the_first_message_add_no_pedestrian_rows()
 def test_a_pedestrian_table_without_a_position_column_is_rejected():
     calculator = PedestrianPathMetricsCalculator(RobotParams())
     tracks = pl.DataFrame({"t_ns": [0], "ped_id": ["a"], "x": [0.0]}, schema={"t_ns": pl.Int64, "ped_id": pl.String, "x": pl.Float64})
-    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame({"time_ns": [0]}, schema={"time_ns": pl.Int64}), start_pos=[], goal_pos=[], topics={"pedestrian_tracks": tracks})
+    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame({"t_ns": [0]}, schema={"t_ns": pl.Int64}), start_pos=[], goal_pos=[], topics={"pedestrian_tracks": tracks})
 
     with pytest.raises(ValueError, match=r"pedestrian_tracks lacks \['y'\]"):
         calculator.series_table(episode)

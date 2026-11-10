@@ -64,7 +64,7 @@ _SUMMARY_KEYS: typing.Final[tuple[str, ...]] = (
 class Kinematics:
     """Speed, tangential acceleration and jerk on one time axis; undefined samples are NaN."""
 
-    time_ns: np.ndarray
+    t_ns: np.ndarray
     speed_mps: np.ndarray
     acceleration_mps2: np.ndarray
     jerk_mps3: np.ndarray
@@ -73,16 +73,16 @@ class Kinematics:
 def _empty_kinematics() -> Kinematics:
     empty = np.array([], dtype=np.float64)
     return Kinematics(
-        time_ns=np.array([], dtype=np.int64),
+        t_ns=np.array([], dtype=np.int64),
         speed_mps=empty,
         acceleration_mps2=empty.copy(),
         jerk_mps3=empty.copy(),
     )
 
 
-def _dt_s(time_ns: np.ndarray) -> np.ndarray:
+def _dt_s(t_ns: np.ndarray) -> np.ndarray:
     """Non-negative sample intervals in seconds, a degenerate interval clipped to ``MIN_DT_S``."""
-    dt = np.diff(time_ns) / NANOSECONDS_PER_SECOND
+    dt = np.diff(t_ns) / NANOSECONDS_PER_SECOND
     return np.where(dt <= 0.0, MIN_DT_S, dt)
 
 
@@ -91,7 +91,7 @@ def _pose_track(calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle)
     frame = calculator.resolve_robot_frame(episode)
     if frame is not None and frame.height >= 2:
         return (
-            frame.get_column("time_ns").to_numpy().astype(np.int64),
+            frame.get_column("t_ns").to_numpy().astype(np.int64),
             frame.get_column("pos_x_gt").to_numpy().astype(np.float64),
             frame.get_column("pos_y_gt").to_numpy().astype(np.float64),
         )
@@ -106,10 +106,10 @@ def _pose_track(calculator: BaseMetricCalculator, episode: AlignedEpisodeBundle)
     )
 
 
-def _unique_track(time_ns: np.ndarray, x_m: np.ndarray, y_m: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+def _unique_track(t_ns: np.ndarray, x_m: np.ndarray, y_m: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Samples in ascending time with one row per stamp and finite positions, None when fewer than two remain."""
-    order = np.argsort(time_ns, kind="stable")
-    time_sorted = time_ns[order]
+    order = np.argsort(t_ns, kind="stable")
+    time_sorted = t_ns[order]
     x_sorted = x_m[order]
     y_sorted = y_m[order]
     keep = np.concatenate(([True], np.diff(time_sorted) > 0))
@@ -121,37 +121,37 @@ def _unique_track(time_ns: np.ndarray, x_m: np.ndarray, y_m: np.ndarray) -> tupl
     return time_sorted, x_sorted, y_sorted
 
 
-def _acceleration_from_speed(time_ns: np.ndarray, speed_mps: np.ndarray) -> np.ndarray:
+def _acceleration_from_speed(t_ns: np.ndarray, speed_mps: np.ndarray) -> np.ndarray:
     """Backward-difference acceleration of a scalar series, at the sample it lands on."""
     acceleration_mps2 = np.full(len(speed_mps), np.nan, dtype=np.float64)
-    acceleration_mps2[1:] = np.diff(speed_mps) / _dt_s(time_ns)
+    acceleration_mps2[1:] = np.diff(speed_mps) / _dt_s(t_ns)
     return acceleration_mps2
 
 
-def _raw_kinematics(speed_mps: np.ndarray, time_ns: np.ndarray) -> Kinematics:
+def _raw_kinematics(speed_mps: np.ndarray, t_ns: np.ndarray) -> Kinematics:
     """Plain finite differences on the recorded samples, the fallback where smoothing is undefined."""
-    acceleration_mps2 = _acceleration_from_speed(time_ns, speed_mps)
+    acceleration_mps2 = _acceleration_from_speed(t_ns, speed_mps)
     jerk_mps3 = np.full(len(speed_mps), np.nan, dtype=np.float64)
     if len(speed_mps) >= 3:
-        jerk_mps3[2:] = np.diff(acceleration_mps2[1:]) / _dt_s(time_ns)[:-1]
+        jerk_mps3[2:] = np.diff(acceleration_mps2[1:]) / _dt_s(t_ns)[:-1]
     return Kinematics(
-        time_ns=time_ns,
+        t_ns=t_ns,
         speed_mps=speed_mps,
         acceleration_mps2=acceleration_mps2,
         jerk_mps3=jerk_mps3,
     )
 
 
-def _speed_from_pose(x_m: np.ndarray, y_m: np.ndarray, time_ns: np.ndarray) -> np.ndarray:
+def _speed_from_pose(x_m: np.ndarray, y_m: np.ndarray, t_ns: np.ndarray) -> np.ndarray:
     """Ground-truth speed from one-sided position differences, zero on the first sample."""
     speed = np.zeros(len(x_m), dtype=np.float64)
     if len(x_m) >= 2:
-        speed[1:] = np.hypot(np.diff(x_m), np.diff(y_m)) / _dt_s(time_ns)
+        speed[1:] = np.hypot(np.diff(x_m), np.diff(y_m)) / _dt_s(t_ns)
     return speed
 
 
 def _smooth_position_kinematics(
-    time_ns: np.ndarray,
+    t_ns: np.ndarray,
     x_m: np.ndarray,
     y_m: np.ndarray,
 ) -> Kinematics | None:
@@ -160,7 +160,7 @@ def _smooth_position_kinematics(
     Used where the recording has no speed stream: fitting the positions first keeps sample noise
     out of the derived speed instead of amplifying it through finite differences.
     """
-    unique = _unique_track(time_ns, x_m, y_m)
+    unique = _unique_track(t_ns, x_m, y_m)
     if unique is None:
         return None
     grid_time_ns, grid_x_m, grid_y_m = unique
@@ -185,7 +185,7 @@ def _smooth_position_kinematics(
     acceleration_mps2 = savgol_filter(speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s)
     jerk_mps3 = savgol_filter(speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s)
     return Kinematics(
-        time_ns=grid,
+        t_ns=grid,
         speed_mps=speed_mps,
         acceleration_mps2=acceleration_mps2,
         jerk_mps3=jerk_mps3,
@@ -193,12 +193,12 @@ def _smooth_position_kinematics(
 
 
 def _smooth_speed_kinematics(
-    time_ns: np.ndarray,
+    t_ns: np.ndarray,
     speed_mps: np.ndarray,
 ) -> Kinematics | None:
     """Savitzky-Golay derivatives of the recorded speed on a uniform grid, None when the window does not fit."""
-    order = np.argsort(time_ns, kind="stable")
-    time_sorted = time_ns[order]
+    order = np.argsort(t_ns, kind="stable")
+    time_sorted = t_ns[order]
     speed_sorted = speed_mps[order]
     keep = np.concatenate(([True], np.diff(time_sorted) > 0)) & np.isfinite(speed_sorted)
     time_sorted, speed_sorted = time_sorted[keep], speed_sorted[keep]
@@ -223,7 +223,7 @@ def _smooth_speed_kinematics(
     acceleration_mps2 = savgol_filter(grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=1, delta=sample_step_s)
     jerk_mps3 = savgol_filter(grid_speed_mps, window, SMOOTHING_POLYORDER, deriv=2, delta=sample_step_s)
     return Kinematics(
-        time_ns=grid,
+        t_ns=grid,
         speed_mps=grid_speed_mps,
         acceleration_mps2=acceleration_mps2,
         jerk_mps3=jerk_mps3,
@@ -240,7 +240,7 @@ def episode_speed_mps(calculator: BaseMetricCalculator, episode: AlignedEpisodeB
     if frame is None or frame.height == 0:
         return np.array([]), np.array([], dtype=np.int64)
     try:
-        frame = frame.select("time_ns", "vel_linear")
+        frame = frame.select("t_ns", "vel_linear")
     except pl.exceptions.ColumnNotFoundError:
         return np.array([]), np.array([], dtype=np.int64)
     valid = pl.col("vel_linear").is_not_null() & ~pl.col("vel_linear").is_nan()
@@ -252,7 +252,7 @@ def episode_speed_mps(calculator: BaseMetricCalculator, episode: AlignedEpisodeB
         return np.array([]), np.array([], dtype=np.int64)
     return (
         np.abs(frame["vel_linear"].to_numpy().astype(np.float64)),
-        frame["time_ns"].to_numpy().astype(np.int64),
+        frame["t_ns"].to_numpy().astype(np.int64),
     )
 
 
@@ -262,13 +262,13 @@ def episode_kinematics(calculator: BaseMetricCalculator, episode: AlignedEpisode
     The recorded ground-truth speed stream is the signal (the same stream the metric always
     reported); an episode without it derives the speed from the ground-truth pose track.
     """
-    speed_mps, time_ns = episode_speed_mps(calculator, episode)
+    speed_mps, t_ns = episode_speed_mps(calculator, episode)
     if len(speed_mps) > 0:
         if len(speed_mps) > 1:
-            smoothed = _smooth_speed_kinematics(time_ns, speed_mps)
+            smoothed = _smooth_speed_kinematics(t_ns, speed_mps)
             if smoothed is not None:
                 return smoothed
-        return _raw_kinematics(speed_mps, time_ns)
+        return _raw_kinematics(speed_mps, t_ns)
 
     track = _pose_track(calculator, episode)
     if track is None:
@@ -319,13 +319,13 @@ def _motion_series_frame(
     sample_count = len(kinematics.speed_mps)
     if sample_count == 0:
         return pl.DataFrame(schema=SERIES_SCHEMA)
-    time_s = (kinematics.time_ns.astype(np.float64) - float(kinematics.time_ns[0])) / NANOSECONDS_PER_SECOND
+    time_s = (kinematics.t_ns.astype(np.float64) - float(kinematics.t_ns[0])) / NANOSECONDS_PER_SECOND
     return pl.DataFrame(
         {
             "run_id": pl.Series("run_id", [run_id] * sample_count, dtype=pl.String),
             "episode_id": pl.Series("episode_id", [int(episode_id)] * sample_count, dtype=pl.Int64),
             "robot_id": pl.Series("robot_id", [robot_id] * sample_count, dtype=pl.String),
-            "t_ns": pl.Series("t_ns", kinematics.time_ns, dtype=pl.Int64),
+            "t_ns": pl.Series("t_ns", kinematics.t_ns, dtype=pl.Int64),
             "time_s": pl.Series("time_s", time_s, dtype=pl.Float64),
             "speed_mps": _null_float_series(kinematics.speed_mps, "speed_mps"),
             "acceleration_mps2": _null_float_series(kinematics.acceleration_mps2, "acceleration_mps2"),

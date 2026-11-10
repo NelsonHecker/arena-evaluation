@@ -398,7 +398,7 @@ def test_load_episode_data_full_bundle(tmp_path):
     df = AcousticFieldRenderer._load_episode_data(bench, "episode_001")
     assert df is not None
     columns = set(df.columns)
-    assert {"time_ns", "pos_x_gt", "pos_y_gt", "source_dba", "peds_positions", "has_collision"} <= columns
+    assert {"t_ns", "pos_x_gt", "pos_y_gt", "source_dba", "peds_positions", "has_collision"} <= columns
     assert df["source_dba"].to_list() == [60.0, 62.0, 62.0]
 
 
@@ -418,7 +418,7 @@ def test_load_episode_data_no_robot_position_frames_returns_none(tmp_path):
 
 def _anim_df(n: int = 4, **overrides) -> pl.DataFrame:
     rows = {
-        "time_ns": list(range(n)),
+        "t_ns": list(range(n)),
         "pos_x_gt": [1.0] * n,
         "pos_y_gt": [1.0] * n,
         "source_dba": [60.0] * n,
@@ -427,7 +427,7 @@ def _anim_df(n: int = 4, **overrides) -> pl.DataFrame:
     }
     rows.update(overrides)
     schema = {
-        "time_ns": pl.Int64,
+        "t_ns": pl.Int64,
         "pos_x_gt": pl.Float64,
         "pos_y_gt": pl.Float64,
         "source_dba": pl.Float64,
@@ -486,8 +486,8 @@ def test_compute_field_timeseries_with_door_timeline_caches_pixel_tl(monkeypatch
         def __init__(self):
             self._state = 0
 
-        def open_doors_at(self, time_ns):
-            return frozenset(["d1"]) if time_ns < 2 else frozenset()
+        def open_doors_at(self, t_ns):
+            return frozenset(["d1"]) if t_ns < 2 else frozenset()
 
     renderer = _new_renderer(_af_spec(), pathlib.Path("."))
     fields = renderer.compute_field_timeseries(_anim_df(), _grid(12), 0.1, 0.0, 0.0, {}, state_timeline=_Timeline(), stride=1, max_frames=4)
@@ -856,7 +856,7 @@ def test_extract_trajectory_data_robot_and_peds():
 
     df = pl.DataFrame(
         {
-            "time_ns": [0, 100000000, 200000000],
+            "t_ns": [0, 100000000, 200000000],
             "pos_x_gt": [1.0, 2.0, 3.0],
             "pos_y_gt": [0.5, 0.5, 0.5],
             "start": [[1.0, 0.5]] * 3,
@@ -944,7 +944,7 @@ def test_extract_trajectory_data_flat_float_list():
 
     df = pl.DataFrame(
         {
-            "time_ns": [0, 100000000],
+            "t_ns": [0, 100000000],
             "pos_x_gt": [0.0, 1.0],
             "pos_y_gt": [0.0, 1.0],
             "has_collision": [False, True],

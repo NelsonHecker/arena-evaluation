@@ -189,7 +189,7 @@ _EPISODE_LIFECYCLE = (
     ("goal_dist_start_m", _FLOAT),
     ("goal_dist_min_m", _FLOAT),
     ("path_length_m", _FLOAT),
-    ("start_time_ns", _INT),
+    ("start_t_ns", _INT),
     ("phases_yaml", _TEXT),
     ("params_yaml", _TEXT),
     ("conditions_yaml", _TEXT),

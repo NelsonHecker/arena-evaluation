@@ -85,18 +85,18 @@ def _ped_roster(peds: pl.DataFrame | None) -> dict[str, str]:
 
 def _entity_field_series(events: pl.DataFrame, entity: str, field: str) -> tuple[np.ndarray, list[str]]:
     """Sorted (event times, values) for one recorded entity and field."""
-    rows = events.filter((pl.col("entity") == entity) & (pl.col("field") == field)).sort("time_ns")
-    return rows["time_ns"].to_numpy(), rows["current"].to_list()
+    rows = events.filter((pl.col("entity") == entity) & (pl.col("field") == field)).sort("t_ns")
+    return rows["t_ns"].to_numpy(), rows["current"].to_list()
 
 
 def _entity_family_series(events: pl.DataFrame, entity: str, family: str) -> dict[str, tuple[np.ndarray, list[str]]]:
     """Sorted (event times, values) of every `<family>.<member>` field of one recorded entity, keyed by member."""
     prefix = f"{family}."
-    rows = events.filter((pl.col("entity") == entity) & pl.col("field").str.starts_with(prefix)).sort("time_ns")
+    rows = events.filter((pl.col("entity") == entity) & pl.col("field").str.starts_with(prefix)).sort("t_ns")
     series: dict[str, tuple[np.ndarray, list[str]]] = {}
     for (field,), group in rows.group_by(["field"], maintain_order=True):
-        ordered = group.sort("time_ns")
-        series[str(field).removeprefix(prefix)] = (ordered["time_ns"].to_numpy(), ordered["current"].to_list())
+        ordered = group.sort("t_ns")
+        series[str(field).removeprefix(prefix)] = (ordered["t_ns"].to_numpy(), ordered["current"].to_list())
     return series
 
 
@@ -164,7 +164,7 @@ def load_wall_grid(world_name: str) -> WallGrid | None:
     return walls
 
 
-def clips_on_axis(peds: pl.DataFrame | None, gestures: pl.DataFrame | None, time_ns: np.ndarray) -> list[dict[str, frozenset[str]]] | None:
+def clips_on_axis(peds: pl.DataFrame | None, gestures: pl.DataFrame | None, t_ns: np.ndarray) -> list[dict[str, frozenset[str]]] | None:
     """Per instant, the gesture clips of every pedestrian in the frame held at it, None when the recording carries no pedestrian_gestures table."""
     if gestures is None or peds is None or len(peds) == 0:
         return None
@@ -180,7 +180,7 @@ def clips_on_axis(peds: pl.DataFrame | None, gestures: pl.DataFrame | None, time
     rows: list[dict[str, frozenset[str]]] = []
     for k, frame in enumerate(frames):
         rows.append({_strip_env(str(name)): frozenset(playing.get(int(times[k]), {}).get(str(ped_id), ())) for name, ped_id in zip(frame["ped_name"], frame["ped_id"], strict=True)})
-    idx = np.searchsorted(times, time_ns, side="right") - 1
+    idx = np.searchsorted(times, t_ns, side="right") - 1
     return [rows[i] if i >= 0 else {} for i in idx]
 
 
@@ -189,7 +189,7 @@ class _EvalContext:
     """Recorded inputs of one robot's episode on one time axis, the ego robot being `robot`."""
 
     events: pl.DataFrame
-    time_ns: np.ndarray
+    t_ns: np.ndarray
     pos_x: np.ndarray
     pos_y: np.ndarray
     data: pl.DataFrame
@@ -231,8 +231,8 @@ class _EvalContext:
         """Pedestrians of the latest frame at or before sample i, within the alignment tolerance."""
         if len(self.peds_times) == 0:
             return {}
-        idx = int(np.searchsorted(self.peds_times, self.time_ns[i], side="right")) - 1
-        if idx < 0 or int(self.time_ns[i]) - int(self.peds_times[idx]) > ALIGN_TOLERANCE_NS:
+        idx = int(np.searchsorted(self.peds_times, self.t_ns[i], side="right")) - 1
+        if idx < 0 or int(self.t_ns[i]) - int(self.peds_times[idx]) > ALIGN_TOLERANCE_NS:
             return {}
         peds: dict[str, tuple[float, float]] = {}
         for name, x, y in self.peds_frames[idx].select("ped_name", "x", "y").iter_rows():
@@ -247,7 +247,7 @@ class _EvalContext:
             robots["robot"] = (float(self.pos_x[i]), float(self.pos_y[i]), float(self.yaw[i]) if self.yaw is not None else 0.0)
         for name, (xs, ys, yaws) in self.fleet.items():
             robots[name] = (float(xs[i]), float(ys[i]), float(yaws[i]))
-        t_ns = int(self.time_ns[i])
+        t_ns = int(self.t_ns[i])
         known = frozenset(self.ped_roster) | frozenset(self.fleet)
         clips = self.clips[i] if self.clips is not None else {}
         return Sample(t=t_ns / 1e9, robots=robots, peds=self.peds_at(i), field=lambda entity, field: self.field_at(entity, field, t_ns), known=known, clips=clips, walls=self.walls, family=lambda entity, family: self.family_at(entity, family, t_ns))
@@ -261,8 +261,8 @@ def _node_series(node: Node, ctx: _EvalContext) -> tuple[np.ndarray | None, bool
     """Boolean series of one condition node stepped over the context axis in time order, (None, False) when any sample cannot resolve it."""
     polygons = ctx.polygons
     monitor = NodeMonitor(node, "robot")
-    series = np.zeros(len(ctx.time_ns), dtype=bool)
-    for i in range(len(ctx.time_ns)):
+    series = np.zeros(len(ctx.t_ns), dtype=bool)
+    for i in range(len(ctx.t_ns)):
         value = monitor.step(ctx.sample(i), polygons)
         if value is None:
             return None, False
@@ -295,7 +295,7 @@ def _clause_verdict(clause: dict, ctx: _EvalContext) -> bool | None:
     return _operator_verdict(cond.op, p_series, p_ok, q_series, q_ok)
 
 
-def _resample_fleet(fleet: dict[str, pl.DataFrame], time_ns: np.ndarray, ego: str | None) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+def _resample_fleet(fleet: dict[str, pl.DataFrame], t_ns: np.ndarray, ego: str | None) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Other robots' judge poses held onto the ego axis, robots without a sample before an instant are left out."""
     out: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     for name, frame in fleet.items():
@@ -305,7 +305,7 @@ def _resample_fleet(fleet: dict[str, pl.DataFrame], time_ns: np.ndarray, ego: st
             continue
         frame = frame.sort("t_ns")
         times = frame["t_ns"].to_numpy()
-        idx = np.searchsorted(times, time_ns, side="right") - 1
+        idx = np.searchsorted(times, t_ns, side="right") - 1
         if np.any(idx < 0):
             continue
         out[name] = (frame["pos_x"].to_numpy()[idx], frame["pos_y"].to_numpy()[idx], frame["yaw"].to_numpy()[idx])
@@ -382,18 +382,18 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
             return empty
 
         pos_x, pos_y, yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
-        if episode.data is None or "time_ns" not in episode.data.columns or len(episode.data) == 0:
+        if episode.data is None or "t_ns" not in episode.data.columns or len(episode.data) == 0:
             return empty
 
-        time_ns = episode.data["time_ns"].to_numpy()
-        if len(time_ns) == 0 or len(pos_x) != len(time_ns):
+        t_ns = episode.data["t_ns"].to_numpy()
+        if len(t_ns) == 0 or len(pos_x) != len(t_ns):
             return empty
 
         peds_df = self.native_ped_frame(episode)
         peds_frames = frames_of(peds_df) if peds_df is not None and len(peds_df) > 0 else []
         ctx = _EvalContext(
             events=_reconstruct_events(episode.semantic_snapshot),
-            time_ns=time_ns,
+            t_ns=t_ns,
             pos_x=pos_x,
             pos_y=pos_y,
             data=episode.data,
@@ -402,9 +402,9 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
             ped_roster=_ped_roster(peds_df),
             pose_valid=bool(episode.start_pos),
             yaw=yaw,
-            fleet=_resample_fleet(episode.fleet, time_ns, bare_robot_name(episode.robot_name or "")),
+            fleet=_resample_fleet(episode.fleet, t_ns, bare_robot_name(episode.robot_name or "")),
             walls=load_wall_grid(self.world),
-            clips=clips_on_axis(peds_df, episode.topics.get("pedestrian_gestures") if episode.topics else None, time_ns),
+            clips=clips_on_axis(peds_df, episode.topics.get("pedestrian_gestures") if episode.topics else None, t_ns),
             peds_frames=peds_frames,
             peds_times=np.array([int(frame["t_ns"][0]) for frame in peds_frames], dtype=np.int64),
         )

@@ -176,7 +176,7 @@ def _consistent_pose_segment(aligned_df: pl.DataFrame | None, ride_arrivals_ns: 
     aligned_df = aligned_df.filter(pl.col("pos_x_gt").is_not_null() & ~pl.col("pos_x_gt").is_nan() & pl.col("pos_y_gt").is_not_null() & ~pl.col("pos_y_gt").is_nan() & pl.col("yaw_gt").is_not_null() & ~pl.col("yaw_gt").is_nan())
     if len(aligned_df) < 2:
         return aligned_df
-    start, end = consistent_segment(aligned_df["pos_x_gt"].to_numpy(), aligned_df["pos_y_gt"].to_numpy(), aligned_df["time_ns"].to_numpy(), ride_arrivals_ns)
+    start, end = consistent_segment(aligned_df["pos_x_gt"].to_numpy(), aligned_df["pos_y_gt"].to_numpy(), aligned_df["t_ns"].to_numpy(), ride_arrivals_ns)
     return aligned_df.slice(start, end - start)
 
 
@@ -305,7 +305,7 @@ def _episode_endpoints(
     plan_df = plan.collect() if isinstance(plan, pl.LazyFrame) else plan
     if plan_df is not None and "t_ns" in plan_df.columns:
         # A recording can outlive its episode by a beat and catch the next episode's first plan.
-        plan_df = plan_df.filter(pl.col("t_ns") <= aligned_df["time_ns"].max())
+        plan_df = plan_df.filter(pl.col("t_ns") <= aligned_df["t_ns"].max())
     if plan_df is not None and len(plan_df) > 0:
         latest_plan = plan_df.filter(pl.col("plan_id") == plan_df["plan_id"].max()).sort("waypoint_idx")
         goal_pos = [latest_plan["x"][-1], latest_plan["y"][-1], latest_plan["yaw"][-1]]
@@ -796,8 +796,8 @@ class ProcessingPipeline:
 
                 topics = _collect_native_topics(bundle)
                 if len(aligned_df) > 0:
-                    t0 = int(aligned_df["time_ns"][0])
-                    t1 = int(aligned_df["time_ns"][-1])
+                    t0 = int(aligned_df["t_ns"][0])
+                    t1 = int(aligned_df["t_ns"][-1])
                     topics = {name: df.filter((pl.col("t_ns") >= t0 - _ALIGN_TOLERANCE_NS) & (pl.col("t_ns") <= t1 + _ALIGN_TOLERANCE_NS)) if "t_ns" in df.columns else df for name, df in topics.items()}
 
                 peds_df = bundle.pedestrian_tracks.collect() if isinstance(bundle.pedestrian_tracks, pl.LazyFrame) else bundle.pedestrian_tracks

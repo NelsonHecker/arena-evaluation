@@ -119,40 +119,40 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             return (*EXPOSURE_SCALAR_KEYS, EXPOSURE_FRAME_T_NS_KEY)
         return tuple(cls.output_keys())
 
-    def _source_level(self, episode: AlignedEpisodeBundle, time_ns: np.ndarray) -> np.ndarray:
+    def _source_level(self, episode: AlignedEpisodeBundle, t_ns: np.ndarray) -> np.ndarray:
         """Emitted A-weighted level at the sample times, from the aligned row or the native acoustics topic."""
         default_dba = _ACOUSTIC_DEFAULTS["L_base_0"]
         df = episode.data
-        if df is not None and len(df) == len(time_ns) and "total_level_af_dba" in df.columns:
+        if df is not None and len(df) == len(t_ns) and "total_level_af_dba" in df.columns:
             return df["total_level_af_dba"].cast(pl.Float64).fill_null(strategy="forward").fill_null(default_dba).to_numpy().astype(np.float64)
         acoustics = self.native_topics(episode).get("robot_acoustics")
         if acoustics is None or len(acoustics) == 0 or "total_level_af_dba" not in acoustics.columns:
-            return np.full(len(time_ns), default_dba, dtype=np.float64)
+            return np.full(len(t_ns), default_dba, dtype=np.float64)
         reference = acoustics.select(pl.col("t_ns").cast(pl.Int64), pl.col("total_level_af_dba").cast(pl.Float64)).drop_nulls().sort("t_ns")
         if len(reference) == 0:
-            return np.full(len(time_ns), default_dba, dtype=np.float64)
-        joined = pl.DataFrame({"t_ns": time_ns.astype(np.int64)}).join_asof(reference, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS).with_columns(pl.col("total_level_af_dba").fill_null(strategy="forward").fill_null(default_dba))
+            return np.full(len(t_ns), default_dba, dtype=np.float64)
+        joined = pl.DataFrame({"t_ns": t_ns.astype(np.int64)}).join_asof(reference, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS).with_columns(pl.col("total_level_af_dba").fill_null(strategy="forward").fill_null(default_dba))
         return joined["total_level_af_dba"].to_numpy().astype(np.float64)
 
     def _time_base(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
         """Sample times, ground-truth robot x/y and validity on the scope's clock, None without a clock or ground truth."""
         df = episode.data
-        if df is not None and len(df) > 0 and "time_ns" in df.columns:
-            time_ns = df["time_ns"].to_numpy().astype(np.int64)
+        if df is not None and len(df) > 0 and "t_ns" in df.columns:
+            t_ns = df["t_ns"].to_numpy().astype(np.int64)
             pos_x_native, pos_y_native, _yaw, native_times_ns = self.resolve_native_pose(episode)
             if len(native_times_ns) == 0:
                 return None
             reference = pl.DataFrame({"t_ns": native_times_ns, "_rx": pos_x_native, "_ry": pos_y_native}).drop_nulls().sort("t_ns")
-            aligned = pl.DataFrame({"time_ns": time_ns}).join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
+            aligned = pl.DataFrame({"t_ns": t_ns}).join_asof(reference, left_on="t_ns", right_on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
             rx_m = aligned["_rx"].to_numpy().astype(np.float64)
             ry_m = aligned["_ry"].to_numpy().astype(np.float64)
-            return time_ns, rx_m, ry_m, ~np.isnan(rx_m) & ~np.isnan(ry_m)
+            return t_ns, rx_m, ry_m, ~np.isnan(rx_m) & ~np.isnan(ry_m)
 
         # A scoped window carries no aligned frame; its native /tf track is the clock.
-        pos_x, pos_y, _yaw, time_ns = self.resolve_native_pose(episode)
-        if len(time_ns) == 0:
+        pos_x, pos_y, _yaw, t_ns = self.resolve_native_pose(episode)
+        if len(t_ns) == 0:
             return None
-        return time_ns, pos_x.astype(np.float64), pos_y.astype(np.float64), np.ones(len(time_ns), dtype=bool)
+        return t_ns, pos_x.astype(np.float64), pos_y.astype(np.float64), np.ones(len(t_ns), dtype=bool)
 
     @staticmethod
     def _null_result() -> AcousticExposureResult:
@@ -286,9 +286,9 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 episode.episode_id,
             )
 
-        time_ns, rx_m, ry_m, robot_valid = time_base
-        source_dba = self._source_level(episode, time_ns)
-        peds_at_time = pedestrians_by_time(time_ns, peds_df)
+        t_ns, rx_m, ry_m, robot_valid = time_base
+        source_dba = self._source_level(episode, t_ns)
+        peds_at_time = pedestrians_by_time(t_ns, peds_df)
 
         frame_ped_ids: list[list[str]] = []
         frame_ped_x_m: list[list[float]] = []
@@ -304,11 +304,11 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         last_attenuations: np.ndarray | None = None
         solver_evals = 0
         scored_frames = 0
-        total_frames = len(time_ns)
+        total_frames = len(t_ns)
 
         for index in range(total_frames):
-            frame = peds_at_time.get(int(time_ns[index]))
-            raw_open = state_timeline.open_doors_at(int(time_ns[index])) if state_timeline is not None else frozenset()
+            frame = peds_at_time.get(int(t_ns[index]))
+            raw_open = state_timeline.open_doors_at(int(t_ns[index])) if state_timeline is not None else frozenset()
             # Canonicalise the semantic entity names to the barrier map's door keys once per frame.
             open_doors_here = tuple(sorted(name for name in doors if any(_entity_matches_door(name, entity) for entity in raw_open)))
             frame_open_doors.append(",".join(open_doors_here))
@@ -405,7 +405,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             episode.episode_id,
             solver_evals,
         )
-        return self._summarize(time_ns, rx_m, ry_m, source_dba, frame_ped_ids, frame_ped_x_m, frame_ped_y_m, ts_exposure, ts_attenuation, frame_open_doors, doors.keys())
+        return self._summarize(t_ns, rx_m, ry_m, source_dba, frame_ped_ids, frame_ped_x_m, frame_ped_y_m, ts_exposure, ts_attenuation, frame_open_doors, doors.keys())
 
     def _episode_result(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
         """The episode's exposure frame series, solved once and reused by the pedestrian rollups and the series table."""

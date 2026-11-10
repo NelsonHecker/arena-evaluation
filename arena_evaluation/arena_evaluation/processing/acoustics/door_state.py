@@ -57,9 +57,9 @@ class DoorStateTimeline:
         open_sets = [frozenset(doors) if doors is not None else frozenset() for doors in timeline_df["open_doors"]]
         return cls(timestamps, open_sets)
 
-    def open_doors_at(self, time_ns: int) -> frozenset[str]:
-        """Backward-asof: door state at or before *time_ns* (empty before first)."""
-        idx = bisect.bisect_right(self.times_ns, time_ns) - 1
+    def open_doors_at(self, t_ns: int) -> frozenset[str]:
+        """Backward-asof: door state at or before *t_ns* (empty before first)."""
+        idx = bisect.bisect_right(self.times_ns, t_ns) - 1
         if idx < 0:
             return frozenset()
         return self.open_sets[idx]

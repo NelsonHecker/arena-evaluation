@@ -16,7 +16,7 @@ SAMPLE_DT_S = 0.1
 ROBOT_RADIUS_M = 0.3
 
 
-def _time_ns(duration_s: float) -> np.ndarray:
+def _t_ns_axis(duration_s: float) -> np.ndarray:
     """Robot clock of an episode sampled every 0.1 s."""
     seconds = np.arange(0.0, duration_s + SAMPLE_DT_S / 2.0, SAMPLE_DT_S)
     return np.round(seconds * SECOND_NS).astype(np.int64)
@@ -35,7 +35,7 @@ def _table(topic: str, rows: list[dict[str, object]]) -> pl.DataFrame:
 
 
 def _robot_tracks(
-    time_ns: np.ndarray,
+    t_ns: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
     *,
@@ -43,8 +43,8 @@ def _robot_tracks(
     vy: np.ndarray | None = None,
     yaw: np.ndarray | None = None,
 ) -> pl.DataFrame:
-    """Flat robot_tracks rows of a robot whose pose is sampled on time_ns, in the recorded schema."""
-    count = len(time_ns)
+    """Flat robot_tracks rows of a robot whose pose is sampled on t_ns, in the recorded schema."""
+    count = len(t_ns)
     vx_arr = np.zeros(count) if vx is None else np.asarray(vx, dtype=np.float64)
     vy_arr = np.zeros(count) if vy is None else np.asarray(vy, dtype=np.float64)
     yaw_arr = np.zeros(count) if yaw is None else np.asarray(yaw, dtype=np.float64)
@@ -52,7 +52,7 @@ def _robot_tracks(
         "robot_tracks",
         [
             {
-                "t_ns": int(time_ns[index]),
+                "t_ns": int(t_ns[index]),
                 "env_id": "env_0",
                 "robot_id": "env_0_jackal",
                 "x": float(np.asarray(x, dtype=np.float64)[index]),
@@ -71,14 +71,14 @@ def _robot_tracks(
     )
 
 
-def _robot_power(time_ns: np.ndarray, total_power_w: np.ndarray) -> pl.DataFrame:
-    """Flat robot_power rows sampled on time_ns, in the recorded schema."""
+def _robot_power(t_ns: np.ndarray, total_power_w: np.ndarray) -> pl.DataFrame:
+    """Flat robot_power rows sampled on t_ns, in the recorded schema."""
     power_w = np.asarray(total_power_w, dtype=np.float64)
     return _table(
         "robot_power",
         [
             {
-                "t_ns": int(time_ns[index]),
+                "t_ns": int(t_ns[index]),
                 "env_id": "env_0",
                 "robot_id": "env_0_jackal",
                 "total_power_w": float(power_w[index]),
@@ -86,7 +86,7 @@ def _robot_power(time_ns: np.ndarray, total_power_w: np.ndarray) -> pl.DataFrame
                 "total_mech_power_w": float(power_w[index] - 15.0),
                 "total_thermal_power_w": 0.0,
             }
-            for index in range(len(time_ns))
+            for index in range(len(t_ns))
         ],
     )
 
@@ -112,19 +112,19 @@ def _calculator(metrics_config: dict[str, object] | None = None) -> EncounterCos
 
 def _following_episode(duration_s: float, *, robot_power: pl.DataFrame | None = None) -> AlignedEpisodeBundle:
     """Robot driving +x at 1 m/s with pedestrian alice following one metre to its left."""
-    time_ns = _time_ns(duration_s)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
+    t_ns = _t_ns_axis(duration_s)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
     pedestrians = flat_peds(
         [
             (
                 int(t_ns),
                 [{"ped_id": "Pedestrian_7", "ped_name": "alice", "x": float(time_s), "y": 1.0, "vx": 1.0}],
             )
-            for t_ns, time_s in zip(time_ns, seconds, strict=True)
+            for t_ns, time_s in zip(t_ns, seconds, strict=True)
         ]
     )
     topics = {
-        "robot_tracks": _robot_tracks(time_ns, seconds.copy(), np.zeros_like(seconds), vx=np.ones_like(seconds)),
+        "robot_tracks": _robot_tracks(t_ns, seconds.copy(), np.zeros_like(seconds), vx=np.ones_like(seconds)),
         "pedestrian_tracks": pedestrians,
     }
     if robot_power is not None:
@@ -133,8 +133,8 @@ def _following_episode(duration_s: float, *, robot_power: pl.DataFrame | None = 
 
 
 def test_reference_twin_matches_pedestrian_by_name() -> None:
-    time_ns = _time_ns(5.0)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
+    t_ns = _t_ns_axis(5.0)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
     robot_x = 1.0 * seconds
     dynamic_peds = flat_peds(
         [
@@ -150,7 +150,7 @@ def test_reference_twin_matches_pedestrian_by_name() -> None:
                     }
                 ],
             )
-            for t_ns, time_s in zip(time_ns, seconds, strict=True)
+            for t_ns, time_s in zip(t_ns, seconds, strict=True)
         ]
     )
     reference_peds = flat_peds(
@@ -162,12 +162,12 @@ def test_reference_twin_matches_pedestrian_by_name() -> None:
                     {"ped_id": "Pedestrian_7", "ped_name": "alice", "x": float(5.0 - time_s), "y": 0.0, "vx": -1.0},
                 ],
             )
-            for t_ns, time_s in zip(time_ns, seconds, strict=True)
+            for t_ns, time_s in zip(t_ns, seconds, strict=True)
         ]
     )
     episode = _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, robot_x, np.zeros_like(robot_x), vx=np.ones_like(robot_x)),
+            "robot_tracks": _robot_tracks(t_ns, robot_x, np.zeros_like(robot_x), vx=np.ones_like(robot_x)),
             "pedestrian_tracks": dynamic_peds,
         },
         episode_id=1,
@@ -187,8 +187,8 @@ def test_reference_twin_matches_pedestrian_by_name() -> None:
 
 
 def test_overlapping_encounters_union_robot_costs_and_sum_sound() -> None:
-    time_ns = _time_ns(4.0)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
+    t_ns = _t_ns_axis(4.0)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
     robot_x = 1.0 * seconds
     pedestrians = flat_peds(
         [
@@ -199,12 +199,12 @@ def test_overlapping_encounters_union_robot_costs_and_sum_sound() -> None:
                     {"ped_id": "Pedestrian_2", "ped_name": "ped_b", "x": float(time_s), "y": -1.0, "vx": 1.0},
                 ],
             )
-            for t_ns, time_s in zip(time_ns, seconds, strict=True)
+            for t_ns, time_s in zip(t_ns, seconds, strict=True)
         ]
     )
     episode = _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, robot_x, np.zeros_like(robot_x), vx=np.ones_like(robot_x)),
+            "robot_tracks": _robot_tracks(t_ns, robot_x, np.zeros_like(robot_x), vx=np.ones_like(robot_x)),
             "pedestrian_tracks": pedestrians,
         }
     )
@@ -222,9 +222,9 @@ def test_overlapping_encounters_union_robot_costs_and_sum_sound() -> None:
 
 
 def test_no_pedestrians_yields_none_for_every_output() -> None:
-    time_ns = _time_ns(2.0)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
-    episode = _bundle({"robot_tracks": _robot_tracks(time_ns, seconds.copy(), np.zeros_like(seconds), vx=np.ones_like(seconds))})
+    t_ns = _t_ns_axis(2.0)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
+    episode = _bundle({"robot_tracks": _robot_tracks(t_ns, seconds.copy(), np.zeros_like(seconds), vx=np.ones_like(seconds))})
     calculator = _calculator()
 
     outputs = calculator.calculate(episode, {})
@@ -234,8 +234,8 @@ def test_no_pedestrians_yields_none_for_every_output() -> None:
 
 
 def test_missing_robot_tracks_yields_none_for_every_output() -> None:
-    time_ns = _time_ns(2.0)
-    pedestrians = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 1.0, "y": 0.0}]) for t_ns in time_ns])
+    t_ns = _t_ns_axis(2.0)
+    pedestrians = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 1.0, "y": 0.0}]) for t_ns in t_ns])
     episode = _bundle({"pedestrian_tracks": pedestrians})
     calculator = _calculator()
 
@@ -246,11 +246,11 @@ def test_missing_robot_tracks_yields_none_for_every_output() -> None:
 
 
 def test_single_sample_robot_track_reports_missing_metrics() -> None:
-    time_ns = np.array([0], dtype=np.int64)
+    t_ns = np.array([0], dtype=np.int64)
     pedestrians = flat_peds([(0, [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 1.0, "y": 0.0}])])
     episode = _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, np.array([0.0]), np.array([0.0])),
+            "robot_tracks": _robot_tracks(t_ns, np.array([0.0]), np.array([0.0])),
             "pedestrian_tracks": pedestrians,
         }
     )
@@ -262,8 +262,8 @@ def test_single_sample_robot_track_reports_missing_metrics() -> None:
 
 
 def test_recorded_robot_power_is_interpolated_onto_robot_clock() -> None:
-    time_ns = _time_ns(4.0)
-    recorded_time_ns = time_ns + SECOND_NS // 10
+    t_ns = _t_ns_axis(4.0)
+    recorded_time_ns = t_ns + SECOND_NS // 10
     recorded_power = _robot_power(recorded_time_ns, np.full(len(recorded_time_ns), 200.0))
     episode = _following_episode(4.0, robot_power=recorded_power)
 
@@ -287,21 +287,21 @@ def test_missing_robot_power_uses_kinematic_power_fallback() -> None:
 
 
 def test_reference_episode_without_matching_name_reports_no_pedestrian_costs() -> None:
-    time_ns = _time_ns(5.0)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
+    t_ns = _t_ns_axis(5.0)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
     dynamic_peds = flat_peds(
         [
             (
                 int(t_ns),
                 [{"ped_id": "Pedestrian_7", "ped_name": "alice", "x": float(5.0 - time_s), "y": 0.0, "vx": -1.0}],
             )
-            for t_ns, time_s in zip(time_ns, seconds, strict=True)
+            for t_ns, time_s in zip(t_ns, seconds, strict=True)
         ]
     )
-    reference_peds = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "bob", "x": 10.0, "y": 10.0}]) for t_ns in time_ns])
+    reference_peds = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "bob", "x": 10.0, "y": 10.0}]) for t_ns in t_ns])
     episode = _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, 1.0 * seconds, np.zeros_like(seconds), vx=np.ones_like(seconds)),
+            "robot_tracks": _robot_tracks(t_ns, 1.0 * seconds, np.zeros_like(seconds), vx=np.ones_like(seconds)),
             "pedestrian_tracks": dynamic_peds,
         }
     )
@@ -318,12 +318,12 @@ def test_reference_episode_without_matching_name_reports_no_pedestrian_costs() -
 
 @pytest.mark.parametrize(("distance_threshold_m", "expected_count", "expected_time_s"), [(2.0, 0, 0.0), (4.0, 1, 1.0)])
 def test_encounter_distance_threshold_controls_detection(distance_threshold_m: float, expected_count: int, expected_time_s: float) -> None:
-    time_ns = _time_ns(1.0)
-    stationary_x = np.zeros(len(time_ns))
-    pedestrians = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 3.0, "y": 0.0}]) for t_ns in time_ns])
+    t_ns = _t_ns_axis(1.0)
+    stationary_x = np.zeros(len(t_ns))
+    pedestrians = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 3.0, "y": 0.0}]) for t_ns in t_ns])
     episode = _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, stationary_x, np.zeros_like(stationary_x)),
+            "robot_tracks": _robot_tracks(t_ns, stationary_x, np.zeros_like(stationary_x)),
             "pedestrian_tracks": pedestrians,
         }
     )
@@ -339,8 +339,8 @@ def test_encounter_distance_threshold_controls_detection(distance_threshold_m: f
 
 
 def test_rollup_keeps_disjoint_encounter_windows_separate() -> None:
-    time_ns = _time_ns(4.0)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
+    t_ns = _t_ns_axis(4.0)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
     first_ped_x = np.where(seconds <= 2.0, 1.0, 100.0)
     second_ped_x = np.where(seconds >= 2.1, 1.0, 100.0)
     pedestrians = flat_peds(
@@ -352,12 +352,12 @@ def test_rollup_keeps_disjoint_encounter_windows_separate() -> None:
                     {"ped_id": "Pedestrian_2", "ped_name": "ped_b", "x": float(second_x), "y": 0.0},
                 ],
             )
-            for t_ns, first_x, second_x in zip(time_ns, first_ped_x, second_ped_x, strict=True)
+            for t_ns, first_x, second_x in zip(t_ns, first_ped_x, second_ped_x, strict=True)
         ]
     )
     episode = _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, np.zeros_like(seconds), np.zeros_like(seconds)),
+            "robot_tracks": _robot_tracks(t_ns, np.zeros_like(seconds), np.zeros_like(seconds)),
             "pedestrian_tracks": pedestrians,
         }
     )
@@ -375,8 +375,8 @@ def test_rollup_keeps_disjoint_encounter_windows_separate() -> None:
 
 def _scoping_episode() -> AlignedEpisodeBundle:
     """Robot driving +x at 1 m/s with alice following and bob far away."""
-    time_ns = _time_ns(3.0)
-    seconds = time_ns.astype(np.float64) / SECOND_NS
+    t_ns = _t_ns_axis(3.0)
+    seconds = t_ns.astype(np.float64) / SECOND_NS
     pedestrians = flat_peds(
         [
             (
@@ -386,12 +386,12 @@ def _scoping_episode() -> AlignedEpisodeBundle:
                     {"ped_id": "Pedestrian_9", "ped_name": "bob", "x": 100.0, "y": 100.0},
                 ],
             )
-            for t_ns, time_s in zip(time_ns, seconds, strict=True)
+            for t_ns, time_s in zip(t_ns, seconds, strict=True)
         ]
     )
     return _bundle(
         {
-            "robot_tracks": _robot_tracks(time_ns, seconds.copy(), np.zeros_like(seconds), vx=np.ones_like(seconds)),
+            "robot_tracks": _robot_tracks(t_ns, seconds.copy(), np.zeros_like(seconds), vx=np.ones_like(seconds)),
             "pedestrian_tracks": pedestrians,
         }
     )

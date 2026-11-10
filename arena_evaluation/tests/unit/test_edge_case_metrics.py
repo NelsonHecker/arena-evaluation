@@ -332,7 +332,7 @@ def _episode(run_dir: pathlib.Path, world: str, run: RunMetadata, peds: dict[str
     times = [i * SEC // 10 for i in range(seconds * 10 + 1)]
     xs = [t / SEC for t in times]
     zeros = [0.0] * len(times)
-    data = pl.DataFrame({"time_ns": times, "pos_x": xs, "pos_y": zeros, "yaw": zeros, "pos_x_gt": xs, "pos_y_gt": zeros, "yaw_gt": zeros})
+    data = pl.DataFrame({"t_ns": times, "pos_x": xs, "pos_y": zeros, "yaw": zeros, "pos_x_gt": xs, "pos_y_gt": zeros, "yaw_gt": zeros})
     robot_tracks = pl.DataFrame({"t_ns": times, "x": xs, "y": zeros, "yaw": zeros, "pose_source": ["tf_gt"] * len(times)})
     names = sorted(peds)
     frames = []

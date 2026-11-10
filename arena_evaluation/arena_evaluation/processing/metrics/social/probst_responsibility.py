@@ -106,7 +106,7 @@ def compute_pdce_series(
 
 def compute_normalization(pair: ProbstPair, idx_tce: int) -> np.ndarray | None:
     """Linear ramp normalization N(t) over [TCE - N_W, TCE] (Eq. 3)."""
-    n = len(pair.robot.time_ns)
+    n = len(pair.robot.t_ns)
     if n < 2 or idx_tce <= 0 or idx_tce >= n:
         return None
 
@@ -156,7 +156,7 @@ def derive_probst_shares(parts: ProbstParts | None) -> dict[str, float | None]:
 def _evaluate_pair_at_tce(pair: ProbstPair, idx_tce: int) -> ProbstResult:
     """Evaluate Probst et al. (ICRA 2026) Eqs. 1-12 for an aligned ProbstPair at a given TCE index."""
     r_sum = pair.robot.radius_m + pair.target.radius_m
-    if len(pair.robot.time_ns) < 2 or len(pair.target.time_ns) != len(pair.robot.time_ns) or r_sum <= 0.0:
+    if len(pair.robot.t_ns) < 2 or len(pair.target.t_ns) != len(pair.robot.t_ns) or r_sum <= 0.0:
         return ProbstResult()
 
     norm = compute_normalization(pair, idx_tce)
@@ -222,7 +222,7 @@ def _evaluate_pair_at_tce(pair: ProbstPair, idx_tce: int) -> ProbstResult:
 
 def evaluate_probst(pair: ProbstPair) -> ProbstResult:
     """Evaluate Probst et al. (ICRA 2026) Eqs. 1-12 using the Euclidean closest encounter as TCE."""
-    if len(pair.robot.time_ns) < 2:
+    if len(pair.robot.t_ns) < 2:
         return ProbstResult()
     dists = np.linalg.norm(pair.target.xy - pair.robot.xy, axis=1)
     return _evaluate_pair_at_tce(pair, int(np.argmin(dists)))
@@ -230,9 +230,9 @@ def evaluate_probst(pair: ProbstPair) -> ProbstResult:
 
 def evaluate_pre_contact_probst(pair: ProbstPair) -> ProbstResult:
     """Evaluate Probst et al. (ICRA 2026) Eqs. 1-12 anchored at contact onset (final sample)."""
-    if len(pair.robot.time_ns) < 2:
+    if len(pair.robot.t_ns) < 2:
         return ProbstResult()
-    return _evaluate_pair_at_tce(pair, len(pair.robot.time_ns) - 1)
+    return _evaluate_pair_at_tce(pair, len(pair.robot.t_ns) - 1)
 
 
 def rollup_probst_results(results: Sequence[ProbstResult]) -> ProbstResult:
@@ -436,17 +436,17 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
         bounds_ns: tuple[int | None, int | None] = (None, None),
     ) -> ProbstPair | None:
         """Align robot and pedestrian trajectories within optional nanosecond bounds."""
-        t_lo = max(int(robot.time_ns[0]), int(track.time_ns[0]))
-        t_hi = min(int(robot.time_ns[-1]), int(track.time_ns[-1]))
+        t_lo = max(int(robot.t_ns[0]), int(track.t_ns[0]))
+        t_hi = min(int(robot.t_ns[-1]), int(track.t_ns[-1]))
         if bounds_ns[0] is not None:
             t_lo = max(t_lo, int(bounds_ns[0]))
         if bounds_ns[1] is not None:
             t_hi = min(t_hi, int(bounds_ns[1]))
         r_slice = robot.slice_ns(t_lo, t_hi)
-        if len(r_slice.time_ns) < 2:
+        if len(r_slice.t_ns) < 2:
             return None
         ped_radius_m = track.radius_m if track.radius_m is not None else float(self.metrics_config.get("default_ped_radius_m", DEFAULT_PED_RADIUS_M))
-        t_slice = replace(track.trajectory.resample_onto(r_slice.time_ns), radius_m=ped_radius_m)
+        t_slice = replace(track.trajectory.resample_onto(r_slice.t_ns), radius_m=ped_radius_m)
         return ProbstPair(robot=r_slice, target=t_slice, window_size_s=NORMALIZATION_WINDOW_S)
 
     @staticmethod
@@ -480,7 +480,7 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
         robot, _ = resolve_robot_trajectory(self, episode)
         tracks = extract_episode_ped_tracks(episode)
         target = tracks.get(target_ped_id)
-        if len(robot.time_ns) < 2 or target is None:
+        if len(robot.t_ns) < 2 or target is None:
             return self._empty_output()
         pre_s = float(self.metrics_config.get("pre_contact_window_s", PRE_CONTACT_PROBST_WINDOW_S))
         t_start_ns = int(t0_ns - round(pre_s * NS_PER_S))
@@ -501,7 +501,7 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
         del prior_results
         robot, _ = resolve_robot_trajectory(self, episode)
         tracks = extract_episode_ped_tracks(episode)
-        if len(robot.time_ns) < 2 or not tracks:
+        if len(robot.t_ns) < 2 or not tracks:
             return self._empty_output()
 
         target = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id"))
@@ -552,7 +552,7 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
         if scope_slice.scope == MetricScope.ENCOUNTER:
             robot, _ = resolve_robot_trajectory(self, episode)
             tracks = extract_episode_ped_tracks(episode)
-            if len(robot.time_ns) < 2 or not tracks:
+            if len(robot.t_ns) < 2 or not tracks:
                 return self._empty_output()
             actor_2 = scope_slice.identity.get("actor_2")
             target = resolve_ped_track(tracks, actor_2) if actor_2 is not None else None

@@ -28,7 +28,7 @@ from arena_evaluation.storage.schemas import RunMetadata
 
 _DF_SCHEMA = pl.Schema(
     {
-        "time_ns": pl.Int64,
+        "t_ns": pl.Int64,
         "value": pl.Float64,
         "label": pl.String,
     }
@@ -48,7 +48,7 @@ _META_BASE = dict(
 def _df(n: int = 5, start: int = 1_000, step: int = 100) -> pl.DataFrame:
     return pl.DataFrame(
         {
-            "time_ns": [start + i * step for i in range(n)],
+            "t_ns": [start + i * step for i in range(n)],
             "value": [float(i) * 0.5 for i in range(n)],
             "label": [f"row{i}" for i in range(n)],
         },
@@ -197,8 +197,8 @@ def test_combine_single_source(tmp_path):
 def test_combine_multiple_diagonal(tmp_path):
     df_a = _df(3)
     df_b = pl.DataFrame(
-        {"time_ns": [10_000], "other": ["x"]},
-        schema=pl.Schema({"time_ns": pl.Int64, "other": pl.String}),
+        {"t_ns": [10_000], "other": ["x"]},
+        schema=pl.Schema({"t_ns": pl.Int64, "other": pl.String}),
     )
     src_a = _write_src(tmp_path, "a.parquet", df_a)
     src_b = _write_src(tmp_path, "b.parquet", df_b)

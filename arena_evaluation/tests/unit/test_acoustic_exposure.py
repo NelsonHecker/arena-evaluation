@@ -186,7 +186,7 @@ def _semantic(rows: list[tuple[int, str, bool]]) -> pl.DataFrame:
 
 def _frames(robot: list[tuple[float | None, float | None]], peds: list[list[tuple[float, float]]], *, source: list[float | None] | None = None, times: list[int] | None = None) -> pl.DataFrame:
     columns = {
-        "time_ns": pl.Series(times if times is not None else [index * SECOND_NS for index in range(len(robot))], dtype=pl.Int64),
+        "t_ns": pl.Series(times if times is not None else [index * SECOND_NS for index in range(len(robot))], dtype=pl.Int64),
         "pos_x_gt": pl.Series([position[0] for position in robot], dtype=pl.Float64),
         "pos_y_gt": pl.Series([position[1] for position in robot], dtype=pl.Float64),
         "peds_positions": pl.Series([[list(point) for point in frame] for frame in peds], dtype=pl.List(pl.List(pl.Float64))),
@@ -198,10 +198,10 @@ def _frames(robot: list[tuple[float | None, float | None]], peds: list[list[tupl
 
 def _episode(data: pl.DataFrame | None, map_name: str | None, **kwargs) -> AlignedEpisodeBundle:
     topics = dict(kwargs.pop("topics", {}) or {})
-    if data is not None and "time_ns" in data.columns and "pedestrian_tracks" not in topics and "peds_positions" in data.columns:
+    if data is not None and "t_ns" in data.columns and "pedestrian_tracks" not in topics and "peds_positions" in data.columns:
         peds_rows = []
         seen = set()
-        for stamp, frame in zip(data["time_ns"].to_list(), data["peds_positions"].to_list()):
+        for stamp, frame in zip(data["t_ns"].to_list(), data["peds_positions"].to_list()):
             if frame:
                 for index, point in enumerate(frame):
                     key = (int(stamp), f"ped_{index}")
@@ -211,12 +211,12 @@ def _episode(data: pl.DataFrame | None, map_name: str | None, **kwargs) -> Align
         schema = {"t_ns": pl.Int64, "ped_id": pl.Utf8, "x": pl.Float64, "y": pl.Float64}
         topics["pedestrian_tracks"] = pl.DataFrame(peds_rows, schema=schema) if peds_rows else pl.DataFrame(schema=schema)
     if data is not None and "total_level_af_dba" in data.columns and "robot_acoustics" not in topics:
-        topics["robot_acoustics"] = pl.DataFrame({"t_ns": data["time_ns"].cast(pl.Int64), "total_level_af_dba": data["total_level_af_dba"].cast(pl.Float64)})
-    if data is not None and "time_ns" in data.columns and "robot_tracks" not in topics:
+        topics["robot_acoustics"] = pl.DataFrame({"t_ns": data["t_ns"].cast(pl.Int64), "total_level_af_dba": data["total_level_af_dba"].cast(pl.Float64)})
+    if data is not None and "t_ns" in data.columns and "robot_tracks" not in topics:
         topics["robot_tracks"] = (
             pl.DataFrame(
                 {
-                    "t_ns": data["time_ns"].cast(pl.Int64),
+                    "t_ns": data["t_ns"].cast(pl.Int64),
                     "x": data["pos_x_gt"].cast(pl.Float64),
                     "y": data["pos_y_gt"].cast(pl.Float64),
                     "yaw": [0.0] * len(data),

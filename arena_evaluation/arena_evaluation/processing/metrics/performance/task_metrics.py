@@ -39,8 +39,8 @@ def _robot_events(events: pl.DataFrame, robot: str) -> dict[str, tuple[np.ndarra
     rows = events.filter((pl.col("kind") == "robot") & (pl.col("entity").str.replace(r"^env_\d+/", "") == robot))
     series: dict[str, tuple[np.ndarray, list[str]]] = {}
     for (field,), group in rows.group_by(["field"]):
-        g = group.sort("time_ns")
-        series[str(field)] = (g["time_ns"].to_numpy(), g["current"].to_list())
+        g = group.sort("t_ns")
+        series[str(field)] = (g["t_ns"].to_numpy(), g["current"].to_list())
     return series
 
 
@@ -131,13 +131,13 @@ class TaskReplayCalculator(BaseMetricCalculator):
             return results
 
         poses = poses.sort("t_ns")
-        time_ns = poses["t_ns"].to_numpy()
+        t_ns = poses["t_ns"].to_numpy()
         gestures = episode.topics.get("pedestrian_gestures") if episode.topics else None
         peds_df = self.native_ped_frame(episode)
         peds_frames = frames_of(peds_df) if peds_df is not None and len(peds_df) > 0 else []
         ctx = _EvalContext(
             events=events,
-            time_ns=time_ns,
+            t_ns=t_ns,
             pos_x=poses["pos_x"].to_numpy(),
             pos_y=poses["pos_y"].to_numpy(),
             data=poses,
@@ -145,14 +145,14 @@ class TaskReplayCalculator(BaseMetricCalculator):
             entity_roster=_entity_roster(snapshot),
             ped_roster=_ped_roster(peds_df),
             yaw=poses["yaw"].to_numpy(),
-            fleet=_resample_fleet(episode.fleet, time_ns, robot),
+            fleet=_resample_fleet(episode.fleet, t_ns, robot),
             walls=load_wall_grid(self.world),
-            clips=clips_on_axis(peds_df, gestures, time_ns),
+            clips=clips_on_axis(peds_df, gestures, t_ns),
             peds_frames=peds_frames,
             peds_times=np.array([int(frame["t_ns"][0]) for frame in peds_frames], dtype=np.int64),
         )
         polygons = ctx.polygons
-        spans = _active_phase_spans(robot_series, int(time_ns[-1]) + 1)
+        spans = _active_phase_spans(robot_series, int(t_ns[-1]) + 1)
 
         disagreements: list[str] = []
         replay_violated: set[str] = set()
@@ -162,8 +162,8 @@ class TaskReplayCalculator(BaseMetricCalculator):
             span = spans.get(index)
             if span is None:
                 continue
-            lo = int(np.searchsorted(time_ns, span[0], side="left"))
-            hi = int(np.searchsorted(time_ns, span[1], side="right"))
+            lo = int(np.searchsorted(t_ns, span[0], side="left"))
+            hi = int(np.searchsorted(t_ns, span[1], side="right"))
             monitor = PhaseMonitor(phase, "robot")
             replay_met = False
             for i in range(lo, hi):

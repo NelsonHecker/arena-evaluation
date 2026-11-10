@@ -76,7 +76,7 @@ def test_point_segment_distance() -> None:
 
 
 def test_pair_track_follows_the_pedestrian_id_at_each_robot_time() -> None:
-    held = pl.DataFrame({"time_ns": [0, SEC, SEC], "ped_id": ["a", "b", "a"], "x": [0.0, 5.0, 1.0], "y": [0.0, 5.0, 1.0]})
+    held = pl.DataFrame({"t_ns": [0, SEC, SEC], "ped_id": ["a", "b", "a"], "x": [0.0, 5.0, 1.0], "y": [0.0, 5.0, 1.0]})
 
     track = pair_track(held, np.array([0, SEC, 2 * SEC]), "a")
 
@@ -94,7 +94,7 @@ def _episode(release: bool = True) -> AlignedEpisodeBundle:
     y = np.zeros_like(t)
     data = pl.DataFrame(
         {
-            "time_ns": (t * SEC).astype(np.int64),
+            "t_ns": (t * SEC).astype(np.int64),
             "pos_x": x,
             "pos_y": y,
             "yaw": np.zeros_like(t),
@@ -172,25 +172,25 @@ def test_calculator_without_an_activation_edge_sees_no_interaction() -> None:
 
 def test_calculator_on_too_short_or_unlocatable_data_is_all_none() -> None:
     empty = dict.fromkeys(ContactInteractionCalculator.output_keys())
-    short = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"time_ns": [0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
+    short = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"t_ns": [0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
     assert ContactInteractionCalculator(RobotParams()).calculate(short, {}) == empty
     nan = float("nan")
-    lost = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"time_ns": [0, SEC], "pos_x_gt": [nan, nan], "pos_y_gt": [nan, nan], "yaw_gt": [0.0, 0.0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
+    lost = AlignedEpisodeBundle(episode_id=0, data=pl.DataFrame({"t_ns": [0, SEC], "pos_x_gt": [nan, nan], "pos_y_gt": [nan, nan], "yaw_gt": [0.0, 0.0]}), start_pos=[0.0, 0.0, 0.0], goal_pos=[1.0, 0.0])
     assert ContactInteractionCalculator(RobotParams()).calculate(lost, {}) == empty
 
 
 def _window_bundle(episode: AlignedEpisodeBundle, *, end_ns: int | None = None) -> AlignedEpisodeBundle:
     """The episode as a CONTACT window slice: its flat topics are the window telemetry, the aligned data is empty."""
     data = episode.data
-    time_ns = data.get_column("time_ns").to_numpy().astype(np.int64)
+    t_ns = data.get_column("t_ns").to_numpy().astype(np.int64)
     tracks = pl.DataFrame(
         {
-            "t_ns": time_ns,
+            "t_ns": t_ns,
             "x": data.get_column("pos_x_gt").to_numpy().astype(np.float64),
             "y": data.get_column("pos_y_gt").to_numpy().astype(np.float64),
             "yaw": data.get_column("yaw_gt").to_numpy().astype(np.float64),
-            "vx": np.zeros(len(time_ns), dtype=np.float64),
-            "vy": np.zeros(len(time_ns), dtype=np.float64),
+            "vx": np.zeros(len(t_ns), dtype=np.float64),
+            "vy": np.zeros(len(t_ns), dtype=np.float64),
         },
         schema={
             "t_ns": pl.Int64,
@@ -235,8 +235,8 @@ def test_contact_scope_measures_the_window_telemetry() -> None:
     episode = _episode()
     window = _window_bundle(episode)
     contact = ContactInteractionCalculator(RobotParams())
-    time_ns = episode.data.get_column("time_ns").to_numpy().astype(np.int64)
-    window_metrics = contact.calculate_for_scope(episode, {}, _contact_slice(window, int(time_ns[-1])))
+    t_ns = episode.data.get_column("t_ns").to_numpy().astype(np.int64)
+    window_metrics = contact.calculate_for_scope(episode, {}, _contact_slice(window, int(t_ns[-1])))
     assert window_metrics == contact.calculate(episode, {})
     assert window_metrics["hhi_stall_count"] == 1
     assert window_metrics["hhi_passes_between"] == 1

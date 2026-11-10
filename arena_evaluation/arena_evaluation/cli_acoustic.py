@@ -271,14 +271,14 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     rx_m = float(row.get("pos_x_gt", 0) or 0)
     ry_m = float(row.get("pos_y_gt", 0) or 0)
     source_dba = float(row.get("source_dba", 42.0) or 42.0)
-    time_ns = int(row.get("time_ns", 0))
+    t_ns = int(row.get("t_ns", 0))
 
     peds_pos = row.get("peds_positions", [])
     peds = AcousticFieldRenderer._parse_pedestrian_positions(peds_pos)
 
     open_set = frozenset()
     if state_timeline is not None:
-        open_set = state_timeline.open_doors_at(time_ns)
+        open_set = state_timeline.open_doors_at(t_ns)
 
     from arena_evaluation.processing.acoustics.door_map import build_pixel_tl
 
@@ -287,7 +287,7 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
     out_path = args.output or (args.benchmark_dir / "plots" / f"{episode_id}_acoustic_snapshot.png")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Rendering snapshot: frame {frame_idx}, t={time_ns / 1e9:.1f}s, source={source_dba:.0f} dBA, {len(open_set)} doors open")
+    print(f"Rendering snapshot: frame {frame_idx}, t={t_ns / 1e9:.1f}s, source={source_dba:.0f} dBA, {len(open_set)} doors open")
 
     traj_data = (
         renderer._extract_trajectory_data(
@@ -313,7 +313,7 @@ def _acoustic_snapshot(df: pl.DataFrame, args: argparse.Namespace) -> None:
         ry_m,
         source_dba,
         peds,
-        title=f"{episode_id}  frame {frame_idx}  t={time_ns / 1e9:.1f}s  {source_dba:.0f} dBA",
+        title=f"{episode_id}  frame {frame_idx}  t={t_ns / 1e9:.1f}s  {source_dba:.0f} dBA",
         out_path=out_path,
         downsample=args.downsample,
         vmin=vmin,

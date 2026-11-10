@@ -37,7 +37,7 @@ def _episode(data, start_pos):
 def test_map_transform_anchors_at_episode_start_not_segment_start():
     data = pl.DataFrame(
         {
-            "time_ns": [0, 100_000_000, 200_000_000, 300_000_000, 400_000_000, 500_000_000, 600_000_000],
+            "t_ns": [0, 100_000_000, 200_000_000, 300_000_000, 400_000_000, 500_000_000, 600_000_000],
             "pos_x": [0.0, 0.05, 0.1, 5.0, 5.3, 5.6, 5.9],
             "pos_y": [0.0, 0.0, 0.0, 5.0, 5.0, 5.0, 5.0],
             "yaw": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -54,7 +54,7 @@ def test_map_transform_anchors_at_episode_start_not_segment_start():
 def test_map_transform_identity_without_teleport():
     data = pl.DataFrame(
         {
-            "time_ns": [0, 100_000_000, 200_000_000],
+            "t_ns": [0, 100_000_000, 200_000_000],
             "pos_x": [1.0, 1.2, 1.4],
             "pos_y": [2.0, 2.0, 2.0],
             "yaw": [0.0, 0.0, 0.0],

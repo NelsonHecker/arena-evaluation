@@ -45,7 +45,7 @@ _SEM_SCHEMA = pl.Schema(
 
 
 def _row(
-    time_ns: int,
+    t_ns: int,
     entity: str,
     field: str,
     kind: str = "door",
@@ -54,7 +54,7 @@ def _row(
     vbool: bool | None = None,
 ) -> dict:
     return {
-        "t_ns": time_ns,
+        "t_ns": t_ns,
         "env_id": "env_0",
         "world": "w",
         "entity_name": entity,
@@ -67,8 +67,8 @@ def _row(
     }
 
 
-def _progress(time_ns: int, entity: str, value: float | None) -> dict:
-    return _row(time_ns, entity, "progress", vnum=value)
+def _progress(t_ns: int, entity: str, value: float | None) -> dict:
+    return _row(t_ns, entity, "progress", vnum=value)
 
 
 def _frame(rows: list[dict]) -> pl.DataFrame:
@@ -97,8 +97,8 @@ def test_from_semantic_frame_empty():
 
 def test_from_semantic_frame_missing_kind_column():
     df = pl.DataFrame(
-        {"time_ns": [1], "entity": ["e"]},
-        schema=pl.Schema({"time_ns": pl.Int64, "entity": pl.String}),
+        {"t_ns": [1], "entity": ["e"]},
+        schema=pl.Schema({"t_ns": pl.Int64, "entity": pl.String}),
     )
     with pytest.raises(ValueError, match="lacks columns"):
         DoorStateTimeline.from_semantic_frame(df)

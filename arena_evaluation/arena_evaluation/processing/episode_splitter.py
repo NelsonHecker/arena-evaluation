@@ -216,4 +216,4 @@ class EpisodeSplitter:
 
 def _window_bounds(aligned_df: pl.DataFrame) -> tuple[int, int]:
     """Start and end stamps of an aligned frame on the odometry clock."""
-    return int(aligned_df["time_ns"].min()), int(aligned_df["time_ns"].max())  # pyright: ignore[reportArgumentType]
+    return int(aligned_df["t_ns"].min()), int(aligned_df["t_ns"].max())  # pyright: ignore[reportArgumentType]

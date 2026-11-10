@@ -59,11 +59,11 @@ _POSITION_COLUMNS: dict[str, tuple[str, str]] = {
 }
 
 
-def anchor_at(anchors: list[Anchor], time_ns: int) -> tuple[float, float]:
-    """The anchor in effect at time_ns: the last one at or before it, the first one before any."""
+def anchor_at(anchors: list[Anchor], t_ns: int) -> tuple[float, float]:
+    """The anchor in effect at t_ns: the last one at or before it, the first one before any."""
     ox, oy = anchors[0][1:]
     for t, ax, ay in anchors[1:]:
-        if t > time_ns:
+        if t > t_ns:
             break
         ox, oy = ax, ay
     return ox, oy

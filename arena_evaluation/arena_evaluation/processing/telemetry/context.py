@@ -45,7 +45,7 @@ def record_episode(sink: TableSink, envelope: Envelope[EpisodeRecord]) -> None:
             goal_dist_start_m=float(record.goal_dist_start),
             goal_dist_min_m=float(record.goal_dist_min),
             path_length_m=float(record.path_length),
-            start_time_ns=int(record.start_time.sec) * 1_000_000_000 + int(record.start_time.nanosec),
+            start_t_ns=int(record.start_time.sec) * 1_000_000_000 + int(record.start_time.nanosec),
             # agent-contracts: ignore MCAP schema evolution
             phases_yaml=str(getattr(record, "phases", "") or ""),
             params_yaml=_params_yaml(record),
@@ -78,7 +78,7 @@ def _record_legacy_episode(sink: TableSink, envelope: Envelope) -> None:
     params = legacy_params(modes, robots_params, obstacles_params)
     # agent-contracts: ignore legacy task_generator_msgs schema boundary
     start_time = getattr(record, "start_time", None)
-    start_time_ns = (int(start_time.sec) * 1_000_000_000 + int(start_time.nanosec)) if start_time else 0
+    start_t_ns = (int(start_time.sec) * 1_000_000_000 + int(start_time.nanosec)) if start_time else 0
     sink.append(
         "episode_lifecycle",
         env_row(
@@ -97,7 +97,7 @@ def _record_legacy_episode(sink: TableSink, envelope: Envelope) -> None:
             goal_dist_min_m=float(getattr(record, "goal_dist_min", 0.0)),
             # agent-contracts: ignore legacy task_generator_msgs schema boundary
             path_length_m=float(getattr(record, "path_length", 0.0)),
-            start_time_ns=start_time_ns,
+            start_t_ns=start_t_ns,
             phases_yaml="",
             params_yaml=yaml.dump(params) if params else "",
             # agent-contracts: ignore legacy task_generator_msgs schema boundary

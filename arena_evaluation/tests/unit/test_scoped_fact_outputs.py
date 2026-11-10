@@ -1347,7 +1347,7 @@ def test_mechanism_state_fact_rows_map_the_episode_clock(
     episode: AlignedEpisodeBundle,
 ) -> None:
     t_ns, _ = _time_axis()
-    timed = dataclasses.replace(episode, data=pl.DataFrame({"time_ns": t_ns}))
+    timed = dataclasses.replace(episode, data=pl.DataFrame({"t_ns": t_ns}))
     tables = _evaluate(timed)
     frame = tables.mechanism_states
     assert sorted(set(frame["t_ns"].drop_nulls().to_list())) == [0, 2 * (NS_PER_S // SAMPLE_RATE_HZ)]

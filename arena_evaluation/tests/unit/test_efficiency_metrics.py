@@ -25,7 +25,7 @@ def _gt(xs: list[float], ys: list[float]) -> pl.DataFrame:
     times = [i * SEC for i in range(len(xs))]
     return pl.DataFrame(
         {
-            "time_ns": times,
+            "t_ns": times,
             "t_ns": times,
             "pos_x_gt": [float(x) for x in xs],
             "pos_y_gt": [float(y) for y in ys],

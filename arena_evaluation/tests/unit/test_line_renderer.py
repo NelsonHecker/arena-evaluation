@@ -11,7 +11,7 @@ from arena_evaluation.storage.schemas import PlotSpec
 def _samples_df() -> pl.DataFrame:
     return pl.DataFrame(
         {
-            "time_ns": [1e9, 2e9, 3e9, 1e9, 2e9, 3e9],
+            "t_ns": [1e9, 2e9, 3e9, 1e9, 2e9, 3e9],
             "p_total_w": [10.0, 20.0, 15.0, 12.0, 18.0, 14.0],
             "phase_kind": ["linear"] * 3 + ["angular"] * 3,
             "std": [1.0] * 6,
@@ -24,7 +24,7 @@ def _spec(**options) -> PlotSpec:
         id="t",
         type="line",
         title="Test Line",
-        data_key="time_ns",
+        data_key="t_ns",
         group_by=["phase_kind"],
         options=options,
     )
@@ -50,7 +50,7 @@ def test_line_missing_columns_returns_none():
     assert LineRenderer(_spec(y="missing")).render_plotly(_samples_df()) is None
     assert LineRenderer(_spec(y="p_total_w")).render_plotly(pl.DataFrame()) is None
     # No group_by columns -> falls back to differentiate, which may be absent.
-    spec = PlotSpec(id="t", type="line", title="T", data_key="time_ns", options={"y": "p_total_w"})
+    spec = PlotSpec(id="t", type="line", title="T", data_key="t_ns", options={"y": "p_total_w"})
     assert spec is not None
     html = LineRenderer(spec).render_plotly(_samples_df())
     assert html is not None or True  # must not raise
@@ -80,7 +80,7 @@ def test_line_error_band_clamped_at_zero():
     # If std > mean (e.g. mean=10, std=25), y_low should be clamped at 0.0, not -15.0
     df = pl.DataFrame(
         {
-            "time_ns": [1e9, 2e9],
+            "t_ns": [1e9, 2e9],
             "p_total_w": [10.0, 10.0],
             "phase_kind": ["linear", "linear"],
             "std": [25.0, 25.0],

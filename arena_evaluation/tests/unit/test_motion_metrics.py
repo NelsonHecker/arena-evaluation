@@ -24,7 +24,7 @@ def _episode(*, vel_linear: list[float | None] | None = None, pos_x_gt: list[flo
         count = len(pos_x_gt)
         data = pl.DataFrame(
             {
-                "time_ns": pl.Series("time_ns", [index * SEC for index in range(count)], dtype=pl.Int64),
+                "t_ns": pl.Series("t_ns", [index * SEC for index in range(count)], dtype=pl.Int64),
                 "pos_x_gt": pl.Series("pos_x_gt", pos_x_gt, dtype=pl.Float64),
                 "pos_y_gt": pl.Series("pos_y_gt", [0.0] * count, dtype=pl.Float64),
                 "yaw_gt": pl.Series("yaw_gt", [0.0] * count, dtype=pl.Float64),
@@ -34,7 +34,7 @@ def _episode(*, vel_linear: list[float | None] | None = None, pos_x_gt: list[flo
         count = len(vel_linear) if vel_linear is not None else (sample_count or 0)
         data = pl.DataFrame(
             {
-                "time_ns": pl.Series("time_ns", [index * SEC for index in range(count)], dtype=pl.Int64),
+                "t_ns": pl.Series("t_ns", [index * SEC for index in range(count)], dtype=pl.Int64),
                 "vel_linear": pl.Series("vel_linear", vel_linear if vel_linear is not None else [None] * count, dtype=pl.Float64),
             }
         )
@@ -161,7 +161,7 @@ def _ramp_episode(*, rate_hz: float = 50.0, duration_s: float = 6.0, accel_mps2:
         episode_id=1,
         data=pl.DataFrame(
             {
-                "time_ns": pl.Series("time_ns", (time_s * SEC).astype(np.int64), dtype=pl.Int64),
+                "t_ns": pl.Series("t_ns", (time_s * SEC).astype(np.int64), dtype=pl.Int64),
                 "pos_x_gt": pl.Series("pos_x_gt", x_m, dtype=pl.Float64),
                 "pos_y_gt": pl.Series("pos_y_gt", np.zeros(count), dtype=pl.Float64),
                 "yaw_gt": pl.Series("yaw_gt", np.zeros(count), dtype=pl.Float64),
@@ -199,12 +199,12 @@ def test_a_noisy_ground_truth_tracks_does_not_inflate_the_peaks():
     rng = np.random.default_rng(7)
     x_m = 1.0 * time_s + rng.normal(0.0, 0.01, count)
     y_m = rng.normal(0.0, 0.01, count)
-    time_ns = (time_s * SEC).astype(np.int64)
+    t_ns = (time_s * SEC).astype(np.int64)
     episode = AlignedEpisodeBundle(
         episode_id=1,
         data=pl.DataFrame(
             {
-                "time_ns": pl.Series("time_ns", time_ns, dtype=pl.Int64),
+                "t_ns": pl.Series("t_ns", t_ns, dtype=pl.Int64),
                 "pos_x_gt": pl.Series("pos_x_gt", x_m, dtype=pl.Float64),
                 "pos_y_gt": pl.Series("pos_y_gt", y_m, dtype=pl.Float64),
                 "yaw_gt": pl.Series("yaw_gt", np.zeros(count), dtype=pl.Float64),
@@ -215,7 +215,7 @@ def test_a_noisy_ground_truth_tracks_does_not_inflate_the_peaks():
     )
 
     results = calculator.calculate(episode, {})
-    raw = _raw_kinematics(_speed_from_pose(x_m, y_m, time_ns), time_ns)
+    raw = _raw_kinematics(_speed_from_pose(x_m, y_m, t_ns), t_ns)
 
     assert float(np.nanmax(np.abs(raw.jerk_mps3))) > 100.0
     assert results["jerk_max"] < 50.0
@@ -229,7 +229,7 @@ def test_sample_order_and_duplicate_stamps_leave_the_peaks_unchanged():
     baseline = calculator.calculate(episode, {})
 
     duplicated = pl.concat([episode.data, episode.data.head(1)])
-    reordered = duplicated.sort("time_ns", descending=True)
+    reordered = duplicated.sort("t_ns", descending=True)
     variant = AlignedEpisodeBundle(episode_id=1, data=reordered, start_pos=[], goal_pos=[])
     reordered_results = calculator.calculate(variant, {})
 

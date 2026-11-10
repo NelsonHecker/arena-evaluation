@@ -72,7 +72,7 @@ def _episode(phases, poses, snapshot, peds=None, fleet=None, gestures=None):
         topics["pedestrian_tracks"] = peds
     return AlignedEpisodeBundle(
         episode_id=1,
-        data=pl.DataFrame({"time_ns": [0]}),
+        data=pl.DataFrame({"t_ns": [0]}),
         start_pos=[0.0, 0.0, 0.0],
         goal_pos=[],
         robot_name="env_0_jackal_0",
@@ -231,7 +231,7 @@ def test_replay_empty_without_phases_or_poses():
     calc = _calc()
     assert calc.calculate(_episode(None, _poses([(0.0, 0.0, 0.0)]), _snapshot([])), {})["phases_total"] is None
     phases = {"phases": [{"goto": [1.0, 1.0, 0.0]}], "conditions": []}
-    results = calc.calculate(_episode(phases, pl.DataFrame({"time_ns": [], "pos_x": [], "pos_y": [], "yaw": []}), _snapshot(_robot_rows(0, "0"))), {})
+    results = calc.calculate(_episode(phases, pl.DataFrame({"t_ns": [], "pos_x": [], "pos_y": [], "yaw": []}), _snapshot(_robot_rows(0, "0"))), {})
     assert results["phases_total"] == 1 and results["judge_agrees"] is None
 
 

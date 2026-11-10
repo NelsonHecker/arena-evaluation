@@ -68,7 +68,7 @@ def test_pedestrian_disturbance_adversarial_chaotic():
             "animation_state": [0] * 7,
         }
     )
-    data = pl.DataFrame({"time_ns": t_ns})
+    data = pl.DataFrame({"t_ns": t_ns})
     episode = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[], goal_pos=[], topics={"pedestrian_tracks": peds})
     params = RobotParams(0.2, 0.0, 10.0)
     calc = PedestrianDisturbanceCalculator(params)
@@ -84,7 +84,7 @@ def test_pedestrian_disturbance_adversarial_chaotic():
 
 def test_gaze_adversarial_chaotic():
     df = pl.DataFrame(
-        {"time_ns": [0, 1000000000, 2000000000], "pos_x": [0.0, 0.0, 0.0], "pos_y": [0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0], "peds_positions": [[(float('nan'), float('nan'))], [(float('inf'), float('inf'))], [(1.0, 1.0)]], "peds_headings": [[float('nan')], [float('inf')], [0.0]], "num_pedestrians": [1, 1, 1]}
+        {"t_ns": [0, 1000000000, 2000000000], "pos_x": [0.0, 0.0, 0.0], "pos_y": [0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0], "peds_positions": [[(float('nan'), float('nan'))], [(float('inf'), float('inf'))], [(1.0, 1.0)]], "peds_headings": [[float('nan')], [float('inf')], [0.0]], "num_pedestrians": [1, 1, 1]}
     )
     episode = AlignedEpisodeBundle(episode_id=1, data=df, start_pos=[], goal_pos=[])
     params = RobotParams(0.2, 0.0, 10.0)
@@ -99,7 +99,7 @@ def test_proxemics_adversarial_chaotic():
     t_ns = [0, 1_000_000_000, 2_000_000_000]
     df = pl.DataFrame(
         {
-            "time_ns": t_ns,
+            "t_ns": t_ns,
             "pos_x": [0.0, 0.0, 0.0],
             "pos_y": [0.0, 0.0, 0.0],
             "yaw": [0.0, 0.0, 0.0],

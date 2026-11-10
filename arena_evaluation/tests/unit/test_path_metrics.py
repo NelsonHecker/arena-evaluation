@@ -21,7 +21,7 @@ def _episode(poses: list[tuple[float, float, float]], *, odom_dx: float = 0.0, e
     yaws = [pose[2] for pose in poses]
     data = pl.DataFrame(
         {
-            "time_ns": pl.Series("time_ns", [index * SEC for index in range(len(poses))], dtype=pl.Int64),
+            "t_ns": pl.Series("t_ns", [index * SEC for index in range(len(poses))], dtype=pl.Int64),
             "pos_x_gt": pl.Series("pos_x_gt", xs, dtype=pl.Float64),
             "pos_y_gt": pl.Series("pos_y_gt", ys, dtype=pl.Float64),
             "yaw_gt": pl.Series("yaw_gt", yaws, dtype=pl.Float64),
@@ -110,7 +110,7 @@ def test_null_ground_truth_rows_are_dropped_before_the_geometry():
     calculator = PathMetricsCalculator(RobotParams(robot_radius=0.2))
     data = pl.DataFrame(
         {
-            "time_ns": pl.Series("time_ns", [0, SEC, 2 * SEC, 3 * SEC], dtype=pl.Int64),
+            "t_ns": pl.Series("t_ns", [0, SEC, 2 * SEC, 3 * SEC], dtype=pl.Int64),
             "pos_x_gt": pl.Series("pos_x_gt", [0.0, None, 2.0, 3.0], dtype=pl.Float64),
             "pos_y_gt": pl.Series("pos_y_gt", [0.0, 0.0, 0.0, 0.0], dtype=pl.Float64),
             "yaw_gt": pl.Series("yaw_gt", [0.0, 0.0, 0.0, 0.0], dtype=pl.Float64),
@@ -130,7 +130,7 @@ def test_null_ground_truth_rows_are_dropped_before_the_geometry():
 def test_missing_ground_truth_yields_zeroed_aggregates_and_an_empty_series():
     data = pl.DataFrame(
         {
-            "time_ns": pl.Series("time_ns", [0, SEC], dtype=pl.Int64),
+            "t_ns": pl.Series("t_ns", [0, SEC], dtype=pl.Int64),
             "pos_x": pl.Series("pos_x", [0.0, 1.0], dtype=pl.Float64),
             "pos_y": pl.Series("pos_y", [0.0, 0.0], dtype=pl.Float64),
             "yaw": pl.Series("yaw", [0.0, 0.0], dtype=pl.Float64),

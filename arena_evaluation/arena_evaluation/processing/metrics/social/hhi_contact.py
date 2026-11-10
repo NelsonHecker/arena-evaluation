@@ -153,14 +153,14 @@ def point_segment_distance(point: np.ndarray, a: np.ndarray, b: np.ndarray) -> n
     return np.linalg.norm(point - (a + delta * projection[:, None]), axis=1)
 
 
-def pair_track(held: pl.DataFrame, time_ns: np.ndarray, ped_id: str) -> np.ndarray:
+def pair_track(held: pl.DataFrame, t_ns: np.ndarray, ped_id: str) -> np.ndarray:
     """(N, 2) position of one pedestrian at each robot time, NaN where it is not in the frame held at that time."""
-    positions = np.full((len(time_ns), 2), np.nan)
-    rows = held.filter(pl.col("ped_id") == ped_id).select("time_ns", "x", "y")
+    positions = np.full((len(t_ns), 2), np.nan)
+    rows = held.filter(pl.col("ped_id") == ped_id).select("t_ns", "x", "y")
     if rows.height == 0:
         return positions
-    held_times = rows.get_column("time_ns").to_numpy().astype(np.int64)
-    positions[np.searchsorted(time_ns.astype(np.int64), held_times)] = rows.select("x", "y").to_numpy().astype(np.float64)
+    held_times = rows.get_column("t_ns").to_numpy().astype(np.int64)
+    positions[np.searchsorted(t_ns.astype(np.int64), held_times)] = rows.select("x", "y").to_numpy().astype(np.float64)
     return positions
 
 
@@ -233,15 +233,15 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         if data is None or data.height < 2:
             return None
         pos_x, pos_y, _yaw, _odom_x, _odom_y, _odom_yaw = self.resolve_robot_pose(episode)
-        time_ns = data.get_column("time_ns").to_numpy().astype(np.int64)
-        length = min(len(time_ns), len(pos_x))
+        t_ns = data.get_column("t_ns").to_numpy().astype(np.int64)
+        length = min(len(t_ns), len(pos_x))
         if length < 2:
             return None
         return (
-            time_ns[:length],
+            t_ns[:length],
             pos_x[:length],
             pos_y[:length],
-            float(time_ns[0]),
+            float(t_ns[0]),
         )
 
     def _stall_intervals(
@@ -253,8 +253,8 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         axis = self._robot_time_axis(episode) if axis is None else axis
         if axis is None:
             return None
-        time_ns, pos_x, pos_y, t0_ns = axis
-        t_s = (time_ns - t0_ns) / 1e9
+        t_ns, pos_x, pos_y, t0_ns = axis
+        t_s = (t_ns - t0_ns) / 1e9
         dist_to_goal = None
         if episode.goal_pos and len(episode.goal_pos) >= 2:
             dist_to_goal = np.hypot(pos_x - episode.goal_pos[0], pos_y - episode.goal_pos[1])
@@ -266,8 +266,8 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         axis: tuple[np.ndarray, np.ndarray, np.ndarray, float],
     ) -> dict[str, typing.Any]:
         """Every hhi output over one robot time axis and the episode view's own interaction stream."""
-        time_ns, pos_x, pos_y, t0_ns = axis
-        t_s = (time_ns - t0_ns) / 1e9
+        t_ns, pos_x, pos_y, t0_ns = axis
+        t_s = (t_ns - t0_ns) / 1e9
         t_end = float(t_s[-1])
         out: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
 
@@ -299,9 +299,9 @@ class ContactInteractionCalculator(BaseMetricCalculator):
 
         peds_df = self.native_ped_frame(episode)
         if len(participants) >= 2 and peds_df is not None:
-            held = pedestrians_at(pl.Series("time_ns", time_ns), peds_df)
-            pair_a = pair_track(held, time_ns, participants[0])
-            pair_b = pair_track(held, time_ns, participants[1])
+            held = pedestrians_at(pl.Series("t_ns", t_ns), peds_df)
+            pair_a = pair_track(held, t_ns, participants[0])
+            pair_b = pair_track(held, t_ns, participants[1])
             robot = np.column_stack([pos_x, pos_y])
             present = np.isfinite(pair_a).all(axis=1) & np.isfinite(pair_b).all(axis=1)
             if hold_onset is not None:
@@ -319,12 +319,12 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         frame = native_robot_frame(window)
         if frame is None or frame.height < 2:
             return None
-        time_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
+        t_ns = frame.get_column("t_ns").to_numpy().astype(np.int64)
         return (
-            time_ns,
+            t_ns,
             frame.get_column("x").to_numpy().astype(np.float64),
             frame.get_column("y").to_numpy().astype(np.float64),
-            float(time_ns[0]),
+            float(t_ns[0]),
         )
 
     def missing_input_provenance(self, episode: AlignedEpisodeBundle) -> dict[str, str]:
@@ -390,8 +390,8 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         stalls = self._stall_intervals(episode, axis) or []
         if not stalls or axis is None:
             return pl.DataFrame(schema=STALL_SERIES_SCHEMA)
-        time_ns, _pos_x, _pos_y, t0_ns = axis
-        t_end = float((time_ns[-1] - t0_ns) / 1e9)
+        t_ns, _pos_x, _pos_y, t0_ns = axis
+        t_end = float((t_ns[-1] - t0_ns) / 1e9)
         events = (episode.topics or {}).get("pedestrian_interaction_events")
         _interaction_type, _participants, hold_onset, release = self._contact_edges(events, int(t0_ns))
         windows = window_bounds(t_end, hold_onset, release)

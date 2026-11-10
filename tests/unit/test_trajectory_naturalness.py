@@ -29,9 +29,9 @@ def test_topological_complexity():
     pos_y = np.array([0.0, 0.0, 0.0])
     yaw = np.array([0.0, 0.0, 0.0])
 
-    data = pl.DataFrame({"time_ns": [0, 1000, 2000], "ts_iso": ["a", "b", "c"], "pos_x_gt": pos_x, "pos_y_gt": pos_y, "yaw_gt": yaw})
+    data = pl.DataFrame({"t_ns": [0, 1000, 2000], "ts_iso": ["a", "b", "c"], "pos_x_gt": pos_x, "pos_y_gt": pos_y, "yaw_gt": yaw})
 
-    peds = pl.DataFrame({"time_ns": [0, 1000, 2000], "ts_iso": ["a", "b", "c"], "ped_id": [1, 1, 1], "pos_x": [1.0, 1.0, 1.0], "pos_y": [1.0, 1.0, 1.0]})
+    peds = pl.DataFrame({"t_ns": [0, 1000, 2000], "ts_iso": ["a", "b", "c"], "ped_id": [1, 1, 1], "pos_x": [1.0, 1.0, 1.0], "pos_y": [1.0, 1.0, 1.0]})
 
     bundle = AlignedEpisodeBundle(episode_id=1, data=data, start_pos=[0.0, 0.0], goal_pos=[2.0, 0.0], peds=peds)
 
@@ -58,7 +58,7 @@ def test_reference_path_metrics():
 
         # Save reference run topic parquet
         ref_topics_dir = fm.extracted_topics_path(ref_run_dir)
-        ref_data = pl.DataFrame({"time_ns": [0, 1000, 2000, 3000, 4000, 5000], "pos_x": [0.0, 0.4, 0.8, 1.2, 1.6, 2.0], "pos_y": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]})
+        ref_data = pl.DataFrame({"t_ns": [0, 1000, 2000, 3000, 4000, 5000], "pos_x": [0.0, 0.4, 0.8, 1.2, 1.6, 2.0], "pos_y": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "yaw": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]})
 
         from arena_evaluation.storage.schemas import TopicBundle
 
@@ -66,7 +66,7 @@ def test_reference_path_metrics():
         TopicParquetStore.write({"robot": ref_bundle}, ref_topics_dir)
 
         # Create test episode bundle referencing main run
-        data = pl.DataFrame({"time_ns": [0, 1000, 2000, 3000, 4000, 5000], "ts_iso": ["a", "b", "c", "d", "e", "f"], "pos_x_gt": np.array([0.0, 0.4, 0.8, 1.2, 1.6, 2.0]), "pos_y_gt": np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0]), "yaw_gt": np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])})
+        data = pl.DataFrame({"t_ns": [0, 1000, 2000, 3000, 4000, 5000], "ts_iso": ["a", "b", "c", "d", "e", "f"], "pos_x_gt": np.array([0.0, 0.4, 0.8, 1.2, 1.6, 2.0]), "pos_y_gt": np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0]), "yaw_gt": np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])})
 
         desc = RunDescriptor(run_dir=str(main_run_dir), benchmark_id=benchmark_id, planner=planner, stage=stage)
 

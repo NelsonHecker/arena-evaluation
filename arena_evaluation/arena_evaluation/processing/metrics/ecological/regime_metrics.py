@@ -67,24 +67,24 @@ def _windows(
     kind: str,
     field: str,
     truthy: typing.Callable[[str], bool],
-    end_time_ns: int | None,
+    end_t_ns: int | None,
 ) -> dict[str, list[tuple[int, int]]]:
     """Per-entity true intervals for one field, seeded false before the first recorded row,
-    held to `end_time_ns` when still true, keyed by authored entity name (`entity_name`)."""
-    rows = events.filter((pl.col("kind") == kind) & (pl.col("field") == field)).sort("time_ns")
+    held to `end_t_ns` when still true, keyed by authored entity name (`entity_name`)."""
+    rows = events.filter((pl.col("kind") == kind) & (pl.col("field") == field)).sort("t_ns")
     windows: dict[str, list[tuple[int, int]]] = {}
     if len(rows) == 0:
         return windows
 
     for _entity, group in rows.group_by("entity"):
-        g = group.sort("time_ns")
+        g = group.sort("t_ns")
         name = entity_name(str(g["entity"][0]))
         state = False
         start: int | None = None
         entity_windows: list[tuple[int, int]] = []
 
         for row in g.iter_rows(named=True):
-            t = row["time_ns"]
+            t = row["t_ns"]
             new_state = truthy(row["current"])
             if new_state and not state:
                 start = t
@@ -93,8 +93,8 @@ def _windows(
                 start = None
             state = new_state
 
-        if state and start is not None and end_time_ns is not None and end_time_ns > start:
-            entity_windows.append((start, end_time_ns))
+        if state and start is not None and end_t_ns is not None and end_t_ns > start:
+            entity_windows.append((start, end_t_ns))
 
         if entity_windows:
             windows.setdefault(name, []).extend(entity_windows)
@@ -111,11 +111,11 @@ def _overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     return a_start < b_end and b_start < a_end
 
 
-def _used_elevator_during_alarm(events: pl.DataFrame, end_time_ns: int | None) -> int:
+def _used_elevator_during_alarm(events: pl.DataFrame, end_t_ns: int | None) -> int:
     """Count of alarm (`schedule.active`) windows overlapped by nonzero elevator occupancy,
     the single-robot proxy since per-episode `members` identity is unavailable."""
-    alarm_windows = _windows(events, "schedule", "active", _parse_bool, end_time_ns)
-    occupancy_windows = _windows(events, "elevator", "occupants", lambda v: _parse_float(v) > 0.0, end_time_ns)
+    alarm_windows = _windows(events, "schedule", "active", _parse_bool, end_t_ns)
+    occupancy_windows = _windows(events, "elevator", "occupants", lambda v: _parse_float(v) > 0.0, end_t_ns)
 
     all_alarm = [w for entity_windows in alarm_windows.values() for w in entity_windows]
     all_occupancy = [w for entity_windows in occupancy_windows.values() for w in entity_windows]
@@ -123,12 +123,12 @@ def _used_elevator_during_alarm(events: pl.DataFrame, end_time_ns: int | None) -
     return sum(1 for a_start, a_end in all_alarm if any(_overlaps(a_start, a_end, o_start, o_end) for o_start, o_end in all_occupancy))
 
 
-def _used_elevator_during_alarm_robot(events: pl.DataFrame, end_time_ns: int | None, identity: RobotIdentity) -> int | None:
+def _used_elevator_during_alarm_robot(events: pl.DataFrame, end_t_ns: int | None, identity: RobotIdentity) -> int | None:
     """Count of alarm windows overlapped by the robot being an elevator member, None when no elevator reports `members`."""
     if len(events.filter((pl.col("kind") == "elevator") & (pl.col("field") == "members"))) == 0:
         return None
-    alarm_windows = _windows(events, "schedule", "active", _parse_bool, end_time_ns)
-    robot_windows = _windows(events, "elevator", "members", lambda v: identity.any_of(parse_members(v)), end_time_ns)
+    alarm_windows = _windows(events, "schedule", "active", _parse_bool, end_t_ns)
+    robot_windows = _windows(events, "elevator", "members", lambda v: identity.any_of(parse_members(v)), end_t_ns)
 
     all_alarm = [w for entity_windows in alarm_windows.values() for w in entity_windows]
     all_robot = [w for entity_windows in robot_windows.values() for w in entity_windows]
@@ -139,12 +139,12 @@ def _used_elevator_during_alarm_robot(events: pl.DataFrame, end_time_ns: int | N
 def _entered_over_cap_zone(
     events: pl.DataFrame,
     zone_idx: np.ndarray,
-    time_ns: np.ndarray,
-    end_time_ns: int | None,
+    t_ns: np.ndarray,
+    end_t_ns: int | None,
     zone_names: list[str],
 ) -> int:
     """Count of outside-to-inside transitions into an occupancy_cap zone while it is over cap."""
-    over_cap_windows = _windows(events, "occupancy_cap", "over_cap", _parse_bool, end_time_ns)
+    over_cap_windows = _windows(events, "occupancy_cap", "over_cap", _parse_bool, end_t_ns)
     if not over_cap_windows:
         return 0
 
@@ -154,7 +154,7 @@ def _entered_over_cap_zone(
         if j == -1 or zone_idx[i - 1] == j:
             continue
         windows = over_cap_windows.get(zone_names[j], [])
-        if _active_at(windows, int(time_ns[i])):
+        if _active_at(windows, int(t_ns[i])):
             count += 1
     return count
 
@@ -178,13 +178,13 @@ def _ran_red_signal(
     events: pl.DataFrame,
     pos_x: np.ndarray,
     pos_y: np.ndarray,
-    time_ns: np.ndarray,
-    end_time_ns: int | None,
+    t_ns: np.ndarray,
+    end_t_ns: int | None,
     doors: list[_DoorGeometry],
     signals: list[SignalGeom] | None = None,
 ) -> int:
     """Count of robot entries into a signal's guarded disc while that signal is `stop`."""
-    stop_windows = _windows(events, "signal", "stop", _parse_bool, end_time_ns)
+    stop_windows = _windows(events, "signal", "stop", _parse_bool, end_t_ns)
     door_by_name = {door.name: door for door in doors}
     signal_by_name = {signal.name: signal for signal in signals or []}
 
@@ -200,7 +200,7 @@ def _ran_red_signal(
             dx = pos_x[i] - cx
             dy = pos_y[i] - cy
             inside = dx * dx + dy * dy <= radius**2
-            if inside and not prev_inside and _active_at(windows, int(time_ns[i])):
+            if inside and not prev_inside and _active_at(windows, int(t_ns[i])):
                 count += 1
             prev_inside = inside
 
@@ -213,14 +213,14 @@ def _cmd_vel_change_times(data: pl.DataFrame, epsilon: float) -> list[int] | Non
     if not cmd_cols:
         return None
 
-    time_ns = data["time_ns"].to_numpy()
-    if len(time_ns) < 2:
+    t_ns = data["t_ns"].to_numpy()
+    if len(t_ns) < 2:
         return []
 
     values = np.stack([data[c].to_numpy() for c in cmd_cols], axis=1)
     diffs = np.abs(np.diff(values, axis=0))
     changed = np.any(diffs > epsilon, axis=1)
-    return [int(time_ns[i + 1]) for i in range(len(changed)) if changed[i]]
+    return [int(t_ns[i + 1]) for i in range(len(changed)) if changed[i]]
 
 
 def _replan_triggers(events: pl.DataFrame) -> list[int]:
@@ -229,16 +229,16 @@ def _replan_triggers(events: pl.DataFrame) -> list[int]:
     triggers: list[int] = []
 
     door_open = events.filter((pl.col("kind") == "door") & (pl.col("field") == "open") & (pl.col("previous") == "false") & (pl.col("current") == "true"))
-    triggers.extend(door_open["time_ns"].to_list())
+    triggers.extend(door_open["t_ns"].to_list())
 
     gate_unlock = events.filter((pl.col("kind") == "gate") & (pl.col("field") == "locked") & (pl.col("previous") == "true") & (pl.col("current") == "false"))
-    triggers.extend(gate_unlock["time_ns"].to_list())
+    triggers.extend(gate_unlock["t_ns"].to_list())
 
     signal_state = events.filter((pl.col("kind") == "signal") & (pl.col("field") == "state"))
-    triggers.extend(signal_state["time_ns"].to_list())
+    triggers.extend(signal_state["t_ns"].to_list())
 
     schedule_active = events.filter((pl.col("kind") == "schedule") & (pl.col("field") == "active"))
-    triggers.extend(schedule_active["time_ns"].to_list())
+    triggers.extend(schedule_active["t_ns"].to_list())
 
     return sorted(triggers)
 
@@ -340,18 +340,18 @@ class RegimeMetricsCalculator(BaseMetricCalculator):
 
         pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
 
-        if episode.data is None or "time_ns" not in episode.data.columns or len(episode.data) == 0:
+        if episode.data is None or "t_ns" not in episode.data.columns or len(episode.data) == 0:
             return results
 
-        time_ns = episode.data["time_ns"].to_numpy()
-        if len(time_ns) == 0:
+        t_ns = episode.data["t_ns"].to_numpy()
+        if len(t_ns) == 0:
             return results
-        end_time_ns = int(time_ns.max())
+        end_t_ns = int(t_ns.max())
 
         if has_events and {"schedule", "elevator"}.issubset(kinds):
-            results["used_elevator_during_alarm"] = _used_elevator_during_alarm(events, end_time_ns)
+            results["used_elevator_during_alarm"] = _used_elevator_during_alarm(events, end_t_ns)
             if episode.robot_name:
-                results["used_elevator_during_alarm_robot"] = _used_elevator_during_alarm_robot(events, end_time_ns, RobotIdentity(episode.robot_name))
+                results["used_elevator_during_alarm_robot"] = _used_elevator_during_alarm_robot(events, end_t_ns, RobotIdentity(episode.robot_name))
 
         if has_events and (kinds & {"door", "gate", "signal", "schedule"}):
             cmd_changes = _cmd_vel_change_times(episode.data, self.CMD_CHANGE_EPSILON)
@@ -362,7 +362,7 @@ class RegimeMetricsCalculator(BaseMetricCalculator):
                     results["replan_latency_after_state_change_p95"] = float(np.percentile(latencies, 95))
 
         n = len(pos_x)
-        if self.world is not None and episode.start_pos and n > 0 and len(time_ns) == n:
+        if self.world is not None and episode.start_pos and n > 0 and len(t_ns) == n:
             loaded = self._load_world(self.world)
             if loaded is not None:
                 zones, doors, signals = loaded
@@ -370,9 +370,9 @@ class RegimeMetricsCalculator(BaseMetricCalculator):
                 if has_events and "occupancy_cap" in kinds and zones:
                     zone_idx = _zone_membership(pos_x, pos_y, zones)
                     zone_names = [zone.name for zone in zones]
-                    results["entered_over_cap_zone"] = _entered_over_cap_zone(events, zone_idx, time_ns, end_time_ns, zone_names)
+                    results["entered_over_cap_zone"] = _entered_over_cap_zone(events, zone_idx, t_ns, end_t_ns, zone_names)
 
                 if has_events and "signal" in kinds:
-                    results["ran_red_signal"] = _ran_red_signal(events, pos_x, pos_y, time_ns, end_time_ns, doors, signals)
+                    results["ran_red_signal"] = _ran_red_signal(events, pos_x, pos_y, t_ns, end_t_ns, doors, signals)
 
         return results

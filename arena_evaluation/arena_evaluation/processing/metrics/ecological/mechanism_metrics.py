@@ -49,7 +49,7 @@ class _Ctx:
         key = ("values", entity, field)
         if key not in self._memo:
             series = self.view.get(entity, field)
-            self._memo[key] = series.sample(self.track.time_ns) if series is not None else None
+            self._memo[key] = series.sample(self.track.t_ns) if series is not None else None
         return self._memo[key]
 
     def members(self, entity: str) -> list[list[str]] | None:
@@ -120,7 +120,7 @@ class _Ctx:
 def _is_jump(track: RobotTrack, i: int) -> bool:
     """Step i-1 -> i is a teleport (`pose_segments` rule: above MIN_JUMP_M and MAX_SPEED_MPS)."""
     dist = float(np.hypot(track.x[i] - track.x[i - 1], track.y[i] - track.y[i - 1]))
-    dt = (int(track.time_ns[i]) - int(track.time_ns[i - 1])) / 1e9
+    dt = (int(track.t_ns[i]) - int(track.t_ns[i - 1])) / 1e9
     return dist > MIN_JUMP_M and (dt <= 0.0 or dist / dt > MAX_SPEED_MPS)
 
 
@@ -141,7 +141,7 @@ def _cabin_masks(ctx: _Ctx) -> dict[str, np.ndarray]:
 
 def _boardings(ctx: _Ctx, masks: dict[str, np.ndarray]) -> dict[str, list[int]]:
     """Per element, sample indices where the robot enters the cabin on foot, ride arrivals excluded."""
-    t = ctx.track.time_ns
+    t = ctx.track.t_ns
     window_ns = int(ARRIVAL_WINDOW_S * 1e9)
     out: dict[str, list[int]] = {}
     for entity, mask in masks.items():
@@ -196,7 +196,7 @@ def _elevator_wait_to_board_s(ctx: _Ctx, boardings: dict[str, list[int]]) -> flo
     """Sum over boardings of the time from entering the call area to entering the cabin."""
     total = 0.0
     boarded = False
-    t = ctx.track.time_ns
+    t = ctx.track.t_ns
     for entity, indices in boardings.items():
         geom = ctx.elevator(entity)
         if geom is None:
@@ -220,7 +220,7 @@ def _call_visits(ctx: _Ctx, entity: str, cabin: np.ndarray) -> list[tuple[int, i
 
 
 def _run_end_time(track: RobotTrack, e: int) -> int:
-    return int(track.time_ns[e]) if e < len(track) else int(track.time_ns[-1]) + 1
+    return int(track.t_ns[e]) if e < len(track) else int(track.t_ns[-1]) + 1
 
 
 def _elevator_missed_cycles(ctx: _Ctx, masks: dict[str, np.ndarray]) -> int:
@@ -231,7 +231,7 @@ def _elevator_missed_cycles(ctx: _Ctx, masks: dict[str, np.ndarray]) -> int:
         if series is None:
             continue
         for s, e in _call_visits(ctx, entity, cabin):
-            t0 = int(ctx.track.time_ns[s])
+            t0 = int(ctx.track.t_ns[s])
             seen_open = series.at(t0) == "open"
             for _t, value in series.changes_in(t0 + 1, _run_end_time(ctx.track, e)):
                 if value == "open":
@@ -253,7 +253,7 @@ def _peds_in_call_area(ctx: _Ctx, geom: ElevatorGeom, i: int) -> set[str]:
 def _elevator_unnecessary_calls(ctx: _Ctx, masks: dict[str, np.ndarray], boardings: dict[str, list[int]]) -> int:
     """Robot call-area visits that ended without boarding although the cabin door opened with no pedestrian waiting."""
     calls = 0
-    t = ctx.track.time_ns
+    t = ctx.track.t_ns
     for entity, cabin in masks.items():
         series = ctx.view.get(entity, "cabin_door")
         geom = ctx.elevator(entity)
@@ -393,7 +393,7 @@ def _door_freeze_and_oscillations(ctx: _Ctx) -> tuple[float | None, int | None]:
         if series is None:
             continue
         for s, e in true_runs(near):
-            openings = sum(1 for _t, v in series.changes_in(int(ctx.track.time_ns[s]), _run_end_time(ctx.track, e)) if v == "opening")
+            openings = sum(1 for _t, v in series.changes_in(int(ctx.track.t_ns[s]), _run_end_time(ctx.track, e)) if v == "opening")
             oscillations += max(openings - 1, 0)
     if not resolvable:
         return None, None
@@ -407,7 +407,7 @@ def _door_yield_violations(ctx: _Ctx) -> int | None:
     doors = [g for g in (ctx.door(e) for e in ctx.view.entities("door")) if g is not None]
     if not doors:
         return None
-    t = ctx.track.time_ns
+    t = ctx.track.t_ns
     window_ns = int(YIELD_WINDOW_S * 1e9)
     violations = 0
     for geom in doors:
@@ -550,7 +550,7 @@ class MechanismMetricsCalculator(BaseMetricCalculator):
             view=view,
             world=self._mechanism_world(),
             identity=robot_identity(episode),
-            peds=ped_tracks(episode.peds, track.time_ns),
+            peds=ped_tracks(episode.peds, track.t_ns),
             robot_radius=float(self.robot_params.robot_radius),
         )
 

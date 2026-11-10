@@ -42,21 +42,21 @@ def _make_pair(
     r_target: float = 0.5,
 ) -> ProbstPair:
     """Construct a ProbstPair from planar position and velocity arrays."""
-    time_ns = (t * 1e9).astype(np.int64)
-    robot = Trajectory2D(time_ns, pos_r[:, 0], pos_r[:, 1], vel_r[:, 0], vel_r[:, 1], r_robot)
-    target = Trajectory2D(time_ns, pos_t[:, 0], pos_t[:, 1], vel_t[:, 0], vel_t[:, 1], r_target)
+    t_ns = (t * 1e9).astype(np.int64)
+    robot = Trajectory2D(t_ns, pos_r[:, 0], pos_r[:, 1], vel_r[:, 0], vel_r[:, 1], r_robot)
+    target = Trajectory2D(t_ns, pos_t[:, 0], pos_t[:, 1], vel_t[:, 0], vel_t[:, 1], r_target)
     return ProbstPair(robot=robot, target=target)
 
 
 def _make_zero_pair(times_s: np.ndarray, *, window_size_s: float = 12.0) -> ProbstPair:
     """ProbstPair at the origin with the given time grid, for normalization boundary tests."""
-    time_ns = np.rint(times_s * 1e9).astype(np.int64)
+    t_ns = np.rint(times_s * 1e9).astype(np.int64)
     zeros = np.zeros(len(times_s), dtype=np.float64)
-    trajectory = Trajectory2D(time_ns, zeros.copy(), zeros.copy(), zeros.copy(), zeros.copy(), 0.5)
+    trajectory = Trajectory2D(t_ns, zeros.copy(), zeros.copy(), zeros.copy(), zeros.copy(), 0.5)
     return ProbstPair(robot=trajectory, target=trajectory, window_size_s=window_size_s)
 
 
-def _pedestrian_tracks(time_ns: np.ndarray, ped_tracks: Sequence[_PedSpec]) -> pl.DataFrame:
+def _pedestrian_tracks(t_ns: np.ndarray, ped_tracks: Sequence[_PedSpec]) -> pl.DataFrame:
     """Flat pedestrian_tracks table, one row per pedestrian per frame, built from _PedSpec trajectories."""
     if not ped_tracks:
         return flat_peds([])
@@ -75,7 +75,7 @@ def _pedestrian_tracks(time_ns: np.ndarray, ped_tracks: Sequence[_PedSpec]) -> p
                 for ped_id, ped_name, xy, vel, _radius_m in ped_tracks
             ],
         )
-        for index, t_ns in enumerate(time_ns)
+        for index, t_ns in enumerate(t_ns)
     ]
     radii = {ped_id: float(radius_m) for ped_id, _name, _xy, _vel, radius_m in ped_tracks}
     return flat_peds(frames).with_columns(pl.col("ped_id").replace_strict(radii, return_dtype=pl.Float64).alias("radius_m"))
@@ -89,11 +89,11 @@ def _make_episode(
     ped_tracks: Sequence[_PedSpec] | None = None,
 ) -> AlignedEpisodeBundle:
     """Build a flat AlignedEpisodeBundle from robot and pedestrian trajectories."""
-    time_ns = (times_s * 1e9).astype(np.int64)
+    t_ns = (times_s * 1e9).astype(np.int64)
     num_samples = len(times_s)
     robot_tracks = pl.DataFrame(
         {
-            "t_ns": time_ns,
+            "t_ns": t_ns,
             "x": robot_xy[:, 0],
             "y": robot_xy[:, 1],
             "z": np.zeros(num_samples, dtype=np.float64),
@@ -104,7 +104,7 @@ def _make_episode(
     )
     topics: dict[str, pl.DataFrame] = {"robot_tracks": robot_tracks}
     if ped_tracks is not None:
-        topics["pedestrian_tracks"] = _pedestrian_tracks(time_ns, ped_tracks)
+        topics["pedestrian_tracks"] = _pedestrian_tracks(t_ns, ped_tracks)
     return AlignedEpisodeBundle(
         episode_id=1,
         data=pl.DataFrame(),

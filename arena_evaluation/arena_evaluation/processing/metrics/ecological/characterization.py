@@ -286,11 +286,11 @@ class CharacterizationCalculator(BaseMetricCalculator):
 
         # Split the transient windows off the steady-state part of every dwell:
         # the accelerating head, plus the trailing decel/cutoff on long blocks.
-        if "time_ns" in out.columns and len(out) > 0:
+        if "t_ns" in out.columns and len(out) > 0:
             out = out.with_columns(((pl.col("phase_label") != pl.col("phase_label").shift(1)) | (pl.col("vx_target") != pl.col("vx_target").shift(1)) | (pl.col("vy_target") != pl.col("vy_target").shift(1)) | (pl.col("wz_target") != pl.col("wz_target").shift(1))).fill_null(True).cum_sum().alias("_phase_block_id"))
             out = out.with_columns(
-                ((pl.col("time_ns") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).alias("_phase_elapsed_s"),
-                ((pl.col("time_ns").max().over("_phase_block_id") - pl.col("time_ns").min().over("_phase_block_id")).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).alias("_phase_total_duration_s"),
+                ((pl.col("t_ns") - pl.col("t_ns").min().over("_phase_block_id")).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).alias("_phase_elapsed_s"),
+                ((pl.col("t_ns").max().over("_phase_block_id") - pl.col("t_ns").min().over("_phase_block_id")).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).alias("_phase_total_duration_s"),
             )
             is_settle = pl.col("phase_label").str.contains("settle")
             is_transient_dwell = pl.col("phase_label").str.starts_with("linear_vx_") | pl.col("phase_label").str.starts_with("lateral_vy_") | pl.col("phase_label").str.starts_with("arc_vx_")
@@ -333,10 +333,10 @@ class CharacterizationCalculator(BaseMetricCalculator):
             .drop_nulls()
             .sort("t_ns")
         )
-        query = pl.DataFrame({"time_ns": sample_times_ns.cast(pl.Int64)})
+        query = pl.DataFrame({"t_ns": sample_times_ns.cast(pl.Int64)})
         joined = query.join_asof(
             reference,
-            left_on="time_ns",
+            left_on="t_ns",
             right_on="t_ns",
             strategy="backward",
             tolerance=_TRACK_ALIGN_TOLERANCE_NS,
@@ -350,13 +350,13 @@ class CharacterizationCalculator(BaseMetricCalculator):
         if tracks is None or tracks.is_empty() or "yaw" not in tracks.columns:
             return empty
         reference = tracks.select(pl.col("t_ns").cast(pl.Int64), pl.col("yaw").cast(pl.Float64).alias("_gt_yaw")).drop_nulls().sort("t_ns")
-        query = pl.DataFrame({"time_ns": sample_times_ns.cast(pl.Int64)})
-        joined = query.join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=_TRACK_ALIGN_TOLERANCE_NS)
+        query = pl.DataFrame({"t_ns": sample_times_ns.cast(pl.Int64)})
+        joined = query.join_asof(reference, left_on="t_ns", right_on="t_ns", strategy="backward", tolerance=_TRACK_ALIGN_TOLERANCE_NS)
         return joined["_gt_yaw"]
 
     def _enrich(self, episode: AlignedEpisodeBundle, frame: pl.DataFrame) -> pl.DataFrame:
         """Add per-sample step duration/distance from ground truth, power, acoustic level, acceleration and efficiency."""
-        sample_times_ns = frame["time_ns"]
+        sample_times_ns = frame["t_ns"]
         ground_truth_x, ground_truth_y = self._ground_truth_xy(episode, sample_times_ns)
         dt = (sample_times_ns.diff().fill_null(0).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).clip(lower_bound=0.0)
         ds = ((ground_truth_x.diff() ** 2) + (ground_truth_y.diff() ** 2)).sqrt().clip(lower_bound=0.0)
@@ -384,15 +384,15 @@ class CharacterizationCalculator(BaseMetricCalculator):
             # (omega_eq = RMS wheel speed, t_eq = mean |effort|).
             profile = self._acoustic_profile
             joints = (
-                out.select(["time_ns", "velocity", "effort"])
+                out.select(["t_ns", "velocity", "effort"])
                 .explode(["velocity", "effort"])
-                .group_by("time_ns")
+                .group_by("t_ns")
                 .agg(
                     pl.col("velocity").pow(2).mean().sqrt().alias("_omega_eq"),
                     pl.col("effort").abs().mean().alias("_t_eq"),
                 )
             )
-            out = out.join(joints, on="time_ns", how="left").with_columns(
+            out = out.join(joints, on="t_ns", how="left").with_columns(
                 pl.col("_omega_eq").clip(lower_bound=profile.omega_active_radps),
             )
             p_drive = (10.0 ** (profile.beta_0_db / 10.0)) * (pl.col("_omega_eq") / profile.omega_ref_radps) ** (profile.beta_1_db / 10.0) * (1.0 + pl.col("_t_eq") / profile.tau_ref_nm) ** (profile.beta_2_db / 10.0)
@@ -405,13 +405,13 @@ class CharacterizationCalculator(BaseMetricCalculator):
         frame, phase_coverage = self._attach_phases(episode)
         out = self._enrich(episode, frame)
 
-        elapsed_s = (out["time_ns"].cast(pl.Float64) - out["time_ns"].cast(pl.Float64).min()) / _NANOSECONDS_PER_SECOND
+        elapsed_s = (out["t_ns"].cast(pl.Float64) - out["t_ns"].cast(pl.Float64).min()) / _NANOSECONDS_PER_SECOND
         speed = out["vel_linear"].cast(pl.Float64).abs() if "vel_linear" in out.columns else pl.when(out["_dt"] > 1e-6).then(out["_ds"] / out["_dt"]).otherwise(None)
         turn_rate = out["vel_angular"].cast(pl.Float64).abs() if "vel_angular" in out.columns else pl.lit(None, dtype=pl.Float64)
 
-        ground_truth_x, ground_truth_y = self._ground_truth_xy(episode, out["time_ns"])
-        step_dt = (out["time_ns"].diff().fill_null(0).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).clip(lower_bound=0.0)
-        ground_truth_yaw = out["yaw"].cast(pl.Float64) if "yaw" in out.columns else self._ground_truth_yaw(episode, out["time_ns"])
+        ground_truth_x, ground_truth_y = self._ground_truth_xy(episode, out["t_ns"])
+        step_dt = (out["t_ns"].diff().fill_null(0).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).clip(lower_bound=0.0)
+        ground_truth_yaw = out["yaw"].cast(pl.Float64) if "yaw" in out.columns else self._ground_truth_yaw(episode, out["t_ns"])
         lateral_speed = pl.when(step_dt > 1e-9).then((-ground_truth_x.diff() * ground_truth_yaw.sin() + ground_truth_y.diff() * ground_truth_yaw.cos()) / step_dt).otherwise(None)
         energy_intensity = pl.when(speed >= _MIN_SPEED_MPS).then(out["_p_total"] / speed).otherwise(None)
         energy_per_rad = pl.when(turn_rate >= _MIN_TURN_RATE_RADPS).then(out["_p_total"] / turn_rate).otherwise(None)
@@ -475,7 +475,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             pl.lit(run_id).alias("run_id"),
             pl.lit(int(episode.episode_id), dtype=pl.Int64).alias("episode_id"),
             pl.lit(robot_id or (episode.robot_name or "robot")).alias("robot_id"),
-            pl.col("time_ns").cast(pl.Int64).alias("t_ns"),
+            pl.col("t_ns").cast(pl.Int64).alias("t_ns"),
             pl.col("_time_s").alias("time_s"),
             pl.col("_p_total").alias("power_total_w"),
             pl.col("_p_mech").alias("power_mech_w"),

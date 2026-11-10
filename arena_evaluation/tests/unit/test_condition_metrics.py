@@ -70,13 +70,13 @@ def _square(name):
     )
 
 
-def _ctx(time_ns, pos_x=None, pos_y=None, snapshot=None, data=None, peds=None, zones=None):
-    n = len(time_ns)
-    time_arr = np.asarray(time_ns, dtype=np.int64)
+def _ctx(t_ns, pos_x=None, pos_y=None, snapshot=None, data=None, peds=None, zones=None):
+    n = len(t_ns)
+    time_arr = np.asarray(t_ns, dtype=np.int64)
     pos_x = np.zeros(n) if pos_x is None else np.asarray(pos_x, dtype=float)
     pos_y = np.zeros(n) if pos_y is None else np.asarray(pos_y, dtype=float)
     zones = zones or []
-    data_df = data if data is not None else pl.DataFrame({"time_ns": list(time_ns)})
+    data_df = data if data is not None else pl.DataFrame({"t_ns": list(t_ns)})
     peds_df = peds
     if peds_df is None and data is not None and "ped_name" in data.columns:
         peds_df = data
@@ -84,7 +84,7 @@ def _ctx(time_ns, pos_x=None, pos_y=None, snapshot=None, data=None, peds=None, z
     peds_times = np.array([int(frame["t_ns"][0]) for frame in peds_frames], dtype=np.int64)
     return _EvalContext(
         events=_reconstruct_events(snapshot),
-        time_ns=time_arr,
+        t_ns=time_arr,
         pos_x=pos_x,
         pos_y=pos_y,
         data=data_df,
@@ -342,9 +342,9 @@ def test_robot_zone_unresolvable_without_pose_anchor():
 # -- ped zone atoms -------------------------------------------------------
 
 
-def _ped_data(time_ns, names, positions):
+def _ped_data(t_ns, names, positions):
     rows = []
-    for t, n_list, p_list in zip(time_ns, names, positions):
+    for t, n_list, p_list in zip(t_ns, names, positions):
         pts = []
         if p_list and isinstance(p_list[0], (list, tuple)):
             pts = [(p[0], p[1]) for p in p_list]
@@ -405,7 +405,7 @@ def test_ped_zone_unresolvable_when_ped_not_recorded():
 
 
 def test_ped_zone_unresolvable_without_peds_names_column():
-    data = pl.DataFrame({"time_ns": [0, 1_000_000_000]})
+    data = pl.DataFrame({"t_ns": [0, 1_000_000_000]})
     ctx = _ctx([0, 1_000_000_000], data=data, zones=[_square("lobby")])
 
     assert _ped_roster(data) == {}
@@ -455,7 +455,7 @@ def test_clause_verdict_unknown_on_malformed_dict():
 
 def test_calculate_all_none_without_conditions():
     calc = _calc()
-    data = pl.DataFrame({"time_ns": [0, 1_000_000_000], "pos_x": [0.0, 0.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0]})
+    data = pl.DataFrame({"t_ns": [0, 1_000_000_000], "pos_x": [0.0, 0.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0]})
 
     results = calc.calculate(_episode(data, conditions=None), {})
 
@@ -465,7 +465,7 @@ def test_calculate_all_none_without_conditions():
 
 def test_calculate_all_none_when_world_absent():
     calc = _calc()
-    data = pl.DataFrame({"time_ns": [0, 1_000_000_000], "pos_x": [0.0, 0.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0]})
+    data = pl.DataFrame({"t_ns": [0, 1_000_000_000], "pos_x": [0.0, 0.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0]})
     conditions = [{"op": "never", "p": "robot in pharmacy"}]
 
     results = calc.calculate(_episode(data, conditions=conditions), {})
@@ -481,7 +481,7 @@ def test_calculate_false_dominates_unknown():
 
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [1.0, 1.0],
             "pos_y": [1.0, 1.0],
             "yaw": [0.0, 0.0],
@@ -509,7 +509,7 @@ def test_calculate_unknown_when_only_unknown_and_true():
 
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [10.0, 10.0],
             "pos_y": [10.0, 10.0],
             "yaw": [0.0, 0.0],
@@ -536,7 +536,7 @@ def test_calculate_success_when_all_true():
 
     data = pl.DataFrame(
         {
-            "time_ns": [0, 1_000_000_000],
+            "t_ns": [0, 1_000_000_000],
             "pos_x": [10.0, 10.0],
             "pos_y": [10.0, 10.0],
             "yaw": [0.0, 0.0],
@@ -604,7 +604,7 @@ def test_calculate_plays_atom_from_the_recorded_gestures():
     calc._world_cache["synthetic_conditions4"] = [_square("pharmacy")]
     _wall_cache["synthetic_conditions4"] = None
     times = [0, 1_000_000_000, 2_000_000_000]
-    data = pl.DataFrame({"time_ns": times, "pos_x": [1.0] * 3, "pos_y": [1.0] * 3, "yaw": [0.0] * 3})
+    data = pl.DataFrame({"t_ns": times, "pos_x": [1.0] * 3, "pos_y": [1.0] * 3, "yaw": [0.0] * 3})
     peds = pl.DataFrame(
         {
             "t_ns": times,

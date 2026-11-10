@@ -301,9 +301,9 @@ def _with_element_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> pl.D
 def _event_time_ns(episode: AlignedEpisodeBundle) -> np.ndarray:
     """Nanosecond clock the EPISODE-scope calculators sampled their per-sample lists on."""
     frame = episode.data
-    if frame is None or "time_ns" not in frame.columns:
+    if frame is None or "t_ns" not in frame.columns:
         return np.array([], dtype=np.int64)
-    return frame.get_column("time_ns").to_numpy().astype(np.int64)
+    return frame.get_column("t_ns").to_numpy().astype(np.int64)
 
 
 def _frame(rows: list[dict[str, object]], schema: pl.Schema) -> pl.DataFrame:
@@ -320,7 +320,7 @@ def _robot_trajectory_from_frame(robot_tracks: pl.DataFrame | None, radius_m: fl
     empty = np.array([], dtype=np.float64)
     if not _has_rows(robot_tracks):
         return Trajectory2D(
-            time_ns=np.array([], dtype=np.int64),
+            t_ns=np.array([], dtype=np.int64),
             x=empty,
             y=empty.copy(),
             vx=empty.copy(),
@@ -330,7 +330,7 @@ def _robot_trajectory_from_frame(robot_tracks: pl.DataFrame | None, radius_m: fl
     rows = typing.cast(pl.DataFrame, robot_tracks).select("t_ns", "x", "y", "vx", "vy").drop_nulls(["t_ns", "x", "y"]).with_columns(pl.col("vx").fill_null(0.0), pl.col("vy").fill_null(0.0)).sort("t_ns")
     if len(rows) == 0:
         return Trajectory2D(
-            time_ns=np.array([], dtype=np.int64),
+            t_ns=np.array([], dtype=np.int64),
             x=empty,
             y=empty.copy(),
             vx=empty.copy(),
@@ -338,7 +338,7 @@ def _robot_trajectory_from_frame(robot_tracks: pl.DataFrame | None, radius_m: fl
             radius_m=radius_m,
         )
     return Trajectory2D(
-        time_ns=rows.get_column("t_ns").to_numpy().astype(np.int64),
+        t_ns=rows.get_column("t_ns").to_numpy().astype(np.int64),
         x=rows.get_column("x").to_numpy().astype(np.float64),
         y=rows.get_column("y").to_numpy().astype(np.float64),
         vx=np.nan_to_num(

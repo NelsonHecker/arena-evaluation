@@ -163,7 +163,7 @@ def _restricted_zone_entries(zone_idx: np.ndarray, zones: list[_ZoneGeometry]) -
 
 
 _RECONSTRUCTED_EVENTS_SCHEMA = {
-    "time_ns": pl.Int64,
+    "t_ns": pl.Int64,
     "entity": pl.Utf8,
     "kind": pl.Utf8,
     "field": pl.Utf8,
@@ -182,7 +182,7 @@ def _stringify_snapshot_value(row: dict) -> str:
 
 
 def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
-    """Event-equivalent (time_ns, entity, kind, field, previous, current) rows, derived by
+    """Event-equivalent (t_ns, entity, kind, field, previous, current) rows, derived by
     keeping only the change points of each entity+field's stepwise snapshot series. The first
     kept row per series is the seed value (from the episode's seed snapshot), `previous` empty.
     Members rows are kept as field `members` (see `_stringify_snapshot_value`), so membership
@@ -205,28 +205,28 @@ def _reconstruct_events(snapshot: pl.DataFrame | None) -> pl.DataFrame:
         )
         .filter(pl.col("prev_raw").is_null() | (pl.col("current") != pl.col("prev_raw")))
         .select(
-            time_ns=pl.col("t_ns"),
+            t_ns=pl.col("t_ns"),
             entity=pl.col("entity_name"),
             kind=pl.col("kind"),
             field=pl.col("field_name"),
             previous=pl.col("prev_raw").fill_null(""),
             current=pl.col("current"),
         )
-        .sort("time_ns")
+        .sort("t_ns")
     )
 
 
 def _door_open_series(events: pl.DataFrame) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Per-door sorted (time_ns, is_open) event series keyed by authored door name."""
-    door_events = events.filter((pl.col("kind") == "door") & (pl.col("field") == "state")).sort("time_ns")
+    """Per-door sorted (t_ns, is_open) event series keyed by authored door name."""
+    door_events = events.filter((pl.col("kind") == "door") & (pl.col("field") == "state")).sort("t_ns")
     result: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     if len(door_events) == 0:
         return result
 
     for _, group in door_events.group_by("entity"):
-        g = group.sort("time_ns")
+        g = group.sort("t_ns")
         name = entity_name(str(g["entity"][0]))
-        times = g["time_ns"].to_numpy()
+        times = g["t_ns"].to_numpy()
         is_open = np.array([v == "open" for v in g["current"].to_list()])
         result[name] = (times, is_open)
     return result
@@ -329,7 +329,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         pos_x: np.ndarray,
         pos_y: np.ndarray,
         speed: np.ndarray,
-        time_ns: np.ndarray,
+        t_ns: np.ndarray,
         doors: list[_DoorGeometry],
     ) -> float:
         if not doors:
@@ -344,13 +344,13 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         if n < 2:
             return 0.0
 
-        dt = np.diff(time_ns) / 1e9
+        dt = np.diff(t_ns) / 1e9
 
         total = 0.0
         for i in range(n - 1):
             if speed[i] > self.STATIONARY_THRESHOLD:
                 continue
-            t = int(time_ns[i])
+            t = int(t_ns[i])
             for door in doors:
                 dx = pos_x[i] - door.center_x
                 dy = pos_y[i] - door.center_y
@@ -369,7 +369,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
             if episode.data is None or len(episode.data) == 0:
                 return None
             pos_x, pos_y, yaw, _, _, _ = self.resolve_robot_pose(episode)
-            t_odom = episode.data["time_ns"].to_numpy().astype(np.int64) if "time_ns" in episode.data.columns else np.arange(len(pos_x), dtype=np.int64)
+            t_odom = episode.data["t_ns"].to_numpy().astype(np.int64) if "t_ns" in episode.data.columns else np.arange(len(pos_x), dtype=np.int64)
 
         if len(pos_x) < 2:
             return None
@@ -489,15 +489,15 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
 
                 if episode.data is not None and len(episode.data) > 0 and "vel_linear" in episode.data.columns:
                     speed = np.abs(episode.data["vel_linear"].to_numpy())
-                    time_ns = episode.data["time_ns"].to_numpy()
+                    t_ns = episode.data["t_ns"].to_numpy()
                     n = len(pos_x)
                     if n > 0 and len(speed) == n:
-                        dt = np.diff(time_ns) / 1e9
+                        dt = np.diff(t_ns) / 1e9
                         zone_idx = _zone_membership(pos_x, pos_y, zones)
                         violations, violation_seconds = _speed_zone_metrics(zone_idx, speed, dt, zones)
                         quiet_seconds = _quiet_zone_dwell(zone_idx, dt, zones)
                         restricted_entries = _restricted_zone_entries(zone_idx, zones)
-                        doorway_blocking = self._doorway_blocking_time(episode, pos_x, pos_y, speed, time_ns, doors)
+                        doorway_blocking = self._doorway_blocking_time(episode, pos_x, pos_y, speed, t_ns, doors)
 
                         result.update(
                             {

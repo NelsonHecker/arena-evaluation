@@ -33,7 +33,7 @@ def _robot(xs: list[float]) -> pl.DataFrame:
     """The robot's ground-truth track on a 1 Hz clock, straight along x."""
     return pl.DataFrame(
         {
-            "time_ns": [i * SEC for i in range(len(xs))],
+            "t_ns": [i * SEC for i in range(len(xs))],
             "pos_x": [float(x) for x in xs],
             "pos_y": [0.0] * len(xs),
             "yaw": [0.0] * len(xs),
@@ -62,7 +62,7 @@ def _episode(peds: pl.DataFrame, robot: pl.DataFrame | None) -> AlignedEpisodeBu
     topics = {"pedestrian_tracks": peds}
     data = robot if robot is not None else pl.DataFrame()
     if robot is not None:
-        topics["robot_tracks"] = pl.DataFrame({"t_ns": robot["time_ns"], "x": robot["pos_x_gt"], "y": robot["pos_y_gt"], "yaw": robot["yaw_gt"], "pose_source": ["tf_gt"] * len(robot)})
+        topics["robot_tracks"] = pl.DataFrame({"t_ns": robot["t_ns"], "x": robot["pos_x_gt"], "y": robot["pos_y_gt"], "yaw": robot["yaw_gt"], "pose_source": ["tf_gt"] * len(robot)})
     return AlignedEpisodeBundle(1, data, [], [], peds=peds, topics=topics)
 
 
@@ -165,7 +165,7 @@ def test_members_only_snapshot_reconstructs_the_empty_members_seed():
 
 
 def test_door_series_is_empty_without_door_state_events():
-    events = pl.DataFrame({"time_ns": [0], "entity": ["env_0/elevator_1"], "kind": ["elevator"], "field": ["state"], "current": ["open"]})
+    events = pl.DataFrame({"t_ns": [0], "entity": ["env_0/elevator_1"], "kind": ["elevator"], "field": ["state"], "current": ["open"]})
 
     assert _door_open_series(events) == {}
 
@@ -178,7 +178,7 @@ def _door_episode(xs: list[float], ys: list[float], vel: list[float], snapshot: 
     n = len(xs)
     data = pl.DataFrame(
         {
-            "time_ns": [i * SEC for i in range(n)],
+            "t_ns": [i * SEC for i in range(n)],
             "pos_x": xs,
             "pos_y": ys,
             "yaw": [0.0] * n,
@@ -194,7 +194,7 @@ def _door_episode(xs: list[float], ys: list[float], vel: list[float], snapshot: 
 def _blocking(episode: AlignedEpisodeBundle, doors: list[_DoorGeometry]) -> float:
     calc = _calc()
     pos_x, pos_y, _, _, _, _ = calc.resolve_robot_pose(episode)
-    return calc._doorway_blocking_time(episode, pos_x, pos_y, np.abs(episode.data["vel_linear"].to_numpy()), episode.data["time_ns"].to_numpy(), doors)
+    return calc._doorway_blocking_time(episode, pos_x, pos_y, np.abs(episode.data["vel_linear"].to_numpy()), episode.data["t_ns"].to_numpy(), doors)
 
 
 def test_doorway_blocking_needs_two_samples():
@@ -220,7 +220,7 @@ def test_cached_world_without_velocity_column_leaves_zone_metrics_unset():
     calc = _calc()
     calc.world = "compliance_test_world"
     calc._world_cache["compliance_test_world"] = ([], [])
-    data = pl.DataFrame({"time_ns": [0, SEC], "pos_x": [0.0, 1.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0], "pos_x_gt": [0.0, 1.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
+    data = pl.DataFrame({"t_ns": [0, SEC], "pos_x": [0.0, 1.0], "pos_y": [0.0, 0.0], "yaw": [0.0, 0.0], "pos_x_gt": [0.0, 1.0], "pos_y_gt": [0.0, 0.0], "yaw_gt": [0.0, 0.0]})
 
     res = calc.calculate(AlignedEpisodeBundle(1, data, [0.0, 0.0, 0.0], []), {})
 
@@ -232,7 +232,7 @@ def test_world_is_loaded_from_the_shipped_assets_once_and_cached():
     calc.world = "map_empty"
     data = pl.DataFrame(
         {
-            "time_ns": [0, SEC, 2 * SEC],
+            "t_ns": [0, SEC, 2 * SEC],
             "pos_x": [15.0, 15.0, 15.0],
             "pos_y": [0.2, 0.2, 0.2],
             "yaw": [0.0] * 3,

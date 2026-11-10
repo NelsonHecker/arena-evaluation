@@ -37,9 +37,9 @@ def test_teleport_jumps_exempt_elevator_arrivals():
     y = np.zeros(5)
     log_t = (np.arange(5) * 1e9).astype(np.int64)
     assert list(teleport_jumps(x, y, log_t)) == [2]
-    assert list(teleport_jumps(x, y, log_t, exempt_ns=np.array([3_500_000_000]), exempt_time_ns=log_t)) == []
-    assert list(teleport_jumps(x, y, log_t, exempt_ns=np.array([9_000_000_000]), exempt_time_ns=log_t)) == [2]
-    assert list(teleport_jumps(x, y, exempt_ns=np.array([3_000_000_000]), exempt_time_ns=log_t)) == []
+    assert list(teleport_jumps(x, y, log_t, exempt_ns=np.array([3_500_000_000]), exempt_t_ns=log_t)) == []
+    assert list(teleport_jumps(x, y, log_t, exempt_ns=np.array([9_000_000_000]), exempt_t_ns=log_t)) == [2]
+    assert list(teleport_jumps(x, y, exempt_ns=np.array([3_000_000_000]), exempt_t_ns=log_t)) == []
     assert list(teleport_jumps(x, y, exempt_ns=np.array([3_000_000_000]))) == [2]
 
     snap = pl.DataFrame(
@@ -83,7 +83,7 @@ def test_stair_crossing_keeps_the_track_whole():
     log_t = (np.arange(6) * 1e9).astype(np.int64)
     crossing = pl.DataFrame({"t_ns": [0, 3_100_000_000], "entity_name": ["env_0/0/stairs_low"] * 2, "kind": ["stairs"] * 2, "field_name": ["just_crossed"] * 2, "value_bool": [False, True]})
     assert list(teleport_jumps(x, y, log_t)) == [2]
-    assert list(teleport_jumps(x, y, log_t, exempt_ns=ride_arrival_times(crossing), exempt_time_ns=log_t)) == []
+    assert list(teleport_jumps(x, y, log_t, exempt_ns=ride_arrival_times(crossing), exempt_t_ns=log_t)) == []
 
 
 def test_the_longest_piece_survives_a_teleport():
