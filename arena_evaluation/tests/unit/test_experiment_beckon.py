@@ -90,9 +90,11 @@ def test_route_window_names_the_visible_stretch_and_the_closest_approach(tmp_pat
 def test_generate_writes_the_scenarios_and_the_paired_suites(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     pytest.importorskip("PIL")
     try:
-        beckon._world_dir()
+        world_dir = beckon._world_dir()
     except FileNotFoundError:
         pytest.skip(f"world {beckon.WORLD} is not in the source tree")
+    if not (world_dir / "0" / "map.yaml").is_file():
+        pytest.skip(f"world {beckon.WORLD} has no generated level map, its assets are not installed")
     (tmp_path / "suites").mkdir()
     suite = beckon.generate(scenarios_dir=tmp_path / "scenarios", suite_path=tmp_path / "suites" / "beckon_service.yaml", episodes=1)
 
