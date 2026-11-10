@@ -247,13 +247,20 @@ def evaluation_slice(
         t_start_ns = None
         t_end_ns = None
 
+    if contact_row is not None:
+        robot_id: str | None = str(contact_row["robot_id"])
+    elif encounter_row is not None:
+        robot_id = str(encounter_row["robot_id"])
+    else:
+        episode_robots = episode_rows.get_column("robot_id").unique()
+        robot_id = str(episode_robots[0]) if len(episode_robots) == 1 else None
     identity = SliceIdentity(
         run_id=run_id,
         episode_id=episode_id,
         encounter_id=encounter_id,
         contact_id=contact_id,
         pedestrian_ids=pedestrian_ids,
-        robot_id=str(episode_rows["robot_id"][0]),
+        robot_id=robot_id,
         t_start_ns=t_start_ns,
         t_end_ns=t_end_ns,
     )
