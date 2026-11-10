@@ -21,7 +21,7 @@ from arena_evaluation.processing.reference_twins import (
     UNOBSTRUCTED_ROBOT,
     build_twin_index,
 )
-from arena_evaluation.storage.declarations import (
+from arena_evaluation.storage.star_schema import (
     DIM_EPISODES_SCHEMA,
     EPISODE_FACT_SCHEMA,
     PEDESTRIAN_FACT_SCHEMA,
