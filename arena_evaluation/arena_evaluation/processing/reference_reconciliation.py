@@ -90,7 +90,14 @@ class ReconciledEpisode:
                 raise KeyError(f"{column!r} is not a reconciled episode column")
 
     def missing_reference(self, column: str) -> str | None:
-        """The reference type whose absence explains a null value, None when the twin is present."""
+        """The reference type whose absence explains a null value, None when every twin it needs is present."""
+        if column == "mar":
+            # MAR needs both twins: the pedestrian flow interference and the robot detour.
+            if not self.has_pedestrian_twin:
+                return UNHINDERED_PEDS
+            if not self.has_robot_twin:
+                return UNOBSTRUCTED_ROBOT
+            return None
         reference_type = _COLUMN_REFERENCE[column]
         present = (
             self.has_pedestrian_twin
