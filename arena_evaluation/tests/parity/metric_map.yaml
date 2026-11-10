@@ -566,3 +566,23 @@ mappings:
     legacy_columns: [max_speed_intimate_zone]
     star_reduction: max
     note: "proxemics_extended ENCOUNTER: the intimate zone is inside the 3 m encounter radius, so the fastest intimate-zone frame lies in an encounter window and the max of the per-window maxima is the legacy value"
+
+  # --- pedestrian acoustic exposure: per-pedestrian facts reduced to the episode grain ----
+  - metric_key: ped_max_exposure_dba
+    star_table: fact_pedestrians
+    star_column: ped_max_exposure_dba
+    legacy_columns: [ped_max_exposure_dba]
+    star_reduction: max
+    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's loudest exposure; the episode maximum is the max over pedestrians"
+  - metric_key: ped_max_startle_factor
+    star_table: fact_pedestrians
+    star_column: ped_max_startle_factor
+    legacy_columns: [ped_max_startle_factor]
+    star_reduction: max
+    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's startle rise rate; the episode maximum is the max over pedestrians (per-pedestrian slicing pairs more consecutive frames, see expected_diff)"
+  - metric_key: ped_leq_exposure_dba
+    star_table: fact_pedestrians
+    star_column: ped_leq_exposure_dba
+    legacy_columns: [ped_leq_exposure_dba]
+    star_reduction: max
+    note: "acoustic_exposure PEDESTRIAN: each row holds that pedestrian's energy-average exposure; the legacy episode value is the energy average over all pedestrian-samples, which a plain row reduction cannot rebuild, see expected_diff"

@@ -17,7 +17,7 @@ from arena_evaluation.processing.metrics.base import (
     ScopeExecutionOutcome,
     ScopeSlice,
 )
-from arena_evaluation.storage.exceptions import CircularDependencyError
+from arena_evaluation.storage.exceptions import CircularDependencyError, MetricInputError
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 
@@ -288,6 +288,8 @@ class MetricRegistry:
                         elif key not in provenance:
                             provenance[key] = f"{key}:no_samples"
 
+                except MetricInputError:
+                    raise
                 except Exception as exc:
                     import logging
 
