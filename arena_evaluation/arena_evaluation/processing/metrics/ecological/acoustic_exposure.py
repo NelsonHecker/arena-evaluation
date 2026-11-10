@@ -97,7 +97,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         "ped_max_exposure_dba": "dBA",
         "ped_leq_exposure_dba": "dBA",
         "ped_max_startle_factor": "dBA/s",
-        "worst_case_acoustic_t_ns": "ns",
     }
 
     world: str | None = None
