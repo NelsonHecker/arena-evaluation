@@ -1,5 +1,7 @@
 """Unit tests for VizManifest YAML parsing/round-trip with the declarative fields."""
 
+import pathlib
+
 import pytest
 import yaml
 
