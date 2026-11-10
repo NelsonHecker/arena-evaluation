@@ -165,7 +165,9 @@ def _smooth_kinematics(
     if unique is None:
         return None
     grid_time_ns, grid_x_m, grid_y_m = unique
-    step_s = min(
+    # Never interpolate finer than the recorded samples: a coarser recording keeps its own step,
+    # a finer one is thinned to the declared grid rate.
+    step_s = max(
         1.0 / KINEMATICS_GRID_HZ,
         float(np.median(np.diff(grid_time_ns))) / NANOSECONDS_PER_SECOND,
     )
