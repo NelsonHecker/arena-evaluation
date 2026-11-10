@@ -13,6 +13,7 @@ from .catalog import config_identifier, config_names
 
 if TYPE_CHECKING:
     from arena_evaluation.benchmark.config import Contest
+
     from arena_rclpy_mixins.ROSParamServer import ROSParamServer
     from arena_runtime.env.task_layer import TaskLayer, TaskModes
     from arena_simulation_setup.tree import DomainAssetIdentifier
