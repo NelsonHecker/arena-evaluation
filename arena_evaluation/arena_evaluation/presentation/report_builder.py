@@ -11,6 +11,7 @@ import polars as pl
 
 from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.presentation.checks import PlotDiagnostics
+from arena_evaluation.presentation.data_sources import EPISODE_SUMMARY_VIEW, data_source_table
 from arena_evaluation.presentation.manifest_registry import resolve_manifest
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
 from arena_evaluation.presentation.resolver import DataResolver
@@ -21,20 +22,7 @@ from arena_evaluation.processing.metrics.registry import MetricRegistry
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import PlotSpec
 
-_EPISODE_TABLE: typing.Final[str] = "v_episode_summary"
-
-# Manifests name a data source; "metrics" is the canonical episode summary view.
-_DATA_SOURCES: typing.Final[dict[str, str]] = {
-    "metrics": _EPISODE_TABLE,
-    "episode_summary": _EPISODE_TABLE,
-}
-
-
-def data_source_table(data_source: str | None) -> str:
-    """Map a manifest data source to the Star Schema catalog table or view it reads."""
-    if not data_source:
-        return _EPISODE_TABLE
-    return _DATA_SOURCES.get(data_source, data_source)
+_EPISODE_TABLE: typing.Final[str] = EPISODE_SUMMARY_VIEW
 
 
 def _has_values(df: pl.DataFrame, col: str) -> bool:
