@@ -336,7 +336,8 @@ def test_unreachable_pedestrians_are_dropped(calc, derived_map):
     episode = _episode(frames, derived_map())
     result = calc.calculate(episode, {})
     assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
-    assert result["worst_case_acoustic_frame"]["pedestrians"] == [[4.0, 1.0], [9.0, 9.0]]
+    # The worst-case frame now lives on the 1NF series, which carries the reachable pedestrians only.
+    assert result["worst_case_acoustic_frame"]["pedestrians"] == [[4.0, 1.0]]
     assert calc.series_table(episode)["ped_id"].unique().to_list() == ["ped_0"]
 
 

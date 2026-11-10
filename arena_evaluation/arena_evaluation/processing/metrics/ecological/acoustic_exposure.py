@@ -222,8 +222,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
         for index in range(total_frames):
             frame = peds_at_time.get(int(time_ns[index]))
-            open_set = state_timeline.open_doors_at(int(time_ns[index])) if state_timeline is not None else frozenset()
-            frame_open_doors.append(",".join(sorted(open_set)))
+            raw_open = state_timeline.open_doors_at(int(time_ns[index])) if state_timeline is not None else frozenset()
+            # Canonicalise the semantic entity names to the barrier map's door keys once per frame.
+            open_doors_here = tuple(sorted(name for name in doors if any(_entity_matches_door(name, entity) for entity in raw_open)))
+            frame_open_doors.append(",".join(open_doors_here))
             if not robot_valid[index] or frame is None or len(frame) == 0:
                 frame_ped_ids.append([])
                 frame_ped_x_m.append([])
@@ -243,7 +245,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 continue
 
             current_source = source_dba[index]
-            tl_key = tuple(sorted(open_set))
+            tl_key = open_doors_here
 
             should_eval = index == 0 or index == total_frames - 1 or last_eval_rx is None or last_eval_peds is None or last_attenuations is None
             if not should_eval and tl_key != last_eval_tl_key:
@@ -268,7 +270,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
                 pixel_tl = tl_cache.get(tl_key)
                 if pixel_tl is None:
-                    pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_set))
+                    pixel_tl = build_pixel_tl(grid, doors, open_doors=set(open_doors_here))
                     tl_cache[tl_key] = pixel_tl
 
                 attenuations = compute_attenuations(
@@ -348,16 +350,13 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                     worst_value = frame_max
                     worst_index = index
 
-        open_at_worst = frame_open_doors[worst_index]
+        worst_open_doors = {name for name in frame_open_doors[worst_index].split(",") if name}
         worst_frame = {
             "robot_x": float(rx_m[worst_index]),
             "robot_y": float(ry_m[worst_index]),
             "source_dba": float(source_dba[worst_index]),
             "pedestrians": [[x_m, y_m] for x_m, y_m in zip(frame_ped_x_m[worst_index], frame_ped_y_m[worst_index], strict=True)],
-            "door_states": {
-                name: ("open" if any(_entity_matches_door(name, entity) for entity in open_at_worst.split(",") if entity) else "closed")
-                for name in doors
-            },
+            "door_states": {name: ("open" if name in worst_open_doors else "closed") for name in doors},
         }
 
         logger.info(
