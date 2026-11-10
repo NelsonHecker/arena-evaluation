@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import dataclasses
+import json
 import logging
 import multiprocessing
 import os
@@ -206,6 +207,122 @@ def _episode_window(record: pl.DataFrame | pl.LazyFrame | None) -> tuple[int | N
     start = next((int(t) for t, s in zip(stamps, states, strict=True) if s == _RECORD_RUNNING), None)
     end = None if states[-1] == _RECORD_RUNNING else int(stamps[-1])
     return start, end
+
+
+_CROWD_PARAM_KEY = "humansim.robots_visible"
+_CROWD_LAUNCH_KEY = "human.robots.visible"
+
+
+def _run_manifest(episode_dir: pathlib.Path, data_root: pathlib.Path) -> dict[str, typing.Any] | None:
+    """The manifest.yaml of the run above episode_dir, None for bare episode dirs and unreadable files."""
+    import yaml
+
+    root = pathlib.Path(data_root).resolve()
+    for parent in pathlib.Path(episode_dir).resolve().parents:
+        manifest_path = parent / "manifest.yaml"
+        if manifest_path.is_file():
+            try:
+                loaded = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, yaml.YAMLError):
+                return None
+            return loaded if isinstance(loaded, dict) else None
+        if parent == root:
+            break
+    return None
+
+
+def _as_visible(value: object) -> bool | None:
+    """A robots_visible value as a bool, None for anything that is not one."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    return None
+
+
+def _accepted_robots_visible(record: pl.DataFrame | pl.LazyFrame | None) -> bool | None:
+    """The last robots_visible the episode's own records accepted, None when none did."""
+    if record is None:
+        return None
+    df = record.collect() if isinstance(record, pl.LazyFrame) else record
+    if len(df) == 0 or "human_params" not in df.columns:
+        return None
+    if "outcome_state" in df.columns and "time_ns" in df.columns:
+        df = df.sort("time_ns", maintain_order=True)
+        states = df["outcome_state"].to_list()
+        started = next((i for i, state in enumerate(states) if state == _RECORD_RUNNING), None)
+        if started is not None and "episode_id" in df.columns and df["episode_id"][started] is not None:
+            # a latched parameter from the previous episode must not decide this one
+            df = df.filter(pl.col("episode_id") == df["episode_id"][started])
+    for raw in reversed(df["human_params"].to_list()):
+        if not isinstance(raw, str) or not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.decoder.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        value = parsed.get(_CROWD_PARAM_KEY)
+        if isinstance(value, bool):
+            return value
+    return None
+
+
+def _launch_robots_visible(manifest: dict[str, typing.Any]) -> bool | None:
+    """robots_visible from the run's cli_args, else from the suite launch block."""
+    for arg in manifest.get("cli_args") or []:
+        if not isinstance(arg, str) or _CROWD_LAUNCH_KEY not in arg:
+            continue
+        _, _, raw = arg.partition(":=")
+        value = _as_visible(raw) if raw else None
+        if value is not None:
+            return value
+    launch = (manifest.get("suite") or {}).get("launch") or {}
+    return _as_visible(launch.get(_CROWD_LAUNCH_KEY)) if isinstance(launch, dict) else None
+
+
+def _stages_set_robots_visible(manifest: dict[str, typing.Any]) -> bool:
+    """Whether any stage of the suite sets robots_visible, so a record-less episode has no single value."""
+    for stage in (manifest.get("suite") or {}).get("stages") or []:
+        humansim = ((stage.get("config") or {}).get("humansim") or {}) if isinstance(stage, dict) else {}
+        if "robots_visible" in humansim:
+            return True
+    return False
+
+
+def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict[str, typing.Any] | None) -> dict[str, typing.Any]:
+    """Whether the crowd saw the robot, and where that came from."""
+    accepted = _accepted_robots_visible(record)
+    if accepted is not None:
+        return {"crowd_visible": accepted, "crowd_condition": "visible" if accepted else "blind", "crowd_visibility_source": "episode_param"}
+    if manifest is None:
+        return {"crowd_visible": None, "crowd_condition": None, "crowd_visibility_source": None}
+    launch = _launch_robots_visible(manifest)
+    if launch is not None:
+        return {"crowd_visible": launch, "crowd_condition": "visible" if launch else "blind", "crowd_visibility_source": "launch_arg"}
+    if record is None and _stages_set_robots_visible(manifest):
+        return {"crowd_visible": None, "crowd_condition": None, "crowd_visibility_source": None}
+    return {"crowd_visible": True, "crowd_condition": "visible", "crowd_visibility_source": "default"}
+
+
+def _pose_frame(tf_gt: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> str | None:
+    """The TF parent the robot pose came from: the most frequent frame_id inside the episode window."""
+    if tf_gt is None:
+        return None
+    df = tf_gt.collect() if isinstance(tf_gt, pl.LazyFrame) else tf_gt
+    if len(df) == 0 or "frame_id" not in df.columns:
+        return None
+    start, end = window
+    if start is not None:
+        df = df.filter(pl.col("time_ns") >= start)
+    if end is not None:
+        df = df.filter(pl.col("time_ns") <= end)
+    df = df.filter(pl.col("frame_id").is_not_null())
+    if len(df) == 0:
+        return None
+    # ties break alphabetically, so the same recording always yields the same frame
+    return str(df["frame_id"].mode().sort()[0])
 
 
 def _episode_endpoints(
