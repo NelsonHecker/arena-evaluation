@@ -121,15 +121,7 @@ class MetricRegistry:
         the pipeline's series writer derives the same stems from the registered instances.
         """
         cls.discover_calculators_cls()
-        return tuple(
-            sorted(
-                {
-                    calc_cls.SERIES_TABLE_STEM or _series_table_stem(calc_cls.__name__)
-                    for calc_cls in _leaf_calculator_classes(BaseMetricCalculator)
-                    if calc_cls.series_table is not BaseMetricCalculator.series_table
-                }
-            )
-        )
+        return tuple(sorted({calc_cls.SERIES_TABLE_STEM or _series_table_stem(calc_cls.__name__) for calc_cls in _leaf_calculator_classes(BaseMetricCalculator) if calc_cls.series_table is not BaseMetricCalculator.series_table}))
 
     @classmethod
     def get_all_units(cls) -> dict[str, str]:
