@@ -148,7 +148,7 @@ def _is_success(row: typing.Mapping[str, object]) -> bool:
 
 
 def _is_collision(row: typing.Mapping[str, object]) -> bool:
-    return row.get("result") in COLLISION_RESULTS or (row.get("collision_amount") or 0) > 0
+    return row.get("result") in COLLISION_RESULTS or (row.get("total_collisions_ped") or 0) + (row.get("total_collisions_static") or 0) > 0
 
 
 def _door_leaf(geom: DoorGeom | ElevatorGeom, progress: float) -> tuple[list[float], list[float]]:

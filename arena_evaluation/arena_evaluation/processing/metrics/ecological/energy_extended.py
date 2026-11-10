@@ -97,9 +97,9 @@ class EnergyExtendedCalculator(BaseMetricCalculator):
 
             power_path = Path(get_package_share_directory("arena_robots")) / "robots" / model / "telemetry" / "power.yaml"
             data = yaml.safe_load(power_path.read_text())
-            return float(data.get("power_system", {}).get("rolling_resistance_crr", _DEFAULT_ROLLING_RESISTANCE))
-        except (OSError, ImportError, ValueError, TypeError, AttributeError):
+        except (OSError, ImportError, KeyError):
             return _DEFAULT_ROLLING_RESISTANCE
+        return float(data.get("power_system", {}).get("rolling_resistance_crr", _DEFAULT_ROLLING_RESISTANCE))
 
     @classmethod
     def required_topics_for_scope(cls, scope: MetricScope) -> tuple[str | tuple[str, ...], ...]:

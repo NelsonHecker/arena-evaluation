@@ -15,7 +15,8 @@ class MapRegistry:
         """Resolve the world the way the runtime does and rasterize its compacted levels into the cache."""
         try:
             from arena_simulation_setup.tree.World import WorldIdentifier
-        except ImportError:
+        except ImportError as error:
+            _log.warning(f"arena_simulation_setup is not importable, no world map for {map_name!r}: {error}")
             return None
         bare, level_filter = WorldIdentifier.split_filter(map_name)
         try:
@@ -49,7 +50,8 @@ class MapRegistry:
         """The preview map yaml of a single-level world directory, read through the world loader."""
         try:
             from arena_simulation_setup.tree.World import WorldView
-        except ImportError:
+        except ImportError as error:
+            _log.warning(f"arena_simulation_setup is not importable, no world preview for {world_dir}: {error}")
             return None
         view = WorldView(world_dir)
         try:

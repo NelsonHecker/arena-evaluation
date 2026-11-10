@@ -39,22 +39,15 @@ if TYPE_CHECKING:
 
 def _state_types() -> dict[str, tuple[type, str, bool]]:
     """ros type name -> (msg class, topic basename, latched) of the state topics discovery subscribes in this env."""
-    types: dict[str, tuple[type, str, bool]] = {}
-    try:
-        from arena_humansim_msgs.msg import AgentStates, InteractionFrame
+    from arena_humansim_msgs.msg import AgentStates, InteractionFrame
+    from arena_people_msgs.msg import AnimationStates, Pedestrians
 
-        types["arena_humansim_msgs/msg/InteractionFrame"] = (InteractionFrame, "interactions", True)
-        types["arena_humansim_msgs/msg/AgentStates"] = (AgentStates, "agent_states", False)
-    except ImportError:
-        pass
-    try:
-        from arena_people_msgs.msg import AnimationStates, Pedestrians
-
-        types["arena_people_msgs/msg/AnimationStates"] = (AnimationStates, "animation_states", False)
-        types["arena_people_msgs/msg/Pedestrians"] = (Pedestrians, "arena_peds", False)
-    except ImportError:
-        pass
-    return types
+    return {
+        "arena_humansim_msgs/msg/InteractionFrame": (InteractionFrame, "interactions", True),
+        "arena_humansim_msgs/msg/AgentStates": (AgentStates, "agent_states", False),
+        "arena_people_msgs/msg/AnimationStates": (AnimationStates, "animation_states", False),
+        "arena_people_msgs/msg/Pedestrians": (Pedestrians, "arena_peds", False),
+    }
 
 
 _OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}

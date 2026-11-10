@@ -12,24 +12,17 @@ from .base import BasePlotRenderer, label_values, new_figure
 
 __all__ = ["HeatmapRenderer"]
 
-_CORRELATION_CANDIDATES: tuple[str, ...] = (
-    "success",
-    "time_to_goal",
-    "path_length",
-    "path_efficiency",
-    "total_energy_wh",
-    "mean_velocity_mps",
-    "max_acceleration_mps2",
-    "jerk_max_mps3",
-    "min_obstacle_clearance_m",
-    "min_ped_clearance_m",
-    "total_collisions_ped",
-    "total_collisions_static",
-    "mar",
-    "pfi",
-    "robot_path_dev_m",
-    "total_acoustic_dose_pa2s",
-)
+_NUMERIC_DTYPES = (pl.Float64, pl.Float32, pl.Int64, pl.Int32, pl.UInt64, pl.UInt32)
+_IDENTITY_COLUMNS = frozenset({"run_id", "episode_id", "robot_id", "env_id", "t_ns", "seed"})
+
+
+def _numeric_metric_columns(df: pl.DataFrame) -> list[str]:
+    """The metric columns a correlation heatmap can show: numeric, non-identity and not all null."""
+    return [
+        column
+        for column, dtype in df.schema.items()
+        if dtype in _NUMERIC_DTYPES and column not in _IDENTITY_COLUMNS and not df[column].is_null().all()
+    ]
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -58,13 +51,14 @@ class HeatmapRenderer(BasePlotRenderer):
         if options.get("metrics"):
             candidates = list(options["metrics"])
         elif self.spec.channels.y:
-            candidates = self.spec.channels.y if isinstance(self.spec.channels.y, list) else [self.spec.channels.y]
+            channels = self.spec.channels.y
+            candidates = channels if isinstance(channels, list) else [channels]
         else:
-            candidates = list(_CORRELATION_CANDIDATES)
+            candidates = _numeric_metric_columns(df_filtered)
 
         valid_cols = [column for column in candidates if schema.get(column) is not None and not df_filtered[column].is_null().all()]
         if len(valid_cols) < 2:
-            valid_cols = [column for column, dtype in schema.items() if dtype in (pl.Float64, pl.Float32, pl.Int64, pl.Int32, pl.UInt64, pl.UInt32) and not df_filtered[column].is_null().all()]
+            valid_cols = _numeric_metric_columns(df_filtered)
         if len(valid_cols) < 2:
             return None
 
