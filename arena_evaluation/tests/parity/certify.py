@@ -641,11 +641,7 @@ def load_benchmark_artifacts(benchmark_dir: pathlib.Path) -> BenchmarkArtifacts:
     required_paths = {name: _fact_table_path(root, name) for name in _REQUIRED_FACT_TABLES}
     missing.extend(name for name, path in required_paths.items() if path is None)
     if missing:
-        raise ParityInputError(
-            f"{root} is not a dual-path benchmark: missing {', '.join(missing)}. "
-            "Historic runs predate the star schema; reprocess the run with "
-            "`arena evaluation process --benchmark-dir <dir> --workers 1` so both artifacts are written in one pass."
-        )
+        raise ParityInputError(f"{root} is not a dual-path benchmark: missing {', '.join(missing)}. Historic runs predate the star schema; reprocess the run with `arena evaluation process --benchmark-dir <dir> --workers 1` so both artifacts are written in one pass.")
     star: dict[str, pl.DataFrame] = {"dim_episodes": pl.read_parquet(root / "dim_episodes.parquet")}
     for name in _FACT_TABLES:
         path = _fact_table_path(root, name)
@@ -717,10 +713,7 @@ def _star_value_frame(artifacts: BenchmarkArtifacts, mapping: MetricMapping) -> 
     if mapping.star_reduction is StarReduction.IDENTITY:
         duplicates = frame.group_by(list(keys)).len().filter(pl.col("len") > 1)
         if not duplicates.is_empty():
-            raise ParitySchemaError(
-                f"{mapping.star_table}.{mapping.star_column}: {duplicates.height} duplicated key rows; "
-                "declare a star_reduction instead of identity"
-            )
+            raise ParitySchemaError(f"{mapping.star_table}.{mapping.star_column}: {duplicates.height} duplicated key rows; declare a star_reduction instead of identity")
         return frame.select([*keys, pl.col(mapping.star_column).alias("star_value")])
     reducers = {
         StarReduction.MEAN: pl.col(mapping.star_column).mean(),
@@ -752,11 +745,7 @@ def _null_reason_frame(artifacts: BenchmarkArtifacts, star_table: str) -> pl.Dat
     keys = _star_keys(star_table)
     if "null_reason" not in names:
         return frame.select([*keys]).with_columns(pl.lit(None, dtype=pl.String).alias("star_null_reason"))
-    return (
-        frame.select([*keys, pl.col("null_reason").alias("star_null_reason")])
-        .group_by(list(keys))
-        .agg(pl.col("star_null_reason").drop_nulls().first())
-    )
+    return frame.select([*keys, pl.col("null_reason").alias("star_null_reason")]).group_by(list(keys)).agg(pl.col("star_null_reason").drop_nulls().first())
 
 
 def _join_comparison_frame(*, legacy: pl.DataFrame, star: pl.DataFrame, keys: tuple[str, ...]) -> pl.DataFrame:
@@ -1385,7 +1374,6 @@ def write_star_coverage_csv(path: pathlib.Path, certificate: Certificate) -> Non
             writer.writerow([row.star_table, row.star_column, row.dtype, row.note])
 
 
-
 def write_summary_yaml(path: pathlib.Path, certificate: Certificate, *, benchmark_dir: pathlib.Path) -> None:
     """Write the machine-readable certificate summary."""
     import yaml
@@ -1479,13 +1467,15 @@ def write_gap_summary_markdown(path: pathlib.Path, certificate: Certificate, *, 
     for entry in certificate.unmapped:
         unmapped_by_calculator[entry.calculator] = unmapped_by_calculator.get(entry.calculator, 0) + 1
     lines.extend(f"| {calculator} | {count} |" for calculator, count in sorted(unmapped_by_calculator.items(), key=lambda item: (-item[1], item[0])))
-    lines.extend([
-        "",
-        "## NO_PRODUCER port gaps by owner",
-        "",
-        "| owner | keys |",
-        "| --- | ---: |",
-    ])
+    lines.extend(
+        [
+            "",
+            "## NO_PRODUCER port gaps by owner",
+            "",
+            "| owner | keys |",
+            "| --- | ---: |",
+        ]
+    )
     lines.extend(f"| {owner} | {count} |" for owner, count in sorted(by_owner.items()))
     lines.extend(["", "## Port gaps by calculator", "", "| calculator | keys |", "| --- | ---: |"])
     lines.extend(f"| {calculator} | {count} |" for calculator, count in sorted(by_calculator.items(), key=lambda item: (-item[1], item[0])))

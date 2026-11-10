@@ -93,9 +93,7 @@ def calc() -> ProxemicsExtendedCalculator:
 
 def test_output_keys_do_not_collide_with_legacy_proxemics():
     """Both calculators land in the same results dict, so keys must be disjoint."""
-    overlap = set(ProxemicsCalculator.output_keys()) & set(
-        ProxemicsExtendedCalculator.output_keys()
-    )
+    overlap = set(ProxemicsCalculator.output_keys()) & set(ProxemicsExtendedCalculator.output_keys())
     assert overlap == set()
 
 
@@ -113,9 +111,7 @@ def test_no_nested_series_column_is_an_output_key():
 
 
 def test_no_topics_yields_all_none(calc: ProxemicsExtendedCalculator):
-    episode = AlignedEpisodeBundle(
-        episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0
-    )
+    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0)
     results = calc.calculate(episode, {})
     assert set(results) == set(calc.output_keys())
     assert all(value is None for value in results.values())

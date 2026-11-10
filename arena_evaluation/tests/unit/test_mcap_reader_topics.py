@@ -53,11 +53,20 @@ AGENT_STATES = (
     "arena_humansim_msgs/msg/AgentStates",
     _msgdef("std_msgs/Header header\nAgentState[] agents", HEADER, TIME, "MSG: arena_humansim_msgs/AgentState\nuint32 agent_id\nuint8 kind\ngeometry_msgs/Pose2D pose\ngeometry_msgs/Vector3 velocity", "MSG: geometry_msgs/Pose2D\nfloat64 x\nfloat64 y\nfloat64 theta", VEC3),
 )
-ACOUSTICS = ("arena_robots_msgs/msg/Acoustics", _msgdef("uint32 FLAG_NO_EFFORT=2\nstd_msgs/Header header\nfloat32 total_level_af_dba\nfloat32 total_level_zf_db\nfloat32 baseline_level_dba\nfloat32 drivetrain_level_dba\nfloat32 uncertainty_1sigma_dba\nuint32 validity_flags\nstring operating_state\nstring calibration_status", HEADER, TIME))
+ACOUSTICS = (
+    "arena_robots_msgs/msg/Acoustics",
+    _msgdef("uint32 FLAG_NO_EFFORT=2\nstd_msgs/Header header\nfloat32 total_level_af_dba\nfloat32 total_level_zf_db\nfloat32 baseline_level_dba\nfloat32 drivetrain_level_dba\nfloat32 uncertainty_1sigma_dba\nuint32 validity_flags\nstring operating_state\nstring calibration_status", HEADER, TIME),
+)
 STRING = ("std_msgs/msg/String", "string data")
 EPISODE_RECORD = (
     "arena_runtime_msgs/msg/EpisodeRecord",
-    _msgdef("uint32 episode_id\nstring world\nint64 seed\nstring task_layer\ndiagnostic_msgs/KeyValue[] modes\nstring[] robots\nuint8 RUNNING = 1\nuint8 outcome_state\nstring outcome_info\nstring goal_uuid\nfloat32 goal_dist_start\nfloat32 goal_dist_min\nfloat32 path_length\nbuiltin_interfaces/Time start_time\nstring[] integrity\nrcl_interfaces/Parameter[] params\nrcl_interfaces/Parameter[] human_params\nstring conditions\nstring phases", KEY_VALUE, PARAM, PARAM_VALUE, TIME),
+    _msgdef(
+        "uint32 episode_id\nstring world\nint64 seed\nstring task_layer\ndiagnostic_msgs/KeyValue[] modes\nstring[] robots\nuint8 RUNNING = 1\nuint8 outcome_state\nstring outcome_info\nstring goal_uuid\nfloat32 goal_dist_start\nfloat32 goal_dist_min\nfloat32 path_length\nbuiltin_interfaces/Time start_time\nstring[] integrity\nrcl_interfaces/Parameter[] params\nrcl_interfaces/Parameter[] human_params\nstring conditions\nstring phases",
+        KEY_VALUE,
+        PARAM,
+        PARAM_VALUE,
+        TIME,
+    ),
 )
 EPISODE_RECORD_BEFORE_MODES = (
     "task_generator_msgs/msg/EpisodeRecord",
@@ -151,8 +160,56 @@ def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
         ("/env_0/jackal/characterization_schedule", STRING, _schedule(("a", 0.2), ("b", 0.4)), 2 * SEC),
         ("/env_0/jackal/characterization_schedule", STRING, {"data": "not json"}, 3 * SEC),
         ("/env_0/jackal/characterization_schedule", STRING, _schedule(("c", 0.6)), 4 * SEC),
-        ("/env_0/state/episode", EPISODE_RECORD, {"episode_id": 7, "world": "test_world", "seed": 42, "task_layer": "standard", "modes": [], "robots": ["jackal"], "outcome_state": 2, "outcome_info": "done", "goal_uuid": "g", "goal_dist_start": 5.0, "goal_dist_min": 0.1, "path_length": 6.2, "start_time": {"sec": 1, "nanosec": 0}, "integrity": [], "params": params, "human_params": [], "conditions": "", "phases": '{"jackal": {"map_poses": []}}'}, 5 * SEC),
-        ("/env_0/state/episode", EPISODE_RECORD, {"episode_id": 7, "world": "test_world", "seed": 42, "task_layer": "standard", "modes": [], "robots": ["jackal"], "outcome_state": 3, "outcome_info": "failed", "goal_uuid": "g", "goal_dist_start": 5.0, "goal_dist_min": 0.1, "path_length": 6.2, "start_time": {"sec": 1, "nanosec": 0}, "integrity": [], "params": [], "human_params": [], "conditions": "", "phases": ""}, 6 * SEC),
+        (
+            "/env_0/state/episode",
+            EPISODE_RECORD,
+            {
+                "episode_id": 7,
+                "world": "test_world",
+                "seed": 42,
+                "task_layer": "standard",
+                "modes": [],
+                "robots": ["jackal"],
+                "outcome_state": 2,
+                "outcome_info": "done",
+                "goal_uuid": "g",
+                "goal_dist_start": 5.0,
+                "goal_dist_min": 0.1,
+                "path_length": 6.2,
+                "start_time": {"sec": 1, "nanosec": 0},
+                "integrity": [],
+                "params": params,
+                "human_params": [],
+                "conditions": "",
+                "phases": '{"jackal": {"map_poses": []}}',
+            },
+            5 * SEC,
+        ),
+        (
+            "/env_0/state/episode",
+            EPISODE_RECORD,
+            {
+                "episode_id": 7,
+                "world": "test_world",
+                "seed": 42,
+                "task_layer": "standard",
+                "modes": [],
+                "robots": ["jackal"],
+                "outcome_state": 3,
+                "outcome_info": "failed",
+                "goal_uuid": "g",
+                "goal_dist_start": 5.0,
+                "goal_dist_min": 0.1,
+                "path_length": 6.2,
+                "start_time": {"sec": 1, "nanosec": 0},
+                "integrity": [],
+                "params": [],
+                "human_params": [],
+                "conditions": "",
+                "phases": "",
+            },
+            6 * SEC,
+        ),
         ("/env_1/agent_states", AGENT_STATES, {"header": _header(frame_id="map"), "agents": [{"agent_id": 5, "kind": 0, "pose": {"x": 1.0, "y": 2.0, "theta": 0.5}, "velocity": {"x": 0.1}}]}, 2 * SEC),
         (
             "/env_2/state/episode",

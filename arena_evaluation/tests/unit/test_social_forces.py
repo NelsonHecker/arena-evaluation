@@ -38,9 +38,7 @@ ROBOT_TRACK_SCHEMA = pl.Schema(
 
 def _sfm(distance: float) -> float:
     """Helbing SFM magnitude for one pedestrian at center distance `distance`."""
-    return SFM_INTERACTION_STRENGTH_N * math.exp(
-        (RADIUS + PEDESTRIAN_RADIUS_M - distance) / SFM_INTERACTION_RANGE_M
-    )
+    return SFM_INTERACTION_STRENGTH_N * math.exp((RADIUS + PEDESTRIAN_RADIUS_M - distance) / SFM_INTERACTION_RANGE_M)
 
 
 def _episode(
@@ -112,9 +110,7 @@ def test_no_nested_series_column_is_an_output_key():
 
 
 def test_no_topics_yields_all_none(calc: SocialForcesCalculator):
-    episode = AlignedEpisodeBundle(
-        episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0
-    )
+    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0)
     results = calc.calculate(episode, {})
     assert set(results) == set(calc.output_keys())
     assert all(value is None for value in results.values())
@@ -147,19 +143,11 @@ def test_esfm_de_weights_pedestrians_behind_the_robot(calc: SocialForcesCalculat
 def test_esfm_ped_variant_uses_pedestrian_heading(calc: SocialForcesCalculator):
     """The ped-heading variant weights by where the pedestrian faces, not the robot."""
     d = 1.0
-    facing_robot = _episode(
-        [0, SEC], [[d, 0.0]] * 2, [(0.0, 0.0)] * 2, [0.0, 0.0], headings=[[math.pi]] * 2
-    )
-    facing_away = _episode(
-        [0, SEC], [[d, 0.0]] * 2, [(0.0, 0.0)] * 2, [0.0, 0.0], headings=[[0.0]] * 2
-    )
+    facing_robot = _episode([0, SEC], [[d, 0.0]] * 2, [(0.0, 0.0)] * 2, [0.0, 0.0], headings=[[math.pi]] * 2)
+    facing_away = _episode([0, SEC], [[d, 0.0]] * 2, [(0.0, 0.0)] * 2, [0.0, 0.0], headings=[[0.0]] * 2)
 
-    assert calc.calculate(facing_robot, {})["esfm_ped_peak_force"] == pytest.approx(
-        _sfm(d), rel=1e-9
-    )
-    assert calc.calculate(facing_away, {})["esfm_ped_peak_force"] == pytest.approx(
-        _sfm(d) * ESFM_ANISOTROPY, rel=1e-9
-    )
+    assert calc.calculate(facing_robot, {})["esfm_ped_peak_force"] == pytest.approx(_sfm(d), rel=1e-9)
+    assert calc.calculate(facing_away, {})["esfm_ped_peak_force"] == pytest.approx(_sfm(d) * ESFM_ANISOTROPY, rel=1e-9)
 
 
 def test_pedestrians_beyond_cutoff_contribute_no_force_but_still_score_ci(
@@ -170,9 +158,7 @@ def test_pedestrians_beyond_cutoff_contribute_no_force_but_still_score_ci(
     results = calc.calculate(episode, {})
     assert results["sfm_peak_force"] == 0.0
     assert results["esfm_peak_force"] == 0.0
-    assert results["ci_max"] == pytest.approx(
-        math.exp(-(far**2) / (2.0 * CI_SIGMA_X_M**2)), rel=1e-9
-    )
+    assert results["ci_max"] == pytest.approx(math.exp(-(far**2) / (2.0 * CI_SIGMA_X_M**2)), rel=1e-9)
 
 
 def test_ci_is_the_gaussian_personal_space_index(calc: SocialForcesCalculator):
@@ -242,9 +228,7 @@ def test_an_unresolved_frame_is_null_not_zero(calc: SocialForcesCalculator):
 
 
 def test_series_table_is_empty_with_schema_without_pedestrians(calc: SocialForcesCalculator):
-    episode = AlignedEpisodeBundle(
-        episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0
-    )
+    episode = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0)
     assert_frame_equal(calc.series_table(episode), pl.DataFrame(schema=SERIES_SCHEMA))
 
 

@@ -28,7 +28,6 @@ def _rows() -> list[dict[str, object]]:
     ]
 
 
-
 def _benchmark(tmp_path: pathlib.Path, rows: list[dict[str, object]] | None = None) -> pathlib.Path:
     return write_benchmark(tmp_path / "bench", rows or _rows())
 

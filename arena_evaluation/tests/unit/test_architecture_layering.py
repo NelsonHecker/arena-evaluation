@@ -36,9 +36,7 @@ def _collect_imports(file_path: pathlib.Path) -> list[str]:
 
 def test_storage_layer_never_imports_processing_or_presentation() -> None:
     """Storage (Layer 3) must never import from processing (Layer 2) or presentation (Layer 5)."""
-    storage_dir = (
-        pathlib.Path(__file__).resolve().parents[2] / "arena_evaluation" / "storage"
-    )
+    storage_dir = pathlib.Path(__file__).resolve().parents[2] / "arena_evaluation" / "storage"
     assert storage_dir.is_dir(), f"Storage directory not found at {storage_dir}"
 
     forbidden_prefixes = (
@@ -54,16 +52,12 @@ def test_storage_layer_never_imports_processing_or_presentation() -> None:
             if any(imported.startswith(prefix) for prefix in forbidden_prefixes):
                 violations.append((py_file.name, imported))
 
-    assert not violations, (
-        f"Layering violation: storage modules import from higher layers: {violations}"
-    )
+    assert not violations, f"Layering violation: storage modules import from higher layers: {violations}"
 
 
 def test_analytics_layer_never_imports_processing_or_presentation() -> None:
     """Analytics (Layer 4) must never import from processing (Layer 2) or presentation (Layer 5)."""
-    analytics_dir = (
-        pathlib.Path(__file__).resolve().parents[2] / "arena_evaluation" / "analytics"
-    )
+    analytics_dir = pathlib.Path(__file__).resolve().parents[2] / "arena_evaluation" / "analytics"
     assert analytics_dir.is_dir(), f"Analytics directory not found at {analytics_dir}"
 
     forbidden_prefixes = (
@@ -79,9 +73,7 @@ def test_analytics_layer_never_imports_processing_or_presentation() -> None:
             if any(imported.startswith(prefix) for prefix in forbidden_prefixes):
                 violations.append((py_file.name, imported))
 
-    assert not violations, (
-        f"Layering violation: analytics modules import from higher layers: {violations}"
-    )
+    assert not violations, f"Layering violation: analytics modules import from higher layers: {violations}"
 
 
 def test_metric_declarations_neutral_module() -> None:

@@ -63,10 +63,7 @@ def test_renderers_survive_an_empty_frame(tmp_path: pathlib.Path) -> None:
 
 def test_report_builder_handles_many_rows(tmp_path: pathlib.Path) -> None:
     """20k rows go through the catalog without the report path materialising pandas."""
-    rows = [
-        {"episode_id": index, "planner": "A" if index % 2 else "B", "path_length_m": float(index % 5), "success": index % 2 == 0}
-        for index in range(20_000)
-    ]
+    rows = [{"episode_id": index, "planner": "A" if index % 2 else "B", "path_length_m": float(index % 5), "success": index % 2 == 0} for index in range(20_000)]
     _build(tmp_path, rows, [PlotSpec(id="huge_box", type="box", title="Huge", data_key="path_length_m", differentiate="planner")])
 
     assert (tmp_path / "plots" / "huge_box.png").exists()

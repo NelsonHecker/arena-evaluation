@@ -234,6 +234,7 @@ def test_max_collisions_default_unchanged() -> None:
     assert results["result"] == "GOAL_REACHED"
     assert results["success"] is True
 
+
 # --- CONTACT scope -----------------------------------------------------------
 
 SEC_NS = 1_000_000_000
@@ -418,6 +419,4 @@ def test_other_scopes_are_rejected():
         full_episode=full,
     )
     with pytest.raises(ValueError, match="does not serve the pedestrians scope"):
-        CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0)).calculate_for_scope(
-            pedestrian_slice.window_bundle, {}, pedestrian_slice
-        )
+        CollisionMetricsCalculator(RobotParams(0.2, 0.0, 10.0)).calculate_for_scope(pedestrian_slice.window_bundle, {}, pedestrian_slice)

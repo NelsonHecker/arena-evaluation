@@ -138,6 +138,7 @@ def test_column_stats_recognize_list_columns():
     assert stats["planner"]["n_unique"] == 3
     assert stats["time_to_goal_s"]["min"] == 40.0
 
+
 def test_notes_replace_append_and_merge(tmp_path):
     path = tmp_path / "notes.yaml"
     runs.write_notes(path, [runs.Note(label="a", value="1"), runs.Note(label="b", value="2")], "replace")

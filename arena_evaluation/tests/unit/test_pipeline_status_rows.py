@@ -78,7 +78,6 @@ def test_status_row_carries_identity_and_verdict() -> None:
     assert "time" not in row
 
 
-
 def test_metadata_robot_uses_bundle_key_style() -> None:
     meta = _meta(3)
     meta.robot_model = ["jackal[top=camera/oakd_rgbd]", "jackal"]

@@ -134,7 +134,6 @@ def test_status_rows_carry_integrity_of_the_records(tmp_path: pathlib.Path) -> N
     assert intact["integrity"] == []
 
 
-
 def test_metric_rows_carry_integrity_of_the_last_record(tmp_path: pathlib.Path) -> None:
     _world_cache[WORLD] = [_ZoneGeometry(name="kitchen", polygon=shapely.Polygon([(0, 0), (0, 4), (4, 4), (4, 0)]), max_speed=None, quiet=False, restricted=False)]
     episode_dir = tmp_path / "run" / "episodes" / "nav2" / "episode_000"
