@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import numpy as np
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal, assert_series_equal
 
-from arena_evaluation.processing.metrics.performance.motion_metrics import SERIES_SCHEMA, MotionMetricsCalculator
+from arena_evaluation.processing.metrics.performance.motion_metrics import (
+    SERIES_SCHEMA,
+    MotionMetricsCalculator,
+    _raw_kinematics,
+    _speed_from_pose,
+)
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 SEC = 1_000_000_000
@@ -135,3 +141,109 @@ def test_without_an_aligned_frame_aggregates_and_series_are_empty():
 
     assert calculator.calculate(episode, {}) == dict.fromkeys(MotionMetricsCalculator.output_keys())
     assert_frame_equal(calculator.series_table(episode), pl.DataFrame(schema=SERIES_SCHEMA), check_dtypes=True)
+
+
+# --- smoothed derivative estimator: physical plausibility ---------------------------------
+
+
+def _ramp_episode(*, rate_hz: float = 50.0, duration_s: float = 6.0, accel_mps2: float = 1.0, ramp_s: float = 2.0) -> AlignedEpisodeBundle:
+    """Analytic profile: constant acceleration for ramp_s, then constant velocity."""
+    count = int(round(duration_s * rate_hz))
+    time_s = np.arange(count, dtype=np.float64) / rate_hz
+    ramp_speed_mps = accel_mps2 * ramp_s
+    accelerating = time_s <= ramp_s
+    x_m = np.where(
+        accelerating,
+        0.5 * accel_mps2 * time_s**2,
+        0.5 * accel_mps2 * ramp_s**2 + ramp_speed_mps * (time_s - ramp_s),
+    )
+    return AlignedEpisodeBundle(
+        episode_id=1,
+        data=pl.DataFrame(
+            {
+                "time_ns": pl.Series("time_ns", (time_s * SEC).astype(np.int64), dtype=pl.Int64),
+                "pos_x_gt": pl.Series("pos_x_gt", x_m, dtype=pl.Float64),
+                "pos_y_gt": pl.Series("pos_y_gt", np.zeros(count), dtype=pl.Float64),
+                "yaw_gt": pl.Series("yaw_gt", np.zeros(count), dtype=pl.Float64),
+            }
+        ),
+        start_pos=[],
+        goal_pos=[],
+    )
+
+
+def test_a_constant_acceleration_ramp_has_zero_jerk_away_from_its_kinks():
+    calculator = _calculator()
+    episode = _ramp_episode()
+    results = calculator.calculate(episode, {})
+    table = calculator.series_table(episode)
+    time_s = table["time_s"].to_numpy()
+    jerk_mps3 = table["jerk_mps3"].to_numpy()
+
+    for interior_s in (1.0, 4.0, 5.0):
+        window = np.abs(time_s - interior_s) < 0.1
+        assert np.all(np.abs(jerk_mps3[window]) < 0.05), interior_s
+
+    assert results["velocity_max"] == pytest.approx(2.0, abs=0.05)
+    assert results["acceleration_max"] == pytest.approx(1.0, abs=0.2)
+    assert results["jerk_max"] is not None
+    assert results["jerk_max"] < 25.0
+
+
+def test_a_noisy_ground_truth_tracks_does_not_inflate_the_peaks():
+    """A 1 cm position noise at 50 Hz is thousands of m/s^3 under raw differentiation, far less smoothed."""
+    calculator = _calculator()
+    rate_hz = 50.0
+    count = int(10.0 * rate_hz)
+    time_s = np.arange(count, dtype=np.float64) / rate_hz
+    rng = np.random.default_rng(7)
+    x_m = 1.0 * time_s + rng.normal(0.0, 0.01, count)
+    y_m = rng.normal(0.0, 0.01, count)
+    time_ns = (time_s * SEC).astype(np.int64)
+    episode = AlignedEpisodeBundle(
+        episode_id=1,
+        data=pl.DataFrame(
+            {
+                "time_ns": pl.Series("time_ns", time_ns, dtype=pl.Int64),
+                "pos_x_gt": pl.Series("pos_x_gt", x_m, dtype=pl.Float64),
+                "pos_y_gt": pl.Series("pos_y_gt", y_m, dtype=pl.Float64),
+                "yaw_gt": pl.Series("yaw_gt", np.zeros(count), dtype=pl.Float64),
+            }
+        ),
+        start_pos=[],
+        goal_pos=[],
+    )
+
+    results = calculator.calculate(episode, {})
+    raw = _raw_kinematics(_speed_from_pose(x_m, y_m, time_ns), time_ns)
+
+    assert float(np.nanmax(np.abs(raw.jerk_mps3))) > 100.0
+    assert results["jerk_max"] < 50.0
+    assert results["acceleration_max"] < 2.5
+    assert results["velocity_mean"] == pytest.approx(1.0, abs=0.1)
+
+
+def test_sample_order_and_duplicate_stamps_leave_the_peaks_unchanged():
+    calculator = _calculator()
+    episode = _ramp_episode()
+    baseline = calculator.calculate(episode, {})
+
+    duplicated = pl.concat([episode.data, episode.data.head(1)])
+    reordered = duplicated.sort("time_ns", descending=True)
+    variant = AlignedEpisodeBundle(episode_id=1, data=reordered, start_pos=[], goal_pos=[])
+    reordered_results = calculator.calculate(variant, {})
+
+    assert reordered_results["acceleration_max"] == pytest.approx(baseline["acceleration_max"], rel=1e-9)
+    assert reordered_results["jerk_max"] == pytest.approx(baseline["jerk_max"], rel=1e-9)
+
+
+def test_smoothed_series_and_metric_row_cannot_disagree():
+    calculator = _calculator()
+    episode = _ramp_episode()
+    table = calculator.series_table(episode)
+    results = calculator.calculate(episode, {})
+
+    assert results["velocity_mean"] == pytest.approx(float(table["speed_mps"].mean()))
+    assert results["velocity_max"] == pytest.approx(float(table["speed_mps"].max()))
+    assert results["acceleration_max"] == pytest.approx(float(table["acceleration_mps2"].abs().max()))
+    assert results["jerk_max"] == pytest.approx(float(table["jerk_mps3"].abs().max()))
