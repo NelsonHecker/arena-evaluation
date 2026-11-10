@@ -79,21 +79,21 @@ def test_phases_without_a_goto_leave_the_goal_to_the_plan():
 
 def test_episode_window_spans_running_to_terminal_record():
     # A latched terminal record from the previous episode can precede this episode's RUNNING row.
-    record = pl.DataFrame({"t_ns": [50, 100, 900], "outcome_state": [2, 1, 4]})
+    record = pl.DataFrame({"episode_id": [7, 7, 7], "t_ns": [50, 100, 900], "outcome_state": [2, 1, 4]})
     assert _episode_window(record.lazy()) == (100, 900)
     assert _episode_window(None) == (None, None)
     assert _episode_window(pl.DataFrame({"t_ns": []})) == (None, None)
 
 
 def test_episode_window_stays_open_when_the_terminal_record_was_not_captured():
-    record = pl.DataFrame({"t_ns": [50, 100], "outcome_state": [3, 1]})
+    record = pl.DataFrame({"episode_id": [7, 7], "t_ns": [50, 100], "outcome_state": [3, 1]})
     assert _episode_window(record) == (100, None)
-    assert _episode_window(pl.DataFrame({"t_ns": [100], "outcome_state": [1]})) == (100, None)
+    assert _episode_window(pl.DataFrame({"episode_id": [7], "t_ns": [100], "outcome_state": [1]})) == (100, None)
 
 
 def test_episode_window_stays_open_without_a_terminal_or_running_record():
-    assert _episode_window(pl.DataFrame({"t_ns": [50, 100], "outcome_state": [2, 1]})) == (100, None)
-    assert _episode_window(pl.DataFrame({"t_ns": [700], "outcome_state": [3]})) == (None, 700)
+    assert _episode_window(pl.DataFrame({"episode_id": [7, 7], "t_ns": [50, 100], "outcome_state": [2, 1]})) == (100, None)
+    assert _episode_window(pl.DataFrame({"episode_id": [7], "t_ns": [700], "outcome_state": [3]})) == (None, 700)
     assert _episode_window(pl.DataFrame({"t_ns": [5, 9]})) == (5, 9)
 
 
