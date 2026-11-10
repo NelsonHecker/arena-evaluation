@@ -238,16 +238,10 @@ def _accepted_robots_visible(record: pl.DataFrame | pl.LazyFrame | None) -> bool
     if record is None:
         return None
     df = record.collect() if isinstance(record, pl.LazyFrame) else record
-    if len(df) == 0 or "human_params" not in df.columns:
+    if len(df) == 0:
         return None
-    if "outcome_state" in df.columns and "t_ns" in df.columns:
-        df = df.sort("t_ns", maintain_order=True)
-        states = df["outcome_state"].to_list()
-        started = next((i for i, state in enumerate(states) if state == _RECORD_RUNNING), None)
-        if started is not None and df["episode_id"][started] is not None:
-            # a latched parameter from the previous episode must not decide this one
-            df = df.filter(pl.col("episode_id") == df["episode_id"][started])
-    for raw in reversed(df["human_params"].to_list()):
+    # _episode_rows keeps only the running episode's own records, so a latched parameter cannot leak in
+    for raw in reversed(_episode_rows(df)["human_params"].to_list()):
         if not isinstance(raw, str) or not raw:
             continue
         try:
