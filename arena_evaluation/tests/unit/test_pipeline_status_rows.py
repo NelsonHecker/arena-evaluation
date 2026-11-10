@@ -3,7 +3,7 @@ import pathlib
 import polars as pl
 import pytest
 from arena_evaluation.processing.parquet_store import ParquetStore
-from arena_evaluation.processing.pipeline import _METRIC_DTYPES, _metadata_robot, _outcome_verdict, _record_conditions, _record_outcome, _status_row
+from arena_evaluation.processing.pipeline import _metadata_robot, _outcome_verdict, _record_conditions, _record_outcome, _status_row
 from arena_evaluation.storage.schemas import EpisodeDescriptor, RunMetadata, TopicBundle
 
 
@@ -76,18 +76,6 @@ def test_status_row_carries_identity_and_verdict() -> None:
     assert row["success"] is False
     assert row["local_planner"] == "bev"
     assert "time" not in row
-
-
-def test_status_rows_write_with_metric_rows(tmp_path: pathlib.Path) -> None:
-    metric = {**_status_row(_ep(), _meta(2), "jackal", "evaluated", ""), "time": [1, 2], "path_length": 3.0}
-    rows = [_status_row(_ep(), _meta(1), "jackal", "no_trajectory", "no odom rows"), metric]
-    dest = tmp_path / "m.parquet"
-    ParquetStore.write_rows(rows, dest, schema_overrides=_METRIC_DTYPES)
-    df, _ = ParquetStore.read(dest)
-    assert df["success"].dtype == pl.Boolean
-    assert df["status"].to_list() == ["no_trajectory", "evaluated"]
-    assert df["path_length"].to_list() == [None, 3.0]
-    assert df["success"].mean() == 0.5
 
 
 def test_metadata_robot_uses_bundle_key_style() -> None:

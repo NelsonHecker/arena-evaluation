@@ -116,7 +116,9 @@ def test_series_table_without_data_keeps_the_schema(calc):
         }
     )
 
+
 # --- ENCOUNTER scope ---------------------------------------------------------
+
 
 def _encounter_episode() -> AlignedEpisodeBundle:
     times = [0, SEC, 2 * SEC]

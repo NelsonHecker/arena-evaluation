@@ -9,17 +9,17 @@ from arena_evaluation.storage.folder_manager import FolderManager
 FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_benchmark"
 
 
-def test_process_benchmark_writes_the_metrics_of_a_recorded_episode(tmp_path: pathlib.Path):
+def test_process_benchmark_writes_the_star_schema_of_a_recorded_episode(tmp_path: pathlib.Path):
     shutil.copytree(FIXTURE, tmp_path / "sample_benchmark")
     fm = FolderManager(data_root=tmp_path)
 
     written = ProcessingPipeline(fm, workers=1).process_benchmark("sample_benchmark")
 
-    assert written == fm.combined_metrics_path("sample_benchmark")
-    metrics = pl.read_parquet(written)
-    assert metrics.height == 1
-    row = metrics.row(0, named=True)
-    assert row["planner"] == "dwb"
-    assert row["map"] == "barn_0"
-    assert row["status"] == "no_trajectory"
-    assert row["status_reason"] == "no tf ground-truth rows"
+    assert written == fm.benchmark_dir("sample_benchmark")
+    assert (written / "dim_episodes.parquet").is_file()
+    assert (written / "metrics" / "fact_episodes.parquet").is_file()
+    dimensions = pl.read_parquet(written / "dim_episodes.parquet")
+    assert dimensions.height == 1
+    episode = dimensions.row(0, named=True)
+    assert episode["planner"] == "dwb"
+    assert episode["world"] == "barn_0"

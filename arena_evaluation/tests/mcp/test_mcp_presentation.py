@@ -289,9 +289,7 @@ def test_mcp_evaluation_read_plot_declaration() -> None:
         evaluation_read_plot_declaration(name="unknown_non_existent_recipe")
 
 
-def test_mcp_evaluation_save_plot_declaration(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mcp_evaluation_save_plot_declaration(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Point default search dir to tmp_path
     monkeypatch.setattr(
         "arena_evaluation.presentation.resolver._DEFAULT_RECIPE_SEARCH_DIRS",
@@ -302,19 +300,7 @@ def test_mcp_evaluation_save_plot_declaration(
         (tmp_path,),
     )
 
-    new_recipe_yaml = (
-        "id: mcp_custom_density_bar\n"
-        'title: "Encounter Density Profile Across Planners"\n'
-        "type: bar\n"
-        "data:\n"
-        "  stored_query: near_miss_encounter_spikes\n"
-        "channels:\n"
-        "  x: approach_type\n"
-        "  y: mean_energy_surge_ratio\n"
-        "  color: planner\n"
-        "options:\n"
-        "  barmode: group\n"
-    )
+    new_recipe_yaml = "id: mcp_custom_density_bar\ntitle: \"Encounter Density Profile Across Planners\"\ntype: bar\ndata:\n  stored_query: near_miss_encounter_spikes\nchannels:\n  x: approach_type\n  y: mean_energy_surge_ratio\n  color: planner\noptions:\n  barmode: group\n"
 
     save_res = evaluation_save_plot_declaration(
         name="mcp_custom_density_bar",
@@ -431,23 +417,15 @@ def test_mcp_evaluation_render_plot_error_handling(
     monkeypatch.setenv("ARENA_DATA_DIR", str(tmp_path / "data"))
 
     # Error: Neither declaration nor spec_yaml
-    with pytest.raises(
-        ToolError, match="Must provide either 'declaration' or 'spec_yaml'"
-    ):
+    with pytest.raises(ToolError, match="Must provide either 'declaration' or 'spec_yaml'"):
         evaluation_render_plot(run_id="run-pres-003")
 
     # Error: Both declaration and spec_yaml
-    with pytest.raises(
-        ToolError, match="Cannot provide both 'declaration' and 'spec_yaml'"
-    ):
-        evaluation_render_plot(
-            run_id="run-pres-003", declaration="foo", spec_yaml="bar"
-        )
+    with pytest.raises(ToolError, match="Cannot provide both 'declaration' and 'spec_yaml'"):
+        evaluation_render_plot(run_id="run-pres-003", declaration="foo", spec_yaml="bar")
 
     # Error: Non-existent declaration
-    with pytest.raises(
-        ToolError, match="Plot declaration 'non_existent_rec' not found"
-    ):
+    with pytest.raises(ToolError, match="Plot declaration 'non_existent_rec' not found"):
         evaluation_render_plot(run_id="run-pres-003", declaration="non_existent_rec")
 
 
@@ -484,7 +462,4 @@ def test_mcp_evaluation_render_plot_zero_row_diagnostic(
 
     err = exc_info.value
     assert "returned 0 rows; cannot render plot with an empty dataset" in str(err)
-    assert (
-        "Verify filter conditions or run 'evaluation_query' to check row counts."
-        in (err.hint or "")
-    )
+    assert "Verify filter conditions or run 'evaluation_query' to check row counts." in (err.hint or "")

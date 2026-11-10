@@ -125,7 +125,9 @@ def test_kinetic_energy_demand_follows_the_velocity_track(calc):
     kinetic = [0.5 * MASS * v**2 + 0.0 * inertia for v in [0.0, 1.0, 1.0, 0.0]]
     assert results["kinetic_energy_demand_j"] == pytest.approx(sum(abs(b - a) for a, b in zip(kinetic, kinetic[1:])))
 
+
 # --- ENCOUNTER scope ---------------------------------------------------------
+
 
 def _encounter_episode() -> AlignedEpisodeBundle:
     times = [0, SEC, 2 * SEC]
@@ -136,9 +138,7 @@ def _encounter_episode() -> AlignedEpisodeBundle:
         goal_pos=[2.0, 0.0],
         topics={
             "robot_power": pl.DataFrame({"t_ns": times, "total_power_w": [360.0, 360.0, 360.0]}),
-            "robot_tracks": pl.DataFrame(
-                {"t_ns": times, "x": [0.0, 1.0, 2.0], "y": [0.0] * 3, "speed_mps": [1.0, 1.0, 1.0]}
-            ),
+            "robot_tracks": pl.DataFrame({"t_ns": times, "x": [0.0, 1.0, 2.0], "y": [0.0] * 3, "speed_mps": [1.0, 1.0, 1.0]}),
         },
     )
 

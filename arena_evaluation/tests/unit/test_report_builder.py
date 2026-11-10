@@ -198,6 +198,7 @@ def test_status_table_lists_only_unevaluated_rows() -> None:
 def test_status_table_empty_when_every_episode_is_evaluated() -> None:
     assert _status_table_html(pl.DataFrame({"episode_id": [0], "success": [True]}, schema={"episode_id": pl.Int64, "success": pl.Boolean})) == ""
 
+
 def test_report_builder_reads_a_consolidated_series_table(tmp_path: pathlib.Path) -> None:
     """A 1NF series table is a first-class catalog source: long-format samples, never list columns."""
     benchmark_dir = _benchmark(tmp_path)

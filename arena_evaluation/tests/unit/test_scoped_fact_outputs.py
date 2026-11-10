@@ -1173,9 +1173,7 @@ def test_declared_columns_keep_the_declaration_order(table_name: str) -> None:
     declarations_for(FactTable.EPISODES),
     ids=lambda declaration: declaration.name,
 )
-def test_episode_fact_publishes_each_declared_metric(
-    declaration: MetricDeclaration, tables: ScopedFactTables
-) -> None:
+def test_episode_fact_publishes_each_declared_metric(declaration: MetricDeclaration, tables: ScopedFactTables) -> None:
     row = tables.episodes.row(0, named=True)
     assert row[declaration.name] == _COMPLETE_EPISODE_METRICS[declaration.name]
 
@@ -1185,9 +1183,7 @@ def test_episode_fact_publishes_each_declared_metric(
     declarations_for(FactTable.ROBOTS),
     ids=lambda declaration: declaration.name,
 )
-def test_robot_fact_falls_back_to_the_declared_episode_metrics(
-    declaration: MetricDeclaration, tables: ScopedFactTables
-) -> None:
+def test_robot_fact_falls_back_to_the_declared_episode_metrics(declaration: MetricDeclaration, tables: ScopedFactTables) -> None:
     assert tables.robots.item(0, declaration.name) == _COMPLETE_EPISODE_METRICS[declaration.name]
 
 
@@ -1250,9 +1246,7 @@ def test_phase_outcome_fact_rows_follow_the_outcome_list(tables: ScopedFactTable
 def test_judge_disagreement_fact_rows_carry_the_text(tables: ScopedFactTables) -> None:
     frame = tables.judge_disagreements
     assert frame.height == 1
-    assert frame["judge_disagreements"].to_list() == [
-        "phase 1 recorded as met but not met in replay"
-    ]
+    assert frame["judge_disagreements"].to_list() == ["phase 1 recorded as met but not met in replay"]
     assert frame["disagreement_idx"].to_list() == [0]
 
 

@@ -91,4 +91,6 @@ def test_process_episode_replays_the_task_on_the_episode_world(tmp_path: pathlib
     assert rows[0]["phase_outcomes"] == ["met"]
     assert rows[0]["judge_agrees"] is True
     assert rows[0]["judge_disagreements"] == []
-    assert (tmp_path / "run" / "episodes" / "nav2" / "episode_000" / "metrics.parquet").exists()
+    metrics_dir = tmp_path / "run" / "episodes" / "nav2" / "episode_000" / "metrics"
+    assert (metrics_dir / "dim_episodes.parquet").exists()
+    assert (metrics_dir / "fact_episodes.parquet").exists()

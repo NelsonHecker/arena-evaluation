@@ -18,9 +18,7 @@ from arena_evaluation.processing.metrics.social.proxemics import (
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
-EMPTY_EPISODE = AlignedEpisodeBundle(
-    episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0
-)
+EMPTY_EPISODE = AlignedEpisodeBundle(episode_id=1, data=pl.DataFrame(), start_pos=[], goal_pos=[], num_pedestrians=0)
 
 
 def _calc(cls):
@@ -55,10 +53,9 @@ def test_gaze_series_table_is_flat():
 
 
 def test_gaze_has_no_nested_series_key():
-    assert not any(
-        key.startswith("time_looking_") or key.startswith("time_looked_")
-        for key in GazeMetricsCalculator.output_keys()
-    )
+    assert not any(key.startswith("time_looking_") or key.startswith("time_looked_") for key in GazeMetricsCalculator.output_keys())
+
+
 WINDOW_RATE_NS = 100_000_000
 
 

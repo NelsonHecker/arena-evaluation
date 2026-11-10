@@ -120,9 +120,7 @@ def test_aeps_is_null_without_an_aligned_time_axis():
 
 def test_aeps_is_null_when_the_aligned_frame_is_missing():
     episode = AlignedEpisodeBundle(episode_id=1, data=None, start_pos=[], goal_pos=[])
-    result = HolisticMetricsCalculator(RobotParams()).calculate(
-        episode, {"timeseries_min_ped_clearance": [0.5], "timeseries_acoustic_exposure_dba": [90.0]}
-    )
+    result = HolisticMetricsCalculator(RobotParams()).calculate(episode, {"timeseries_min_ped_clearance": [0.5], "timeseries_acoustic_exposure_dba": [90.0]})
     assert result == {"aeps_linear_s": None, "e_cot": None}
 
 
@@ -143,9 +141,7 @@ def test_aeps_falls_back_to_the_frame_geometry_without_the_proxemics_series():
             "vy": [0.0, 0.0],
         }
     )
-    robot = pl.DataFrame(
-        {"t_ns": [0, S], "x": [0.0, 0.0], "y": [0.0, 0.0], "yaw": [0.0, 0.0]}
-    )
+    robot = pl.DataFrame({"t_ns": [0, S], "x": [0.0, 0.0], "y": [0.0, 0.0], "yaw": [0.0, 0.0]})
     episode = AlignedEpisodeBundle(
         episode_id=1,
         data=pl.DataFrame({"time_ns": [0, S]}),
@@ -159,9 +155,7 @@ def test_aeps_falls_back_to_the_frame_geometry_without_the_proxemics_series():
 
 
 def calc_aeps(episode: AlignedEpisodeBundle, prior: dict) -> float:
-    return HolisticMetricsCalculator(RobotParams(robot_radius=0.25)).calculate(episode, prior)[
-        "aeps_linear_s"
-    ]
+    return HolisticMetricsCalculator(RobotParams(robot_radius=0.25)).calculate(episode, prior)["aeps_linear_s"]
 
 
 @pytest.mark.parametrize("cot", [None, 0.0, -1.0])

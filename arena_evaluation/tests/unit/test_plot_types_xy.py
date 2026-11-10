@@ -338,6 +338,7 @@ def test_timeseries_static_empty_df_writes_nothing(tmp_path):
 
 # TrajectoryRenderer
 
+
 def _flat_traj_df() -> pl.DataFrame:
     """Single non-nested path per row."""
     return pl.DataFrame(

@@ -112,8 +112,3 @@ class FolderManager:
     def extracted_topics_path_for_episode(self, episode_dir: pathlib.Path) -> pathlib.Path:
         """Return topics directory for an episode."""
         return self._safe_resolve(episode_dir / "topics")
-
-    def combined_metrics_path(self, benchmark_id: str) -> pathlib.Path:
-        """Get path for combined benchmark metrics Parquet file (deprecated)."""
-        b_dir = self.benchmark_dir(benchmark_id)
-        return self._safe_resolve(b_dir / "combined_metrics.parquet")

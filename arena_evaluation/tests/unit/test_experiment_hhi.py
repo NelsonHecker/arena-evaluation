@@ -117,6 +117,7 @@ def test_paper_outcomes_fail_collisions_and_drop_failed_times() -> None:
     assert out["success"].to_list() == [True, False, False]
     assert out["time_to_goal"].to_list() == [30.0, None, None]
 
+
 def test_stage_regex_round_trips() -> None:
     for kind in hhi.KINDS:
         m = hhi.STAGE_RE.match(hhi.stage_name(kind, 7, "loco"))

@@ -665,10 +665,7 @@ def test_report_builder_with_data_resolver_and_standalone_artifacts(tmp_path: pa
         for index, row in enumerate(source.iter_rows(named=True))
     ]
     write_benchmark(tmp_path, episodes)
-    contacts = [
-        {"run_id": "run", "episode_id": index, "robot_id": "robot_0", "closer_label": "robot", "fault_attributed_to": "robot", "impact_speed_mps": 0.8, "robot_closing_share": 0.7, "counterfactual_freeze_persists": False}
-        for index in range(len(episodes))
-    ]
+    contacts = [{"run_id": "run", "episode_id": index, "robot_id": "robot_0", "closer_label": "robot", "fault_attributed_to": "robot", "impact_speed_mps": 0.8, "robot_closing_share": 0.7, "counterfactual_freeze_persists": False} for index in range(len(episodes))]
     pl.DataFrame([{name: row.get(name) for name in CONTACT_FACT_SCHEMA.names()} for row in contacts], schema=CONTACT_FACT_SCHEMA).write_parquet(tmp_path / "metrics" / "fact_contacts.parquet")
 
     # 2. Setup manifest with recipe usage, multi-dimensional plots, and diagnostic warnings

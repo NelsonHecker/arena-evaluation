@@ -60,5 +60,3 @@ def runner_log() -> Iterator[list[str]]:
     runner._log.addHandler(handler)
     yield handler.messages
     runner._log.removeHandler(handler)
-
-
