@@ -88,6 +88,11 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
     world: str | None = None
 
+    def __init__(self, robot_params: typing.Any) -> None:
+        """One acoustic solve per episode is expensive, so its frame series is memoised for the pedestrian rollups."""
+        super().__init__(robot_params)
+        self._episode_frame_cache: dict[tuple, AcousticExposureResult] = {}
+
     @classmethod
     def output_keys(cls) -> list[str]:
         return [
@@ -146,14 +151,15 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             return None
         return time_ns, pos_x.astype(np.float64), pos_y.astype(np.float64), np.ones(len(time_ns), dtype=bool)
 
-    def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
-        """Scalar summaries and per-frame pedestrian exposure series for the scope window."""
-        null_result = AcousticExposureResult(
-            scalars={key: None for key in self.output_keys()},
+    @staticmethod
+    def _null_result() -> AcousticExposureResult:
+        empty = np.array([], dtype=np.float64)
+        return AcousticExposureResult(
+            scalars=dict.fromkeys(AcousticExposureCalculator.output_keys(), None),
             frame_times_ns=np.array([], dtype=np.int64),
-            frame_robot_x_m=np.array([], dtype=np.float64),
-            frame_robot_y_m=np.array([], dtype=np.float64),
-            frame_source_dba=np.array([], dtype=np.float64),
+            frame_robot_x_m=empty,
+            frame_robot_y_m=empty.copy(),
+            frame_source_dba=empty.copy(),
             frame_ped_ids=[],
             frame_ped_x_m=[],
             frame_ped_y_m=[],
@@ -162,14 +168,92 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             frame_open_doors=[],
             worst_frame_index=0,
         )
+
+    def _summarize(self, frame_times_ns: np.ndarray, frame_robot_x_m: np.ndarray, frame_robot_y_m: np.ndarray, frame_source_dba: np.ndarray, frame_ped_ids: list[list[str]], frame_ped_x_m: list[list[float]], frame_ped_y_m: list[list[float]], frame_exposure_dba: list[list[float]], frame_attenuation_db: list[list[float]], frame_open_doors: list[str], door_names: typing.Iterable[str]) -> AcousticExposureResult:
+        """Reduce one frame series to the scalar summaries and the worst-case frame."""
+        if not any(frame_exposure_dba):
+            logger.info("No acoustic exposure values produced")
+            return self._null_result()
+
+        all_exposure = np.concatenate([np.asarray(frame, dtype=np.float64) for frame in frame_exposure_dba if frame])
+        max_exposure_dba = float(np.max(all_exposure))
+        leq_exposure_dba = float(10.0 * np.log10(np.mean(10.0 ** (all_exposure / 10.0))))
+
+        time_s = frame_times_ns / 1e9
+        startle_rates: list[float] = []
+        for index in range(1, len(frame_exposure_dba)):
+            previous = frame_exposure_dba[index - 1]
+            current = frame_exposure_dba[index]
+            dt = time_s[index] - time_s[index - 1]
+            if dt > 0 and len(previous) == len(current) and len(current) > 0:
+                startle_rates.extend(((np.asarray(current) - np.asarray(previous)) / dt).tolist())
+        max_startle = float(np.max(startle_rates)) if startle_rates else 0.0
+
+        worst_index = 0
+        worst_value = -1.0
+        for index, frame_exposure in enumerate(frame_exposure_dba):
+            if frame_exposure:
+                frame_max = max(frame_exposure)
+                if frame_max > worst_value:
+                    worst_value = frame_max
+                    worst_index = index
+
+        worst_open_doors = {name for name in frame_open_doors[worst_index].split(",") if name}
+        worst_frame = {
+            "robot_x": float(frame_robot_x_m[worst_index]),
+            "robot_y": float(frame_robot_y_m[worst_index]),
+            "source_dba": float(frame_source_dba[worst_index]),
+            "pedestrians": [[x_m, y_m] for x_m, y_m in zip(frame_ped_x_m[worst_index], frame_ped_y_m[worst_index], strict=True)],
+            "door_states": {name: ("open" if name in worst_open_doors else "closed") for name in door_names},
+        }
+
+        logger.info(
+            "AcousticExposureCalculator: max_exp=%.1f dBA, leq=%.1f dBA, startle=%.2f dBA/s",
+            max_exposure_dba,
+            leq_exposure_dba,
+            max_startle,
+        )
+        return AcousticExposureResult(
+            scalars={
+                "ped_max_exposure_dba": max_exposure_dba,
+                "ped_leq_exposure_dba": leq_exposure_dba,
+                "ped_max_startle_factor": max_startle,
+                "worst_case_acoustic_frame": worst_frame,
+                "worst_case_acoustic_t_ns": int(frame_times_ns[worst_index]),
+            },
+            frame_times_ns=frame_times_ns,
+            frame_robot_x_m=frame_robot_x_m,
+            frame_robot_y_m=frame_robot_y_m,
+            frame_source_dba=frame_source_dba,
+            frame_ped_ids=frame_ped_ids,
+            frame_ped_x_m=frame_ped_x_m,
+            frame_ped_y_m=frame_ped_y_m,
+            frame_exposure_dba=frame_exposure_dba,
+            frame_attenuation_db=frame_attenuation_db,
+            frame_open_doors=frame_open_doors,
+            worst_frame_index=worst_index,
+        )
+
+    def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
+        """Scalar summaries and per-frame pedestrian exposure series for the scope window."""
         if episode.run is not None and episode.run.is_reference:
             logger.info("Skipping acoustic calculation for reference episode %s", episode.episode_id)
-            return null_result
+            return self._null_result()
 
         map_name = prior_results.get("map") or episode.map or self.world
         if not map_name:
             logger.warning("No map name available for episode %s - skipping acoustics", episode.episode_id)
-            return null_result
+            return self._null_result()
+
+        time_base = self._time_base(episode)
+        if time_base is None:
+            logger.warning("Ground-truth robot_tracks missing for episode %s", episode.episode_id)
+            return self._null_result()
+
+        peds_df = self.native_ped_frame(episode)
+        if peds_df is None or "x" not in peds_df.columns:
+            logger.warning("Pedestrian position data missing for episode %s", episode.episode_id)
+            return self._null_result()
 
         run_dir = episode.run_dir
         if run_dir is None and episode.folder_manager and episode.run is not None and episode.run.benchmark_id:
@@ -190,18 +274,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 episode.episode_id,
             )
 
-        time_base = self._time_base(episode)
-        if time_base is None:
-            logger.warning("Ground-truth robot_tracks missing for episode %s", episode.episode_id)
-            return null_result
         time_ns, rx_m, ry_m, robot_valid = time_base
         source_dba = self._source_level(episode, time_ns)
-
-        peds_df = self.native_ped_frame(episode)
-        if peds_df is None or "x" not in peds_df.columns:
-            logger.warning("Pedestrian position data missing for episode %s", episode.episode_id)
-            return null_result
-
         peds_at_time = pedestrians_by_time(time_ns, peds_df)
 
         frame_ped_ids: list[list[str]] = []
@@ -321,75 +395,57 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             episode.episode_id,
             solver_evals,
         )
+        return self._summarize(time_ns, rx_m, ry_m, source_dba, frame_ped_ids, frame_ped_x_m, frame_ped_y_m, ts_exposure, ts_attenuation, frame_open_doors, doors.keys())
 
-        if not any(ts_exposure):
-            logger.info("No acoustic exposure values produced for episode %s", episode.episode_id)
-            return null_result
+    def _episode_result(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
+        """The episode's exposure frame series, solved once and reused by the pedestrian rollups and the series table."""
+        key = (int(episode.episode_id), str(episode.robot_name or ""), str(episode.map or ""), str(episode.run_dir or ""), str(episode.robot_name))
+        cached = self._episode_frame_cache.get(key)
+        if cached is None:
+            cached = self._compute(episode, prior_results)
+            self._episode_frame_cache[key] = cached
+        return cached
 
-        all_exposure = np.concatenate([np.asarray(frame, dtype=np.float64) for frame in ts_exposure if frame])
-        max_exposure_dba = float(np.max(all_exposure))
-        linear_exposure = 10.0 ** (all_exposure / 10.0)
-        leq_exposure_dba = float(10.0 * np.log10(np.mean(linear_exposure)))
-
-        time_s = time_ns / 1e9
-        startle_rates: list[float] = []
-        for index in range(1, len(ts_exposure)):
-            previous = ts_exposure[index - 1]
-            current = ts_exposure[index]
-            dt = time_s[index] - time_s[index - 1]
-            if dt > 0 and len(previous) == len(current) and len(current) > 0:
-                startle_rates.extend(((np.asarray(current) - np.asarray(previous)) / dt).tolist())
-        max_startle = float(np.max(startle_rates)) if startle_rates else 0.0
-
-        worst_index = 0
-        worst_value = -1.0
-        for index, frame_exposure in enumerate(ts_exposure):
-            if frame_exposure:
-                frame_max = max(frame_exposure)
-                if frame_max > worst_value:
-                    worst_value = frame_max
-                    worst_index = index
-
-        worst_open_doors = {name for name in frame_open_doors[worst_index].split(",") if name}
-        worst_frame = {
-            "robot_x": float(rx_m[worst_index]),
-            "robot_y": float(ry_m[worst_index]),
-            "source_dba": float(source_dba[worst_index]),
-            "pedestrians": [[x_m, y_m] for x_m, y_m in zip(frame_ped_x_m[worst_index], frame_ped_y_m[worst_index], strict=True)],
-            "door_states": {name: ("open" if name in worst_open_doors else "closed") for name in doors},
-        }
-
-        logger.info(
-            "AcousticExposureCalculator: episode %s, max_exp=%.1f dBA, leq=%.1f dBA, startle=%.2f dBA/s",
-            episode.episode_id,
-            max_exposure_dba,
-            leq_exposure_dba,
-            max_startle,
+    def _restrict_to_pedestrian(self, result: AcousticExposureResult, ped_id: str, door_names: typing.Iterable[str]) -> AcousticExposureResult:
+        """The same solved frame series reduced to the rows of one pedestrian."""
+        frame_ped_ids: list[list[str]] = []
+        frame_ped_x_m: list[list[float]] = []
+        frame_ped_y_m: list[list[float]] = []
+        frame_exposure_dba: list[list[float]] = []
+        frame_attenuation_db: list[list[float]] = []
+        for index, ped_ids in enumerate(result.frame_ped_ids):
+            keep = [position for position, name in enumerate(ped_ids) if name == ped_id]
+            frame_ped_ids.append([ped_ids[position] for position in keep])
+            frame_ped_x_m.append([result.frame_ped_x_m[index][position] for position in keep])
+            frame_ped_y_m.append([result.frame_ped_y_m[index][position] for position in keep])
+            frame_exposure_dba.append([result.frame_exposure_dba[index][position] for position in keep])
+            frame_attenuation_db.append([result.frame_attenuation_db[index][position] for position in keep])
+        return self._summarize(
+            result.frame_times_ns,
+            result.frame_robot_x_m,
+            result.frame_robot_y_m,
+            result.frame_source_dba,
+            frame_ped_ids,
+            frame_ped_x_m,
+            frame_ped_y_m,
+            frame_exposure_dba,
+            frame_attenuation_db,
+            result.frame_open_doors,
+            door_names,
         )
 
-        return AcousticExposureResult(
-            scalars={
-                "ped_max_exposure_dba": max_exposure_dba,
-                "ped_leq_exposure_dba": leq_exposure_dba,
-                "ped_max_startle_factor": max_startle,
-                "worst_case_acoustic_frame": worst_frame,
-                "worst_case_acoustic_t_ns": int(time_ns[worst_index]),
-            },
-            frame_times_ns=time_ns,
-            frame_robot_x_m=rx_m,
-            frame_robot_y_m=ry_m,
-            frame_source_dba=source_dba,
-            frame_ped_ids=frame_ped_ids,
-            frame_ped_x_m=frame_ped_x_m,
-            frame_ped_y_m=frame_ped_y_m,
-            frame_exposure_dba=ts_exposure,
-            frame_attenuation_db=ts_attenuation,
-            frame_open_doors=frame_open_doors,
-            worst_frame_index=worst_index,
-        )
+    def _door_names(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> tuple[str, ...]:
+        """Door keys of the episode's barrier map, for the worst-case frame's door states."""
+        map_name = prior_results.get("map") or episode.map or self.world
+        if not map_name:
+            return ()
+        run_dir = episode.run_dir
+        if run_dir is None and episode.folder_manager and episode.run is not None and episode.run.benchmark_id:
+            run_dir = episode.folder_manager.data_root / episode.run.benchmark_id
+        return tuple(barrier_door_tl(load_barrier_map(map_name, run_dir=run_dir)).keys())
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
-        return dict(self._compute(episode, prior_results).scalars)
+        return dict(self._episode_result(episode, prior_results).scalars)
 
     def calculate_for_scope(
         self,
@@ -397,10 +453,14 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         prior_results: dict[str, typing.Any],
         scope_slice: ScopeSlice | None = None,
     ) -> dict[str, typing.Any]:
-        if scope_slice is None or scope_slice.scope in (MetricScope.EPISODE, MetricScope.PEDESTRIAN):
-            # The pedestrian slice restricts the pedestrian stream to its own actor and carries the
-            # native /tf clock, so the same reduction yields that pedestrian's exposure lifetime.
+        if scope_slice is None or scope_slice.scope == MetricScope.EPISODE:
             return self.calculate(episode, prior_results)
+        if scope_slice.scope == MetricScope.PEDESTRIAN:
+            # One solve per episode: the pedestrian slice reduces the episode frame series to its own rows.
+            full_result = self._episode_result(scope_slice.full_episode, prior_results)
+            ped_id = str(scope_slice.identity.get("ped_id") or scope_slice.slice_id)
+            restricted = self._restrict_to_pedestrian(full_result, ped_id, self._door_names(scope_slice.full_episode, prior_results))
+            return dict(restricted.scalars)
         raise ValueError(f"acoustic_exposure does not serve the {scope_slice.scope.value} scope")
 
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
@@ -410,7 +470,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         doors open at that sample, so the legacy worst-case frame struct lives here instead of
         in a nested fact column.
         """
-        result = self._compute(episode, {})
+        result = self._episode_result(episode, {})
         if not any(result.frame_exposure_dba):
             return pl.DataFrame(schema=SERIES_SCHEMA)
 
