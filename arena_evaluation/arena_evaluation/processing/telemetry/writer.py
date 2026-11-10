@@ -89,7 +89,6 @@ _COLLISION_EVENTS = (
     ("ped_count", _INT),
 )
 _COLLISION_CONTACTS = (
-    ("stamp_ns", _INT),
     ("obstacle_id", _TEXT),
     ("kind", _TEXT),
     ("obstacle_x", _FLOAT),

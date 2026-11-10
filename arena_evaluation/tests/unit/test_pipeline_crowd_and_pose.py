@@ -52,7 +52,7 @@ def test_run_manifest_is_the_one_above_the_episode_dir(tmp_path: pathlib.Path) -
 
 
 def test_pose_frame_is_the_most_frequent_parent_inside_the_window() -> None:
-    tf_gt = pl.DataFrame({"t_ns": [1, 2, 3, 4], "frame_id": ["map", "env_0/jackal/odom", "env_0/jackal/odom", "map"]})
+    tf_gt = pl.DataFrame({"t_ns": [1, 2, 3, 4], "parent_frame": ["map", "env_0/jackal/odom", "env_0/jackal/odom", "map"]})
     assert _pose_frame(tf_gt, (2, 3)) == "env_0/jackal/odom"
     assert _pose_frame(tf_gt, (None, None)) == "env_0/jackal/odom"
     assert _pose_frame(tf_gt.lazy(), (4, None)) == "map"
@@ -83,12 +83,12 @@ def test_run_manifest_is_none_when_the_file_is_not_text(tmp_path: pathlib.Path) 
 
 
 def test_pose_frame_is_none_when_the_window_excludes_every_row() -> None:
-    tf_gt = pl.DataFrame({"t_ns": [1, 2], "frame_id": ["map", "map"]})
+    tf_gt = pl.DataFrame({"t_ns": [1, 2], "parent_frame": ["map", "map"]})
     assert _pose_frame(tf_gt, (10, 20)) is None
 
 
 def test_pose_frame_ignores_null_frame_ids() -> None:
-    tf_gt = pl.DataFrame({"t_ns": [1, 2, 3], "frame_id": [None, None, "map"]})
+    tf_gt = pl.DataFrame({"t_ns": [1, 2, 3], "parent_frame": [None, None, "map"]})
     assert _pose_frame(tf_gt, (None, None)) == "map"
 
 

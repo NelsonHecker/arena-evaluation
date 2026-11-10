@@ -16,7 +16,7 @@ def _names(table: str) -> set[str]:
 
 def test_collision_contacts_carry_the_header_stamp_and_obstacle_geometry() -> None:
     names = _names("collision_contacts")
-    assert {"t_ns", "stamp_ns", "env_id", "robot_id", "kind", "obstacle_id", "obstacle_x", "obstacle_y", "obstacle_z", "distance"} <= names
+    assert {"t_ns", "env_id", "robot_id", "kind", "obstacle_id", "obstacle_x", "obstacle_y", "obstacle_z", "distance"} <= names
 
 
 def test_collision_events_keep_the_per_message_counts() -> None:

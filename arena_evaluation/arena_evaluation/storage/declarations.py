@@ -93,30 +93,100 @@ class MetricDeclaration:
     direction: str = ""  # "higher", "lower", or ""
 
 
+class CrowdVisibility(typing.NamedTuple):
+    """Whether the crowd saw the robot, the resulting condition, and where the answer came from."""
+
+    visible: bool | None
+    condition: str | None
+    source: str | None
+
+
+_CROWD_LAUNCH_KEY = "human.robots.visible"
+
+
+def visible_flag(value: object) -> bool | None:
+    """A robots_visible value as a bool, None for anything that is not one."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    return None
+
+
+def launch_robots_visible(manifest: Mapping[str, Any] | None) -> bool | None:
+    """robots_visible from the run's cli_args, else from the suite launch block."""
+    if not manifest:
+        return None
+    for arg in manifest.get("cli_args") or []:
+        if not isinstance(arg, str) or _CROWD_LAUNCH_KEY not in arg:
+            continue
+        _, _, raw = arg.partition(":=")
+        value = visible_flag(raw) if raw else None
+        if value is not None:
+            return value
+    launch = (manifest.get("suite") or {}).get("launch") or {}
+    return visible_flag(launch.get(_CROWD_LAUNCH_KEY)) if isinstance(launch, dict) else None
+
+
+def stages_set_robots_visible(manifest: Mapping[str, Any] | None) -> bool:
+    """Whether any stage of the suite sets robots_visible, so a record-less episode has no single value."""
+    for stage in ((manifest or {}).get("suite") or {}).get("stages") or []:
+        if not isinstance(stage, dict):
+            continue
+        humansim = (stage.get("config") or {}).get("humansim") or {}
+        if "robots_visible" in humansim:
+            return True
+    return False
+
+
+def resolve_crowd_visibility(
+    accepted: bool | None,
+    manifest: Mapping[str, Any] | None,
+    metrics_config: Mapping[str, Any] | None = None,
+    *,
+    record_present: bool = True,
+) -> CrowdVisibility:
+    """Crowd visibility of one episode: metrics config, accepted parameter, run manifest, then the default."""
+    config = metrics_config or {}
+    configured = config.get("crowd_condition")
+    if configured in ("blind", "visible"):
+        return CrowdVisibility(configured == "visible", configured, "metrics_config")
+    for key in ("crowd_visible", "robots_visible"):
+        configured_flag = visible_flag(config.get(key))
+        if configured_flag is not None:
+            return CrowdVisibility(configured_flag, "visible" if configured_flag else "blind", "metrics_config")
+    if accepted is not None:
+        return CrowdVisibility(accepted, "visible" if accepted else "blind", "episode_param")
+    if manifest is None:
+        return CrowdVisibility(None, None, None)
+    launched = launch_robots_visible(manifest)
+    if launched is not None:
+        return CrowdVisibility(launched, "visible" if launched else "blind", "launch_arg")
+    if not record_present and stages_set_robots_visible(manifest):
+        return CrowdVisibility(None, None, None)
+    return CrowdVisibility(True, "visible", "default")
+
+
 def resolve_crowd_condition(
     episode: AlignedEpisodeBundle,
     metrics_config: Mapping[str, Any] | None = None,
 ) -> CrowdCondition:
-    """Crowd visibility of the episode: explicit metrics config first, else the recorded humansim parameter, else visible."""
-    config = metrics_config or {}
-    configured = config.get("crowd_condition")
-    if configured in ("blind", "visible"):
-        return "blind" if configured == "blind" else "visible"
-    for key in ("crowd_visible", "robots_visible"):
-        visible = config.get(key)
-        if visible is not None:
-            return "visible" if bool(visible) else "blind"
-
+    """Crowd visibility of the episode, through the shared resolver: metrics config, accepted parameter, run metadata."""
+    accepted: bool | None = None
     params = episode.human_params
     if params is not None:
-        val = params.get(ROBOT_VISIBILITY_PARAM)
-        if val is not None:
-            return "visible" if bool(val) else "blind"
-        vis_leaf = ROBOT_VISIBILITY_PARAM.rsplit(".", maxsplit=1)[-1]
-        for name, parameter in params.items():
-            if name.rsplit(".", maxsplit=1)[-1] == vis_leaf:
-                return "visible" if bool(parameter) else "blind"
-
+        value = params.get(ROBOT_VISIBILITY_PARAM)
+        if value is not None:
+            accepted = bool(value)
+        else:
+            leaf = ROBOT_VISIBILITY_PARAM.rsplit(".", maxsplit=1)[-1]
+            for name, parameter in params.items():
+                if name.rsplit(".", maxsplit=1)[-1] == leaf:
+                    accepted = bool(parameter)
+                    break
+    visibility = resolve_crowd_visibility(accepted, None, metrics_config)
+    if accepted is not None or visibility.source == "metrics_config":
+        return "visible" if visibility.visible else "blind"
     run = episode.run
     if run is not None and run.crowd_condition is not None:
         return run.crowd_condition
