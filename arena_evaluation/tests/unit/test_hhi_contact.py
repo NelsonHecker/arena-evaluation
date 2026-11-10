@@ -133,13 +133,20 @@ def test_calculator_without_a_release_holds_to_the_end() -> None:
     assert out["hhi_stalls_hold"] == 1 and out["hhi_stalls_post"] == 0
 
 
-def test_calculator_without_contact_events() -> None:
+def test_calculator_without_contact_events_reports_unknown_windows() -> None:
+    """Without the interaction stream there is no hold/release window: unknown, never zero."""
     ep = _episode()
     ep.topics = {}
-    out = ContactInteractionCalculator(RobotParams()).calculate(ep, {})
-    assert out["hhi_interaction"] is None and out["hhi_hold_onset_s"] is None
-    assert out["hhi_stalls_approach"] == out["hhi_stall_count"] == 1
-    assert out["hhi_passes_between"] is None
+    calc = ContactInteractionCalculator(RobotParams())
+    out = calc.calculate(ep, {})
+    assert out["hhi_episode_s"] == pytest.approx(22.0, abs=0.1)
+    for key in ("hhi_interaction", "hhi_hold_onset_s", "hhi_release_s", "hhi_stall_count", "hhi_stall_time_s", "hhi_passes_between", "hhi_min_pair_clearance", "hhi_pair_gap_hold"):
+        assert out[key] is None, key
+    for window in ("approach", "hold", "post", "rest"):
+        assert out[f"hhi_stalls_{window}"] is None
+        assert out[f"hhi_share_{window}"] is None
+    provenance = calc.missing_input_provenance(ep)
+    assert provenance["hhi_stall_count"] == "hhi_stall_count:topic_missing:pedestrian_interaction_events"
 
 
 def test_speed_of_a_single_sample_is_zero() -> None:

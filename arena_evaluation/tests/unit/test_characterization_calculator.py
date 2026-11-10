@@ -368,3 +368,20 @@ def test_without_ground_truth_the_series_has_null_step_distances():
     # No odometry fallback: without /tf ground truth the path rate is unavailable, so intensity is null.
     assert calc.calculate(episode, {})["char_mean_energy_intensity_j_m"] is None
     assert _series(calc, episode)["energy_intensity_j_m"].null_count() == 3
+
+
+def test_phase_coverage_is_null_without_characterization_markers():
+    """No marker stream means no coverage, not a fabricated 0.0."""
+    frame = _sample_episode().data.drop("label")
+    episode = _episode(frame)
+    calc = _calc()
+    assert calc.calculate(episode, {})["char_phase_coverage"] is None
+    assert calc.missing_input_provenance(episode)["char_phase_coverage"] == "char_phase_coverage:topic_missing:robot_characterization_phase"
+
+
+def test_vy_achieved_is_derived_from_the_ground_truth_motion():
+    """A straight, non-holonomic run has zero body-frame lateral velocity: produced, not null."""
+    series = _series(_calc(), _sample_episode())
+    lateral = series.get_column("vy_achieved_mps")
+    assert lateral.null_count() == 1  # the first sample has no previous step
+    assert lateral.drop_nulls().abs().max() < 1e-9

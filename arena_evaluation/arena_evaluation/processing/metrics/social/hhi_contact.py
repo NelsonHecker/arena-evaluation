@@ -272,7 +272,15 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         out: dict[str, typing.Any] = dict.fromkeys(self.output_keys())
 
         topics = episode.topics or {}
-        interaction_type, participants, hold_onset, release = self._contact_edges(topics.get("pedestrian_interaction_events"), int(t0_ns))
+        events = topics.get("pedestrian_interaction_events")
+        if events is None or events.height == 0:
+            # Without the human-human interaction stream no hold/release window exists: the stall
+            # counters and window shares are unknown, not zero. A recorded stream with no contact
+            # event is different and keeps its honest zeros.
+            without_stream = dict.fromkeys(self.output_keys())
+            without_stream["hhi_episode_s"] = t_end
+            return without_stream
+        interaction_type, participants, hold_onset, release = self._contact_edges(events, int(t0_ns))
         out["hhi_interaction"] = CONTACT_TYPES.get(interaction_type) if interaction_type is not None else None
         out["hhi_hold_onset_s"] = hold_onset
         out["hhi_release_s"] = release
@@ -319,6 +327,13 @@ class ContactInteractionCalculator(BaseMetricCalculator):
             float(time_ns[0]),
         )
 
+    def missing_input_provenance(self, episode: AlignedEpisodeBundle) -> dict[str, str]:
+        """Stall windows need the interaction stream; without it their counters are unknown, not zero."""
+        events = (episode.topics or {}).get("pedestrian_interaction_events")
+        if events is None or events.height == 0:
+            return {key: f"{key}:topic_missing:pedestrian_interaction_events" for key in self.output_keys()}
+        return {}
+
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         del prior_results
         axis = self._robot_time_axis(episode)
@@ -353,6 +368,10 @@ class ContactInteractionCalculator(BaseMetricCalculator):
                 return dict.fromkeys(self.output_keys())
 
     SERIES_TABLE_STEM = "hhi_contact"
+    SERIES_KEY = ("t_ns",)
+    # The stall series derives from the robot's own motion; the interaction stream only labels the
+    # windows, so it is not a series requirement.
+    SERIES_REQUIRED_TOPICS = ("robot_tracks",)
 
     def series_table(
         self,
@@ -361,7 +380,12 @@ class ContactInteractionCalculator(BaseMetricCalculator):
         run_id: str = "",
         robot_id: str = "",
     ) -> pl.DataFrame:
-        """1NF stall series: one row per stall onset with its duration and the window it falls in."""
+        """1NF stall series: one row per stall onset (natural key ``t_ns``) with its duration and window.
+
+        The stalls are derived from the robot's own motion; the interaction stream only labels the
+        approach/hold/post/rest windows. The table is therefore emitted whenever robot ground truth
+        exists, independently of whether ``pedestrian_interaction_events`` was recorded.
+        """
         axis = self._robot_time_axis(episode)
         stalls = self._stall_intervals(episode, axis) or []
         if not stalls or axis is None:

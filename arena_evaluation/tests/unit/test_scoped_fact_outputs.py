@@ -678,17 +678,18 @@ def test_encounter_fact_publishes_the_windowed_social_columns(tables: ScopedFact
     assert row["total_time_looking_at_pedestrians"] is not None
 
 
-def test_contact_fact_publishes_the_windowed_hhi_columns(tables: ScopedFactTables) -> None:
-    """The hhi metrics are the slice's own pre/post-contact window: one second around the 10 Hz contact sample."""
+def test_contact_fact_reports_unknown_hhi_windows_without_an_interaction_stream(tables: ScopedFactTables) -> None:
+    """The episode records no pedestrian_interaction_events, so the hold/post windows are unknown, not zero."""
     pedestrian_contact = _single_row(tables.contacts, "obstacle_id", "Pedestrian_1")
     assert pedestrian_contact["hhi_episode_s"] == pytest.approx(1.0)
-    assert pedestrian_contact["hhi_share_approach"] == pytest.approx(1.0)
-    assert pedestrian_contact["hhi_share_hold"] == pytest.approx(0.0)
-    assert pedestrian_contact["hhi_stall_count"] == 0
-    assert pedestrian_contact["hhi_interaction"] is None
+    for key in ("hhi_share_approach", "hhi_share_hold", "hhi_stall_count", "hhi_interaction"):
+        assert pedestrian_contact[key] is None, key
+    reason = typing.cast(str, pedestrian_contact["null_reason"])
+    assert "hhi_stall_count:topic_missing:pedestrian_interaction_events" in reason
+    assert "hhi_share_approach:topic_missing:pedestrian_interaction_events" in reason
     wall_contact = _single_row(tables.contacts, "obstacle_id", "wall_north")
     assert wall_contact["hhi_episode_s"] == pytest.approx(1.0)
-    assert wall_contact["hhi_share_approach"] == pytest.approx(1.0)
+    assert wall_contact["hhi_share_approach"] is None
 
 
 def test_no_reference_episode_nulls_detour_facts(episode: AlignedEpisodeBundle) -> None:

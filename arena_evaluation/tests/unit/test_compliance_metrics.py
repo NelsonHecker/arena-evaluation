@@ -316,7 +316,8 @@ def test_calculate_end_to_end_with_cached_world():
             "vel_linear": [0.5, 2.0, 0.5],  # over 1.0 m/s cap during [1s, 2s)
         }
     )
-    episode = _episode(data)
+    snapshot = snapshot_frame([(0, "env_0/door_1", "door", "state", "discrete", "closed")])
+    episode = _episode(data, semantic_snapshot=snapshot)
 
     results = calc.calculate(episode, {})
 
@@ -476,3 +477,33 @@ def test_reconstruct_events_independent_per_entity_and_field():
 
     assert door_1["current"].to_list() == ["closed"]
     assert door_2["current"].to_list() == ["open", "closed"]
+
+
+def test_zone_metrics_are_null_without_recorded_world_semantics():
+    """A missing world-semantics snapshot makes the zone/door values unknown, not zero."""
+    from arena_simulation_setup.shared.semantics import SemanticCfg
+    from arena_simulation_setup.tree.World import Level, Zone
+    from arena_simulation_setup.utils.geometry import Position
+
+    zone = Zone(
+        name="lobby",
+        polygon=[Position(0.0, 0.0), Position(0.0, 4.0), Position(4.0, 4.0), Position(4.0, 0.0)],
+        semantics=[SemanticCfg(role="state", name="max_speed", value=1.0)],
+    )
+    level = Level(zones=[zone])
+    calc = _calc()
+    calc.world = "synthetic_world"
+    calc._world_cache["synthetic_world"] = (_extract_zone_geometry(level), _extract_door_geometry(level))
+    data = pl.DataFrame(
+        {
+            "time_ns": [0, 1_000_000_000, 2_000_000_000],
+            "pos_x": [1.0, 1.0, 1.0],
+            "pos_y": [1.0, 1.0, 1.0],
+            "yaw": [0.0, 0.0, 0.0],
+            "vel_linear": [0.5, 2.0, 0.5],
+        }
+    )
+    results = calc.calculate(_episode(data, semantic_snapshot=None), {})
+    for key in ("speed_zone_violations", "speed_zone_violation_seconds", "quiet_zone_dwell_seconds", "restricted_zone_entries", "doorway_blocking_time"):
+        assert results[key] is None, key
+    assert calc.missing_input_provenance(_episode(data, semantic_snapshot=None))["speed_zone_violations"] == "speed_zone_violations:topic_missing:world_semantics"

@@ -100,6 +100,15 @@ class _PolygonZone(typing.Protocol):
     def polygon(self) -> shapely.Polygon | shapely.MultiPolygon: ...
 
 
+_ZONE_OUTPUT_KEYS: typing.Final[tuple[str, ...]] = (
+    "doorway_blocking_time",
+    "quiet_zone_dwell_seconds",
+    "restricted_zone_entries",
+    "speed_zone_violation_seconds",
+    "speed_zone_violations",
+)
+
+
 def _zone_membership(pos_x: np.ndarray, pos_y: np.ndarray, zones: Sequence[_PolygonZone]) -> np.ndarray:
     import shapely
 
@@ -255,6 +264,8 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
     """
 
     NAME = "compliance_metrics"
+    SERIES_KEY = ("t_ns",)
+    SERIES_REQUIRED_TOPICS = ("robot_tracks",)
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = True
     DEPENDS_ON = ["motion_metrics"]
@@ -449,6 +460,12 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
 
         return float(encounters_compliant) / encounters_total
 
+    def missing_input_provenance(self, episode: AlignedEpisodeBundle) -> dict[str, str]:
+        """Zone and door compliance needs the recorded world semantics; without it the values are unknown."""
+        if episode.semantic_snapshot is None or episode.semantic_snapshot.height == 0:
+            return {key: f"{key}:topic_missing:world_semantics" for key in _ZONE_OUTPUT_KEYS}
+        return {}
+
     def calculate(
         self,
         episode: AlignedEpisodeBundle,
@@ -460,10 +477,13 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         # 1. Passing Rule Compliance (Independent of world)
         result["passing_rule_compliance"] = self._compute_passing_compliance(episode)
 
-        # 2. Zone/Door Metrics (Requires world)
+        # 2. Zone/Door Metrics (Requires the world and its recorded semantic snapshot). The world file
+        # alone is not enough: without the recorded world semantics the zone/door occupancy is unknown,
+        # so the values stay null instead of collapsing to a fabricated zero.
+        has_semantics = episode.semantic_snapshot is not None and episode.semantic_snapshot.height > 0
         if self.world is not None and episode.start_pos:
             loaded = self._load_world(self.world)
-            if loaded is not None:
+            if loaded is not None and has_semantics:
                 zones, doors = loaded
                 pos_x, pos_y, _yaw, _ox, _oy, _oyaw = self.resolve_robot_pose(episode)
 
