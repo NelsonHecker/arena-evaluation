@@ -893,7 +893,9 @@ class ScopedEvaluator:
         collisions_static = _int(metrics.get("collision_amount_static"))
         # Without the recorded collision stream a zero would claim "no collision happened"; the
         # honest value is unknown, carried as null and explained by `null_reason`.
-        collision_stream = _has_rows(_table(episode, COLLISION_EVENTS_TOPIC))
+        # Presence of the stream, not its row count: an empty stream means "no collision happened",
+        # an absent one means "unknown". Only the second is null.
+        collision_stream = _table(episode, COLLISION_EVENTS_TOPIC) is not None
         collision_known = collision_stream or bool(contact_rows)
         row: dict[str, object] = {
             "run_id": run_id,
