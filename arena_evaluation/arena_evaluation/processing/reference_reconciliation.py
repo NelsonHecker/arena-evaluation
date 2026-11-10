@@ -245,11 +245,13 @@ def plan_reconciliation(
         )
         episode_dir = pathlib.Path(episode.episode_dir)
         for fact_row in frames.to_dicts():
+            # Only read the path series the twins actually need; a run without references
+            # still gets the typed missingness codes, just not the two parquet reads.
             dynamic = _legacy_row(
                 episode_dir,
                 fact_row,
-                include_robot_path=True,
-                include_pedestrian_path=True,
+                include_robot_path=robot_twin is not None,
+                include_pedestrian_path=pedestrian_twin is not None,
             )
             values = MutualAccommodationCalculator.reconcile_stage_references(
                 dynamic_row=dynamic,
