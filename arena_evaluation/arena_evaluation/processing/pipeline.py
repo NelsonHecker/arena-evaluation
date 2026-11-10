@@ -16,8 +16,7 @@ import polars as pl
 if typing.TYPE_CHECKING:
     import numpy as np
 
-    from arena_evaluation.processing.metrics.registry import MetricRegistry
-
+    from arena_evaluation.processing.metrics.base import MetricScope
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.schemas import (
     AlignedEpisodeBundle,
@@ -282,7 +281,7 @@ from arena_evaluation.benchmark.profiler import PipelineProfiler
 from arena_evaluation.processing.mcap_reader import MCAPReader
 from arena_evaluation.processing.metrics.ecological.mechanism_common import robot_env_snapshot
 from arena_evaluation.processing.native_bundle import NativeBundle
-from arena_evaluation.processing.parquet_store import ParquetStore, TopicParquetStore
+from arena_evaluation.processing.parquet_store import TopicParquetStore
 from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS as _ALIGN_TOLERANCE_NS
 from arena_evaluation.processing.pedestrian_frames import peak_pedestrian_count
 from arena_evaluation.processing.pose_anchor import resolve_pose_source
@@ -292,30 +291,6 @@ from arena_evaluation.storage.manifest import MetadataWriter
 # Columns whose values are all-None (no kind in the recording) or all-empty
 # (no collisions) would otherwise infer as Null / List(Null) and clash with
 # an Int64 / List(String) run when frames from several runs are combined.
-_METRIC_DTYPES = {
-    "collision_amount_wall": pl.Int64,
-    "collision_amount_static": pl.Int64,
-    "collision_amount_pedestrian": pl.Int64,
-    "collision_obstacles": pl.List(pl.String),
-    "pose_source": pl.String,
-    "pose_samples": pl.Int64,
-    "status": pl.String,
-    "status_reason": pl.String,
-    "result": pl.String,
-    "outcome_info": pl.String,
-    "integrity": pl.List(pl.String),
-    "success": pl.Boolean,
-    "ne": pl.Float64,
-    "osr": pl.Boolean,
-    "success_geodesic": pl.Boolean,
-    "spl_geodesic": pl.Float64,
-    "ndtw": pl.Float64,
-    "sdtw": pl.Float64,
-    "stuck": pl.Boolean,
-    "start": pl.List(pl.Float64),
-    "goal": pl.List(pl.Float64),
-}
-
 from .metrics.registry import MetricRegistry
 
 # EpisodeRecord.outcome_state -> (result, success)
@@ -558,11 +533,9 @@ class ProcessingPipeline:
         return self.extract_episode(self._describe_run_dir(run_dir), force_extract=force_extract)
 
     def process_run_dir(self, run_dir: pathlib.Path, force_extract: bool = False) -> pathlib.Path | None:
-        """Extract and evaluate one `episode_NNN` directory, returning its metrics.parquet path."""
+        """Extract and evaluate one `episode_NNN` directory, returning its Star Schema directory."""
         rows = self.process_episode(self._describe_run_dir(run_dir), force_extract=force_extract)
-        if not rows:
-            return None
-        out = pathlib.Path(run_dir) / "metrics.parquet"
+        out = pathlib.Path(run_dir) / "metrics"
         return out if out.exists() else None
 
     def process_episode(
@@ -581,13 +554,8 @@ class ProcessingPipeline:
 
         episode_dir = pathlib.Path(ep.episode_dir)
 
-        if not force_extract and (episode_dir / "metrics.parquet").exists() and (episode_dir / "metrics").exists():
-            try:
-                df, _ = ParquetStore.read(episode_dir / "metrics.parquet")
-                if len(df) > 0:
-                    return df.to_dicts()
-            except Exception:
-                pass
+        if not force_extract and (episode_dir / "metrics" / "dim_episodes.parquet").exists():
+            return []
 
         # Load episode metadata
         yaml_path = episode_dir / f"{episode_dir.name}.yaml"
@@ -606,10 +574,6 @@ class ProcessingPipeline:
             star_tables: list[StarSchemaTables] | None = None,
             series: list[dict[str, pl.DataFrame]] | None = None,
         ) -> list[dict]:
-            try:
-                ParquetStore.write_rows(rows, episode_dir / "metrics.parquet", schema_overrides=_METRIC_DTYPES)
-            except Exception as e:
-                _log.warning(f"episode_{ep.episode_id:03d}: metrics.parquet not written, the combined frame is the only copy: {e!r}")
             try:
                 if star_tables:
                     merged_star = StarSchemaBuilder.concat_tables(star_tables)
@@ -761,12 +725,14 @@ class ProcessingPipeline:
                             pass
 
                 for aligned_ep in episodes:
-                    ep_metrics = registry.run(
+                    ep_outcome = registry.run_scope(
+                        MetricScope.EPISODE,
                         aligned_ep,
                         pedsim_available=robot_pedsim,
                         available_topics=available_topics,
                         progress_callback=on_calc_progress,
                     )
+                    ep_metrics = dict(ep_outcome.results)
                     ep_metrics["episode"] = ep.episode_id
                     ep_metrics["planner"] = ep.planner
                     if metadata is not None and metadata.local_planner:
@@ -882,7 +848,7 @@ class ProcessingPipeline:
                 _shutdown_executor_cleanly(executor)
 
     def process_benchmark(self, benchmark_id: str, force_extract: bool = False) -> pathlib.Path | None:
-        """Process all episodes and write combined_metrics.parquet using a 2-Phase pipeline, returning its path, None when nothing was written."""
+        """Process all episodes into the Star Schema lakehouse with a 2-Phase pipeline, returning its directory, None when nothing was written."""
         episodes = self.folder_manager.discover_episodes(benchmark_id)
 
         if not episodes:
@@ -1000,8 +966,7 @@ class ProcessingPipeline:
             )
             row.update(reconciled)
 
-        combined_path = self.folder_manager.combined_metrics_path(benchmark_id)
-        ParquetStore.write_rows(all_metrics, combined_path, schema_overrides=_METRIC_DTYPES)
+        benchmark_dir = self.folder_manager.benchmark_dir(benchmark_id)
 
         from arena_evaluation.storage.star_schema import (
             StarSchemaBuilder,
@@ -1024,17 +989,17 @@ class ProcessingPipeline:
             collected_star.append(ep_star)
 
         benchmark_star = StarSchemaBuilder.concat_tables(collected_star)
-        write_star_schema(benchmark_star, combined_path.parent)
+        write_star_schema(benchmark_star, benchmark_dir)
 
         series_parts: dict[str, list[pl.DataFrame]] = {}
         for ep in episodes:
             for path in sorted((pathlib.Path(ep.episode_dir) / "metrics").glob("series_*.parquet")):
                 series_parts.setdefault(path.stem.removeprefix("series_"), []).append(pl.read_parquet(path))
         if series_parts:
-            series_dir = combined_path.parent / "metrics"
+            series_dir = benchmark_dir / "metrics"
             series_dir.mkdir(parents=True, exist_ok=True)
             for stem, frames in series_parts.items():
                 pl.concat(frames, how="vertical_relaxed").write_parquet(series_dir / f"series_{stem}.parquet")
 
-        print(f"Done. {len(all_metrics)} episode rows -> {combined_path}")
-        return combined_path
+        print(f"Done. {len(all_metrics)} episode rows -> {benchmark_dir}")
+        return benchmark_dir

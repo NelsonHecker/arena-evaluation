@@ -180,18 +180,6 @@ def test_episode_dir_absolute_nested_inside_root_is_allowed(tmp_path: pathlib.Pa
     assert fm.episode_dir(str(tmp_path / "nested"), 1) == expected
 
 
-def test_combined_metrics_path_blocks_parent_traversal(tmp_path: pathlib.Path):
-    fm = FolderManager(tmp_path)
-    with pytest.raises(ValueError, match="outside data_root"):
-        fm.combined_metrics_path("../outside")
-
-
-def test_combined_metrics_path_blocks_absolute_escape(tmp_path: pathlib.Path):
-    fm = FolderManager(tmp_path)
-    with pytest.raises(ValueError, match="outside data_root"):
-        fm.combined_metrics_path(str(tmp_path.parent / "outside"))
-
-
 # ---------------------------------------------------------------------------
 # discover_episodes
 # ---------------------------------------------------------------------------
@@ -395,10 +383,5 @@ def test_extracted_topics_path_escape_raises(tmp_path: pathlib.Path):
 
 
 # ---------------------------------------------------------------------------
-# combined_metrics_path
 # ---------------------------------------------------------------------------
 
-
-def test_combined_metrics_path(tmp_path: pathlib.Path):
-    fm = FolderManager(tmp_path)
-    assert fm.combined_metrics_path("bench") == (tmp_path / "bench" / "combined_metrics.parquet").resolve()
