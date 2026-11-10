@@ -95,6 +95,10 @@ REFERENCE_MISSING: Final[str] = "reference_missing"
 ZERO_DENOMINATOR: Final[str] = "zero_denominator"
 TOPIC_MISSING: Final[str] = "topic_missing"
 
+# Registry provenance kinds that keep the legacy `field:no_samples` base reason; any other code
+# (e.g. `reference_exceeds_path`) replaces it as the field's distinct reason.
+_GENERIC_PROVENANCE_KINDS: Final[tuple[str, ...]] = (NO_SAMPLES, PEDSIM_UNAVAILABLE, TOPIC_MISSING, "exception")
+
 __all__ = [
     "COLLISION_FACT_SCHEMA",
     "CONTACT_FACT_SCHEMA",
@@ -211,7 +215,12 @@ def _row_null_reason(row: Mapping[str, object], nullable: tuple[str, ...], prove
         if row.get(field) is not None:
             continue
         override = (provenance or {}).get(field)
-        codes.append(override if isinstance(override, str) and override else f"{field}:{NO_SAMPLES}")
+        if isinstance(override, str) and override:
+            kind = override.partition(":")[2].partition(":")[0]
+            if kind not in _GENERIC_PROVENANCE_KINDS:
+                codes.append(override)
+                continue
+        codes.append(f"{field}:{NO_SAMPLES}")
     return ";".join(codes)
 
 
