@@ -207,7 +207,7 @@ def _door_cells_across(mask: np.ndarray, door: DoorOpening, resolution: float, c
     cols = np.floor((middle[0] + normal[0] * offsets) / resolution).astype(int) - col0
     rows = np.floor((middle[1] + normal[1] * offsets) / resolution).astype(int) - row0
     inside = (rows >= 0) & (rows < mask.shape[0]) & (cols >= 0) & (cols < mask.shape[1])
-    crossed = {(row, col) for row, col in zip(rows[inside], cols[inside]) if mask[row, col]}
+    crossed = {(row, col) for row, col in zip(rows[inside], cols[inside], strict=True) if mask[row, col]}
     return max(1, len(crossed))
 
 

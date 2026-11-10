@@ -19,7 +19,7 @@ from arena_evaluation.processing.acoustics.impedance_grid import compute_attenua
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.ecological.characterization import _ACOUSTIC_DEFAULTS
 from arena_evaluation.processing.pedestrian_frames import pedestrians_by_time
-from arena_evaluation.storage.schemas import AlignedEpisodeBundle
+from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
     world: str | None = None
 
-    def __init__(self, robot_params: typing.Any) -> None:
+    def __init__(self, robot_params: RobotParams) -> None:
         """One acoustic solve per episode is expensive, so its frame series is memoised for the pedestrian rollups."""
         super().__init__(robot_params)
         self._episode_frame_cache: dict[tuple, AcousticExposureResult] = {}
