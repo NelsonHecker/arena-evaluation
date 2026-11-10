@@ -4,7 +4,10 @@ import numpy as np
 import polars as pl
 import pytest
 
-from arena_evaluation.processing.metrics.naturalness.trajectory import TrajectoryMetricsCalculator, _discrete_frechet
+from arena_evaluation.processing.metrics.naturalness.trajectory import (
+    TrajectoryMetricsCalculator,
+    _discrete_frechet,
+)
 from arena_evaluation.processing.path import theta_star
 from arena_evaluation.processing.path.theta_star import GeometricThetaStar
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
@@ -39,11 +42,13 @@ def _gt(xs: list[float], ys: list[float], yaws: list[float] | None = None) -> pl
     )
 
 
-def _episode(gt: pl.DataFrame, goal: list[float], *, map_name: str | None = None, peds: pl.DataFrame | None = None) -> AlignedEpisodeBundle:
+def _episode(gt: pl.DataFrame, goal: list[float], *, map_name: str | None = None, peds: pl.DataFrame | None = None, plans: pl.DataFrame | None = None) -> AlignedEpisodeBundle:
     topics = {"robot_tracks": gt, "tf_gt": gt}
     if peds is not None:
         topics["pedestrian_tracks"] = peds
         topics["peds"] = peds
+    if plans is not None:
+        topics["robot_plans"] = plans
     return AlignedEpisodeBundle(1, gt, [], goal, map=map_name, topics=topics, peds=peds)
 
 
@@ -169,3 +174,56 @@ def test_missing_goal_leaves_reference_metrics_unset():
     assert res["theta_star_length"] is None
     assert res["path_irregularity"] is None
     assert res["topological_complexity"] == 0.0
+
+
+def test_theta_star_length_sums_the_recorded_mission_legs():
+    plans = pl.DataFrame(
+        {
+            "t_ns": [SEC, 2 * SEC],
+            "plan_id": ["plan_0", "plan_1"],
+            "waypoint_idx": [0, 0],
+            "x": [3.0, 0.0],
+            "y": [0.0, 0.0],
+            "yaw": [0.0, 0.0],
+        }
+    )
+    gt = _gt([0.0, 1.0, 2.0, 3.0, 2.0, 1.0, 0.0], [0.0] * 7)
+
+    res = _calc().calculate(_episode(gt, [0.0, 0.0], map_name=OPEN_ROOM, plans=plans), {})
+
+    assert res["theta_star_length"] == pytest.approx(6.0)
+
+
+def test_unvisited_commanded_goals_do_not_inflate_the_reference_route():
+    plans = pl.DataFrame(
+        {
+            "t_ns": [SEC, 2 * SEC],
+            "plan_id": ["plan_0", "plan_1"],
+            "waypoint_idx": [0, 0],
+            "x": [50.0, 0.0],
+            "y": [0.0, 0.0],
+            "yaw": [0.0, 0.0],
+        }
+    )
+    gt = _gt([0.0, 1.0, 2.0, 3.0, 2.0, 1.0, 0.0], [0.0] * 7)
+
+    res = _calc().calculate(_episode(gt, [0.0, 0.0], map_name=OPEN_ROOM, plans=plans), {})
+
+    assert res["theta_star_length"] is None
+
+def test_unreached_first_leg_falls_back_to_the_commanded_mission_target():
+    plans = pl.DataFrame(
+        {
+            "t_ns": [SEC],
+            "plan_id": ["plan_0"],
+            "waypoint_idx": [0],
+            "x": [4.0],
+            "y": [0.0],
+            "yaw": [0.0],
+        }
+    )
+    gt = _gt([0.0, 1.0, 2.0], [0.0, 0.0, 0.0])
+
+    res = _calc().calculate(_episode(gt, [4.0, 0.0], map_name=OPEN_ROOM, plans=plans), {})
+
+    assert res["theta_star_length"] == pytest.approx(4.0)

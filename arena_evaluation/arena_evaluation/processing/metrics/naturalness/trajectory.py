@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import itertools
+import math
 import typing
 
 import numpy as np
 import polars as pl
 from scipy.spatial.distance import cdist
 
-from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
+from arena_evaluation.processing.metrics.base import (
+    BaseMetricCalculator,
+    MetricScope,
+    ScopeSlice,
+)
 from arena_evaluation.processing.path.theta_star import (
     ThetaStarResult,
     compute_theta_star_for_episode,
@@ -14,6 +20,10 @@ from arena_evaluation.processing.path.theta_star import (
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 _TWO_PI: typing.Final[float] = 2.0 * np.pi
+# Two consecutive mission waypoints closer than this are one waypoint (replans to the same pose).
+_ROUTE_WAYPOINT_TOLERANCE_M: typing.Final[float] = 0.25
+# A commanded goal counts as visited when the ground-truth track comes this close to it.
+_REACHED_WAYPOINT_TOLERANCE_M: typing.Final[float] = 1.0
 
 
 def _discrete_frechet(path: np.ndarray, reference: np.ndarray) -> float:
@@ -75,6 +85,125 @@ def _topological_complexity(peds_df: pl.DataFrame | None, pos_x: np.ndarray, pos
     if len(winding) == 0 or winding["total_winding"][0] is None:
         return 0.0
     return float(winding["total_winding"][0])
+
+
+def _phase_waypoints(phases: dict | None) -> tuple[tuple[float, float], ...]:
+    """The recorded task goal poses of this robot in mission order; () when the record carries none."""
+    if not phases:
+        return ()
+    raw_poses = phases.get("map_poses")
+    if not isinstance(raw_poses, (list, tuple)):
+        return ()
+    waypoints: list[tuple[float, float]] = []
+    for pose in raw_poses:
+        if not isinstance(pose, (list, tuple)) or len(pose) < 2:
+            continue
+        try:
+            point = (float(pose[0]), float(pose[1]))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(point[0]) and math.isfinite(point[1]):
+            waypoints.append(point)
+    return tuple(waypoints)
+
+
+def _planned_waypoints(topics: typing.Mapping[str, pl.DataFrame] | None) -> tuple[tuple[float, float], ...]:
+    """Distinct commanded plan goals in command order, from the recorded robot_plans topic."""
+    if not topics:
+        return ()
+    plans = topics.get("robot_plans")
+    if plans is None or len(plans) == 0:
+        return ()
+    # agent-contracts: ignore recording schema evolution at the MCAP topic boundary
+    required = {"t_ns", "plan_id", "waypoint_idx", "x", "y"}
+    if not required <= set(plans.columns):
+        return ()
+    last_per_plan = (
+        plans.sort(["t_ns", "plan_id", "waypoint_idx"])
+        .group_by("plan_id", maintain_order=True)
+        .agg(pl.col("t_ns").min().alias("t_ns"), pl.col("x").last().alias("x"), pl.col("y").last().alias("y"))
+        .sort("t_ns")
+    )
+    waypoints: list[tuple[float, float]] = []
+    for raw_x, raw_y in zip(last_per_plan["x"].to_numpy(), last_per_plan["y"].to_numpy(), strict=True):
+        point = (float(raw_x), float(raw_y))
+        if not (math.isfinite(point[0]) and math.isfinite(point[1])):
+            continue
+        if not waypoints or math.dist(point, waypoints[-1]) > _ROUTE_WAYPOINT_TOLERANCE_M:
+            waypoints.append(point)
+    return tuple(waypoints)
+
+
+def _reached_waypoints(*, track_x: np.ndarray, track_y: np.ndarray, waypoints: tuple[tuple[float, float], ...]) -> tuple[tuple[float, float], ...]:
+    """The commanded goals the ground-truth track actually came within tolerance of, in order."""
+    if len(track_x) < 1:
+        return ()
+    reached: list[tuple[float, float]] = []
+    cursor = 0
+    for waypoint_x, waypoint_y in waypoints:
+        distance_squared = (track_x[cursor:] - waypoint_x) ** 2 + (track_y[cursor:] - waypoint_y) ** 2
+        close = np.nonzero(distance_squared <= _REACHED_WAYPOINT_TOLERANCE_M**2)[0]
+        if len(close) == 0:
+            continue
+        reached.append((waypoint_x, waypoint_y))
+        cursor += int(close[0])
+    return tuple(reached)
+
+
+def _route_waypoints(
+    *,
+    start_pt: tuple[float, float],
+    goal_pt: tuple[float, float] | None,
+    phases: dict | None,
+    topics: typing.Mapping[str, pl.DataFrame] | None,
+    track_x: np.ndarray,
+    track_y: np.ndarray,
+) -> tuple[tuple[float, float], ...]:
+    """Mission waypoints in order: start, the reached task goals, and the final goal when no route is recorded.
+
+    The recorded task phases are authoritative. Archived recordings made before phases were recorded
+    fall back to the distinct plan goals the robot actually reached, which reconstructs the
+    out-and-back retrieval legs; a single-leg episode then reduces to start -> goal.
+    """
+    commanded = _phase_waypoints(phases)
+    if not commanded:
+        commanded = _planned_waypoints(topics)
+    if commanded:
+        reached = _reached_waypoints(track_x=track_x, track_y=track_y, waypoints=commanded)
+        points: list[tuple[float, float]] = [start_pt]
+        if reached:
+            for waypoint in reached:
+                if math.dist(waypoint, points[-1]) > _ROUTE_WAYPOINT_TOLERANCE_M:
+                    points.append(waypoint)
+        else:
+            # Failed before the first leg (e.g. a timeout en route): the last commanded goal is the
+            # mission target, so the reference is start -> mission target rather than degenerate.
+            mission_target = commanded[-1]
+            if math.dist(mission_target, start_pt) > _ROUTE_WAYPOINT_TOLERANCE_M:
+                points.append(mission_target)
+        return tuple(points)
+    points = [start_pt]
+    if goal_pt is not None and math.dist(goal_pt, start_pt) > _ROUTE_WAYPOINT_TOLERANCE_M:
+        points.append(goal_pt)
+    return tuple(points)
+
+
+def _route_geodesic_length(
+    *,
+    episode: AlignedEpisodeBundle,
+    waypoints: tuple[tuple[float, float], ...],
+    robot_radius: float,
+) -> float | None:
+    """Sum of the per-leg Theta* geodesic lengths over the mission waypoints, None without a usable reference."""
+    if episode.map is None or len(waypoints) < 2:
+        return None
+    total = 0.0
+    for leg_start, leg_goal in itertools.pairwise(waypoints):
+        leg = compute_theta_star_for_episode(episode.map, leg_start, leg_goal, robot_radius=robot_radius, run_dir=episode.run_dir)
+        if not leg.success or len(leg.path_x) == 0:
+            return None
+        total += float(leg.geodesic_length)
+    return total if math.isfinite(total) else None
 
 
 class TrajectoryMetricsCalculator(BaseMetricCalculator):
@@ -156,10 +285,21 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
         results["topological_complexity"] = _topological_complexity(self.native_ped_frame(episode), pos_x, pos_y, time_ns)
 
         reference = None
+        route_waypoints: tuple[tuple[float, float], ...] = ()
+        route_length = None
         start_pt = (float(pos_x[0]), float(pos_y[0]))
         if goal_pt is not None and episode.map:
             try:
                 robot_radius = self.robot_params.robot_radius if self.robot_params else 0.25
+                route_waypoints = _route_waypoints(
+                    start_pt=start_pt,
+                    goal_pt=goal_pt,
+                    phases=episode.phases,
+                    topics=episode.topics,
+                    track_x=pos_x,
+                    track_y=pos_y,
+                )
+                route_length = _route_geodesic_length(episode=episode, waypoints=route_waypoints, robot_radius=robot_radius)
                 reference = compute_theta_star_for_episode(
                     episode.map,
                     start_pt,
@@ -172,9 +312,16 @@ class TrajectoryMetricsCalculator(BaseMetricCalculator):
 
                 logging.getLogger(__name__).info(f"theta* reference unavailable for episode {episode.episode_id}: {error!r}")
                 reference = None
+                route_length = None
 
         if reference is not None and reference.success and len(reference.path_x) > 0:
             results.update(self._reference_metrics(pos_x, pos_y, goal_pt, reference))
+            if route_length is not None:
+                results["theta_star_length"] = route_length
+            elif len(route_waypoints) < 2:
+                # The mission route collapsed to the start pose (e.g. the recorded goal is the return-home
+                # pose of a closed loop): the geodesic reference is degenerate, not zero.
+                results["theta_star_length"] = None
         elif goal_pt is not None:
             results["fde"] = float(np.sqrt((pos_x[-1] - goal_pt[0]) ** 2 + (pos_y[-1] - goal_pt[1]) ** 2))
             results["theta_star_length"] = float(np.sqrt((goal_pt[0] - start_pt[0]) ** 2 + (goal_pt[1] - start_pt[1]) ** 2))
