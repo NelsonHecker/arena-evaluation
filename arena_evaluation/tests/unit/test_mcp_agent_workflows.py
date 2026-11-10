@@ -17,8 +17,6 @@ import pytest
 import yaml
 from polars.testing import assert_frame_equal
 
-from arena_mcp.core import ToolError
-
 from arena_evaluation.analytics.evidence import EVIDENCE_INDEX_SCHEMA
 from arena_evaluation.mcp.findings import (
     FindingStatus,
@@ -47,6 +45,7 @@ from arena_evaluation.storage.star_schema import (
     StarSchemaTables,
     write_star_schema,
 )
+from arena_mcp.core import ToolError
 
 RUN_ID = "run-wp5-slices"
 EPISODE_ID = 0
