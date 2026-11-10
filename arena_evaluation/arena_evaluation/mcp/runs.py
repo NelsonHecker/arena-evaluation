@@ -71,6 +71,7 @@ def benchmark_argv(
     scale_episodes: float | None = None,
     data_root: str | None = None,
     lanes: int | None = None,
+    ros_domain_id: int | None = None,
     sim: str | None = None,
     headless: bool | None = None,
     env_n: int | None = None,
@@ -89,7 +90,7 @@ def benchmark_argv(
     for flag, on in (("--retry-failed", retry_failed), ("--lockstep-verdict", lockstep_verdict), ("--strict", strict), ("--world-swap", world_swap), ("--noexit", noexit), ("--profile", profile)):
         if on:
             argv.append(flag)
-    for flag, value in (("--retries", retries), ("--max-sim-deaths", max_sim_deaths), ("--efficacy", efficacy), ("--spawn-budget", spawn_budget), ("--scale-episodes", scale_episodes), ("--data-root", data_root), ("--lanes", lanes)):
+    for flag, value in (("--retries", retries), ("--max-sim-deaths", max_sim_deaths), ("--efficacy", efficacy), ("--spawn-budget", spawn_budget), ("--scale-episodes", scale_episodes), ("--data-root", data_root), ("--lanes", lanes), ("--ros-domain-id", ros_domain_id)):
         if value is not None:
             argv += [flag, str(value)]
     return argv + launch_tokens(launch_args, sim=sim, headless=headless, env__n=env_n, optim__obstacles=optim_obstacles)
@@ -138,6 +139,7 @@ def run_status(path: pathlib.Path, *, running: dict[str, int] | None = None, lig
         "suite": manifest.suite_name,
         "contest": manifest.contest_name,
         "simulator": manifest.simulator,
+        "ros_domain_id": manifest.ros_domain_id,
         "env_n": manifest.env_n,
         "headless": manifest.headless,
         "created_at": manifest.created_at,
@@ -152,7 +154,7 @@ def run_status(path: pathlib.Path, *, running: dict[str, int] | None = None, lig
         "lanes": lanes,
         "runner_pids": pids,
         "jobs": [job.id for job in run_jobs(manifest.run_id)],
-        "has_combined_metrics": (path / "combined_metrics.parquet").is_file(),
+        "has_star_schema": (path / "dim_episodes.parquet").is_file(),
         "has_report": (path / "report.html").is_file(),
     }
 
@@ -204,6 +206,7 @@ async def evaluation_benchmark(
     profile: Annotated[bool, pydantic.Field(description="write simulation_profile.yaml with resource stats")] = False,
     scale_episodes: Annotated[float | None, pydantic.Field(description="scale every stage's episode count")] = None,
     lanes: Annotated[int | None, pydantic.Field(description="run as one shared run across this many lanes, each in a pool fork", ge=1)] = None,
+    ros_domain_id: Annotated[int | None, pydantic.Field(description="ROS domain for the runtime and its envs (GZ_PARTITION follows); omitted, an already-set ROS_DOMAIN_ID is kept and otherwise the runner picks the lowest domain with no arena runtime", ge=0, le=232)] = None,
     sim: Annotated[str | None, pydantic.Field(description="sim:= launch arg, the suite's launch block or the runtime default when omitted")] = None,
     headless: Annotated[bool | None, pydantic.Field(description="headless:= launch arg, only passed when set")] = None,
     env_n: Annotated[int | None, pydantic.Field(description="env.n:= parallel envs, only passed when set")] = None,
@@ -246,6 +249,7 @@ async def evaluation_benchmark(
         scale_episodes=scale_episodes,
         data_root=data_root_dir,
         lanes=lanes,
+        ros_domain_id=ros_domain_id,
         sim=sim,
         headless=headless,
         env_n=env_n,
@@ -337,7 +341,7 @@ def evaluation_runs(
         if len(runs) == limit:
             more = True
             break
-        runs.append({key: status[key] for key in ("run_id", "suite", "contest", "simulator", "created_at", "state", "steps_total", "steps", "lanes", "runner_pids", "has_combined_metrics", "has_report")})
+        runs.append({key: status[key] for key in ("run_id", "suite", "contest", "simulator", "ros_domain_id", "created_at", "state", "steps_total", "steps", "lanes", "runner_pids", "has_star_schema", "has_report")})
     return {"data_root": str(root), "runs": runs, "more": more, "unreadable_manifests": unreadable}
 
 
@@ -492,7 +496,7 @@ async def pipeline_job(
     def outputs(_job: Job) -> dict[str, Any]:
         found: dict[str, Any] = {}
         if verb in ("process", "run") and flag == "--benchmark-dir":
-            found["combined_metrics"] = {str(path): (path / "combined_metrics.parquet").is_file() for path in paths}
+            found["star_schema"] = {str(path): (path / "dim_episodes.parquet").is_file() for path in paths}
         if verb in ("report", "run"):
             found["report"] = str(out_dir / "report.html") if (out_dir / "report.html").is_file() else None
         if verb in ("report", "run", "plot"):
@@ -514,7 +518,7 @@ Profile = Annotated[bool, pydantic.Field(description="write pipeline_profile.yam
 
 @domain.tool()
 async def evaluation_process(run_ids: RunIds = None, episode_dirs: EpisodeDirs = None, force_extract: bool = False, workers: Workers = None, profile: Profile = False) -> dict[str, Any]:
-    """Start `arena evaluation process` as a job: extract MCAP topics and compute every metric into combined_metrics.parquet, failing when nothing was written."""
+    """Start `arena evaluation process` as a job: extract MCAP topics and compute every metric into the Star Schema tables, failing when nothing was written."""
     return await pipeline_job("process", run_ids, episode_dirs, workers=workers, profile=profile, force_extract=force_extract)
 
 
