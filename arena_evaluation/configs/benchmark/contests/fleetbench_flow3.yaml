@@ -1,0 +1,23 @@
+# FleetBench crowd flow: three nav2-based planners spanning costmap, sampling and
+# human-aware TEB families. No DRL contestant: the training/rosnav_rl stack is not
+# installed on the benchmark host.
+name: fleetbench_flow3
+contestants:
+- name: dwb
+  mobile:
+    driver: nav2
+    local_planner: dwb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+    params_overlay: social_cost_layer
+- name: mppi
+  mobile:
+    driver: nav2
+    local_planner: mppi
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+    params_overlay: social_cost_layer
+- name: hateb
+  mobile:
+    driver: nav2
+    local_planner: hateb
+    inter_planner: navigate_to_pose_w_replanning_and_recovery
+    params_overlay: social_cost_layer
