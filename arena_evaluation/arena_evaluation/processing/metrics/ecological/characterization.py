@@ -343,6 +343,17 @@ class CharacterizationCalculator(BaseMetricCalculator):
         )
         return joined["_gt_x"], joined["_gt_y"]
 
+    def _ground_truth_yaw(self, episode: AlignedEpisodeBundle, sample_times_ns: pl.Series) -> pl.Series:
+        """Ground-truth yaw at ``sample_times_ns`` from the native /tf robot_tracks table, nulls without it."""
+        empty = pl.Series("_gt_yaw", [None] * len(sample_times_ns), dtype=pl.Float64)
+        tracks = self.native_topics(episode).get("robot_tracks")
+        if tracks is None or tracks.is_empty() or "yaw" not in tracks.columns:
+            return empty
+        reference = tracks.select(pl.col("t_ns").cast(pl.Int64), pl.col("yaw").cast(pl.Float64).alias("_gt_yaw")).drop_nulls().sort("t_ns")
+        query = pl.DataFrame({"time_ns": sample_times_ns.cast(pl.Int64)})
+        joined = query.join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=_TRACK_ALIGN_TOLERANCE_NS)
+        return joined["_gt_yaw"]
+
     def _enrich(self, episode: AlignedEpisodeBundle, frame: pl.DataFrame) -> pl.DataFrame:
         """Add per-sample step duration/distance from ground truth, power, acoustic level, acceleration and efficiency."""
         sample_times_ns = frame["time_ns"]
@@ -400,7 +411,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
 
         ground_truth_x, ground_truth_y = self._ground_truth_xy(episode, out["time_ns"])
         step_dt = (out["time_ns"].diff().fill_null(0).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).clip(lower_bound=0.0)
-        ground_truth_yaw = out["yaw"].cast(pl.Float64) if "yaw" in out.columns else pl.lit(None, dtype=pl.Float64)
+        ground_truth_yaw = out["yaw"].cast(pl.Float64) if "yaw" in out.columns else self._ground_truth_yaw(episode, out["time_ns"])
         lateral_speed = pl.when(step_dt > 1e-9).then((-ground_truth_x.diff() * ground_truth_yaw.sin() + ground_truth_y.diff() * ground_truth_yaw.cos()) / step_dt).otherwise(None)
         energy_intensity = pl.when(speed >= _MIN_SPEED_MPS).then(out["_p_total"] / speed).otherwise(None)
         energy_per_rad = pl.when(turn_rate >= _MIN_TURN_RATE_RADPS).then(out["_p_total"] / turn_rate).otherwise(None)

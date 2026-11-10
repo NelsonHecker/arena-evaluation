@@ -115,7 +115,7 @@ def test_series_table_is_flat_1nf_with_ground_truth_columns():
             "power_mech_w": [0.0, 2.0, 8.0, 16.0],
             "dba": [42.0, 46.0, 51.0, 56.0],
             "vx_achieved_mps": [0.0, 0.25, 0.5, 1.0],
-            "vy_achieved_mps": [None] * 4,
+            "vy_achieved_mps": [None, 0.0, 0.0, 0.0],
             "wz_achieved_radps": [None] * 4,
             "speed_achieved_mps": [0.0, 0.25, 0.5, 1.0],
             "accel_achieved_mps2": [None, 0.25, 0.25, 0.5],
