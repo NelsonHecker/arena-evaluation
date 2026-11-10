@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from arena_evaluation.processing.telemetry.messages import Envelope, env_row, pedestrian_id, robot_row
+from arena_evaluation.processing.telemetry.messages import Envelope, env_row, pedestrian_id, robot_row, stamp_ns
 from arena_evaluation.processing.telemetry.writer import TableSink
 
 if TYPE_CHECKING:
