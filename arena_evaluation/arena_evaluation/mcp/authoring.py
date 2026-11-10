@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import ast
 import asyncio
+import dataclasses
+import enum
+import functools
 import importlib
 import pathlib
 from typing import TYPE_CHECKING, Annotated, Any, Final, cast
@@ -108,6 +112,188 @@ def _at(block: dict[str, Any], dotted: str) -> object:
     return node
 
 
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class LaunchSpec:
+    """The declared type of one launch argument, and its allowed values when the declaration is an enum."""
+
+    expected: type
+    choices: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+class LaunchRegistry:
+    """Every declared launch argument and the typed subset the authoring validator can check."""
+
+    declared: frozenset[str]
+    specs: dict[str, LaunchSpec]
+
+
+def _python_type(type_: object, parse: object, parameter_type: object, default: object) -> LaunchSpec:
+    """Resolve a declared launch argument to the python type the launcher parses."""
+    if isinstance(parse, type) and issubclass(parse, enum.Enum):
+        return LaunchSpec(expected=str, choices=tuple(str(member.value) for member in parse))
+    if isinstance(type_, enum.Enum):
+        mapped = {"STRING": str, "BOOL": bool, "INTEGER": int, "DOUBLE": float}.get(type_.name)
+        if mapped is not None:
+            return LaunchSpec(expected=mapped)
+    if parameter_type in (bool, int, float, str):
+        return LaunchSpec(expected=parameter_type)
+    if isinstance(parameter_type, type) and issubclass(parameter_type, enum.Enum):
+        return LaunchSpec(expected=str, choices=tuple(str(member.value) for member in parameter_type))
+    if isinstance(default, bool):
+        return LaunchSpec(expected=bool)
+    if isinstance(default, int):
+        return LaunchSpec(expected=int)
+    if isinstance(default, float):
+        return LaunchSpec(expected=float)
+    if isinstance(default, str):
+        return LaunchSpec(expected=str)
+    return LaunchSpec(expected=object)
+
+
+def _configuration_launch_specs() -> tuple[dict[str, LaunchSpec], frozenset[str]]:
+    """The parameters the env configuration declares, captured with their types instead of declared on a node."""
+    from arena_runtime.env.constants.runtime import Configuration
+
+    specs: dict[str, LaunchSpec] = {}
+
+    class _Recorder:
+        _parameter_type: object = object
+
+        def __class_getitem__(cls, item: object) -> type:
+            return type("_RecordedParam", (cls,), {"_parameter_type": item})
+
+        def __init__(self, name: str, value: object = None, *, type_: object = None, parse: object = None, **_kwargs: object) -> None:
+            specs[str(name)] = _python_type(type_, parse, self._parameter_type, value)
+
+    class _Server:
+        ROSParam = _Recorder
+
+    Configuration(_Server())
+    return specs, frozenset(specs)
+
+
+def _infer_launch_default(node: ast.expr | None) -> LaunchSpec | None:
+    if not isinstance(node, ast.Constant):
+        return None
+    value = node.value
+    if isinstance(value, bool):
+        return LaunchSpec(expected=bool)
+    if isinstance(value, int):
+        return LaunchSpec(expected=int)
+    if isinstance(value, float):
+        return LaunchSpec(expected=float)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "false"}:
+            return LaunchSpec(expected=bool)
+        try:
+            int(value)
+        except ValueError:
+            try:
+                float(value)
+            except ValueError:
+                return None
+            return LaunchSpec(expected=float)
+        return LaunchSpec(expected=int)
+    return None
+
+
+def _launch_file_specs() -> tuple[dict[str, LaunchSpec], frozenset[str]]:
+    """Launch arguments declared by the bringup launch files, typed where the declared default shows the type."""
+    from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+
+    specs: dict[str, LaunchSpec] = {}
+    declared: set[str] = set()
+    for package in ("arena_bringup", "arena_runtime", "arena_simulation_setup"):
+        try:
+            base = pathlib.Path(get_package_share_directory(package)) / "launch"
+        except PackageNotFoundError:
+            continue
+        for file in sorted(base.rglob("*.launch.py")):
+            try:
+                tree = ast.parse(file.read_text())
+            except (OSError, SyntaxError, UnicodeDecodeError):
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+                if name not in {"LaunchArgument", "DeclareLaunchArgument"}:
+                    continue
+                keywords = {keyword.arg: keyword.value for keyword in node.keywords if keyword.arg}
+                name_node = keywords.get("name")
+                if not isinstance(name_node, ast.Constant) or not isinstance(name_node.value, str):
+                    continue
+                argument = name_node.value
+                declared.add(argument)
+                spec = _infer_launch_default(keywords.get("default_value"))
+                if spec is not None and argument not in specs:
+                    specs[argument] = spec
+    return specs, frozenset(declared)
+
+
+@functools.lru_cache(maxsize=1)
+def launch_registry() -> LaunchRegistry:
+    """Declared launch arguments with the types the runtime configuration and bringup launch files fix."""
+    specs: dict[str, LaunchSpec] = {}
+    declared: set[str] = set()
+    file_specs, file_declared = _launch_file_specs()
+    specs.update(file_specs)
+    declared.update(file_declared)
+    config_specs, config_declared = _configuration_launch_specs()
+    specs.update(config_specs)
+    declared.update(config_declared)
+    return LaunchRegistry(declared=frozenset(declared), specs=specs)
+
+
+_BOOL_WORDS = frozenset({"true", "false", "1", "0", "yes", "no", "on", "off"})
+
+
+def _launch_type_problem(where: str, name: str, value: object, spec: LaunchSpec) -> str | None:
+    """Why a launch value does not match its declared type, typed booleans never accepting the string spellings."""
+    expected = spec.expected
+    if expected is bool:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, str) and value.strip().lower() in _BOOL_WORDS:
+            return f"{where}: launch arg {name!r} must be a boolean, got the string {value!r}; write YAML true/false unquoted"
+        return f"{where}: launch arg {name!r} must be a boolean, got {type(value).__name__} {value!r}"
+    if expected is int:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return None
+        return f"{where}: launch arg {name!r} must be an integer, got {type(value).__name__} {value!r}" + (" (remove the quotes)" if isinstance(value, str) else "")
+    if expected is float:
+        if isinstance(value, float | int) and not isinstance(value, bool):
+            return None
+        return f"{where}: launch arg {name!r} must be a number, got {type(value).__name__} {value!r}" + (" (remove the quotes)" if isinstance(value, str) else "")
+    if expected is str:
+        if isinstance(value, str):
+            return None
+        return f"{where}: launch arg {name!r} must be a string, got {type(value).__name__} {value!r}"
+    if spec.choices and isinstance(value, str) and value not in spec.choices:
+        return f"{where}: launch arg {name!r} must be one of {list(spec.choices)}, got {value!r}"
+    return None
+
+
+def launch_arg_problems(where: str, launch_args: dict[str, object]) -> tuple[list[str], list[str]]:
+    """Problems and warnings for one suite's launch block against the declared launch arguments and their types."""
+    registry = launch_registry()
+    problems: list[str] = []
+    warnings: list[str] = []
+    for name, value in launch_args.items():
+        if name not in registry.declared:
+            warnings.append(f"{where}: launch arg {name!r} is not declared by the runtime configuration or the bringup launch files")
+            continue
+        spec = registry.specs.get(name)
+        if spec is not None:
+            problem = _launch_type_problem(where, name, value, spec)
+            if problem is not None:
+                problems.append(problem)
+    return problems, warnings
+
+
 def check_suite(data: object) -> dict[str, Any]:
     """Suite.parse verdict plus warnings for task modes, config keys, worlds, robots and models the registries and resolvers do not know."""
     from arena_robots.Robot import RobotIdentifier
@@ -170,6 +356,9 @@ def check_suite(data: object) -> dict[str, Any]:
         unknown = [entry for entry in split_robot_arg(stage.robot) if entry.partition("[")[0].strip() not in robots]
         if raw.get("robot") != "auto" and unknown:
             warnings.append(f"{where}: robot {', '.join(unknown)} not in the robot catalog (robots_catalog)")
+    launch_problems, launch_warnings = launch_arg_problems("suite launch", suite.launch_args)
+    problems.extend(launch_problems)
+    warnings.extend(launch_warnings)
     return {"valid": not problems, "n_stages": len(suite.stages), "stages": [stage.name for stage in suite.stages], "references": suite.references, "launch": suite.launch_args, "problems": problems, "warnings": warnings}
 
 

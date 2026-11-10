@@ -6,6 +6,7 @@ import subprocess
 import time
 
 import pytest
+from rcl_interfaces.msg import ParameterType
 
 from arena_evaluation.benchmark.config import Contest, Suite
 from arena_evaluation.benchmark.runner import (
@@ -28,13 +29,13 @@ from arena_evaluation.benchmark.runner import (
     build_launch_args,
     build_pending,
     group_pending,
+    launch_value,
     resolve_planner_identity,
     robot_has_depth_camera,
     runtime_launch_args,
 )
 from arena_evaluation.benchmark.state import Manifest, RunDir, compute_config_hash
 from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult
-from rcl_interfaces.msg import ParameterType
 
 RANDOM_ROBOTS = "random"
 RANDOM_OBSTACLES = "random"
@@ -91,9 +92,9 @@ def test_launch_args_forward_passthrough_except_runner_owned_and_stage_keys():
 
 
 def test_runtime_launch_args_start_a_suite_lockstep_stepping():
-    args = runtime_launch_args({"lockstep": "True", "headless": "True"}, {"sim": "flatsim"})
+    args = runtime_launch_args({"lockstep": True, "headless": True}, {"sim": "flatsim"})
 
-    assert args == {"lockstep": "True", "headless": "True", "sim": "flatsim", "lockstep.paused": "false"}
+    assert args == {"lockstep": "true", "headless": "true", "sim": "flatsim", "lockstep.paused": "false"}
 
 
 def test_runtime_launch_args_start_a_cli_lockstep_stepping():
@@ -101,12 +102,34 @@ def test_runtime_launch_args_start_a_cli_lockstep_stepping():
 
 
 def test_runtime_launch_args_keep_an_explicit_paused_lockstep():
-    assert runtime_launch_args({"lockstep": "True", "lockstep.paused": "True"}, {})["lockstep.paused"] == "True"
-    assert runtime_launch_args({"lockstep": "True"}, {"lockstep.paused": "true"})["lockstep.paused"] == "true"
+    assert runtime_launch_args({"lockstep": True, "lockstep.paused": True}, {})["lockstep.paused"] == "true"
+    assert runtime_launch_args({"lockstep": True}, {"lockstep.paused": "true"})["lockstep.paused"] == "true"
 
 
 def test_runtime_launch_args_leave_runs_without_lockstep_alone():
-    assert runtime_launch_args({"headless": "True"}, {"lockstep": "false"}) == {"headless": "True", "lockstep": "false"}
+    assert runtime_launch_args({"headless": True}, {"lockstep": "false"}) == {"headless": "true", "lockstep": "false"}
+
+
+def test_launch_value_renders_a_typed_scalar_as_the_launcher_parses_it():
+    assert launch_value(True) == "true"
+    assert launch_value(False) == "false"
+    assert launch_value(10) == "10"
+    assert launch_value(0.5) == "0.5"
+    assert launch_value("as written") == "as written"
+    with pytest.raises(TypeError, match="boolean, number or string"):
+        launch_value(["not", "a", "scalar"])
+
+
+def test_suite_launch_keeps_the_types_yaml_gave_the_values():
+    assert Suite._parse_launch({"lockstep": True, "lockstep.rtf": 2.5, "sim": "gazebo"}) == {"lockstep": True, "lockstep.rtf": 2.5, "sim": "gazebo"}
+    with pytest.raises(ValueError, match="boolean, number or string"):
+        Suite._parse_launch({"lockstep.channels": ["a", "b"]})
+
+
+def test_a_contest_arg_with_a_false_boolean_reaches_the_launcher_as_false():
+    args = build_launch_args(_step(args={"mobile": {"driver": "nav2", "use_sim_time": False}}), "gazebo")
+
+    assert "robot.mobile.use_sim_time:=false" in args
 
 
 def test_reference_grid_adds_an_unobstructed_run_per_cell_and_one_ped_run_per_stage(tmp_path: pathlib.Path):

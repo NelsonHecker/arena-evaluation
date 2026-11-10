@@ -46,3 +46,31 @@ def test_a_nav2_contest_without_a_planner_block_passes():
 def test_plugins_finds_nested_plugin_classes():
     config = {"controller_server": {"ros__parameters": {"FollowPath": {"plugin": "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"}}}}
     assert authoring._plugins(config) == ["nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"]
+
+
+def _suite_with_launch(launch: str) -> str:
+    return "stages:\n  - name: s1\n    map: map_empty\n    robot: jackal\n    episodes: 1\nlaunch:\n" + launch
+
+
+def test_validate_suite_accepts_a_typed_boolean_launch_arg():
+    verdict = authoring.evaluation_validate_suite(_suite_with_launch("  lockstep: true\n"))
+    assert verdict["valid"], verdict["problems"]
+    assert verdict["launch"]["lockstep"] is True
+
+
+def test_validate_suite_rejects_a_quoted_boolean_launch_arg():
+    verdict = authoring.evaluation_validate_suite(_suite_with_launch('  lockstep: "True"\n'))
+    assert not verdict["valid"]
+    assert any("lockstep" in problem and "boolean" in problem and "string" in problem for problem in verdict["problems"])
+
+
+def test_validate_suite_rejects_a_quoted_boolean_config_param():
+    verdict = authoring.evaluation_validate_suite(_suite_with_launch('  human.robots.visible: "false"\n'))
+    assert not verdict["valid"]
+    assert any("human.robots.visible" in problem and "boolean" in problem for problem in verdict["problems"])
+
+
+def test_validate_suite_warns_about_an_undeclared_launch_arg():
+    verdict = authoring.evaluation_validate_suite(_suite_with_launch("  made_up_argument: 1\n"))
+    assert verdict["valid"], verdict["problems"]
+    assert any("made_up_argument" in warning and "not declared" in warning for warning in verdict["warnings"])
