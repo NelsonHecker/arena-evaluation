@@ -886,11 +886,14 @@ def test_absent_robot_tracks_yields_null_metrics(episode: AlignedEpisodeBundle) 
     assert row["result"] is None
     assert row["success"] is None
     assert row["time_to_goal_s"] is None
-    assert row["total_collisions_ped"] == 0
-    assert row["total_collisions_static"] == 0
+    # No recorded collision stream: the count is unknown, not zero.
+    assert row["total_collisions_ped"] is None
+    assert row["total_collisions_static"] is None
     reason = typing.cast(str, row["null_reason"])
     assert "path_length_m:no_samples" in reason
     assert "topic_missing:robot_tracks" in reason
+    assert "total_collisions_ped:topic_missing:" in reason
+    assert "total_collisions_static:topic_missing:" in reason
     assert tables.encounters.height == 0
     assert tables.encounters.schema == FACT_SCHEMAS["encounters"]
     assert tables.contacts.height == 0
