@@ -94,6 +94,7 @@ PEDSIM_UNAVAILABLE: Final[str] = "pedsim_unavailable"
 REFERENCE_MISSING: Final[str] = "reference_missing"
 ZERO_DENOMINATOR: Final[str] = "zero_denominator"
 TOPIC_MISSING: Final[str] = "topic_missing"
+SERIES_MISSING: Final[str] = "series_missing"
 
 # Registry provenance kinds that keep the legacy `field:no_samples` base reason; any other code
 # (e.g. `reference_exceeds_path`) replaces it as the field's distinct reason.
@@ -237,7 +238,7 @@ def _merge_provenance_reasons(base_reason: str, provenance: Mapping[str, str], r
     parts = [part for part in base_reason.split(";") if part]
     seen = set(parts)
     for key, code in provenance.items():
-        if ":exception:" in code or (":topic_missing:" in code and row.get(key) is None):
+        if ":exception:" in code or (":topic_missing:" in code and row.get(key) is None) or (":series_missing:" in code and row.get(key) is None):
             if code not in seen:
                 parts.append(code)
                 seen.add(code)

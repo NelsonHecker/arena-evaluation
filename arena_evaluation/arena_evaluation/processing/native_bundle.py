@@ -90,10 +90,15 @@ class NativeBundle:
 
 
 def _primary(track: pl.LazyFrame) -> pl.LazyFrame:
-    """The ground-truth track in the aligned column names the metrics read."""
+    """The ground-truth track in the aligned column names the metrics read.
+
+    A recording variant that omits an optional component (for example no lateral velocity on a
+    non-holonomic base) simply leaves that aligned column absent instead of failing the episode.
+    """
+    available = set(track.collect_schema().names())
     columns = [pl.col("t_ns").alias(TIME_COLUMN)]
-    columns.extend(pl.col(source).alias(target) for source, target in _PRIMARY.items())
-    columns.extend(pl.col(source).alias(target) for source, target in _GROUND_TRUTH_ALIASES.items())
+    columns.extend(pl.col(source).alias(target) for source, target in _PRIMARY.items() if source in available)
+    columns.extend(pl.col(source).alias(target) for source, target in _GROUND_TRUTH_ALIASES.items() if source in available)
     return track.select(columns).sort(TIME_COLUMN)
 
 

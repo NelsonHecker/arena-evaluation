@@ -118,12 +118,7 @@ def _planned_waypoints(topics: typing.Mapping[str, pl.DataFrame] | None) -> tupl
     required = {"t_ns", "plan_id", "waypoint_idx", "x", "y"}
     if not required <= set(plans.columns):
         return ()
-    last_per_plan = (
-        plans.sort(["t_ns", "plan_id", "waypoint_idx"])
-        .group_by("plan_id", maintain_order=True)
-        .agg(pl.col("t_ns").min().alias("t_ns"), pl.col("x").last().alias("x"), pl.col("y").last().alias("y"))
-        .sort("t_ns")
-    )
+    last_per_plan = plans.sort(["t_ns", "plan_id", "waypoint_idx"]).group_by("plan_id", maintain_order=True).agg(pl.col("t_ns").min().alias("t_ns"), pl.col("x").last().alias("x"), pl.col("y").last().alias("y")).sort("t_ns")
     waypoints: list[tuple[float, float]] = []
     for raw_x, raw_y in zip(last_per_plan["x"].to_numpy(), last_per_plan["y"].to_numpy(), strict=True):
         point = (float(raw_x), float(raw_y))

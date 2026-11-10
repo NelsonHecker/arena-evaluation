@@ -85,6 +85,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     """
 
     NAME = "acoustic_exposure"
+    SERIES_KEY = ("t_ns", "ped_id")
+    SERIES_REQUIRED_TOPICS = ("robot_tracks", "pedestrian_tracks")
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = ["proxemics"]
@@ -250,10 +252,6 @@ class AcousticExposureCalculator(BaseMetricCalculator):
 
     def _compute(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> AcousticExposureResult:
         """Scalar summaries and per-frame pedestrian exposure series for the scope window."""
-        if episode.run is not None and episode.run.is_reference:
-            logger.info("Skipping acoustic calculation for reference episode %s", episode.episode_id)
-            return self._null_result()
-
         map_name = prior_results.get("map") or episode.map or self.world
         if not map_name:
             logger.warning("No map name available for episode %s - skipping acoustics", episode.episode_id)
@@ -480,9 +478,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
         """1NF flat pedestrian acoustic exposure series, one row per (sample, pedestrian).
 
-        ``is_worst_frame`` marks the rows of the worst-case frame, and ``open_doors`` names the
-        doors open at that sample, so the legacy worst-case frame struct lives here instead of
-        in a nested fact column.
+        The natural key is ``(t_ns, ped_id)``: duplicate recorded clock samples collapse to their
+        loudest row. ``is_worst_frame`` marks the rows of the worst-case frame, and ``open_doors``
+        names the doors open at that sample, so the legacy worst-case frame struct lives here
+        instead of in a nested fact column.
         """
         result = self._episode_result(episode, {})
         if not any(result.frame_exposure_dba):
@@ -522,7 +521,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 is_worst.append(index == result.worst_frame_index)
                 open_doors.append(result.frame_open_doors[index])
 
-        return pl.DataFrame(
+        frame = pl.DataFrame(
             {
                 "run_id": [run_id] * len(t_ns),
                 "episode_id": [int(episode.episode_id)] * len(t_ns),
@@ -540,4 +539,9 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 "open_doors": open_doors,
             },
             schema=SERIES_SCHEMA,
+        )
+        return frame.sort(["t_ns", "ped_id", "exposure_dba"]).unique(
+            subset=["run_id", "episode_id", "robot_id", "t_ns", "ped_id"],
+            keep="last",
+            maintain_order=True,
         )

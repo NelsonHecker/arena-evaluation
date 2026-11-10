@@ -13,10 +13,10 @@ from typing import Annotated, Any, Final, Literal
 
 import polars as pl
 import pydantic
+from arena_mcp.core import ToolError
 
 from arena_evaluation.analytics.catalog import SERIES_TABLE_PREFIX, BenchmarkCatalog
 from arena_evaluation.storage.declarations import FACT_SCHEMAS, FactTable
-from arena_mcp.core import ToolError
 
 from .base import RunId, domain, run_path
 

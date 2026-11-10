@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import dataclasses
 import logging
 import multiprocessing
 import os
@@ -42,6 +43,8 @@ def _episode_series_tables(
     """1NF series frames the registered calculators publish for one robot episode, keyed by table stem."""
     frames: dict[str, pl.DataFrame] = {}
     for stem, calculator in registry.series_calculators():
+        if calculator.SERIES_REQUIRED_TOPICS and any(topic not in (episode.topics or {}) for topic in calculator.SERIES_REQUIRED_TOPICS):
+            continue
         frame = calculator.series_table(episode, run_id=run_id, robot_id=robot_id)
         if frame is not None and frame.height > 0:
             frames[stem] = frame
@@ -706,6 +709,13 @@ class ProcessingPipeline:
                     topics=topics,
                     run_dir=episode_dir.parent.parent,
                 )
+                series_tables = _episode_series_tables(
+                    registry,
+                    aligned_ep,
+                    run_id=ep.benchmark_id,
+                    robot_id=str(aligned_ep.robot_name or robot_name),
+                )
+                aligned_ep = dataclasses.replace(aligned_ep, series=series_tables)
                 episodes = [aligned_ep]
 
                 def on_calc_progress(calc_name: str, calc_idx: int, total_calcs: int):
@@ -778,14 +788,7 @@ class ProcessingPipeline:
                             metrics_config=suite_metrics_cfg,
                         )
                     )
-                    episode_series.append(
-                        _episode_series_tables(
-                            registry,
-                            aligned_ep,
-                            run_id=ep.benchmark_id,
-                            robot_id=str(ep_metrics.get("robot") or ""),
-                        )
-                    )
+                    episode_series.append(series_tables)
 
             return finish(all_results, episode_star_tables, episode_series)
 

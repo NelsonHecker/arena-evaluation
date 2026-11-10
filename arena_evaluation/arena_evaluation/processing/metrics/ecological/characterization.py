@@ -155,6 +155,8 @@ SERIES_SCHEMA: typing.Final[dict[str, pl.DataType]] = {
 
 class CharacterizationCalculator(BaseMetricCalculator):
     NAME = "characterization"
+    SERIES_KEY = ("t_ns",)
+    SERIES_REQUIRED_TOPICS = ("robot_tracks",)
     CATEGORY = "ecological"
     REQUIRES_PEDSIM = False
     DEPENDS_ON = []
@@ -238,10 +240,15 @@ class CharacterizationCalculator(BaseMetricCalculator):
         accel = pl.when(pl.col("phase_kind") == "ramp_down").then(-accel).otherwise(accel)
         return table.with_columns(accel.alias("accel_target")).drop(["duration_s", "ramp_s"])
 
-    def _attach_phases(self, episode: AlignedEpisodeBundle) -> tuple[pl.DataFrame, float]:
-        """Aligned frame with phase labels/targets attached, and the fraction of samples the schedule recognised."""
+    def _attach_phases(self, episode: AlignedEpisodeBundle) -> tuple[pl.DataFrame, float | None]:
+        """Aligned frame with phase labels/targets attached, and the fraction of samples the schedule recognised.
+
+        None when no phase markers were recorded: the coverage of a schedule that does not exist is
+        unknown, not zero, so the robot fact publishes null with the missing-topic reason.
+        """
         out = episode.data
-        if "label" not in out.columns:
+        marked = "label" in out.columns
+        if not marked:
             # No phase markers at all: not a characterization episode, every sample classifies from cmd_vel.
             out = out.with_columns(pl.lit("unknown").alias("phase_label"))
             phase_map = pl.DataFrame(schema=self._SCHEDULE_SCHEMA).drop(["duration_s", "ramp_s"]).with_columns(pl.lit(0.0).alias("accel_target"))
@@ -251,7 +258,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
         out = out.join(phase_map, on="phase_label", how="left")
 
         unmatched = int(out["phase_kind"].null_count())
-        phase_coverage = 1.0 - unmatched / len(out) if len(out) else 1.0
+        phase_coverage = (1.0 - unmatched / len(out) if len(out) else 1.0) if marked else None
         # Unmarked samples ("unknown") are expected before the first marker, foreign labels are not.
         foreign = sorted(set(out.filter(pl.col("phase_kind").is_null())["phase_label"].to_list()) - {"unknown"})
         if foreign:
@@ -336,6 +343,17 @@ class CharacterizationCalculator(BaseMetricCalculator):
         )
         return joined["_gt_x"], joined["_gt_y"]
 
+    def _ground_truth_yaw(self, episode: AlignedEpisodeBundle, sample_times_ns: pl.Series) -> pl.Series:
+        """Ground-truth yaw at ``sample_times_ns`` from the native /tf robot_tracks table, nulls without it."""
+        empty = pl.Series("_gt_yaw", [None] * len(sample_times_ns), dtype=pl.Float64)
+        tracks = self.native_topics(episode).get("robot_tracks")
+        if tracks is None or tracks.is_empty() or "yaw" not in tracks.columns:
+            return empty
+        reference = tracks.select(pl.col("t_ns").cast(pl.Int64), pl.col("yaw").cast(pl.Float64).alias("_gt_yaw")).drop_nulls().sort("t_ns")
+        query = pl.DataFrame({"time_ns": sample_times_ns.cast(pl.Int64)})
+        joined = query.join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=_TRACK_ALIGN_TOLERANCE_NS)
+        return joined["_gt_yaw"]
+
     def _enrich(self, episode: AlignedEpisodeBundle, frame: pl.DataFrame) -> pl.DataFrame:
         """Add per-sample step duration/distance from ground truth, power, acoustic level, acceleration and efficiency."""
         sample_times_ns = frame["time_ns"]
@@ -382,7 +400,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
 
         return out
 
-    def _series_frame(self, episode: AlignedEpisodeBundle) -> tuple[pl.DataFrame, float]:
+    def _series_frame(self, episode: AlignedEpisodeBundle) -> tuple[pl.DataFrame, float | None]:
         """Per-sample characterization frame with every derived series column, and the phase coverage."""
         frame, phase_coverage = self._attach_phases(episode)
         out = self._enrich(episode, frame)
@@ -391,6 +409,10 @@ class CharacterizationCalculator(BaseMetricCalculator):
         speed = out["vel_linear"].cast(pl.Float64).abs() if "vel_linear" in out.columns else pl.when(out["_dt"] > 1e-6).then(out["_ds"] / out["_dt"]).otherwise(None)
         turn_rate = out["vel_angular"].cast(pl.Float64).abs() if "vel_angular" in out.columns else pl.lit(None, dtype=pl.Float64)
 
+        ground_truth_x, ground_truth_y = self._ground_truth_xy(episode, out["time_ns"])
+        step_dt = (out["time_ns"].diff().fill_null(0).cast(pl.Float64) / _NANOSECONDS_PER_SECOND).clip(lower_bound=0.0)
+        ground_truth_yaw = out["yaw"].cast(pl.Float64) if "yaw" in out.columns else self._ground_truth_yaw(episode, out["time_ns"])
+        lateral_speed = pl.when(step_dt > 1e-9).then((-ground_truth_x.diff() * ground_truth_yaw.sin() + ground_truth_y.diff() * ground_truth_yaw.cos()) / step_dt).otherwise(None)
         energy_intensity = pl.when(speed >= _MIN_SPEED_MPS).then(out["_p_total"] / speed).otherwise(None)
         energy_per_rad = pl.when(turn_rate >= _MIN_TURN_RATE_RADPS).then(out["_p_total"] / turn_rate).otherwise(None)
         accel_achieved = pl.when(out["_dt"] > _MIN_ACCEL_DT_S).then(speed.diff() / out["_dt"]).otherwise(None)
@@ -402,6 +424,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
                 speed.alias("_speed"),
                 turn_rate.alias("_turn_rate"),
                 out["turn_radius_m"].alias("_turn_radius"),
+                lateral_speed.alias("_vel_lateral"),
                 energy_intensity.alias("_energy_intensity"),
                 energy_per_rad.alias("_energy_per_rad"),
                 accel_achieved.alias("_accel_achieved"),
@@ -409,6 +432,12 @@ class CharacterizationCalculator(BaseMetricCalculator):
             ),
             phase_coverage,
         )
+
+    def missing_input_provenance(self, episode: AlignedEpisodeBundle) -> dict[str, str]:
+        """Phase coverage is unknown, not zero, when no characterization markers were recorded."""
+        if episode.data is None or "label" not in episode.data.columns:
+            return {"char_phase_coverage": "char_phase_coverage:topic_missing:robot_characterization_phase"}
+        return {}
 
     def calculate(self, episode: AlignedEpisodeBundle, prior_results: dict[str, typing.Any]) -> dict[str, typing.Any]:
         del prior_results
@@ -452,7 +481,7 @@ class CharacterizationCalculator(BaseMetricCalculator):
             pl.col("_p_mech").alias("power_mech_w"),
             pl.col("_dba").alias("dba"),
             pl.col("vel_linear").cast(pl.Float64).alias("vx_achieved_mps") if "vel_linear" in series.columns else pl.lit(None, dtype=pl.Float64).alias("vx_achieved_mps"),
-            pl.col("vel_lateral").cast(pl.Float64).alias("vy_achieved_mps") if "vel_lateral" in series.columns else pl.lit(None, dtype=pl.Float64).alias("vy_achieved_mps"),
+            pl.col("_vel_lateral").alias("vy_achieved_mps"),
             pl.col("vel_angular").cast(pl.Float64).alias("wz_achieved_radps") if "vel_angular" in series.columns else pl.lit(None, dtype=pl.Float64).alias("wz_achieved_radps"),
             pl.col("_speed").alias("speed_achieved_mps"),
             pl.col("_accel_achieved").alias("accel_achieved_mps2"),

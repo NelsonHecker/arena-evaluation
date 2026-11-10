@@ -157,6 +157,23 @@ entries:
     kind: ground_truth
     reason: "semantic_metrics no longer depends on the removed in-place episode-bundle mutation; values may change where the mutation leaked"
 
+  # --- producer gaps: values that were fabricated zeros are now typed nulls ---------
+  - metric_key: doorway_blocking_time
+    kind: null_fill
+    reason: "zone/door compliance is null without the recorded world semantics or an annotated world; the legacy frame published a fabricated 0.0"
+  - metric_key: quiet_zone_dwell_seconds
+    kind: null_fill
+    reason: "zone/door compliance is null without the recorded world semantics or an annotated world; the legacy frame published a fabricated 0.0"
+  - metric_key: restricted_zone_entries
+    kind: null_fill
+    reason: "zone/door compliance is null without the recorded world semantics or an annotated world; the legacy frame published a fabricated 0"
+  - metric_key: speed_zone_violation_seconds
+    kind: null_fill
+    reason: "zone/door compliance is null without the recorded world semantics or an annotated world; the legacy frame published a fabricated 0.0"
+  - metric_key: speed_zone_violations
+    kind: null_fill
+    reason: "zone/door compliance is null without the recorded world semantics or an annotated world; the legacy frame published a fabricated 0"
+
 relocated_series:
   - reason: "characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror"
     metric_keys:

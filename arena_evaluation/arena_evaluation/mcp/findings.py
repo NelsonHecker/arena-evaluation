@@ -19,10 +19,10 @@ from typing import Annotated, Any, Final, Literal
 import polars as pl
 import pydantic
 import yaml
+from arena_mcp.core import ToolError
 
 from arena_evaluation.analytics.evidence import EvidenceStore
 from arena_evaluation.analytics.queries import QueryCatalog
-from arena_mcp.core import ToolError
 
 from .base import RunId, component, domain, run_path
 from .runs import Note, write_notes

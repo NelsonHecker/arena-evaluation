@@ -213,6 +213,7 @@ def test_unvisited_commanded_goals_do_not_inflate_the_reference_route():
 
     assert res["theta_star_length"] is None
 
+
 def test_unreached_first_leg_falls_back_to_the_commanded_mission_target():
     plans = pl.DataFrame(
         {

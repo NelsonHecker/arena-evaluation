@@ -18,6 +18,8 @@ from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 NANOSECONDS_PER_SECOND: typing.Final[float] = 1e9
 
 SERIES_TABLE_STEM = "pedestrian_path"
+SERIES_KEY = ("t_ns", "ped_id")
+SERIES_REQUIRED_TOPICS = ("pedestrian_tracks",)
 
 # One row per (episode, pedestrian, frame); no list or struct columns.
 SERIES_SCHEMA: typing.Final[dict[str, pl.DataType]] = {
@@ -68,7 +70,11 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
         return pl.col(column).cast(pl.Float64)
 
     def series_table(self, episode: AlignedEpisodeBundle, run_id: str = "", robot_id: str = "") -> pl.DataFrame:
-        """1NF flat pedestrian path series, one row per pedestrian frame; schema-typed when empty."""
+        """1NF flat pedestrian path series, one row per (t_ns, ped_id); schema-typed when empty.
+
+        Duplicate recorded telemetry samples for the same key collapse to the last row, so the
+        published natural key is honest.
+        """
         tracks = self.native_ped_frame(episode)
         if tracks is None or tracks.height == 0:
             return pl.DataFrame(schema=SERIES_SCHEMA)
@@ -80,6 +86,7 @@ class PedestrianPathMetricsCalculator(BaseMetricCalculator):
         if present.height == 0:
             return pl.DataFrame(schema=SERIES_SCHEMA)
 
+        present = present.unique(subset=["t_ns", "ped_id"], keep="last", maintain_order=True)
         first_t_ns = int(present["t_ns"].min())
         return present.select(
             run_id=pl.lit(run_id, dtype=pl.String),

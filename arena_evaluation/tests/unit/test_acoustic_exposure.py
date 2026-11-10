@@ -241,10 +241,14 @@ def test_metric_raises_when_no_barrier_map_exists(calc, derived_map):
         calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {})
 
 
-def test_reference_run_yields_nulls(calc, derived_map):
-    run = EpisodeDescriptor(episode_dir="ep", benchmark_id="bench", episode_id=7, planner="p", stage="s", is_reference=True)
+def test_reference_run_is_evaluated_like_any_other_episode(derived_map):
+    """Reference twins carry the same acoustic telemetry, so they no longer skip the exposure solve."""
+    run = EpisodeDescriptor(episode_dir="ep", benchmark_id="bench", episode_id=7, planner="p", stage="s", is_reference=True, reference_type="unhindered_peds")
     episode = _episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), derived_map(), run=run)
-    assert calc.calculate(episode, {}) == NULLS
+    reference_calc = AcousticExposureCalculator(RobotParams())
+    result = reference_calc.calculate(episode, {})
+    assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
+    assert reference_calc.series_table(episode).height > 0
 
 
 @pytest.mark.parametrize("data", [None, pl.DataFrame()], ids=["none", "empty"])
@@ -265,6 +269,14 @@ def test_world_fallback_supplies_the_map(calc, derived_map):
 def test_prior_map_overrides_episode_map(calc, derived_map):
     result = calc.calculate(_episode(_frames([(1.0, 1.0)], [[(4.0, 1.0)]]), "unknown"), {"map": derived_map()})
     assert result["ped_max_exposure_dba"] == pytest.approx(42.0 - _att(3.0), abs=1e-3)
+
+
+def test_series_collapses_duplicate_clock_samples(calc, derived_map):
+    """The published natural key (t_ns, ped_id) is unique even when the recorded clock repeats a stamp."""
+    repeated = _frames([(1.0, 1.0), (1.0, 1.0)], [[(4.0, 1.0)], [(4.0, 1.0)]], times=[0, 0])
+    table = AcousticExposureCalculator(RobotParams()).series_table(_episode(repeated, derived_map()))
+    assert table.height == 1
+    assert table.select("t_ns", "ped_id").unique().height == table.height
 
 
 def test_scalars_follow_the_exposure_series(calc, derived_map):
