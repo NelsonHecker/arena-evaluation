@@ -26,9 +26,8 @@ def _write_acoustic_world(base: pathlib.Path, world: str) -> None:
     """A minimal format-2 world snapshot so the acoustic barrier map resolves for a synthetic episode."""
     world_dir = base / "worlds" / world
     world_dir.mkdir(parents=True, exist_ok=True)
-    (world_dir / "world.yaml").write_text(
-        "format: arena-world/2\nlevels:\n  - id: '0'\n    zones:\n      - name: open\n        polygon: [[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0]]\n"
-    )
+    (world_dir / "world.yaml").write_text("format: arena-world/2\nlevels:\n  - id: '0'\n    zones:\n      - name: open\n        polygon: [[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0]]\n")
+
 
 def _robot_frame(points: list[tuple[float, float, float]], columns: dict[str, str]) -> dict[str, list]:
     """Flat robot rows of a track: the time, identity and the columns named by the mapping."""

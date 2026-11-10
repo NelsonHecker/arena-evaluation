@@ -42,9 +42,7 @@ def _load_level(world_dir: str) -> Level:
     return world.compact_world(origins)
 
 
-def _world_candidates(
-    map_name: str, run_dir: pathlib.Path | str | None = None
-) -> list[tuple[str, pathlib.Path | None]]:
+def _world_candidates(map_name: str, run_dir: pathlib.Path | str | None = None) -> list[tuple[str, pathlib.Path | None]]:
     """Where a map's world may live, in lookup order, labelled for error messages.
 
     A path of None marks a location that cannot be used; its label says why.
@@ -83,10 +81,7 @@ def _find_world_level(map_name: str, run_dir: pathlib.Path | str | None = None) 
 def _barrier_map_for_world(world_dir: str, resolution: float) -> BarrierMap:
     level = _load_level(world_dir)
     walls = [WallSegment(start=(wall.start.x, wall.start.y), end=(wall.end.x, wall.end.y)) for wall in level.all_walls]
-    doors = [
-        DoorOpening(name=door.name, start=(door.start.x, door.start.y), end=(door.end.x, door.end.y), width=door.width)
-        for door in level.doors
-    ]
+    doors = [DoorOpening(name=door.name, start=(door.start.x, door.start.y), end=(door.end.x, door.end.y), width=door.width) for door in level.doors]
     # Zones give the walkable extent, so that agents standing in open space are on the grid. They are not barriers.
     extent = [(point.x, point.y) for zone in level.zones for point in zone.polygon]
     return derive_barrier_map(walls=walls, doors=doors, extent=extent, resolution=resolution)
@@ -104,9 +99,7 @@ def load_barrier_map(
     """
     found = _find_world_level(map_name, run_dir=run_dir)
     if found is None:
-        searched = "; ".join(
-            label if path is None else f"{label} at {path}" for label, path in _world_candidates(map_name, run_dir=run_dir)
-        )
+        searched = "; ".join(label if path is None else f"{label} at {path}" for label, path in _world_candidates(map_name, run_dir=run_dir))
         raise AcousticsError(f"no world declares map {map_name!r}; searched {searched}")
     world_dir, _level = found
     return _barrier_map_for_world(str(world_dir), float(resolution))
@@ -118,10 +111,7 @@ def barrier_door_tl(barrier: BarrierMap) -> dict[str, tuple[np.ndarray, float]]:
     The solver charges every barrier cell a path enters, so a door's closed TL is shared by the cells it crosses: each
     cell holds ``1 / door_cells_across`` of the door's TL, and a path through the whole door pays the full TL once.
     """
-    return {
-        f"world/{name}": (mask, DEFAULT_DOOR_TL_DB / barrier.door_cells_across[name])
-        for name, mask in barrier.door_masks.items()
-    }
+    return {f"world/{name}": (mask, DEFAULT_DOOR_TL_DB / barrier.door_cells_across[name]) for name, mask in barrier.door_masks.items()}
 
 
 def _entity_matches_door(door_key: str, entity: str) -> bool:

@@ -275,7 +275,6 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     # --- PEDESTRIAN scope -> fact_pedestrians -----------------------------------------------
     MetricDeclaration(name="ped_round_trips_completed", unit="", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
     MetricDeclaration(name="ped_velocity_delay_ratio", unit="", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="", description="social metric of the pedestrian_disturbance calculator"),
-
     MetricDeclaration(name="ped_max_exposure_dba", unit="dBA", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="lower", description="ecological metric of the acoustic_exposure calculator"),
     MetricDeclaration(name="ped_leq_exposure_dba", unit="dBA", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="lower", description="ecological metric of the acoustic_exposure calculator"),
     MetricDeclaration(name="ped_max_startle_factor", unit="dBA/s", fact_table=_PEDESTRIANS, dtype=pl.Float64, direction="lower", description="ecological metric of the acoustic_exposure calculator"),

@@ -1109,6 +1109,7 @@ def test_registry_reraises_metric_input_errors(episode: AlignedEpisodeBundle) ->
             scope_slice=enc_slice,
         )
 
+
 def test_registry_provenance_records_topic_missing_no_samples_and_exception(episode: AlignedEpisodeBundle) -> None:
     class _BrokenCalculator(BaseMetricCalculator):
         NAME = "broken_calc"

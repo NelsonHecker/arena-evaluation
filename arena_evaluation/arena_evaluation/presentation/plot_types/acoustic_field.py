@@ -46,8 +46,6 @@ def _cell_centres(lower_m: float, cells: int, cell_m: float) -> np.ndarray:
     return lower_m + (np.arange(cells) + 0.5) * cell_m
 
 
-
-
 class AcousticFieldRenderer(BasePlotRenderer):
     PLOT_TYPE = "acoustic_field"
 

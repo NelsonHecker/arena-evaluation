@@ -111,18 +111,10 @@ class AcousticExposureCalculator(BaseMetricCalculator):
         acoustics = self.native_topics(episode).get("robot_acoustics")
         if acoustics is None or len(acoustics) == 0 or "total_level_af_dba" not in acoustics.columns:
             return np.full(len(time_ns), default_dba, dtype=np.float64)
-        reference = (
-            acoustics.select(pl.col("t_ns").cast(pl.Int64), pl.col("total_level_af_dba").cast(pl.Float64))
-            .drop_nulls()
-            .sort("t_ns")
-        )
+        reference = acoustics.select(pl.col("t_ns").cast(pl.Int64), pl.col("total_level_af_dba").cast(pl.Float64)).drop_nulls().sort("t_ns")
         if len(reference) == 0:
             return np.full(len(time_ns), default_dba, dtype=np.float64)
-        joined = (
-            pl.DataFrame({"t_ns": time_ns.astype(np.int64)})
-            .join_asof(reference, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
-            .with_columns(pl.col("total_level_af_dba").fill_null(strategy="forward").fill_null(default_dba))
-        )
+        joined = pl.DataFrame({"t_ns": time_ns.astype(np.int64)}).join_asof(reference, on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS).with_columns(pl.col("total_level_af_dba").fill_null(strategy="forward").fill_null(default_dba))
         return joined["total_level_af_dba"].to_numpy().astype(np.float64)
 
     def _time_base(self, episode: AlignedEpisodeBundle) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
@@ -133,14 +125,8 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             pos_x_native, pos_y_native, _yaw, native_times_ns = self.resolve_native_pose(episode)
             if len(native_times_ns) == 0:
                 return None
-            reference = (
-                pl.DataFrame({"t_ns": native_times_ns, "_rx": pos_x_native, "_ry": pos_y_native})
-                .drop_nulls()
-                .sort("t_ns")
-            )
-            aligned = pl.DataFrame({"time_ns": time_ns}).join_asof(
-                reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS
-            )
+            reference = pl.DataFrame({"t_ns": native_times_ns, "_rx": pos_x_native, "_ry": pos_y_native}).drop_nulls().sort("t_ns")
+            aligned = pl.DataFrame({"time_ns": time_ns}).join_asof(reference, left_on="time_ns", right_on="t_ns", strategy="backward", tolerance=TRACK_ALIGN_TOLERANCE_NS)
             rx_m = aligned["_rx"].to_numpy().astype(np.float64)
             ry_m = aligned["_ry"].to_numpy().astype(np.float64)
             return time_ns, rx_m, ry_m, ~np.isnan(rx_m) & ~np.isnan(ry_m)
@@ -169,7 +155,20 @@ class AcousticExposureCalculator(BaseMetricCalculator):
             worst_frame_index=0,
         )
 
-    def _summarize(self, frame_times_ns: np.ndarray, frame_robot_x_m: np.ndarray, frame_robot_y_m: np.ndarray, frame_source_dba: np.ndarray, frame_ped_ids: list[list[str]], frame_ped_x_m: list[list[float]], frame_ped_y_m: list[list[float]], frame_exposure_dba: list[list[float]], frame_attenuation_db: list[list[float]], frame_open_doors: list[str], door_names: typing.Iterable[str]) -> AcousticExposureResult:
+    def _summarize(
+        self,
+        frame_times_ns: np.ndarray,
+        frame_robot_x_m: np.ndarray,
+        frame_robot_y_m: np.ndarray,
+        frame_source_dba: np.ndarray,
+        frame_ped_ids: list[list[str]],
+        frame_ped_x_m: list[list[float]],
+        frame_ped_y_m: list[list[float]],
+        frame_exposure_dba: list[list[float]],
+        frame_attenuation_db: list[list[float]],
+        frame_open_doors: list[str],
+        door_names: typing.Iterable[str],
+    ) -> AcousticExposureResult:
         """Reduce one frame series to the scalar summaries and the worst-case frame."""
         if not any(frame_exposure_dba):
             logger.info("No acoustic exposure values produced")
@@ -326,9 +325,7 @@ class AcousticExposureCalculator(BaseMetricCalculator):
                 should_eval = True
             if not should_eval:
                 robot_moved = np.hypot(rx_m[index] - last_eval_rx, ry_m[index] - last_eval_ry) > POSITION_EVALUATION_THRESHOLD_M
-                pedestrians_changed = len(px_m) != len(last_eval_peds[0]) or np.any(
-                    np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1]) > POSITION_EVALUATION_THRESHOLD_M
-                )
+                pedestrians_changed = len(px_m) != len(last_eval_peds[0]) or np.any(np.hypot(px_m - last_eval_peds[0], py_m - last_eval_peds[1]) > POSITION_EVALUATION_THRESHOLD_M)
                 should_eval = bool(robot_moved or pedestrians_changed)
 
             if should_eval:

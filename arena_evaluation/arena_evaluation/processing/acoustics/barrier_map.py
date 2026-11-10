@@ -106,9 +106,7 @@ def derive_barrier_map(
         resolution=resolution,
         origin=((col0 + 0.5) * resolution, (row0 + 0.5) * resolution),
         door_masks=door_masks,
-        door_cells_across={
-            door.name: _door_cells_across(door_masks[door.name], door, resolution, col0, row0) for door in doors
-        },
+        door_cells_across={door.name: _door_cells_across(door_masks[door.name], door, resolution, col0, row0) for door in doors},
     )
 
 
@@ -194,11 +192,7 @@ def _door_mask(grid_x: np.ndarray, grid_y: np.ndarray, door: DoorOpening, resolu
             point_y = bottom + fraction_y * resolution
             along = (point_x - start[0]) * direction[0] + (point_y - start[1]) * direction[1]
             across = (point_y - start[1]) * direction[0] - (point_x - start[0]) * direction[1]
-            mask |= (
-                (along >= -_EDGE_TOLERANCE_M)
-                & (along <= length + _EDGE_TOLERANCE_M)
-                & (np.abs(across) <= half_width + _EDGE_TOLERANCE_M)
-            )
+            mask |= (along >= -_EDGE_TOLERANCE_M) & (along <= length + _EDGE_TOLERANCE_M) & (np.abs(across) <= half_width + _EDGE_TOLERANCE_M)
     return mask
 
 

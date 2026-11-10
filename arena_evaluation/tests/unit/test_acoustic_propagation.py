@@ -279,9 +279,7 @@ def test_world_door_in_a_derived_wall_blocks_when_closed_and_opens_the_path(tmp_
     door = {"name": "d", "span": [[2.0, 3.0], [4.0, 3.0]], "width": 0.1}
     world_dir = tmp_path / "worlds" / "doorworld"
     world_dir.mkdir(parents=True)
-    (world_dir / "world.yaml").write_text(
-        yaml.safe_dump({"format": "arena-world/2", "levels": [{"id": "0", "zones": [room], "walls": walls, "doors": [door]}]})
-    )
+    (world_dir / "world.yaml").write_text(yaml.safe_dump({"format": "arena-world/2", "levels": [{"id": "0", "zones": [room], "walls": walls, "doors": [door]}]}))
 
     barrier = load_barrier_map("doorworld", run_dir=tmp_path, resolution=RES)
     assert barrier is not None

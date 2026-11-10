@@ -29,7 +29,6 @@ import rclpy
 import yaml
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from arena_bringup.defaults import default_sim
-from arena_evaluation.processing.world_lookup import installed_world_dir
 from arena_evaluation_msgs.msg import BenchmarkState
 from arena_evaluation_msgs.srv import RecordEpisode
 from arena_rclpy_mixins import ActionClientWrapper, ArenaMixinNode, ClientWrapper
@@ -44,6 +43,8 @@ from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import GetParameters, SetParameters
 from rclpy.action.client import ClientGoalHandle
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
+
+from arena_evaluation.processing.world_lookup import installed_world_dir
 
 STATE_TOPIC = "/arena/benchmark/state"
 PREPARED = "benchmark: prepared run_id="

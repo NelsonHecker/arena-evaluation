@@ -161,9 +161,7 @@ def test_opening_door_counts_open_past_threshold():
 
 
 def test_state_labels_do_not_open_a_door():
-    df = _frame_strict_schema(
-        [_progress(100, "d1", 0.0), _row(100, "d1", "state", vstr="open")]
-    )
+    df = _frame_strict_schema([_progress(100, "d1", 0.0), _row(100, "d1", "state", vstr="open")])
     tl = DoorStateTimeline.from_semantic_frame(df)
     assert tl.open_sets[0] == frozenset()
 
@@ -259,33 +257,25 @@ def test_duplicate_stamps_merged_into_one_frame():
 
 
 def test_open_doors_at_before_first_is_empty():
-    tl = DoorStateTimeline(
-        np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset()]
-    )
+    tl = DoorStateTimeline(np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset()])
     assert tl.open_doors_at(50) == frozenset()
     assert tl.open_doors_at(99) == frozenset()
 
 
 def test_open_doors_at_exact_stamp():
-    tl = DoorStateTimeline(
-        np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset({"d2"})]
-    )
+    tl = DoorStateTimeline(np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset({"d2"})])
     assert tl.open_doors_at(100) == frozenset({"d1"})
     assert tl.open_doors_at(200) == frozenset({"d2"})
 
 
 def test_open_doors_at_backward_between_stamps():
-    tl = DoorStateTimeline(
-        np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset({"d2"})]
-    )
+    tl = DoorStateTimeline(np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset({"d2"})])
     assert tl.open_doors_at(150) == frozenset({"d1"})
     assert tl.open_doors_at(199) == frozenset({"d1"})
 
 
 def test_open_doors_at_after_last_stamp():
-    tl = DoorStateTimeline(
-        np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset()]
-    )
+    tl = DoorStateTimeline(np.array([100, 200], dtype=np.int64), [frozenset({"d1"}), frozenset()])
     assert tl.open_doors_at(10_000) == frozenset()
 
 
@@ -302,12 +292,8 @@ def test_open_doors_at_returns_fresh_frozenset():
 
 
 @given(
-    timestamps=st.lists(
-        st.integers(min_value=0, max_value=100_000), min_size=1, max_size=8, unique=True
-    ),
-    door_names=st.lists(
-        st.text(min_size=1, max_size=6), min_size=1, max_size=4, unique=True
-    ),
+    timestamps=st.lists(st.integers(min_value=0, max_value=100_000), min_size=1, max_size=8, unique=True),
+    door_names=st.lists(st.text(min_size=1, max_size=6), min_size=1, max_size=4, unique=True),
     seed=st.integers(min_value=0, max_value=2**32 - 1),
 )
 @settings(max_examples=100, deadline=None, derandomize=True)
@@ -333,12 +319,8 @@ def test_from_semantic_frame_consistent_with_input(timestamps, door_names, seed)
 
 
 @given(
-    times=st.lists(
-        st.integers(min_value=0, max_value=1000), min_size=1, max_size=12, unique=True
-    ),
-    door_names=st.lists(
-        st.text(min_size=1, max_size=4), min_size=0, max_size=3, unique=True
-    ),
+    times=st.lists(st.integers(min_value=0, max_value=1000), min_size=1, max_size=12, unique=True),
+    door_names=st.lists(st.text(min_size=1, max_size=4), min_size=0, max_size=3, unique=True),
     seed=st.integers(min_value=0, max_value=2**32 - 1),
 )
 @settings(max_examples=100, deadline=None, derandomize=True)
