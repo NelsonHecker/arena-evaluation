@@ -11,6 +11,7 @@ Verifies:
 from __future__ import annotations
 
 import pathlib
+import threading
 import time
 from typing import Any
 
@@ -657,3 +658,39 @@ def test_mcp_query_error_handling(
     # Error: evidence_id not found
     with pytest.raises(ToolError, match="Evidence 'ev-nonexistent' not found"):
         evaluation_evidence(run_id="run-wp5-003", evidence_id="ev-nonexistent")
+
+
+def test_concurrent_appends_keep_every_evidence_id(tmp_path: pathlib.Path) -> None:
+    """Two writers in one run lose no record: the index lock covers read, concat and replace."""
+    evidence_dir = tmp_path / "evidence"
+    barrier = threading.Barrier(2)
+    failures: list[str] = []
+
+    def append_records(worker: int) -> None:
+        try:
+            barrier.wait(timeout=30)
+            store = EvidenceStore(evidence_dir=evidence_dir)
+            for index in range(5):
+                store.record(
+                    pl.DataFrame({"worker": [worker], "value": [worker * 10 + index]}),
+                    kind="sql",
+                    operation=f"worker-{worker}-{index}",
+                    purpose="concurrent append",
+                )
+        except BaseException as exc:
+            failures.append(f"worker {worker}: {exc!r}")
+
+    writers = [threading.Thread(target=append_records, args=(worker,)) for worker in (0, 1)]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join(timeout=60)
+
+    assert not failures
+    assert all(not writer.is_alive() for writer in writers)
+
+    index = pl.read_parquet(evidence_dir / "evidence_index.parquet")
+    assert index.schema == EVIDENCE_INDEX_SCHEMA
+    assert index.height == 10
+    assert index.get_column("evidence_id").n_unique() == 10
+    assert all(pl.read_parquet(artifact).height == 1 for artifact in index.get_column("artifact_path").to_list())

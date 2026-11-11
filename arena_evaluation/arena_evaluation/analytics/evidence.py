@@ -17,6 +17,8 @@ from typing import Any, Final
 
 import polars as pl
 
+from arena_evaluation.storage.atomic import atomic_write_text, file_lock, staged_temp_path
+
 __all__ = [
     "EVIDENCE_INDEX_SCHEMA",
     "VALID_EVIDENCE_KINDS",
@@ -193,7 +195,8 @@ class EvidenceStore:
         if self.evidence_dir is not None:
             self.evidence_dir.mkdir(parents=True, exist_ok=True)
             artifact_path = self.evidence_dir / f"{evidence_id}.parquet"
-            df.write_parquet(artifact_path)
+            with staged_temp_path(artifact_path) as temporary:
+                df.write_parquet(temporary)
 
         stamp_ns = int(created_at_ns) if created_at_ns is not None else time.time_ns()
         iso_utc = str(created_at_utc) if created_at_utc is not None else _ns_to_iso_utc(stamp_ns)
@@ -214,7 +217,7 @@ class EvidenceStore:
 
         if self.evidence_dir is not None:
             meta_path = self.evidence_dir / f"{evidence_id}.json"
-            meta_path.write_text(json.dumps(rec.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+            atomic_write_text(meta_path, json.dumps(rec.to_dict(), indent=2, sort_keys=True))
             self._upsert_index(rec)
 
         self._records[evidence_id] = rec
@@ -223,7 +226,8 @@ class EvidenceStore:
 
     def _upsert_index(self, record: EvidenceRecord) -> None:
         """Upsert a single record into the authoritative evidence_index.parquet file."""
-        if self.index_path is None:
+        index_path = self.index_path
+        if index_path is None:
             return
 
         row = pl.DataFrame(
@@ -243,14 +247,16 @@ class EvidenceStore:
             schema=EVIDENCE_INDEX_SCHEMA,
         )
 
-        if self.index_path.is_file():
-            existing = pl.read_parquet(self.index_path)
-            filtered = existing.filter(pl.col("evidence_id") != record.evidence_id)
-            updated = pl.concat([filtered, row], how="vertical_relaxed")
-        else:
-            updated = row
+        with file_lock(index_path):
+            if index_path.is_file():
+                existing = pl.read_parquet(index_path)
+                filtered = existing.filter(pl.col("evidence_id") != record.evidence_id)
+                updated = pl.concat([filtered, row], how="vertical_relaxed")
+            else:
+                updated = row
 
-        updated.write_parquet(self.index_path)
+            with staged_temp_path(index_path) as temporary:
+                updated.write_parquet(temporary)
 
     def load_index(self) -> pl.DataFrame:
         """Load the evidence index as a DataFrame, or an empty index frame if none exists."""

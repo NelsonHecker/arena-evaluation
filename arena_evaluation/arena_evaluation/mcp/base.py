@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import contextlib
-import fcntl
-import os
 import pathlib
 import re
-import stat
-import tempfile
-from collections.abc import Iterator
 from typing import Annotated
 
 import pydantic
 from arena_mcp.core import Domain, ToolError
+
+from arena_evaluation.storage.atomic import atomic_write_text as atomic_write_text
+from arena_evaluation.storage.atomic import file_lock as file_lock
 
 domain = Domain(
     "evaluation",
@@ -32,7 +29,10 @@ _COMPONENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 def component(name: str, what: str = "name") -> str:
     """name when it is one safe path component, else a ToolError."""
     if not _COMPONENT.fullmatch(name):
-        raise ToolError(f"{what} {name!r} must be one path component of letters, digits, '.', '_' or '-', not starting with a dot")
+        raise ToolError(
+            f"{what} {name!r} must be one path component of letters, digits, '.', '_' or '-', not starting with a dot",
+            hint="pass one path component, e.g. dwb or bench-20260101-120000",
+        )
     return name
 
 
@@ -64,11 +64,14 @@ def parse_yaml(text: str, what: str) -> object:
     import yaml
 
     if not text.strip():
-        raise ToolError(f"empty {what}")
+        raise ToolError(f"empty {what}", hint=f"pass the {what} YAML document, not an empty string")
     try:
         return yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise ToolError(f"{what} is not valid YAML: {exc}") from exc
+        raise ToolError(
+            f"{what} is not valid YAML: {exc}",
+            hint=f"fix the YAML syntax of the {what}, or start from evaluation_manifests",
+        ) from exc
 
 
 def config_stem(name: str) -> str:
@@ -79,35 +82,17 @@ def is_inline(value: str) -> bool:
     return value.lstrip().startswith(("{", "["))
 
 
-@contextlib.contextmanager
-def file_lock(path: pathlib.Path) -> Iterator[None]:
-    """Hold the exclusive advisory lock of path, the guard every read-modify-write of it takes."""
-    lock_path = path.with_name(f".{path.name}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-
-def atomic_write_text(path: pathlib.Path, text: str) -> None:
-    """Replace path with text in one rename, so no reader ever sees a partial file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-    except FileNotFoundError:
-        mode = 0o644
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    temporary = pathlib.Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary, mode)
-        os.replace(temporary, path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+__all__ = [
+    "OptionalRunId",
+    "RunId",
+    "YamlText",
+    "atomic_write_text",
+    "component",
+    "config_stem",
+    "data_root",
+    "domain",
+    "file_lock",
+    "is_inline",
+    "parse_yaml",
+    "run_path",
+]
