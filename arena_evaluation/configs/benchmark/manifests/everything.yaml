@@ -11,7 +11,7 @@ manifest_version: "1.0"
 name: everything
 title: Comprehensive Master Evaluation Report (All Metrics & Perspectives)
 description: Exhaustive master report containing every metric, visualization type, correlation, and trade-off frontier across all evaluation domains. Serves as inspiration for research analytics and autonomous MCP agents.
-data_source: metrics
+data_source: v_episode_summary
 
 groups:
   - {id: executive_overview, title: "1. Executive Overview & Multi-Domain Radar Profiles"}
@@ -32,7 +32,7 @@ groups:
 
 units:
   success: "%"
-  spl: ""
+  spl_geodesic: ""
   time_to_goal: s
   path_length: m
   path_efficiency: ""
@@ -52,12 +52,12 @@ units:
   frechet_distance: m
   topological_complexity: ""
   theta_star_length: m
-  velocity_mean: m/s
+  mean_velocity_mps: m/s
   velocity_max: m/s
   acceleration_mean: m/s2
-  acceleration_max: m/s2
+  max_acceleration_mps2: m/s2
   jerk_mean: m/s3
-  jerk_max: m/s3
+  jerk_max_mps3: m/s3
   curvature_mean: 1/m
   curvature_max: 1/m
   roughness_mean: rad/m
@@ -86,7 +86,7 @@ units:
   ped_path_deflection_m: m
   total_time_looking_at_pedestrians: s
   total_time_looked_at_by_pedestrians: s
-  energy_total_wh: Wh
+  total_energy_wh: Wh
   energy_static_wh: Wh
   energy_mechanical_wh: Wh
   energy_thermal_wh: Wh
@@ -124,13 +124,13 @@ plots:
       group_by: [local_planner]
       columns:
         - {metric: success, label: Success, format: "{:.0%}"}
-        - {metric: spl, label: SPL, format: "{:.2f}"}
+        - {metric: spl_geodesic, label: SPL, format: "{:.2f}"}
         - {metric: time_to_goal, label: Avg Time (s), format: "{:.1f}"}
         - {metric: path_efficiency, label: Path Effic., format: "{:.2f}"}
         - {metric: collision_amount, label: Collisions, format: "{:.1f}"}
         - {metric: passing_rule_compliance, label: Passing Compl., format: "{:.0%}"}
         - {metric: personal_space_intrusion_integral, label: PSII (m·s), format: "{:.2f}"}
-        - {metric: energy_total_wh, label: Energy (Wh), format: "{:.2f}"}
+        - {metric: total_energy_wh, label: Energy (Wh), format: "{:.2f}"}
         - {metric: specific_cost_of_transport, label: S-CoT, format: "{:.2f}"}
         - {metric: e_cot, label: E-CoT, format: "{:.2f}"}
         - {metric: ped_leq_exposure_dba, label: Leq (dBA), format: "{:.1f}"}
@@ -143,7 +143,7 @@ plots:
     auto_differentiate: false
     layout_group: executive_overview
     options:
-      metrics: [success, spl, path_efficiency, passing_rule_compliance, relative_throughput, collision_amount, jerk_mean, personal_space_intrusion_integral, specific_cost_of_transport, e_cot]
+      metrics: [success, spl_geodesic, path_efficiency, passing_rule_compliance, relative_throughput, collision_amount, jerk_mean, personal_space_intrusion_integral, specific_cost_of_transport, e_cot]
 
   - id: radar_master_inter_planner
     type: radar
@@ -153,7 +153,7 @@ plots:
     auto_differentiate: false
     layout_group: executive_overview
     options:
-      metrics: [success, spl, path_efficiency, passing_rule_compliance, relative_throughput, collision_amount, jerk_mean, personal_space_intrusion_integral, specific_cost_of_transport, e_cot]
+      metrics: [success, spl_geodesic, path_efficiency, passing_rule_compliance, relative_throughput, collision_amount, jerk_mean, personal_space_intrusion_integral, specific_cost_of_transport, e_cot]
 
   - id: radar_safety_domain
     type: radar
@@ -163,7 +163,7 @@ plots:
     auto_differentiate: false
     layout_group: executive_overview
     options:
-      metrics: [success, spl, collision_amount, tti_min, ci_max, jerk_mean]
+      metrics: [success, spl_geodesic, collision_amount, tti_min, ci_max, jerk_mean]
 
   - id: radar_social_domain
     type: radar
@@ -183,7 +183,7 @@ plots:
     auto_differentiate: false
     layout_group: executive_overview
     options:
-      metrics: [energy_total_wh, specific_cost_of_transport, e_cot, kcsc_wh, kinetic_energy_demand_j, ped_leq_exposure_dba, spl]
+      metrics: [total_energy_wh, specific_cost_of_transport, e_cot, kcsc_wh, kinetic_energy_demand_j, ped_leq_exposure_dba, spl_geodesic]
 
   # ============================================================================
   # 2. Correlation Matrix & Strategic Pivot Grids
@@ -204,7 +204,7 @@ plots:
   - id: heatmap_spl_pivot
     type: heatmap
     title: SPL Pivot Matrix (Local vs. Inter Planner)
-    data_key: spl
+    data_key: spl_geodesic
     layout_group: correlation_and_pivots
     options: {x: inter_planner, y: local_planner}
 
@@ -244,7 +244,7 @@ plots:
   - id: bar_spl_local
     type: bar
     title: Success weighted by Path Length (SPL) by Local Planner
-    data_key: spl
+    data_key: spl_geodesic
     differentiate: local_planner
     auto_differentiate: false
     layout_group: safety_and_collisions
@@ -252,7 +252,7 @@ plots:
   - id: bar_spl_inter
     type: bar
     title: Success weighted by Path Length (SPL) by Inter-Planner
-    data_key: spl
+    data_key: spl_geodesic
     differentiate: inter_planner
     auto_differentiate: false
     layout_group: safety_and_collisions
@@ -423,7 +423,7 @@ plots:
   - id: violin_velocity_local
     type: violin
     title: Mean Linear Velocity (m/s) by Local Planner
-    data_key: velocity_mean
+    data_key: mean_velocity_mps
     differentiate: local_planner
     auto_differentiate: false
     layout_group: motion_kinematics
@@ -447,7 +447,7 @@ plots:
   - id: box_acceleration_max_local
     type: box
     title: Peak Acceleration (m/s2) by Local Planner
-    data_key: acceleration_max
+    data_key: max_acceleration_mps2
     differentiate: local_planner
     auto_differentiate: false
     layout_group: motion_kinematics
@@ -463,7 +463,7 @@ plots:
   - id: box_jerk_max_local
     type: box
     title: Peak Jerk (m/s3) by Local Planner
-    data_key: jerk_max
+    data_key: jerk_max_mps3
     differentiate: local_planner
     auto_differentiate: false
     layout_group: motion_kinematics
@@ -651,7 +651,7 @@ plots:
   - id: bar_energy_breakdown
     type: bar
     title: Subsystem Energy Breakdown (%)
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: local_planner
     layout_group: energy_and_cost_of_transport
     options:
@@ -661,7 +661,7 @@ plots:
   - id: violin_energy_local
     type: violin
     title: Total Electrical Energy Consumption (Wh)
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: local_planner
     auto_differentiate: false
     layout_group: energy_and_cost_of_transport
@@ -839,10 +839,10 @@ plots:
   - id: scatter_spl_vs_energy
     type: scatter
     title: Safety-Energy Frontier (SPL vs. Total Energy in Wh)
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: local_planner
     layout_group: multi_objective_tradeoffs
-    options: {y: spl}
+    options: {y: spl_geodesic}
 
   - id: scatter_time_vs_ecot
     type: scatter
@@ -855,7 +855,7 @@ plots:
   - id: scatter_velocity_vs_psii
     type: scatter
     title: Speed-Comfort Frontier (Mean Velocity vs. PSII)
-    data_key: velocity_mean
+    data_key: mean_velocity_mps
     differentiate: local_planner
     layout_group: multi_objective_tradeoffs
     options: {y: personal_space_intrusion_integral}

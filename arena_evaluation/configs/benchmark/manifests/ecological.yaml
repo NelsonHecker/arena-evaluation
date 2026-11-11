@@ -3,7 +3,7 @@ manifest_version: "1.0"
 name: ecological
 title: Ecological & Energetic Impact Report
 description: Comprehensive energy consumption, power dissipation, transport costs (S-CoT/E-CoT), friction losses, and acoustic emissions across navigation planners.
-data_source: metrics
+data_source: v_episode_summary
 groups:
   - {id: overview, title: Ecological Performance Overview}
   - {id: energy_consumption, title: Electrical Energy & Power Consumption}
@@ -13,7 +13,7 @@ groups:
   - {id: power_dynamics, title: Power Draw & Velocity Time Profiles}
   - {id: eco_tradeoffs, title: Ecological & Transport Trade-Off Frontiers}
 units:
-  energy_total_wh: Wh
+  total_energy_wh: Wh
   energy_static_wh: Wh
   energy_mechanical_wh: Wh
   energy_thermal_wh: Wh
@@ -29,7 +29,7 @@ units:
   path_length: m
   path_efficiency: ""
   success: "%"
-  spl: ""
+  spl_geodesic: ""
   aeps_linear_s: s
   ped_max_exposure_dba: dBA
   ped_leq_exposure_dba: dBA
@@ -53,7 +53,7 @@ plots:
     options:
       group_by: [local_planner]
       columns:
-        - {metric: energy_total_wh, label: Total Energy (Wh), format: "{:.2f}"}
+        - {metric: total_energy_wh, label: Total Energy (Wh), format: "{:.2f}"}
         - {metric: specific_cost_of_transport, label: S-CoT, format: "{:.2f}"}
         - {metric: e_cot, label: E-CoT, format: "{:.2f}"}
         - {metric: kcsc_wh, label: KCSC (Wh), format: "{:.2f}"}
@@ -68,13 +68,13 @@ plots:
     auto_differentiate: false
     layout_group: overview
     options:
-      metrics: [energy_total_wh, specific_cost_of_transport, e_cot, kcsc_wh, kinetic_energy_demand_j, ped_leq_exposure_dba, spl]
+      metrics: [total_energy_wh, specific_cost_of_transport, e_cot, kcsc_wh, kinetic_energy_demand_j, ped_leq_exposure_dba, spl_geodesic]
 
   # ── Electrical Energy & Power Consumption ───────────────────────────────────
   - id: bar_energy_breakdown
     type: bar
     title: Energy Breakdown by Subsystem (%)
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: local_planner
     layout_group: energy_consumption
     options:
@@ -83,14 +83,14 @@ plots:
   - id: violin_energy_local
     type: violin
     title: Total Energy Consumption (Wh) by Local Planner
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: local_planner
     auto_differentiate: false
     layout_group: energy_consumption
   - id: violin_energy_inter
     type: violin
     title: Total Energy Consumption (Wh) by Inter-Planner
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: inter_planner
     auto_differentiate: false
     layout_group: energy_consumption
@@ -257,18 +257,18 @@ plots:
     data_key: time_to_goal
     differentiate: local_planner
     layout_group: eco_tradeoffs
-    options: {y: energy_total_wh}
+    options: {y: total_energy_wh}
   - id: scatter_scot_vs_spl
     type: scatter
     title: Transport Cost vs. Navigation Performance (S-CoT vs. SPL)
-    data_key: spl
+    data_key: spl_geodesic
     differentiate: local_planner
     layout_group: eco_tradeoffs
     options: {y: specific_cost_of_transport}
   - id: scatter_ke_vs_velocity
     type: scatter
     title: Dynamic Agility vs. Steady Speed (Kinetic Demand vs. Mean Velocity)
-    data_key: velocity_mean
+    data_key: mean_velocity_mps
     differentiate: local_planner
     layout_group: eco_tradeoffs
     options: {y: kinetic_energy_demand_j}

@@ -3,7 +3,7 @@ manifest_version: "1.0"
 name: standard
 title: Standard Benchmark Report
 description: Standard balanced arena_evaluation report covering performance, safety, efficiency, naturalness, motion, smoothness, social interaction, ecology, and trade-off frontiers.
-data_source: metrics
+data_source: v_episode_summary
 groups:
   - {id: overview, title: Performance Overview}
   - {id: safety, title: Safety & Collision Metrics}
@@ -17,16 +17,14 @@ groups:
   - {id: details, title: Detailed Run Traces & Analysis}
 units:
   success: "%"
-  spl: ""
+  spl_geodesic: ""
   time_to_goal: s
   path_length: m
   path_efficiency: ""
   idling_time: s
   relative_throughput: ""
-  collision_amount: ""
-  collision_amount_wall: ""
-  collision_amount_static: ""
-  collision_amount_pedestrian: ""
+  total_collisions_ped: ""
+  total_collisions_static: ""
   tti_min: s
   tti_mean: s
   ade: m
@@ -36,12 +34,11 @@ units:
   frechet_distance: m
   topological_complexity: ""
   theta_star_length: m
-  velocity_mean: m/s
+  mean_velocity_mps: m/s
   velocity_max: m/s
   acceleration_mean: m/s2
-  acceleration_max: m/s2
-  jerk_mean: m/s3
-  jerk_max: m/s3
+  max_acceleration_mps2: m/s2
+  jerk_max_mps3: m/s3
   curvature_mean: 1/m
   curvature_max: 1/m
   roughness_mean: rad/m
@@ -66,7 +63,7 @@ units:
   ped_path_deflection_m: m
   total_time_looking_at_pedestrians: s
   total_time_looked_at_by_pedestrians: s
-  energy_total_wh: Wh
+  total_energy_wh: Wh
   energy_static_wh: Wh
   energy_mechanical_wh: Wh
   energy_thermal_wh: Wh
@@ -110,14 +107,14 @@ plots:
     type: heatmap
     title: Metrics Correlation Matrix
     data:
-      source: fact_episodes
+      source: v_episode_summary
     data_key: "*"
     layout_group: overview
   - id: heatmap_success_pivot
     type: heatmap
     title: Success Rate Pivot Grid (Local vs Inter Planner)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: local_planner
@@ -128,11 +125,11 @@ plots:
     type: heatmap
     title: SPL Pivot Grid (Local vs Inter Planner)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: local_planner
-      color: spl
+      color: spl_geodesic
     layout_group: overview
     options: {x: inter_planner, y: local_planner}
 
@@ -141,7 +138,7 @@ plots:
     type: bar
     title: Success Rate by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: success
@@ -150,7 +147,7 @@ plots:
     type: bar
     title: Success Rate by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: success
@@ -159,37 +156,39 @@ plots:
     type: bar
     title: Success weighted by Path Length (SPL) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
-      y: spl
+      y: spl_geodesic
     layout_group: safety
   - id: bar_spl_inter
     type: bar
     title: Success weighted by Path Length (SPL) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
-      y: spl
+      y: spl_geodesic
     layout_group: safety
+  # The episode grain carries total_collisions_ped / total_collisions_static only; the historic
+  # collision_amount lived on the contact rows, so the panel reports the pedestrian collision count.
   - id: box_collisions_local
     type: box
-    title: Collision Amount by Local Planner
+    title: Pedestrian Collisions by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
-      y: collision_amount
+      y: total_collisions_ped
     layout_group: safety
   - id: box_collisions_inter
     type: box
-    title: Collision Amount by Inter-Planner
+    title: Pedestrian Collisions by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
-      y: collision_amount
+      y: total_collisions_ped
     layout_group: safety
   - id: bar_collision_breakdown
     uses: closer_attribution_matrix
@@ -199,7 +198,7 @@ plots:
     type: box
     title: Minimum Time to Collision (TTI min) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: tti_min
@@ -210,7 +209,7 @@ plots:
     type: violin
     title: Geodesic Path Efficiency (vs Theta*) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: path_efficiency
@@ -219,7 +218,7 @@ plots:
     type: violin
     title: Geodesic Path Efficiency (vs Theta*) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: path_efficiency
@@ -228,7 +227,7 @@ plots:
     type: violin
     title: Time to Goal by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: time_to_goal
@@ -237,7 +236,7 @@ plots:
     type: violin
     title: Time to Goal by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: time_to_goal
@@ -246,7 +245,7 @@ plots:
     type: box
     title: Idling Time by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: idling_time
@@ -255,7 +254,7 @@ plots:
     type: box
     title: Idling Time by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: idling_time
@@ -264,7 +263,7 @@ plots:
     type: histogram
     title: Path Length Distribution by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: path_length
       color: planner
@@ -273,7 +272,7 @@ plots:
     type: box
     title: Relative Throughput (vs Unobstructed) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: relative_throughput
@@ -284,7 +283,7 @@ plots:
     type: box
     title: Average Displacement Error (ADE vs Theta*) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ade
@@ -293,7 +292,7 @@ plots:
     type: box
     title: Average Displacement Error (ADE vs Theta*) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: ade
@@ -302,7 +301,7 @@ plots:
     type: box
     title: Final Displacement Error (FDE) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: fde
@@ -311,7 +310,7 @@ plots:
     type: box
     title: Discrete Fréchet Distance (vs Theta*) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: frechet_distance
@@ -320,7 +319,7 @@ plots:
     type: violin
     title: Modified Hausdorff Distance (MHD vs Theta*) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: mhd
@@ -329,7 +328,7 @@ plots:
     type: box
     title: Topological Complexity (Net Winding Number) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: topological_complexity
@@ -340,25 +339,25 @@ plots:
     type: violin
     title: Mean Velocity by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
-      y: velocity_mean
+      y: mean_velocity_mps
     layout_group: motion
   - id: violin_velocity_inter
     type: violin
     title: Mean Velocity by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
-      y: velocity_mean
+      y: mean_velocity_mps
     layout_group: motion
   - id: box_acceleration_local
     type: box
     title: Mean Acceleration by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: acceleration_mean
@@ -367,36 +366,20 @@ plots:
     type: box
     title: Mean Acceleration by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: acceleration_mean
     layout_group: motion
-  - id: box_jerk_local
-    type: box
-    title: Mean Jerk by Local Planner
-    data:
-      source: fact_episodes
-    channels:
-      x: planner
-      y: jerk_mean
-    layout_group: motion
-  - id: box_jerk_inter
-    type: box
-    title: Mean Jerk by Inter-Planner
-    data:
-      source: fact_episodes
-    channels:
-      x: inter_planner
-      y: jerk_mean
-    layout_group: motion
+  # Mean jerk is measured per robot (fact_robots.jerk_mean) and has no episode-grain column, so a
+  # "Mean Jerk by Planner" panel cannot resolve; jerk_max_mps3 is the episode-grain jerk measure.
 
   # ── Path Smoothness ─────────────────────────────────────────────────────────
   - id: violin_curvature_local
     type: violin
     title: Curvature Mean by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: curvature_mean
@@ -405,7 +388,7 @@ plots:
     type: violin
     title: Curvature Mean by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: curvature_mean
@@ -414,7 +397,7 @@ plots:
     type: violin
     title: Roughness Mean by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: roughness_mean
@@ -423,7 +406,7 @@ plots:
     type: violin
     title: Roughness Mean by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: roughness_mean
@@ -432,7 +415,7 @@ plots:
     type: box
     title: Angle Over Length by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: angle_over_length
@@ -446,7 +429,7 @@ plots:
     type: violin
     title: Personal Space Intrusion Integral (PSII Depth) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: personal_space_intrusion_integral
@@ -455,7 +438,7 @@ plots:
     type: violin
     title: Personal Space Intrusion Integral (PSII Depth) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: personal_space_intrusion_integral
@@ -464,7 +447,7 @@ plots:
     type: bar
     title: Passing Rule Compliance (Right-Hand Passing) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: passing_rule_compliance
@@ -473,7 +456,7 @@ plots:
     type: bar
     title: Passing Rule Compliance (Right-Hand Passing) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: passing_rule_compliance
@@ -482,7 +465,7 @@ plots:
     type: box
     title: Directional Collision Index (CI Max) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ci_max
@@ -491,7 +474,7 @@ plots:
     type: box
     title: Max Social Force on Pedestrians by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: social_force_ped_max
@@ -500,7 +483,7 @@ plots:
     type: violin
     title: Time in Personal Space by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: total_time_in_personal_space
@@ -509,7 +492,7 @@ plots:
     type: box
     title: Time Looking at Pedestrians by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: total_time_looking_at_pedestrians
@@ -518,7 +501,7 @@ plots:
     type: box
     title: Time Looked at by Pedestrians by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: total_time_looked_at_by_pedestrians
@@ -532,7 +515,7 @@ plots:
     type: bar
     title: Energy Breakdown (%)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: [energy_static_wh, energy_mechanical_wh, energy_thermal_wh]
@@ -544,7 +527,7 @@ plots:
     type: violin
     title: Specific Cost of Transport (S-CoT) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: specific_cost_of_transport
@@ -553,7 +536,7 @@ plots:
     type: violin
     title: Specific Cost of Transport (S-CoT) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: specific_cost_of_transport
@@ -562,7 +545,7 @@ plots:
     type: box
     title: Effective Cost of Transport (E-CoT) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: e_cot
@@ -571,7 +554,7 @@ plots:
     type: box
     title: Kinetic Energy Demand (J) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: kinetic_energy_demand_j
@@ -580,7 +563,7 @@ plots:
     type: box
     title: Friction Dissipation (J) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: friction_dissipation_j
@@ -615,7 +598,7 @@ plots:
     type: box
     title: Max Pedestrian Acoustic Exposure (dBA)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ped_max_exposure_dba
@@ -624,7 +607,7 @@ plots:
     type: box
     title: Leq Pedestrian Acoustic Exposure (dBA)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ped_leq_exposure_dba
@@ -633,7 +616,7 @@ plots:
     type: box
     title: Max Pedestrian Startle Factor (dBA/s)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ped_max_startle_factor
@@ -642,7 +625,7 @@ plots:
     type: box
     title: Acoustic Exposure in Personal Space (AEPS) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: aeps_linear_s
@@ -685,18 +668,18 @@ plots:
     type: scatter
     title: Safety-Energy Frontier (SPL vs. Total Energy)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
-      x: energy_total_wh
-      y: spl
+      x: total_energy_wh
+      y: spl_geodesic
       color: planner
     layout_group: tradeoffs
-    options: {y: spl}
+    options: {y: spl_geodesic}
   - id: scatter_time_vs_ecot
     type: scatter
     title: Efficiency-Holistic Frontier (Time to Goal vs. E-CoT)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: time_to_goal
       y: e_cot
@@ -707,9 +690,9 @@ plots:
     type: scatter
     title: Speed-Comfort Frontier (Mean Velocity vs. PSII)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
-      x: velocity_mean
+      x: mean_velocity_mps
       y: personal_space_intrusion_integral
       color: planner
     layout_group: tradeoffs
@@ -718,7 +701,7 @@ plots:
     type: scatter
     title: Transport Cost vs. Path Efficiency (S-CoT vs. Path Efficiency)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: path_efficiency
       y: specific_cost_of_transport
@@ -731,7 +714,7 @@ plots:
     type: trajectory
     title: Robot Trajectories
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: path
       color: planner
@@ -745,7 +728,7 @@ plots:
     type: trajectory
     title: Pedestrian Trajectories
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: pedestrian_path
       color: planner

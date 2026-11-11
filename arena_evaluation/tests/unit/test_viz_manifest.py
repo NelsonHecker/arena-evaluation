@@ -167,7 +167,7 @@ def test_standard_manifest_modernized_recipes_and_channels():
     for s in manifest.plots:
         if s.uses is None and s.type in ("box", "violin", "bar", "scatter"):
             assert s.data is not None, f"Plot {s.id} must declare data binding"
-            assert s.data.source == "fact_episodes", f"Plot {s.id} data source must be fact_episodes"
+            assert s.data.source == "v_episode_summary", f"Plot {s.id} must bind the episode summary view, the only episode-grain source with planner identity"
             assert s.channels.x is not None, f"Plot {s.id} must declare x channel"
             assert s.channels.y is not None, f"Plot {s.id} must declare y channel"
 
@@ -223,6 +223,6 @@ def test_social_manifest_modernized_recipes_and_channels():
     for s in manifest.plots:
         if s.uses is None and s.type in ("box", "violin", "bar", "scatter"):
             assert s.data is not None, f"Plot {s.id} must declare data binding"
-            assert s.data.source == "fact_episodes", f"Plot {s.id} data source must be fact_episodes"
+            assert s.data.source == "v_episode_summary", f"Plot {s.id} must bind the episode summary view, the only episode-grain source with planner identity"
             assert s.channels.x is not None, f"Plot {s.id} must declare x channel"
             assert s.channels.y is not None, f"Plot {s.id} must declare y channel"

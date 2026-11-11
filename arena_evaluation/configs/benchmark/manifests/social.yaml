@@ -3,7 +3,7 @@ manifest_version: "1.0"
 name: social
 title: Social Navigation & Human-Robot Interaction Report
 description: Comprehensive human-robot social co-navigation report covering proxemics zones, intrusion depth (PSII), passing etiquette compliance, social force disturbances, gaze, acoustic comfort, and encounter dynamics.
-data_source: metrics
+data_source: v_episode_summary
 groups:
   - {id: overview, title: Social Performance Overview}
   - {id: encounters, title: Spatiotemporal Encounters & Fault Attribution}
@@ -46,7 +46,7 @@ units:
   time_to_goal: s
   path_length: m
   success: "%"
-  spl: ""
+  spl_geodesic: ""
   acoustic_dose_db: dB
   energy_wh: Wh
   total_contacts: ""
@@ -81,7 +81,7 @@ plots:
     type: violin
     title: Personal Space Intrusion Integral (PSII Depth) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: personal_space_intrusion_integral
@@ -91,7 +91,7 @@ plots:
     type: violin
     title: Personal Space Intrusion Integral (PSII Depth) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: personal_space_intrusion_integral
@@ -101,7 +101,7 @@ plots:
     type: violin
     title: Time in Personal Zone (0.45m - 1.2m) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: total_time_in_personal_space
@@ -111,7 +111,7 @@ plots:
     type: violin
     title: Time in Intimate Zone (< 0.45m) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: time_in_intimate_zone
@@ -121,7 +121,7 @@ plots:
     type: box
     title: Discrete Intimate Space Intrusion Events by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: psi_intimate_events
@@ -131,7 +131,7 @@ plots:
     type: box
     title: Discrete Personal Space Intrusion Events by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: psi_personal_events
@@ -142,7 +142,7 @@ plots:
     type: bar
     title: Passing Rule Compliance Ratio (Right-Hand Rule) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: passing_rule_compliance
@@ -152,7 +152,7 @@ plots:
     type: bar
     title: Passing Rule Compliance Ratio (Right-Hand Rule) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: passing_rule_compliance
@@ -162,7 +162,7 @@ plots:
     type: box
     title: Max Speed Inside Personal Space by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: max_speed_personal_zone
@@ -172,7 +172,7 @@ plots:
     type: box
     title: Max Speed Inside Intimate Space by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: max_speed_intimate_zone
@@ -183,7 +183,7 @@ plots:
     type: box
     title: Directional Collision Index (CI Max) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ci_max
@@ -193,7 +193,7 @@ plots:
     type: violin
     title: Directional Collision Index (CI Mean) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ci_mean
@@ -203,7 +203,7 @@ plots:
     type: box
     title: Max Social Force Exerted on Pedestrians (N) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: social_force_ped_max
@@ -213,7 +213,7 @@ plots:
     type: box
     title: Mean Social Force Exerted on Pedestrians (N) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: social_force_ped_mean
@@ -223,7 +223,7 @@ plots:
     type: violin
     title: Pedestrian Path Deflection (m) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ped_path_deflection_m
@@ -233,7 +233,7 @@ plots:
     type: violin
     title: Pedestrian Path Deflection (m) by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: ped_path_deflection_m
@@ -244,7 +244,7 @@ plots:
     type: box
     title: Time Looking at Pedestrians by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: total_time_looking_at_pedestrians
@@ -254,7 +254,7 @@ plots:
     type: box
     title: Time Looking at Pedestrians by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: total_time_looking_at_pedestrians
@@ -264,7 +264,7 @@ plots:
     type: box
     title: Time Looked at by Pedestrians by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: total_time_looked_at_by_pedestrians
@@ -274,7 +274,7 @@ plots:
     type: box
     title: Time Looked at by Pedestrians by Inter-Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: inter_planner
       y: total_time_looked_at_by_pedestrians
@@ -290,7 +290,7 @@ plots:
     type: box
     title: Acoustic Exposure in Personal Space (AEPS) by Local Planner
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: aeps_linear_s
@@ -300,7 +300,7 @@ plots:
     type: box
     title: Peak Acoustic Level at Pedestrian Position (dBA)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ped_max_exposure_dba
@@ -310,7 +310,7 @@ plots:
     type: box
     title: Max Pedestrian Startle Factor (dBA/s)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: planner
       y: ped_max_startle_factor
@@ -330,7 +330,7 @@ plots:
     type: scatter
     title: Etiquette vs. Personal Space Intrusion (Passing Compliance vs. PSII)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: passing_rule_compliance
       y: personal_space_intrusion_integral
@@ -342,7 +342,7 @@ plots:
     type: scatter
     title: Proximity Speed vs. Pedestrian Disturbance (Speed in Personal Space vs. Deflection)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: avg_velocity_in_personal_space
       y: ped_path_deflection_m
@@ -354,7 +354,7 @@ plots:
     type: scatter
     title: Politeness vs. Travel Efficiency (PSII vs. Time to Goal)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: time_to_goal
       y: personal_space_intrusion_integral
@@ -366,7 +366,7 @@ plots:
     type: scatter
     title: Acoustic Discomfort vs. Physical Intrusion (AEPS vs. PSII)
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: personal_space_intrusion_integral
       y: aeps_linear_s
@@ -379,7 +379,7 @@ plots:
     type: trajectory
     title: Pedestrian Trajectories & Encounter Corridors
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: pedestrian_path
       color: planner
@@ -394,7 +394,7 @@ plots:
     type: trajectory
     title: Robot Trajectories Across Social Scenarios
     data:
-      source: fact_episodes
+      source: v_episode_summary
     channels:
       x: path
       color: planner

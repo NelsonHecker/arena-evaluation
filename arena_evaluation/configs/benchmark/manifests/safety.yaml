@@ -3,7 +3,7 @@ manifest_version: "1.0"
 name: safety
 title: Safety & Collision Analysis Report
 description: Comprehensive safety report evaluating collision rates, SPL, temporal reaction margins, interaction hazard indices, and kinematic limits.
-data_source: metrics
+data_source: v_episode_summary
 groups:
   - {id: overview, title: Safety Performance Overview}
   - {id: collision_analysis, title: Collision & Goal Completion Dynamics}
@@ -14,7 +14,7 @@ groups:
   - {id: details, title: Spatial Trajectories & Hazard Traces}
 units:
   success: "%"
-  spl: ""
+  spl_geodesic: ""
   collision_amount: ""
   collision_amount_wall: ""
   collision_amount_static: ""
@@ -31,12 +31,12 @@ units:
   psi_intimate_events: ""
   time_to_goal: s
   path_length: m
-  velocity_mean: m/s
+  mean_velocity_mps: m/s
   velocity_max: m/s
   acceleration_mean: m/s2
-  acceleration_max: m/s2
+  max_acceleration_mps2: m/s2
   jerk_mean: m/s3
-  jerk_max: m/s3
+  jerk_max_mps3: m/s3
   roughness_mean: rad/m
 plots:
   # ── Overview ────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ plots:
       group_by: [local_planner]
       columns:
         - {metric: success, label: Success, format: "{:.0%}"}
-        - {metric: spl, label: SPL, format: "{:.2f}"}
+        - {metric: spl_geodesic, label: SPL, format: "{:.2f}"}
         - {metric: collision_amount, label: Total Collisions, format: "{:.1f}"}
         - {metric: collision_amount_wall, label: Wall Collisions, format: "{:.1f}"}
         - {metric: collision_amount_static, label: Static Collisions, format: "{:.1f}"}
@@ -64,7 +64,7 @@ plots:
     auto_differentiate: false
     layout_group: overview
     options:
-      metrics: [success, spl, collision_amount, tti_min, ci_max, jerk_mean]
+      metrics: [success, spl_geodesic, collision_amount, tti_min, ci_max, jerk_mean]
 
   # ── Collision Analysis ──────────────────────────────────────────────────────
   - id: bar_success_local
@@ -84,14 +84,14 @@ plots:
   - id: bar_spl_local
     type: bar
     title: Success weighted by Path Length (SPL) by Local Planner
-    data_key: spl
+    data_key: spl_geodesic
     differentiate: local_planner
     auto_differentiate: false
     layout_group: collision_analysis
   - id: bar_spl_inter
     type: bar
     title: Success weighted by Path Length (SPL) by Inter-Planner
-    data_key: spl
+    data_key: spl_geodesic
     differentiate: inter_planner
     auto_differentiate: false
     layout_group: collision_analysis
@@ -127,7 +127,7 @@ plots:
   - id: heatmap_spl_pivot
     type: heatmap
     title: SPL Pivot Grid (Local vs Inter Planner)
-    data_key: spl
+    data_key: spl_geodesic
     layout_group: collision_analysis
     options: {x: inter_planner, y: local_planner}
 
@@ -202,14 +202,14 @@ plots:
   - id: box_jerk_max_local
     type: box
     title: Peak Jerk by Local Planner
-    data_key: jerk_max
+    data_key: jerk_max_mps3
     differentiate: local_planner
     auto_differentiate: false
     layout_group: kinematic_limits
   - id: box_acceleration_max_local
     type: box
     title: Maximum Acceleration by Local Planner
-    data_key: acceleration_max
+    data_key: max_acceleration_mps2
     differentiate: local_planner
     auto_differentiate: false
     layout_group: kinematic_limits
@@ -225,7 +225,7 @@ plots:
   - id: scatter_velocity_vs_collisions
     type: scatter
     title: Speed vs. Collision Risk (Mean Velocity vs. Collision Amount)
-    data_key: velocity_mean
+    data_key: mean_velocity_mps
     differentiate: local_planner
     layout_group: tradeoffs
     options: {y: collision_amount}
@@ -242,11 +242,11 @@ plots:
     data_key: collision_amount
     differentiate: local_planner
     layout_group: tradeoffs
-    options: {y: spl}
+    options: {y: spl_geodesic}
   - id: scatter_jerk_vs_ci
     type: scatter
     title: Dynamic Reactivity vs. Pedestrian Hazard (Max Jerk vs. CI Max)
-    data_key: jerk_max
+    data_key: jerk_max_mps3
     differentiate: local_planner
     layout_group: tradeoffs
     options: {y: ci_max}

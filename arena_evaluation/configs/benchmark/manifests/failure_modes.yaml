@@ -11,7 +11,7 @@ manifest_version: "1.0"
 name: failure_modes
 title: Failure Modes & Metric Diagnostic Analysis Report
 description: In-depth diagnostic report decomposing every metric into its foundational mathematical definitions, source signals, baseline comparisons (Theta* and unobstructed references), trajectory overlays, and synchronized timeseries.
-data_source: metrics
+data_source: v_episode_summary
 
 groups:
   - {id: executive_failure_triage, title: "1. Executive Failure Triage & Collision Summary"}
@@ -28,7 +28,7 @@ groups:
 
 units:
   success: "%"
-  spl: ""
+  spl_geodesic: ""
   time_to_goal: s
   path_length: m
   path_efficiency: ""
@@ -50,12 +50,12 @@ units:
   frechet_distance: m
   topological_complexity: ""
   theta_star_length: m
-  velocity_mean: m/s
+  mean_velocity_mps: m/s
   velocity_max: m/s
   acceleration_mean: m/s2
-  acceleration_max: m/s2
+  max_acceleration_mps2: m/s2
   jerk_mean: m/s3
-  jerk_max: m/s3
+  jerk_max_mps3: m/s3
   curvature_mean: 1/m
   curvature_max: 1/m
   roughness_mean: rad/m
@@ -84,7 +84,7 @@ units:
   ped_path_deflection_m: m
   total_time_looking_at_pedestrians: s
   total_time_looked_at_by_pedestrians: s
-  energy_total_wh: Wh
+  total_energy_wh: Wh
   energy_static_wh: Wh
   energy_mechanical_wh: Wh
   energy_thermal_wh: Wh
@@ -132,7 +132,7 @@ plots:
       group_by: [local_planner]
       columns:
         - {metric: success, label: "Success Rate (%)", format: "{:.1f}%"}
-        - {metric: spl, label: "SPL Score", format: "{:.3f}"}
+        - {metric: spl_geodesic, label: "SPL Score", format: "{:.3f}"}
         - {metric: collision_amount, label: "Total Collisions", format: "{:.2f}"}
         - {metric: collision_amount_wall, label: "Wall Collisions", format: "{:.2f}"}
         - {metric: collision_amount_static, label: "Static Collisions", format: "{:.2f}"}
@@ -149,7 +149,7 @@ plots:
     data_key: success
     layout_group: executive_failure_triage
     options:
-      metrics: [success, spl, collision_amount, tti_min, ci_max, jerk_mean, personal_space_intrusion_integral, e_cot]
+      metrics: [success, spl_geodesic, collision_amount, tti_min, ci_max, jerk_mean, personal_space_intrusion_integral, e_cot]
 
   - id: bar_collision_breakdown
     type: bar
@@ -480,7 +480,7 @@ plots:
   - id: kinematics_methodology_card
     type: table
     title: "Calculation Methodology: Kinematic Motion & Actuator Jerk Inflexions"
-    data_key: velocity_mean
+    data_key: mean_velocity_mps
     layout_group: kinematic_stress_and_jerk_spikes
     options:
       notes: |
@@ -493,17 +493,17 @@ plots:
   - id: table_kinematics_verification
     type: table
     title: Kinematic Motion & Smoothness Verification Table
-    data_key: velocity_mean
+    data_key: mean_velocity_mps
     layout_group: kinematic_stress_and_jerk_spikes
     options:
       group_by: [local_planner]
       columns:
-        - {metric: velocity_mean, label: "Mean Velocity (m/s)", format: "{:.2f}"}
+        - {metric: mean_velocity_mps, label: "Mean Velocity (m/s)", format: "{:.2f}"}
         - {metric: velocity_max, label: "Peak Velocity (m/s)", format: "{:.2f}"}
         - {metric: acceleration_mean, label: "Mean Acceleration (m/s²)", format: "{:.2f}"}
-        - {metric: acceleration_max, label: "Peak Acceleration (m/s²)", format: "{:.2f}"}
+        - {metric: max_acceleration_mps2, label: "Peak Acceleration (m/s²)", format: "{:.2f}"}
         - {metric: jerk_mean, label: "Mean Jerk (m/s³)", format: "{:.2f}"}
-        - {metric: jerk_max, label: "Peak Jerk Spike (m/s³)", format: "{:.2f}"}
+        - {metric: jerk_max_mps3, label: "Peak Jerk Spike (m/s³)", format: "{:.2f}"}
         - {metric: curvature_mean, label: "Mean Curvature (1/m)", format: "{:.3f}"}
         - {metric: roughness_mean, label: "Mean Roughness (rad/m)", format: "{:.3f}"}
         - {metric: angle_over_length, label: "Angle / Length (rad/m)", format: "{:.3f}"}
@@ -520,7 +520,7 @@ plots:
   - id: box_jerk_max_local
     type: box
     title: Peak Jerk Spikes (jerk max in m/s3) - Actuator Chattering Severity
-    data_key: jerk_max
+    data_key: jerk_max_mps3
     differentiate: local_planner
     auto_differentiate: false
     layout_group: kinematic_stress_and_jerk_spikes
@@ -536,7 +536,7 @@ plots:
   - id: box_acceleration_max_local
     type: box
     title: Maximum Acceleration (m/s2)
-    data_key: acceleration_max
+    data_key: max_acceleration_mps2
     differentiate: local_planner
     auto_differentiate: false
     layout_group: kinematic_stress_and_jerk_spikes
@@ -555,7 +555,7 @@ plots:
   - id: energy_methodology_card
     type: table
     title: "Calculation Methodology: Energy Demand, Friction & Holistic Cost of Transport"
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     layout_group: energy_surges_and_dynamic_dissipation
     options:
       notes: |
@@ -569,12 +569,12 @@ plots:
   - id: table_energy_verification
     type: table
     title: Energy, Power & Battery Dissipation Inspection Table
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     layout_group: energy_surges_and_dynamic_dissipation
     options:
       group_by: [local_planner]
       columns:
-        - {metric: energy_total_wh, label: "Total Energy (Wh)", format: "{:.3f}"}
+        - {metric: total_energy_wh, label: "Total Energy (Wh)", format: "{:.3f}"}
         - {metric: energy_static_wh, label: "Static Base Energy (Wh)", format: "{:.3f}"}
         - {metric: energy_mechanical_wh, label: "Mechanical Work (Wh)", format: "{:.3f}"}
         - {metric: energy_thermal_wh, label: "Thermal Motor Loss (Wh)", format: "{:.3f}"}
@@ -597,7 +597,7 @@ plots:
   - id: bar_energy_subsystems
     type: bar
     title: Subsystem Energy Breakdown (Static Base vs. Mechanical vs. Thermal Motor Loss)
-    data_key: energy_total_wh
+    data_key: total_energy_wh
     differentiate: local_planner
     layout_group: energy_surges_and_dynamic_dissipation
     options:
@@ -735,8 +735,8 @@ plots:
   - id: scatter_spl_vs_energy
     type: scatter
     title: "Frontier 1: Success Weighted by Path Length (SPL) vs. Total Energy (Wh)"
-    data_key: spl
-    secondary_data_key: energy_total_wh
+    data_key: spl_geodesic
+    secondary_data_key: total_energy_wh
     differentiate: local_planner
     layout_group: diagnostic_tradeoff_frontiers
 
@@ -775,7 +775,7 @@ plots:
   - id: scatter_ked_vs_jerk
     type: scatter
     title: "Frontier 6: Kinetic Energy Demand (J) vs. Maximum Jerk Spikes (m/s³)"
-    data_key: jerk_max
+    data_key: jerk_max_mps3
     secondary_data_key: kinetic_energy_demand_j
     differentiate: local_planner
     layout_group: diagnostic_tradeoff_frontiers
