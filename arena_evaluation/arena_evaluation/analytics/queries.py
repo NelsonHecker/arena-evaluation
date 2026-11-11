@@ -27,9 +27,9 @@ _PARAM_COLON_RE: Final[re.Pattern[str]] = re.compile(r":([A-Za-z_][A-Za-z0-9_]*)
 _PARAM_BRACE_RE: Final[re.Pattern[str]] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _DEFAULT_QUERY_SEARCH_DIRS: Final[tuple[pathlib.Path, ...]] = (
-    pathlib.Path(__file__).resolve().parents[1] / "query_declarations",
-    pathlib.Path(__file__).resolve().parents[2] / "query_declarations",
-    pathlib.Path.cwd() / "query_declarations",
+    pathlib.Path(__file__).resolve().parents[1] / "configs" / "declarations" / "query_declarations",
+    pathlib.Path(__file__).resolve().parents[2] / "configs" / "declarations" / "query_declarations",
+    pathlib.Path.cwd() / "configs" / "declarations" / "query_declarations",
 )
 
 
@@ -117,7 +117,7 @@ class QueryCatalog:
         try:
             from ament_index_python.packages import get_package_share_directory
 
-            share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "query_declarations"
+            share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "configs" / "declarations" / "query_declarations"
             candidates.append(share_dir)
         except Exception:
             pass

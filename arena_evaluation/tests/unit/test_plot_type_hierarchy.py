@@ -264,7 +264,7 @@ def test_static_dispatcher_dendrogram(tmp_path: pathlib.Path):
 
 
 def test_declarative_recipes_load_and_render(tmp_path: pathlib.Path):
-    decl_dir = pathlib.Path(__file__).parents[2] / "plot_declarations"
+    decl_dir = pathlib.Path(__file__).parents[2] / "configs" / "declarations" / "plot_declarations"
 
     # 1. Planner Behavioral Dendrogram
     dendro_path = decl_dir / "planner_behavioral_dendrogram.yaml"

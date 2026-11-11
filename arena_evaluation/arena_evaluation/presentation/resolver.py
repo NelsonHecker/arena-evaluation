@@ -28,9 +28,9 @@ __all__ = [
 ]
 
 _DEFAULT_RECIPE_SEARCH_DIRS = (
-    pathlib.Path(__file__).resolve().parents[1] / "plot_declarations",
-    pathlib.Path(__file__).resolve().parents[2] / "plot_declarations",
-    pathlib.Path.cwd() / "plot_declarations",
+    pathlib.Path(__file__).resolve().parents[1] / "configs" / "declarations" / "plot_declarations",
+    pathlib.Path(__file__).resolve().parents[2] / "configs" / "declarations" / "plot_declarations",
+    pathlib.Path.cwd() / "configs" / "declarations" / "plot_declarations",
 )
 
 
@@ -42,7 +42,7 @@ def find_recipe_path(name: str, extra_dirs: Sequence[pathlib.Path] | None = None
     try:
         from ament_index_python.packages import get_package_share_directory
 
-        share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "plot_declarations"
+        share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "configs" / "declarations" / "plot_declarations"
         candidates.append(share_dir)
     except Exception:
         pass

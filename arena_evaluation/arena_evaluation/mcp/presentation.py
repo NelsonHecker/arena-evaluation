@@ -46,7 +46,7 @@ def evaluation_plot_declarations() -> list[dict[str, Any]]:
     try:
         from ament_index_python.packages import get_package_share_directory
 
-        share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "plot_declarations"
+        share_dir = pathlib.Path(get_package_share_directory("arena_evaluation")) / "configs" / "declarations" / "plot_declarations"
         candidates.append(share_dir)
     except Exception:
         pass
