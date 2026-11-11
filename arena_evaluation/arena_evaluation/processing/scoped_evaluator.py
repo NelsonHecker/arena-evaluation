@@ -125,7 +125,6 @@ COLLISION_CONTACTS_TOPIC: Final[str] = "collision_contacts"
 ROBOT_POWER_TOPIC: Final[str] = "robot_power"
 ROBOT_ACOUSTICS_TOPIC: Final[str] = "robot_acoustics"
 
-DEFAULT_ROBOT_ACTOR_RADIUS_M: Final[float] = 0.3
 CONTACT_PRE_WINDOW_S: Final[float] = 0.5
 CONTACT_POST_WINDOW_S: Final[float] = 0.5
 METRES_PER_WH_J: Final[float] = 3600.0
@@ -856,7 +855,7 @@ class ScopedEvaluator:
                 y=pl.col("pos_y").cast(pl.Float64),
                 vx=(pl.col("pos_x").diff() / dt_s).fill_null(0.0),
                 vy=(pl.col("pos_y").diff() / dt_s).fill_null(0.0),
-                radius_m=pl.lit(DEFAULT_ROBOT_ACTOR_RADIUS_M, dtype=pl.Float64),
+                radius_m=pl.col("radius_m").cast(pl.Float64),
                 desired_speed=pl.lit(None, dtype=pl.Float64),
             )
             .select(

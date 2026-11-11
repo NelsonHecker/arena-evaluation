@@ -337,13 +337,17 @@ def _robot_phases(record: pl.DataFrame, robot_dir: str) -> dict | None:
     return None
 
 
-def _fleet_poses(robots: dict[str, TopicBundle], window: tuple[int | None, int | None]) -> dict[str, pl.DataFrame]:
-    """Recorded judge poses of every robot in the episode by bare name, cut to the window."""
-    from arena_evaluation.processing.metrics.ecological.condition_metrics import bare_robot_name
+def _fleet_poses(robots: dict[str, TopicBundle], window: tuple[int | None, int | None], *, ego_robot_id: str, actor_radius_m: float) -> dict[str, pl.DataFrame]:
+    """Recorded judge poses of every other robot, keyed by its full env-prefixed id and cut to the window.
 
+    The evaluated robot is excluded by identity, so it can never become its own encounter actor, and
+    every actor frame carries the radius the detector must use for edge clearance.
+    """
     start_ns, end_ns = window
     fleet: dict[str, pl.DataFrame] = {}
     for name, bundle in robots.items():
+        if name == ego_robot_id:
+            continue
         frame = bundle.robot_task_pose
         if frame is None:
             continue
@@ -354,7 +358,7 @@ def _fleet_poses(robots: dict[str, TopicBundle], window: tuple[int | None, int |
         if end_ns is not None:
             frame = frame.filter(pl.col("t_ns") <= end_ns + _ALIGN_TOLERANCE_NS)
         if len(frame) > 0:
-            fleet[bare_robot_name(name)] = frame
+            fleet[name] = frame.with_columns(radius_m=pl.lit(actor_radius_m, dtype=pl.Float64))
     return fleet
 
 
@@ -826,7 +830,7 @@ class ProcessingPipeline:
                 integrity = _record_integrity(bundle.episode_lifecycle, bundle.episode_integrity, metadata)
                 start_pos, goal_pos = _episode_endpoints(aligned_df, bundle.robot_plans, phases)
 
-                fleet = _fleet_poses(robots, window)
+                fleet = _fleet_poses(robots, window, ego_robot_id=robot_name, actor_radius_m=float(robot_params.robot_radius))
 
                 aligned_ep = AlignedEpisodeBundle(
                     episode_id=ep.episode_id,

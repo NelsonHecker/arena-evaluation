@@ -15,14 +15,14 @@ from typing import Final
 import polars as pl
 
 NS_PER_S: Final[float] = 1e9
-DETECTOR_VERSION: Final[str] = "wp2-scope-detectors-v1"
+DETECTOR_VERSION: Final[str] = "wp2-scope-detectors-v2"
 
-ENCOUNTER_DISTANCE_M: Final[float] = 3.0
+# Encounter membership is surface-to-surface clearance: the exposed 2.0 m edge-to-edge decision.
+ENCOUNTER_EDGE_DISTANCE_M: Final[float] = 2.0
 ENCOUNTER_MERGE_GAP_S: Final[float] = 1.0
 CONTACT_MERGE_GAP_S: Final[float] = 0.25
 ALIGN_TOLERANCE_NS: Final[int] = 100_000_000
 DEFAULT_PED_RADIUS_M: Final[float] = 0.3
-DEFAULT_ROBOT_RADIUS_M: Final[float] = 0.25
 
 STATIONARY_SPEED_MPS: Final[float] = 0.15
 HEAD_ON_ANGLE_RAD: Final[float] = 3.141592653589793 / 4.0
@@ -135,9 +135,14 @@ STALL_WINDOW_SCHEMA = pl.Schema(
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DetectorParams:
-    """Versioned parameters of the encounter and contact detectors."""
+    """Versioned parameters of the encounter and contact detectors.
 
-    encounter_distance_m: float = ENCOUNTER_DISTANCE_M
+    ``encounter_edge_distance_m`` is surface-to-surface clearance: two bodies are in an
+    encounter while their edges are at most this far apart. Centre distance is reported in
+    ``min_distance_m`` but never decides membership.
+    """
+
+    encounter_edge_distance_m: float = ENCOUNTER_EDGE_DISTANCE_M
     encounter_merge_gap_s: float = ENCOUNTER_MERGE_GAP_S
     contact_merge_gap_s: float = CONTACT_MERGE_GAP_S
     align_tolerance_ns: int = ALIGN_TOLERANCE_NS
@@ -171,23 +176,29 @@ def pedestrian_pairs_lf(robot_tracks: pl.DataFrame | pl.LazyFrame, pedestrian_tr
     return _pairs_lf(robot_tracks, actors, robot_radius_m, params)
 
 
-def fleet_pairs_lf(robot_tracks: pl.DataFrame | pl.LazyFrame, fleet: dict[str, pl.DataFrame], robot_radius_m: float, actor_radius_m: float = DEFAULT_ROBOT_RADIUS_M, params: DetectorParams = DEFAULT_DETECTOR_PARAMS) -> pl.LazyFrame:
-    """One row per other-robot task-pose sample with this robot's pose at or before it."""
-    actor_frames = [_fleet_actor_frame(name, frame, actor_radius_m) for name, frame in fleet.items()]
+def fleet_pairs_lf(robot_tracks: pl.DataFrame | pl.LazyFrame, fleet: dict[str, pl.DataFrame], robot_radius_m: float, params: DetectorParams = DEFAULT_DETECTOR_PARAMS) -> pl.LazyFrame:
+    """One row per other-robot task-pose sample with this robot's pose at or before it.
+
+    The evaluated robot is dropped from its own fleet by full env-prefixed identity, and each
+    actor carries its own recorded ``radius_m`` rather than a fleet-wide default.
+    """
+    actor_frames = [_fleet_actor_frame(actor_id, frame) for actor_id, frame in fleet.items()]
     if not actor_frames:
         return pl.LazyFrame(schema=PAIR_SCHEMA)
-    actors = pl.concat(actor_frames, how="vertical").sort("t_ns")
+    ego_ids = robot_tracks.lazy().select(pl.col("robot_id").alias("actor_id")).unique()
+    actors = pl.concat(actor_frames, how="vertical").join(ego_ids, on="actor_id", how="anti").sort("t_ns")
     return _pairs_lf(robot_tracks, actors, robot_radius_m, params)
 
 
-def _fleet_actor_frame(actor_id: str, frame: pl.DataFrame, actor_radius_m: float) -> pl.LazyFrame:
-    """Task poses of another robot as a pair-actor frame: position, derived velocity and heading."""
+def _fleet_actor_frame(actor_id: str, frame: pl.DataFrame) -> pl.LazyFrame:
+    """Task poses of another robot as a pair-actor frame: position, derived velocity and its own radius."""
     actor = (
         frame.lazy()
         .select(
             pl.col("t_ns").cast(pl.Int64),
             pl.col("pos_x").alias("actor_x"),
             pl.col("pos_y").alias("actor_y"),
+            pl.col("radius_m").cast(pl.Float64).alias("actor_radius_m"),
         )
         .sort("t_ns")
     )
@@ -199,7 +210,6 @@ def _fleet_actor_frame(actor_id: str, frame: pl.DataFrame, actor_radius_m: float
         actor_kind=pl.lit(ACTOR_ROBOT),
         actor_vx=(pl.col("actor_x").diff() / dt_s).fill_null(0.0),
         actor_vy=(pl.col("actor_y").diff() / dt_s).fill_null(0.0),
-        actor_radius_m=pl.lit(actor_radius_m, dtype=pl.Float64),
     ).select("actor_id", "actor_name", "actor_kind", "t_ns", "actor_x", "actor_y", "actor_vx", "actor_vy", "actor_radius_m")
 
 
@@ -231,14 +241,15 @@ def _pairs_lf(robot_tracks: pl.DataFrame | pl.LazyFrame, actors: pl.LazyFrame, r
 
 
 def detect_encounter_windows_lf(pairs: pl.LazyFrame, params: DetectorParams = DEFAULT_DETECTOR_PARAMS) -> pl.LazyFrame:
-    """Contiguous bouts with centre distance <= encounter_distance_m, gaps shorter than the merge gap bridged.
+    """Contiguous bouts whose surface clearance <= encounter_edge_distance_m, near gaps bridged.
 
     Run-length ids over the boolean clearance mask give the bouts; a second run-length id over the
-    gap-bridged mask separates bouts that survive the merge window. The onset row of each bout keeps
-    the kinematics that classify the approach.
+    gap-bridged mask separates bouts that survive the merge window. A gap is bridged when the time
+    between the last in-encounter sample before it and the first in-encounter sample after it is at
+    most the merge gap. The onset row of each bout keeps the kinematics that classify the approach.
     """
     merge_gap_ns = int(params.encounter_merge_gap_s * NS_PER_S)
-    in_encounter = pl.col("distance_m") <= params.encounter_distance_m
+    in_encounter = pl.col("edge_clearance_m") <= params.encounter_edge_distance_m
 
     runs = (
         pairs.sort(["actor_id", "t_ns"])
@@ -252,7 +263,10 @@ def detect_encounter_windows_lf(pairs: pl.LazyFrame, params: DetectorParams = DE
         )
         .sort(["actor_id", "run_id"])
     )
-    interior_gap = (~pl.col("run_in_encounter")) & pl.col("run_in_encounter").shift(1).over("actor_id").fill_null(False) & pl.col("run_in_encounter").shift(-1).over("actor_id").fill_null(False) & ((pl.col("run_end_ns") - pl.col("run_start_ns")) <= merge_gap_ns)
+    previous_in_encounter = pl.col("run_in_encounter").shift(1).over("actor_id").fill_null(False)
+    next_in_encounter = pl.col("run_in_encounter").shift(-1).over("actor_id").fill_null(False)
+    gap_ns = pl.col("run_start_ns").shift(-1).over("actor_id") - pl.col("run_end_ns").shift(1).over("actor_id")
+    interior_gap = (~pl.col("run_in_encounter")) & previous_in_encounter & next_in_encounter & (gap_ns <= merge_gap_ns)
     runs = runs.with_columns(bridgeable=interior_gap)
     flagged = (
         pairs.sort(["actor_id", "t_ns"])

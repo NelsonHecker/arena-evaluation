@@ -15,12 +15,11 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal, assert_series_equal
 
-from arena_evaluation.processing.metrics.social.interaction_common import DEFAULT_ENCOUNTER_DIST_M
 from arena_evaluation.processing.windows import (
     CONTACT_WINDOW_SCHEMA,
     DEFAULT_DETECTOR_PARAMS,
     DETECTOR_VERSION,
-    ENCOUNTER_DISTANCE_M,
+    ENCOUNTER_EDGE_DISTANCE_M,
     ENCOUNTER_WINDOW_SCHEMA,
     PAIR_SCHEMA,
     DetectorParams,
@@ -36,7 +35,7 @@ from arena_evaluation.processing.windows import (
 NS_PER_S: Final[int] = 1_000_000_000
 ROBOT_RADIUS_M: Final[float] = 0.25
 ACTOR_RADIUS_M: Final[float] = 0.3
-DEFAULT_PARAMS_HASH: Final[str] = "edb7f7cf3de3"
+DEFAULT_PARAMS_HASH: Final[str] = "c84856fed3be"
 
 _ROBOT_TRACKS_SCHEMA: Final[pl.Schema] = pl.Schema(
     {
@@ -63,7 +62,7 @@ _PEDESTRIAN_TRACKS_SCHEMA: Final[pl.Schema] = pl.Schema(
     }
 )
 
-_FLEET_POSE_SCHEMA: Final[pl.Schema] = pl.Schema({"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64})
+_FLEET_POSE_SCHEMA: Final[pl.Schema] = pl.Schema({"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64, "radius_m": pl.Float64})
 
 _CONTACT_SCHEMA: Final[pl.Schema] = pl.Schema(
     {
@@ -106,7 +105,7 @@ _PEDESTRIAN_DEFAULTS: Final[dict[str, object]] = {
     "vy": 0.0,
     "radius_m": ACTOR_RADIUS_M,
 }
-_FLEET_DEFAULTS: Final[dict[str, object]] = {"pos_y": 0.0}
+_FLEET_DEFAULTS: Final[dict[str, object]] = {"pos_y": 0.0, "radius_m": ROBOT_RADIUS_M}
 _CONTACT_DEFAULTS: Final[dict[str, object]] = {"obstacle_x": 0.0, "obstacle_y": 0.0, "obstacle_z": 0.0}
 _PAIR_DEFAULTS: Final[dict[str, object]] = {
     "robot_id": "r1",
@@ -267,8 +266,8 @@ def test_encounter_straight_pass_by_exact_bounds() -> None:
 
     expected = pl.DataFrame(
         {
-            "t_start_ns": [2_000_000_000],
-            "t_end_ns": [8_000_000_000],
+            "t_start_ns": [2_500_000_000],
+            "t_end_ns": [7_500_000_000],
             "min_distance_m": [0.0],
             "min_clearance_m": [0.0 - ROBOT_RADIUS_M - ACTOR_RADIUS_M],
         },
@@ -277,19 +276,24 @@ def test_encounter_straight_pass_by_exact_bounds() -> None:
     assert_frame_equal(windows.select("t_start_ns", "t_end_ns", "min_distance_m", "min_clearance_m"), expected)
 
 
-@pytest.mark.parametrize(("distance_m", "expected_height"), [(2.999, 1), (3.0, 1), (3.001, 0)])
-def test_encounter_distance_threshold_is_inclusive(distance_m: float, expected_height: int) -> None:
-    rows = [{"t_ns": t_s * NS_PER_S, "actor_x": x} for t_s, x in ((0, 5.0), (2, 5.0), (4, distance_m), (6, 5.0), (8, 5.0))]
-
-    windows = _detect_windows(_pairs_lf(rows))
+@pytest.mark.parametrize(("edge_clearance_m", "expected_height"), [(1.999, 1), (2.0, 1), (2.001, 0)])
+def test_encounter_edge_threshold_is_inclusive(edge_clearance_m: float, expected_height: int) -> None:
+    windows = _detect_windows(_pair_frame([edge_clearance_m]))
 
     assert windows.height == expected_height
     if expected_height == 1:
-        expected = pl.DataFrame(
-            {"t_start_ns": [4_000_000_000], "t_end_ns": [4_000_000_000], "min_distance_m": [distance_m]},
-            schema={"t_start_ns": pl.Int64, "t_end_ns": pl.Int64, "min_distance_m": pl.Float64},
-        )
-        assert_frame_equal(windows.select("t_start_ns", "t_end_ns", "min_distance_m"), expected)
+        assert windows["min_clearance_m"][0] == edge_clearance_m
+        assert windows["min_distance_m"][0] == pytest.approx(edge_clearance_m + ROBOT_RADIUS_M + ACTOR_RADIUS_M)
+
+
+@pytest.mark.parametrize(("ped_radius_m", "expected_height"), [(0.3, 0), (0.6, 1)])
+def test_encounter_edge_threshold_is_radius_aware(ped_radius_m: float, expected_height: int) -> None:
+    robot = _robot_tracks([{"t_ns": 0}])
+    pedestrians = _pedestrian_tracks([{"t_ns": 0, "x": 2.7, "radius_m": ped_radius_m}])
+
+    windows = _detect_windows(pedestrian_pairs_lf(robot, pedestrians, ROBOT_RADIUS_M))
+
+    assert windows.height == expected_height
 
 
 @pytest.mark.parametrize(
@@ -321,17 +325,17 @@ def test_encounter_leading_shoulder_does_not_extend_start() -> None:
     assert_frame_equal(windows.select("t_start_ns", "t_end_ns", "min_distance_m"), expected)
 
 
-def test_encounter_bridges_interior_gap_bounded_by_encounters() -> None:
-    rows = [{"t_ns": t_s * NS_PER_S, "actor_x": x} for t_s, x in ((0, 2.0), (1, 5.0), (1.5, 5.0), (2, 5.0), (3, 2.0))]
+def test_encounter_one_sample_gap_longer_than_the_merge_window_does_not_bridge() -> None:
+    rows = [{"t_ns": t_s * NS_PER_S, "actor_x": x} for t_s, x in ((0, 2.0), (1, 5.0), (2, 2.0))]
 
     windows = _detect_windows(_pairs_lf(rows))
 
     expected = pl.DataFrame(
         {
-            "t_start_ns": [0],
-            "t_end_ns": [3_000_000_000],
-            "min_distance_m": [2.0],
-            "min_clearance_m": [2.0 - ROBOT_RADIUS_M - ACTOR_RADIUS_M],
+            "t_start_ns": [0, 2_000_000_000],
+            "t_end_ns": [0, 2_000_000_000],
+            "min_distance_m": [2.0, 2.0],
+            "min_clearance_m": [2.0 - ROBOT_RADIUS_M - ACTOR_RADIUS_M, 2.0 - ROBOT_RADIUS_M - ACTOR_RADIUS_M],
         },
         schema={"t_start_ns": pl.Int64, "t_end_ns": pl.Int64, "min_distance_m": pl.Float64, "min_clearance_m": pl.Float64},
     )
@@ -429,24 +433,24 @@ def test_encounter_approach_type(robot_yaw: float, robot_vx: float, actor_x: flo
 def test_encounter_detector_metadata_constants() -> None:
     windows = _detect_windows(_pairs_lf([{"t_ns": 0, "actor_x": 1.0}]))
 
-    assert DETECTOR_VERSION == "wp2-scope-detectors-v1"
-    assert_series_equal(windows["detector_version"], pl.Series("detector_version", ["wp2-scope-detectors-v1"], dtype=pl.String))
+    assert DETECTOR_VERSION == "wp2-scope-detectors-v2"
+    assert_series_equal(windows["detector_version"], pl.Series("detector_version", ["wp2-scope-detectors-v2"], dtype=pl.String))
     assert_series_equal(windows["detector_params_hash"], pl.Series("detector_params_hash", [DEFAULT_PARAMS_HASH], dtype=pl.String))
 
 
 def test_detector_params_fingerprint_is_stable_and_param_sensitive() -> None:
     assert DEFAULT_DETECTOR_PARAMS == DetectorParams()
     fingerprint = DEFAULT_DETECTOR_PARAMS.fingerprint()
-    assert fingerprint == "edb7f7cf3de3"
+    assert fingerprint == "c84856fed3be"
     assert len(fingerprint) == 12
     assert all(character in "0123456789abcdef" for character in fingerprint)
-    assert DetectorParams(encounter_distance_m=2.0).fingerprint() != fingerprint
+    assert DetectorParams(encounter_edge_distance_m=1.5).fingerprint() != fingerprint
     assert DetectorParams(contact_merge_gap_s=0.5).fingerprint() != fingerprint
 
 
 def test_encounter_custom_params_change_threshold_and_hash() -> None:
     rows = [{"t_ns": 0, "actor_x": 2.5}]
-    custom_params = DetectorParams(encounter_distance_m=2.0)
+    custom_params = DetectorParams(encounter_edge_distance_m=1.9)
 
     default_windows = _detect_windows(_pairs_lf(rows))
     custom_windows = _detect_windows(_pairs_lf(rows), custom_params)
@@ -529,9 +533,9 @@ def test_fleet_pairs_derive_robot_velocity_from_pose_gradient() -> None:
 @pytest.mark.parametrize(("actor_radius_m", "expected_radius_m"), [(0.25, 0.25), (0.5, 0.5)])
 def test_fleet_pairs_edge_clearance_uses_robot_and_actor_radius(actor_radius_m: float, expected_radius_m: float) -> None:
     robot = _robot_tracks([{"t_ns": 0}])
-    fleet = {"r2": _fleet_poses([{"t_ns": 0, "pos_x": 4.0}])}
+    fleet = {"r2": _fleet_poses([{"t_ns": 0, "pos_x": 4.0, "radius_m": actor_radius_m}])}
 
-    pairs = fleet_pairs_lf(robot, fleet, robot_radius_m=0.4, actor_radius_m=actor_radius_m).collect()
+    pairs = fleet_pairs_lf(robot, fleet, robot_radius_m=0.4).collect()
 
     expected = pl.DataFrame(
         {
@@ -560,7 +564,7 @@ def test_fleet_encounter_detects_robot_actor_window() -> None:
         {
             "actor_id": ["r2"],
             "actor_kind": ["robot"],
-            "t_start_ns": [4_000_000_000],
+            "t_start_ns": [6_000_000_000],
             "t_end_ns": [10_000_000_000],
             "min_distance_m": [0.0],
             "min_clearance_m": [0.0 - 0.4 - 0.25],
@@ -588,6 +592,80 @@ def test_fleet_encounter_detects_robot_actor_window() -> None:
         ),
         expected,
     )
+
+
+def _pair_frame(edge_clearance_m: Sequence[float], t_s: Sequence[float] | None = None) -> pl.LazyFrame:
+    """Pair rows with an explicit surface clearance, distance = clearance + the fixture radii."""
+    count = len(edge_clearance_m)
+    times_s = list(range(count)) if t_s is None else list(t_s)
+    surface_margin_m = ROBOT_RADIUS_M + ACTOR_RADIUS_M
+    return pl.DataFrame(
+        {
+            "robot_id": ["r1"] * count,
+            "actor_id": ["p1"] * count,
+            "actor_name": ["Pedestrian 1"] * count,
+            "actor_kind": ["pedestrian"] * count,
+            "t_ns": [int(time_s * NS_PER_S) for time_s in times_s],
+            "robot_x": [0.0] * count,
+            "robot_y": [0.0] * count,
+            "robot_yaw": [0.0] * count,
+            "robot_vx": [0.0] * count,
+            "robot_vy": [0.0] * count,
+            "actor_x": [clearance + surface_margin_m for clearance in edge_clearance_m],
+            "actor_y": [0.0] * count,
+            "actor_vx": [0.0] * count,
+            "actor_vy": [0.0] * count,
+            "actor_radius_m": [ACTOR_RADIUS_M] * count,
+            "distance_m": [clearance + surface_margin_m for clearance in edge_clearance_m],
+            "edge_clearance_m": list(edge_clearance_m),
+        },
+        schema=PAIR_SCHEMA,
+    ).lazy()
+
+
+def test_two_robot_fixture_does_not_pair_the_robot_with_itself() -> None:
+    robot = _robot_tracks([{"t_ns": 0, "x": 0.0, "y": 0.0}])
+    fleet = {
+        "r1": _fleet_poses([{"t_ns": 0, "pos_x": 0.0, "radius_m": 0.25}]),
+        "env_0_r2": _fleet_poses([{"t_ns": 0, "pos_x": 1.0, "radius_m": 0.25}]),
+    }
+
+    windows = _detect_windows(fleet_pairs_lf(robot, fleet, robot_radius_m=0.25))
+
+    assert windows.height == 1
+    assert_series_equal(windows["actor_id"], pl.Series("actor_id", ["env_0_r2"], dtype=pl.String))
+
+
+def test_fleet_pairs_carry_each_actor_its_own_radius() -> None:
+    robot = _robot_tracks([{"t_ns": 0}])
+    fleet = {
+        "env_0_r2": _fleet_poses([{"t_ns": 0, "pos_x": 4.0, "radius_m": 0.2}]),
+        "env_1_r2": _fleet_poses([{"t_ns": 0, "pos_x": 5.0, "radius_m": 0.6}]),
+    }
+
+    pairs = fleet_pairs_lf(robot, fleet, robot_radius_m=0.4).collect().sort("actor_id")
+
+    assert_series_equal(pairs["actor_id"], pl.Series("actor_id", ["env_0_r2", "env_1_r2"], dtype=pl.String))
+    assert_series_equal(pairs["actor_radius_m"], pl.Series("actor_radius_m", [0.2, 0.6], dtype=pl.Float64))
+    assert_series_equal(pairs["edge_clearance_m"], pl.Series("edge_clearance_m", [4.0 - 0.4 - 0.2, 5.0 - 0.4 - 0.6], dtype=pl.Float64))
+
+
+def test_one_robot_fixture_encounter_count_at_the_new_threshold() -> None:
+    """A straight pass still yields one encounter at 2.0 m edge clearance.
+
+    Membership moved from a 3.0 m centre distance to a 2.0 m surface clearance (2.55 m centre
+    for the default 0.25 m robot and 0.3 m pedestrian), so the bout keeps its count but is
+    shorter: here onset 2 s and end 4 s where the old centre rule spanned 1 s to 5 s.
+    """
+    rows = [{"t_ns": t_s * NS_PER_S, "actor_x": x} for t_s, x in ((0, 4.0), (1, 3.0), (2, 2.5), (3, 2.0), (4, 2.5), (5, 3.0), (6, 4.0))]
+
+    windows = _detect_windows(_pairs_lf(rows))
+
+    expected = pl.DataFrame(
+        {"t_start_ns": [2_000_000_000], "t_end_ns": [4_000_000_000]},
+        schema={"t_start_ns": pl.Int64, "t_end_ns": pl.Int64},
+    )
+    assert_frame_equal(windows.select("t_start_ns", "t_end_ns"), expected)
 
 
 # ---------------------------------------------------------------------------
@@ -709,9 +787,9 @@ def test_contact_empty_contacts_returns_canonical_empty_frame() -> None:
     assert_frame_equal(windows, empty_contact_windows())
 
 
-def test_canonical_encounter_distance_constant_is_shared() -> None:
-    assert ENCOUNTER_DISTANCE_M == 3.0
-    assert DEFAULT_ENCOUNTER_DIST_M == ENCOUNTER_DISTANCE_M
+def test_canonical_encounter_edge_distance_constant_is_shared() -> None:
+    assert ENCOUNTER_EDGE_DISTANCE_M == 2.0
+    assert DEFAULT_DETECTOR_PARAMS.encounter_edge_distance_m == ENCOUNTER_EDGE_DISTANCE_M
 
 
 def test_contact_resolves_numeric_gazebo_id_and_actor_name_before_merging_and_joining() -> None:

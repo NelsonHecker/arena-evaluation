@@ -73,12 +73,9 @@ ACOUSTIC_LEVEL_DBA: typing.Final[float] = 60.0
 REFERENCE_PRESSURE_PA: typing.Final[float] = 20e-6
 WALKING_SPEED_MPS: typing.Final[float] = 1.2
 
-ALICE_START_NS: typing.Final[int] = 1 * NS_PER_S  # centre distance crosses 3 m exactly here
-ALICE_END_NS: typing.Final[int] = 5 * NS_PER_S  # and returns to 3 m exactly here
-ALICE_DURATION_S: typing.Final[float] = 4.0
-CARA_START_NS: typing.Final[int] = 300_000_000
-CARA_END_NS: typing.Final[int] = 4_700_000_000
-CARA_DURATION_S: typing.Final[float] = 4.4
+ALICE_START_NS: typing.Final[int] = 1_300_000_000  # surface clearance crosses 2 m exactly here
+ALICE_END_NS: typing.Final[int] = 4_700_000_000  # and returns to 2 m exactly here
+ALICE_DURATION_S: typing.Final[float] = 3.4
 PED_CONTACT_NS: typing.Final[int] = 3 * NS_PER_S
 WALL_CONTACT_NS: typing.Final[int] = 1 * NS_PER_S
 ALICE_ENCOUNTER_ID: typing.Final[str] = f"enc-{EPISODE_ID:03d}-{ROBOT_TOKEN}-001"
@@ -966,14 +963,14 @@ def test_absent_collision_contacts_yields_empty_contacts(episode: AlignedEpisode
     assert row["success_no_robot_fault"] is True
 
 
-def test_detector_distance_parameter_changes_encounter_count(episode: AlignedEpisodeBundle, tables: ScopedFactTables) -> None:
+def test_detector_edge_parameter_changes_encounter_count(episode: AlignedEpisodeBundle, tables: ScopedFactTables) -> None:
     assert tables.encounters.height == 2
-    tight = _evaluate_referenced(episode, detector_params=DetectorParams(encounter_distance_m=1.0))
+    tight = _evaluate_referenced(episode, detector_params=DetectorParams(encounter_edge_distance_m=1.0))
     assert tight.encounters.height == 1
     row = _encounter_row(tight, "Pedestrian_1")
-    assert row["t_start_ns"] == 2_400_000_000
-    assert row["t_end_ns"] == 3_600_000_000
-    assert row["duration_s"] == pytest.approx(1.2)
+    assert row["t_start_ns"] == 2_000_000_000
+    assert row["t_end_ns"] == 4_000_000_000
+    assert row["duration_s"] == pytest.approx(2.0)
     assert row["encounter_id"] == CARA_ENCOUNTER_ID
     contact = _single_row(tight.contacts, "obstacle_id", "Pedestrian_1")
     assert contact["encounter_id"] == CARA_ENCOUNTER_ID
@@ -1117,8 +1114,13 @@ def test_encounter_acoustics_attenuates_recorded_dba_and_fleet_encounter_has_cho
     assert louder_dose == pytest.approx(base_dose * 10.0, rel=1e-9)
 
     fleet_poses = pl.DataFrame(
-        {"t_ns": t_ns, "pos_x": np.full(SAMPLE_COUNT, 3.0, dtype=np.float64), "pos_y": np.zeros(SAMPLE_COUNT, dtype=np.float64)},
-        schema={"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64},
+        {
+            "t_ns": t_ns,
+            "pos_x": np.full(SAMPLE_COUNT, 3.0, dtype=np.float64),
+            "pos_y": np.zeros(SAMPLE_COUNT, dtype=np.float64),
+            "radius_m": np.full(SAMPLE_COUNT, 0.25, dtype=np.float64),
+        },
+        schema={"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64, "radius_m": pl.Float64},
     )
     fleet_episode = dataclasses.replace(_without_topics(episode, "pedestrian_tracks", "collision_contacts"), fleet={"robot_peer": fleet_poses})
     fleet_tables = _evaluate(fleet_episode)
