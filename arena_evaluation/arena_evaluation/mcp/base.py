@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import os
 import pathlib
 import re
+import stat
+import tempfile
+from collections.abc import Iterator
 from typing import Annotated
 
 import pydantic
@@ -71,3 +77,37 @@ def config_stem(name: str) -> str:
 
 def is_inline(value: str) -> bool:
     return value.lstrip().startswith(("{", "["))
+
+
+@contextlib.contextmanager
+def file_lock(path: pathlib.Path) -> Iterator[None]:
+    """Hold the exclusive advisory lock of path, the guard every read-modify-write of it takes."""
+    lock_path = path.with_name(f".{path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def atomic_write_text(path: pathlib.Path, text: str) -> None:
+    """Replace path with text in one rename, so no reader ever sees a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = pathlib.Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
