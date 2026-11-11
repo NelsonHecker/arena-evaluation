@@ -91,16 +91,6 @@ def _is_known_item(item: str) -> bool:
     return code in NULL_REASON_MEANINGS
 
 
-def canonical_null_reason(text: str) -> str:
-    """Join the non-empty provenance items; producers already emit ``NullReason`` codes.
-
-    Kept as the join used by the scoped evaluator while its call site is removed; it no
-    longer rewrites producer tokens, so an unknown code reaches the publish-time contract
-    check instead of being silently mapped.
-    """
-    return ";".join(item for item in text.split(";") if item)
-
-
 class MetricScope(StrEnum):
     """The five first-class fact table evaluation scopes."""
 

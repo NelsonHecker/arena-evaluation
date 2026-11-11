@@ -82,7 +82,6 @@ from arena_evaluation.storage.declarations import (
     MetricDeclaration,
     NullReason,
     ScopedFactTables,
-    canonical_null_reason,
     declarations_for,
     resolve_crowd_condition,
     write_fact_tables,
@@ -241,11 +240,11 @@ def _merge_provenance_reasons(base_reason: str, provenance: Mapping[str, str], r
     parts = [part for part in base_reason.split(";") if part]
     seen = set(parts)
     for key, code in provenance.items():
-        if ":exception:" in code or (":topic_missing:" in code and row.get(key) is None) or (":series_missing:" in code and row.get(key) is None):
+        if ":exception:" in code or (":topic_missing:" in code and row.get(key) is None) or (":not_recorded:" in code and row.get(key) is None):
             if code not in seen:
                 parts.append(code)
                 seen.add(code)
-    return canonical_null_reason(";".join(parts))
+    return ";".join(parts)
 
 
 def _declared_value(value: object, declaration: MetricDeclaration) -> object:
