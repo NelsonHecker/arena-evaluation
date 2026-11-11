@@ -44,6 +44,14 @@ def _flat() -> AgentFrame:
     msg.header.frame_id = "map"
     msg.header.stamp.sec = 2
     msg.agent_id, msg.kind, msg.x, msg.y, msg.theta, msg.vx, msg.vy = (list(column) for column in zip(*_AGENTS, strict=True))
+    msg.desired_velocity = [0.0, 0.0, 0.0]
+    msg.radius = [0.0, 0.0, 0.0]
+    msg.policy_idx = [-1, -1, -1]
+    msg.animation_state = [0, 0, 0]
+    msg.interaction_id = [-1, -1, -1]
+    msg.interaction_type = [0, 0, 0]
+    msg.gait_phase = [0.0, 0.0, 0.0]
+    msg.gait_cadence = [0.0, 0.0, 0.0]
     return msg
 
 
@@ -81,6 +89,14 @@ def _robot_only() -> AgentFrame:
     msg.header.frame_id = "map"
     msg.header.stamp.sec = 1
     msg.agent_id, msg.kind, msg.x, msg.y, msg.theta, msg.vx, msg.vy = [99], [AgentState.KIND_ROBOT], [4.0], [4.0], [0.0], [1.0], [0.0]
+    msg.desired_velocity = [0.0]
+    msg.radius = [0.0]
+    msg.policy_idx = [-1]
+    msg.animation_state = [0]
+    msg.interaction_id = [-1]
+    msg.interaction_type = [0]
+    msg.gait_phase = [0.0]
+    msg.gait_cadence = [0.0]
     return msg
 
 

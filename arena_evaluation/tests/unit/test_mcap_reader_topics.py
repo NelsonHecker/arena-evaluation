@@ -15,7 +15,6 @@ from mcap_ros2.writer import Writer
 
 from arena_evaluation.processing.mcap_reader import MCAPReader, anchor_at
 from arena_evaluation.processing.telemetry import writer as telemetry_writer
-from arena_evaluation.storage.manifest import MetadataWriter
 
 SEC = 1_000_000_000
 SEP = "\n" + "=" * 80 + "\n"
@@ -36,7 +35,8 @@ PARAM = "MSG: rcl_interfaces/Parameter\nstring name\nParameterValue value"
 TRANSFORM_STAMPED = "MSG: geometry_msgs/TransformStamped\nstd_msgs/Header header\nstring child_frame_id\nTransform transform"
 TRANSFORM = "MSG: geometry_msgs/Transform\nVector3 translation\nQuaternion rotation"
 ENTITY = "MSG: arena_runtime_msgs/SemanticEntityState\nstring entity\nstring kind\nstring[] discrete_names\nstring[] discrete_values\nstring[] continuous_names\nfloat64[] continuous_values\nstring[] predicate_names\nbool[] predicate_values\nstring[] members"
-PEDESTRIAN = "MSG: arena_people_msgs/Pedestrian\nstring name\nuint32 id\ngeometry_msgs/Pose pose\ngeometry_msgs/Twist twist\nuint8 animation_state\nint32 interaction_id\nuint8 interaction_type\nstring agent_type\nfloat32 gait_phase\nfloat32 gait_cadence"
+PEDESTRIAN = "MSG: arena_people_msgs/Pedestrian\nstring name\nuint32 id\ngeometry_msgs/Pose pose\ngeometry_msgs/Twist twist\nuint8 animation_state\narena_people_msgs/Gesture[] gestures\nint32 interaction_id\nuint8 interaction_type\nstring agent_type\nfloat32 gait_phase\nfloat32 gait_cadence"
+GESTURE = "MSG: arena_people_msgs/Gesture\nstring slot\ngeometry_msgs/Point at\nstring clip\nstring hand\nbool render_pose_override"
 
 
 def _msgdef(body: str, *deps: str) -> str:
@@ -48,10 +48,17 @@ LASER_SCAN = ("sensor_msgs/msg/LaserScan", _msgdef("std_msgs/Header header\nfloa
 TWIST_MSG = ("geometry_msgs/msg/Twist", _msgdef("geometry_msgs/Vector3 linear\ngeometry_msgs/Vector3 angular", VEC3))
 TWIST_STAMPED = ("geometry_msgs/msg/TwistStamped", _msgdef("std_msgs/Header header\ngeometry_msgs/Twist twist", HEADER, TIME, TWIST, VEC3))
 JOINT_STATE = ("sensor_msgs/msg/JointState", _msgdef("std_msgs/Header header\nstring[] name\nfloat64[] position\nfloat64[] velocity\nfloat64[] effort", HEADER, TIME))
-PEDESTRIANS = ("arena_people_msgs/msg/Pedestrians", _msgdef("std_msgs/Header header\nPedestrian[] pedestrians", HEADER, TIME, PEDESTRIAN, POSE, POINT, QUAT, TWIST, VEC3))
+PEDESTRIANS = ("arena_people_msgs/msg/Pedestrians", _msgdef("std_msgs/Header header\nPedestrian[] pedestrians", HEADER, TIME, PEDESTRIAN, GESTURE, POSE, POINT, QUAT, TWIST, VEC3))
 AGENT_STATES = (
     "arena_humansim_msgs/msg/AgentStates",
-    _msgdef("std_msgs/Header header\nAgentState[] agents", HEADER, TIME, "MSG: arena_humansim_msgs/AgentState\nuint32 agent_id\nuint8 kind\ngeometry_msgs/Pose2D pose\ngeometry_msgs/Vector3 velocity", "MSG: geometry_msgs/Pose2D\nfloat64 x\nfloat64 y\nfloat64 theta", VEC3),
+    _msgdef(
+        "std_msgs/Header header\nAgentState[] agents",
+        HEADER,
+        TIME,
+        "MSG: arena_humansim_msgs/AgentState\nint32 agent_id\nstring name\nuint8 kind\ngeometry_msgs/Pose2D pose\ngeometry_msgs/Vector3 velocity\nfloat64 desired_velocity\nfloat64 radius\nstring agent_type\nuint8 animation_state\nstring policy",
+        "MSG: geometry_msgs/Pose2D\nfloat64 x\nfloat64 y\nfloat64 theta",
+        VEC3,
+    ),
 )
 ACOUSTICS = (
     "arena_robots_msgs/msg/Acoustics",
@@ -68,11 +75,6 @@ EPISODE_RECORD = (
         TIME,
     ),
 )
-EPISODE_RECORD_BEFORE_MODES = (
-    "task_generator_msgs/msg/EpisodeRecord",
-    _msgdef("uint32 episode_id\nuint8 outcome_state\nstring outcome_info\nstring goal_uuid\nstring tm_robots\nstring tm_obstacles\nstring[] tm_modules\nrcl_interfaces/Parameter[] robots_params\nrcl_interfaces/Parameter[] obstacles_params", PARAM, PARAM_VALUE),
-)
-EPISODE_RECORD_V1 = ("task_generator_msgs/msg/EpisodeRecord", "uint32 episode_id\nuint8 outcome_state\nstring outcome_info\nstring goal_uuid")
 SEMANTIC_SNAPSHOT = ("arena_runtime_msgs/msg/SemanticSnapshot", _msgdef("builtin_interfaces/Time stamp\nuint32 env_id\nstring world\nSemanticEntityState[] entities", TIME, ENTITY))
 COLLISION_EVENTS = (
     "arena_robots_msgs/msg/CollisionEvents",
@@ -123,7 +125,7 @@ def _schedule(*phases: tuple[str, float]) -> dict:
 def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
     odom = {"header": _header(1, 5, "odom"), "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": YAW_HALF_PI}}, "twist": {"twist": {"linear": {"x": 0.5}, "angular": {"z": 0.1}}}}
     controller_odom = {"header": _header(1, 0, "odom"), "pose": {"pose": {"position": {"x": 7.0, "y": 8.0}, "orientation": {"w": 1.0}}}, "twist": {"twist": {}}}
-    pedestrian = {"name": "alice", "id": 0, "pose": {"position": {"x": 3.0, "y": 4.0, "z": 0.0}, "orientation": YAW_HALF_PI}, "twist": {"linear": {"x": 0.3, "y": -0.1, "z": 0.0}}, "animation_state": 1, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0}
+    pedestrian = {"name": "alice", "id": 0, "pose": {"position": {"x": 3.0, "y": 4.0, "z": 0.0}, "orientation": YAW_HALF_PI}, "twist": {"linear": {"x": 0.3, "y": -0.1, "z": 0.0}}, "animation_state": 1, "gestures": [], "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0}
     params = [
         _param("jackal.enabled", 1, bool_value=True),
         _param("jackal.count", 2, integer_value=3),
@@ -211,13 +213,6 @@ def _every_topic_bag(path: pathlib.Path) -> pathlib.Path:
             6 * SEC,
         ),
         ("/env_1/agent_states", AGENT_STATES, {"header": _header(frame_id="map"), "agents": [{"agent_id": 5, "kind": 0, "pose": {"x": 1.0, "y": 2.0, "theta": 0.5}, "velocity": {"x": 0.1}}]}, 2 * SEC),
-        (
-            "/env_2/state/episode",
-            EPISODE_RECORD_BEFORE_MODES,
-            {"episode_id": 9, "outcome_state": 2, "tm_robots": "scenario", "tm_obstacles": "random", "tm_modules": ["benchmark"], "robots_params": [_param("file", 4, string_value="case_1")], "obstacles_params": [_param("static.n", 7, integer_array_value=[1, 2])]},
-            5 * SEC,
-        ),
-        ("/env_1/state/episode", EPISODE_RECORD_V1, {"episode_id": 8, "outcome_state": 3, "outcome_info": "old", "goal_uuid": "h"}, 5 * SEC),
         (
             "/arena/state/semantics",
             SEMANTIC_SNAPSHOT,
@@ -342,106 +337,6 @@ def test_episode_record_stores_the_full_name_params_as_yaml(every_topic: tuple[p
     assert params["unset"] == ""
 
 
-def test_episode_record_of_an_older_schema_has_no_phases_or_params(every_topic: tuple[pathlib.Path, dict]):
-    out, _ = every_topic
-
-    record = pl.read_parquet(out / "episode_lifecycle.parquet").filter(pl.col("env_id") == "env_1").row(0, named=True)
-    assert record["phases_yaml"] == ""
-    assert record["params_yaml"] == ""
-    assert record["outcome_info"] == "old"
-    physics = pl.read_parquet(out / "pedestrians.parquet").filter(pl.col("env_id") == "env_1")
-    assert physics.select("x", "y").row(0) == (1.0, 2.0)
-
-
-def test_episode_record_of_a_schema_before_modes_maps_its_leaf_params_to_full_names(every_topic: tuple[pathlib.Path, dict]):
-    out, _ = every_topic
-
-    record = pl.read_parquet(out / "episode_lifecycle.parquet").filter(pl.col("env_id") == "env_2").row(0, named=True)
-    assert yaml.safe_load(record["params_yaml"]) == {"task.scenario.file": "case_1", "task.random.static.n": [1, 2]}
-
-
-def test_a_recording_naming_the_old_task_generator_runtime_reads_like_the_new_one(tmp_path: pathlib.Path):
-    from arena_evaluation.storage.legacy import legacy_modes
-    from arena_runtime.env.task_layer import decode_modes
-    from mcap.reader import make_reader
-    from mcap_ros2.decoder import DecoderFactory
-
-    old_ns = "arena/env_0/task_generator_node"
-    new_ns = "arena/env_0/arena_env_node"
-    odom = {"header": _header(1, 5, "odom"), "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": YAW_HALF_PI}}, "twist": {"twist": {"linear": {"x": 0.5}, "angular": {"z": 0.1}}}}
-    old_record = {
-        "episode_id": 4,
-        "outcome_state": 2,
-        "outcome_info": "done",
-        "goal_uuid": "g",
-        "tm_robots": "scenario",
-        "tm_obstacles": "random",
-        "tm_modules": [],
-        "robots_params": [_param("file", 4, string_value="case_1"), _param("linger_after_completion", 1, bool_value=False)],
-        "obstacles_params": [_param("static.n", 7, integer_array_value=[1, 2])],
-    }
-    new_record = {
-        "episode_id": 4,
-        "outcome_state": 2,
-        "outcome_info": "done",
-        "goal_uuid": "g",
-        "modes": [{"key": "robots", "value": "scenario"}, {"key": "obstacles", "value": "random"}, {"key": "modules", "value": ""}],
-        "phases": "",
-        "params": [
-            _param("task.random.static.n", 7, integer_array_value=[1, 2]),
-            _param("task.scenario.file", 4, string_value="case_1"),
-            _param("task.scenario.linger_after_completion", 1, bool_value=False),
-        ],
-    }
-    old_bag = _write_bag(
-        tmp_path / "old.mcap",
-        [(f"/{old_ns}/jackal/odom", ODOMETRY, odom, 1 * SEC), (f"/{old_ns}/state/episode", EPISODE_RECORD_BEFORE_MODES, old_record, 2 * SEC)],
-    )
-    new_bag = _write_bag(
-        tmp_path / "new.mcap",
-        [(f"/{new_ns}/jackal/odom", ODOMETRY, odom, 1 * SEC), (f"/{new_ns}/state/episode", EPISODE_RECORD, new_record, 2 * SEC)],
-    )
-    metadata_path = tmp_path / "episode_000.yaml"
-    metadata_path.write_text(
-        yaml.safe_dump(
-            {
-                "benchmark_id": "b",
-                "planner": "dwb",
-                "map": "barn_0",
-                "stage": "barn_0",
-                "recording_started_at": "2026-10-07T05:04:37Z",
-                "python_version": "3.12.3",
-                "ros_distro": "jazzy",
-                "tm_robots": "scenario",
-                "tm_obstacles": "random",
-                "tm_modules": [],
-                "robots_params": {"file": "case_1", "linger_after_completion": False},
-                "obstacles_params": {"static": {"n": [1, 2]}},
-                "env_ns_root": f"/{old_ns}",
-            }
-        )
-    )
-
-    with old_bag.open("rb") as fh:
-        summary = make_reader(fh).get_summary()
-    assert "task_generator_msgs/msg/EpisodeRecord" in {schema.name for schema in summary.schemas.values()}
-    assert {channel.topic for channel in summary.channels.values()} == {f"/{old_ns}/jackal/odom", f"/{old_ns}/state/episode"}
-
-    old = MCAPReader(old_bag).read(tmp_path / "old_topics")
-    new = MCAPReader(new_bag).read(tmp_path / "new_topics")
-    metadata = MetadataWriter.read(metadata_path)
-
-    assert set(old) == set(new) == {"env_0_jackal"}
-    assert old["env_0_jackal"].robot_odom.collect().equals(new["env_0_jackal"].robot_odom.collect())
-    old_record_row = old["env_0_jackal"].episode_lifecycle.collect().row(0, named=True)
-    new_record_row = new["env_0_jackal"].episode_lifecycle.collect().row(0, named=True)
-    assert (old_record_row["episode_id"], old_record_row["outcome_state"], old_record_row["outcome_info"], old_record_row["goal_uuid"]) == (4, 2, "done", "g")
-    assert yaml.safe_load(old_record_row["params_yaml"]) == yaml.safe_load(new_record_row["params_yaml"]) == metadata.params
-    with new_bag.open("rb") as fh:
-        new_episode = next(msg for _, channel, _, msg in make_reader(fh, decoder_factories=[DecoderFactory()]).iter_decoded_messages() if channel.topic == f"/{new_ns}/state/episode")
-    assert decode_modes(new_episode.modes) == legacy_modes(robots=old_record["tm_robots"], obstacles=old_record["tm_obstacles"], modules=old_record["tm_modules"]) == metadata.modes == {"robots": ["scenario"], "obstacles": ["random"], "modules": []}
-
-
 def test_semantic_snapshot_flattens_each_entity_field_into_a_row(every_topic: tuple[pathlib.Path, dict]):
     _, bundles = every_topic
 
@@ -558,7 +453,7 @@ def test_directory_of_bags_skips_undecodable_and_corrupt_messages(tmp_path: path
 
 def test_global_and_env_writers_append_across_buffer_flushes(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(telemetry_writer, "FLUSH_ROW_LIMIT", 1_000)
-    peds = {"header": _header(frame_id="map"), "pedestrians": [{"name": "p", "id": 1, "pose": {"position": {"x": 1.0}, "orientation": {"w": 1.0}}, "twist": {}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0}]}
+    peds = {"header": _header(frame_id="map"), "pedestrians": [{"name": "p", "id": 1, "pose": {"position": {"x": 1.0}, "orientation": {"w": 1.0}}, "twist": {}, "animation_state": 0, "gestures": [], "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0}]}
     tf = {"transforms": [_transform("map", "env_0/map", 0.0, 0.0)]}
     odom = {"header": _header(), "pose": {"pose": {"position": {}, "orientation": {"w": 1.0}}}, "twist": {"twist": {}}}
     records = [("/env_0/jackal/odom", ODOMETRY, odom, 0)]

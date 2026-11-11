@@ -11,7 +11,6 @@ import yaml
 
 from arena_evaluation.processing.telemetry.messages import Envelope, RobotRef, env_row, robot_row, stamp_ns, yaw_from_orientation
 from arena_evaluation.processing.telemetry.writer import TableSink
-from arena_evaluation.storage.legacy import legacy_modes, legacy_params
 
 if TYPE_CHECKING:
     from arena_runtime_msgs.msg import EpisodeRecord, SemanticSnapshot
@@ -27,9 +26,6 @@ _BYTE_ARRAY, _BOOL_ARRAY, _INTEGER_ARRAY, _DOUBLE_ARRAY, _STRING_ARRAY = 5, 6, 7
 
 
 def record_episode(sink: TableSink, envelope: Envelope[EpisodeRecord]) -> None:
-    if envelope.schema.name == "task_generator_msgs/msg/EpisodeRecord":
-        _record_legacy_episode(sink, envelope)
-        return
     record = envelope.body
     sink.append(
         "episode_lifecycle",
@@ -46,8 +42,7 @@ def record_episode(sink: TableSink, envelope: Envelope[EpisodeRecord]) -> None:
             goal_dist_min_m=float(record.goal_dist_min),
             path_length_m=float(record.path_length),
             start_t_ns=int(record.start_time.sec) * 1_000_000_000 + int(record.start_time.nanosec),
-            # agent-contracts: ignore MCAP schema evolution
-            phases_yaml=str(getattr(record, "phases", "") or ""),
+            phases_yaml=str(record.phases or ""),
             params_yaml=_params_yaml(record),
             conditions_yaml=str(record.conditions or ""),
             world=str(record.world) if record.world else None,
@@ -55,61 +50,8 @@ def record_episode(sink: TableSink, envelope: Envelope[EpisodeRecord]) -> None:
             human_params=_human_params_json(record),
         ),
     )
-    # agent-contracts: ignore MCAP schema evolution
-    flags = getattr(record, "integrity", ())
-    if isinstance(flags, list):
-        for flag_idx, flag in enumerate(flags):
-            sink.append("episode_integrity", env_row(envelope, flag_idx=flag_idx, flag=str(flag)))
-
-
-def _record_legacy_episode(sink: TableSink, envelope: Envelope) -> None:
-    record = envelope.body
-    # agent-contracts: ignore legacy task_generator_msgs schema boundary
-    tm_robots = getattr(record, "tm_robots", None)
-    # agent-contracts: ignore legacy task_generator_msgs schema boundary
-    tm_obstacles = getattr(record, "tm_obstacles", None)
-    # agent-contracts: ignore legacy task_generator_msgs schema boundary
-    tm_modules = getattr(record, "tm_modules", None)
-    modes = legacy_modes(robots=tm_robots, obstacles=tm_obstacles, modules=tm_modules)
-    # agent-contracts: ignore legacy task_generator_msgs schema boundary
-    robots_params = {param.name: _param_value(param.value) for param in getattr(record, "robots_params", ())}
-    # agent-contracts: ignore legacy task_generator_msgs schema boundary
-    obstacles_params = {param.name: _param_value(param.value) for param in getattr(record, "obstacles_params", ())}
-    params = legacy_params(modes, robots_params, obstacles_params)
-    # agent-contracts: ignore legacy task_generator_msgs schema boundary
-    start_time = getattr(record, "start_time", None)
-    start_t_ns = (int(start_time.sec) * 1_000_000_000 + int(start_time.nanosec)) if start_time else 0
-    sink.append(
-        "episode_lifecycle",
-        env_row(
-            envelope,
-            episode_id=int(record.episode_id),
-            outcome_state=int(record.outcome_state),
-            outcome_info=str(record.outcome_info),
-            goal_uuid=str(record.goal_uuid),
-            task_layer="",
-            modes_json=json.dumps(modes),
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            robots_json=json.dumps(list(getattr(record, "robots", ()))),
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            goal_dist_start_m=float(getattr(record, "goal_dist_start", 0.0)),
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            goal_dist_min_m=float(getattr(record, "goal_dist_min", 0.0)),
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            path_length_m=float(getattr(record, "path_length", 0.0)),
-            start_t_ns=start_t_ns,
-            phases_yaml="",
-            params_yaml=yaml.dump(params) if params else "",
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            conditions_yaml=str(getattr(record, "conditions", "") or ""),
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            world=str(record.world) if getattr(record, "world", None) else None,
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            seed=int(record.seed) if getattr(record, "seed", -1) >= 0 else None,
-            # agent-contracts: ignore legacy task_generator_msgs schema boundary
-            human_params=_human_params_json(record) if hasattr(record, "human_params") else None,
-        ),
-    )
+    for flag_idx, flag in enumerate(record.integrity):
+        sink.append("episode_integrity", env_row(envelope, flag_idx=flag_idx, flag=str(flag)))
 
 
 def record_semantics(sink: TableSink, envelope: Envelope[SemanticSnapshot]) -> None:

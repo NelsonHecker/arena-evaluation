@@ -41,9 +41,9 @@ def _ground_truth_bag(path: pathlib.Path) -> pathlib.Path:
 
 def _pedestrian_bag(path: pathlib.Path) -> pathlib.Path:
     pedestrians = [
-        {"id": 3, "name": "Pedestrian_3", "pose": {"position": {"x": 1.0, "y": 2.0, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {"linear": {"x": 0.1}}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0},
-        {"id": 7, "name": "Pedestrian_7", "pose": {"position": {"x": -4.0, "y": 0.5, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {"linear": {"y": -0.2}}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0},
-        {"id": 9, "name": "Pedestrian_9", "pose": {"position": {"x": 6.0, "y": -3.0, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0},
+        {"id": 3, "name": "Pedestrian_3", "pose": {"position": {"x": 1.0, "y": 2.0, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {"linear": {"x": 0.1}}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0, "gestures": []},
+        {"id": 7, "name": "Pedestrian_7", "pose": {"position": {"x": -4.0, "y": 0.5, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {"linear": {"y": -0.2}}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0, "gestures": []},
+        {"id": 9, "name": "Pedestrian_9", "pose": {"position": {"x": 6.0, "y": -3.0, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {}, "animation_state": 0, "interaction_id": -1, "interaction_type": 0, "agent_type": "adult", "gait_phase": 0.0, "gait_cadence": 0.0, "gestures": []},
     ]
     frame = {"header": _header(frame_id="map"), "pedestrians": pedestrians}
     return _write_bag(path, [("/env_0/jackal/odom", ODOMETRY, _odometry(0.0, 0.0), SEC), ("/env_0/peds", PEDESTRIANS, frame, SEC)])

@@ -53,7 +53,8 @@ float32 path_length
 builtin_interfaces/Time start_time
 string[] integrity
 string conditions
-{extra}rcl_interfaces/Parameter[] params
+string phases
+rcl_interfaces/Parameter[] params
 rcl_interfaces/Parameter[] human_params
 """
 
@@ -66,13 +67,11 @@ _PHASES = {
 }
 
 
-def _records(tmp_path: pathlib.Path, payloads: list[str | None]) -> pl.DataFrame:
-    with_phases = payloads[0] is not None
+def _records(tmp_path: pathlib.Path, payloads: list[str]) -> pl.DataFrame:
     bag = tmp_path / "run.mcap"
     with bag.open("wb") as f:
         writer = Writer(f)
-        fields = _RECORD_FIELDS.format(extra="string phases\n" if with_phases else "")
-        schema = writer.register_msgdef("arena_runtime_msgs/msg/EpisodeRecord", fields + _PARAMETER_DEFS)
+        schema = writer.register_msgdef("arena_runtime_msgs/msg/EpisodeRecord", _RECORD_FIELDS + _PARAMETER_DEFS)
         for i, payload in enumerate(payloads):
             msg = {
                 "episode_id": 7,
@@ -92,9 +91,8 @@ def _records(tmp_path: pathlib.Path, payloads: list[str | None]) -> pl.DataFrame
                 "conditions": "",
                 "params": [],
                 "human_params": [],
+                "phases": payload,
             }
-            if with_phases:
-                msg["phases"] = payload
             writer.write_message("/env_0/arena_env_node/state/episode", schema, msg, log_time=i + 1, publish_time=i + 1)
         writer.finish()
     out = tmp_path / "topics"
@@ -108,10 +106,3 @@ def test_phases_of_the_episode_record_reach_the_robot(tmp_path: pathlib.Path) ->
     assert records["phases_yaml"].to_list() == ["", json.dumps(_PHASES)]
     assert _robot_phases(records.sort("t_ns"), "env_0_jackal") == _PHASES["jackal"]
     assert _robot_phases(records.sort("t_ns"), "env_0_burger") is None
-
-
-def test_recording_from_before_phases_reads_none_for_the_robot(tmp_path: pathlib.Path) -> None:
-    records = _records(tmp_path, [None, None])
-    assert records["phases_yaml"].to_list() == ["", ""]
-    assert records["outcome_state"].to_list() == [1, 2]
-    assert _robot_phases(records.sort("t_ns"), "env_0_jackal") is None

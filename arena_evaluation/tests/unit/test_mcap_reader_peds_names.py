@@ -12,7 +12,7 @@ from test_mcap_reader_topics import PEDESTRIANS, _header, _write_bag
 
 
 def _ped(name: str, ped_id: int, x: float, y: float) -> dict:
-    return {"name": name, "id": ped_id, "pose": {"position": {"x": x, "y": y, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {"linear": {"x": 0.1}}}
+    return {"name": name, "id": ped_id, "pose": {"position": {"x": x, "y": y, "z": 0.0}, "orientation": {"w": 1.0}}, "twist": {"linear": {"x": 0.1}}, "gestures": []}
 
 
 def _peds(*peds: dict) -> dict:

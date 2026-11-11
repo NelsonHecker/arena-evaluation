@@ -35,8 +35,6 @@ rcl_interfaces/Parameter[] params
 rcl_interfaces/Parameter[] human_params"""
 
 CURRENT = _msgdef(_BASE_FIELDS + "\nstring[] integrity", KEY_VALUE, PARAM, PARAM_VALUE, TIME)
-BOOL_FIELD = _msgdef(_BASE_FIELDS + "\nbool integrity", KEY_VALUE, PARAM, PARAM_VALUE, TIME)
-NO_FIELD = _msgdef(_BASE_FIELDS, KEY_VALUE, PARAM, PARAM_VALUE, TIME)
 
 
 def _bag(path: pathlib.Path, records: list[tuple[str, str, dict, int]]) -> pathlib.Path:
@@ -82,8 +80,6 @@ def extracted(tmp_path: pathlib.Path) -> pathlib.Path:
             ("/env_0/state/episode", CURRENT, _record(1, integrity=[]), 1 * SEC),
             ("/env_0/state/episode", CURRENT, _record(1, integrity=["robot jackal spawned by hand"]), 2 * SEC),
             ("/env_0/state/episode", CURRENT, _record(2, integrity=["robot jackal spawned by hand", "task parameters changed mid-episode"]), 3 * SEC),
-            ("/env_1/state/episode", BOOL_FIELD, _record(2, integrity=True), 1 * SEC),
-            ("/env_2/state/episode", NO_FIELD, _record(3), 1 * SEC),
         ],
     )
     out = tmp_path / "topics"
@@ -98,11 +94,3 @@ def test_each_flag_of_each_record_is_kept_as_it_accrues(extracted: pathlib.Path)
         (3 * SEC, "env_0", 0, "robot jackal spawned by hand"),
         (3 * SEC, "env_0", 1, "task parameters changed mid-episode"),
     ]
-
-
-def test_a_boolean_integrity_of_an_older_schema_carries_no_reasons(extracted: pathlib.Path) -> None:
-    assert "env_1" not in pl.read_parquet(extracted / "episode_integrity.parquet")["env_id"].to_list()
-
-
-def test_a_record_without_integrity_carries_no_reasons(extracted: pathlib.Path) -> None:
-    assert "env_2" not in pl.read_parquet(extracted / "episode_integrity.parquet")["env_id"].to_list()
