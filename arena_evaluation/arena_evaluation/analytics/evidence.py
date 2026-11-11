@@ -53,10 +53,9 @@ EVIDENCE_INDEX_SCHEMA: Final[dict[str, pl.DataType]] = {
 }
 
 
-def _ns_to_iso_utc(timestamp_ns: int) -> str:
-    """Format nanosecond timestamp as ISO-8601 UTC string."""
-    dt = datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=UTC)
-    return dt.isoformat()
+def _ns_to_iso_utc(t_ns: int) -> str:
+    """Format a ``t_ns`` epoch timestamp as an ISO-8601 UTC string."""
+    return datetime.fromtimestamp(t_ns / 1_000_000_000, tz=UTC).isoformat()
 
 
 def compute_schema_signature(frame: pl.DataFrame | pl.LazyFrame) -> str:
