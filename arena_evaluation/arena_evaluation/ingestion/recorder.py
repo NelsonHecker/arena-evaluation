@@ -858,6 +858,9 @@ class DataRecorderNode(Node, EpisodeWriter):
             task_generator_episode_id=self.current_sim_episode_id,
             agent_name=self.robot_model,
             workspace_dir=str(self.workspace_dir or self.episodes_root or "/opt/arena_ws"),
+            # The task selection arrives with the EpisodeRecord; _update_metadata_from_episode fills both.
+            modes={},
+            params={},
         )
         try:
             MetadataWriter.write(metadata, self.current_metadata_path)

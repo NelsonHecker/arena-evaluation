@@ -13,7 +13,7 @@ MOVED = ("_enter_episode_dir", "_open_writer", "_close_current_writer", "_write_
 def metadata(episode_id: int = 0):
     from arena_evaluation.ingestion.metadata import IngestionMetadata
 
-    return IngestionMetadata.create_episode_metadata(benchmark_id="run", planner="teb", stage="stage", map_name="unknown", episode_id=episode_id, robot_model="jackal")
+    return IngestionMetadata.create_episode_metadata(benchmark_id="run", planner="teb", stage="stage", map_name="unknown", episode_id=episode_id, robot_model="jackal", modes={}, params={})
 
 
 def record(writer, directory: Path, speeds: list[float]):

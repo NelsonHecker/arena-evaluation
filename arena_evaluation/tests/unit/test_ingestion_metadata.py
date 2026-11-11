@@ -33,6 +33,8 @@ def _base_kwargs(tmp_path, **overrides) -> dict:
         episode_id=3,
         robot_model="jackal",
         workspace_dir=str(tmp_path),
+        modes={"robots": ["scenario"]},
+        params={"task.scenario.file": "case_1"},
     )
     kwargs.update(overrides)
     return kwargs
@@ -256,3 +258,5 @@ def test_episode_metadata_roundtrip_through_metadata_writer(tmp_path):
     assert loaded.inter_planner == "mpc"
     assert loaded.recording_started_at == meta.recording_started_at
     assert loaded.python_version == meta.python_version
+    assert loaded.modes == {"robots": ["scenario"]}
+    assert loaded.params == {"task.scenario.file": "case_1"}

@@ -288,6 +288,7 @@ def _make_synthetic_episode(
         recording_started_at="2026-11-07T00:00:00+00:00",
         python_version="3.12",
         ros_distro="jazzy",
+        modes={},
         params={
             "scenario": "opposing_flow",
             "dispatcher": "cbs",
@@ -875,6 +876,8 @@ def test_processing_pipeline_writes_episode_and_benchmark_star_schema(tmp_path: 
         recording_started_at="2026-11-07T00:00:00+00:00",
         python_version="3.12",
         ros_distro="jazzy",
+        modes={},
+        params={},
     )
     MetadataWriter.write(meta, episode_dir / "episode_000.yaml")
 

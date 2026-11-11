@@ -42,6 +42,8 @@ _META_BASE = dict(
     recording_started_at="2026-01-01T00:00:00Z",
     python_version="3.12",
     ros_distro="humble",
+    modes={"robots": ["scenario"]},
+    params={"task.scenario.file": "case_1"},
 )
 
 
@@ -62,35 +64,15 @@ def _meta(**overrides) -> RunMetadata:
     return RunMetadata(**kw)
 
 
-def test_metadata_of_a_recording_without_modes_reads_them_as_empty():
-    assert "modes" not in _META_BASE
-    assert _meta().modes == {}
-    assert _meta(modes={"robots": ["explore"]}).modes == {"robots": ["explore"]}
-
-
-def test_metadata_written_before_modes_reads_into_modes_and_params(tmp_path):
-    old = {
-        **_META_BASE,
-        "tm_robots": "scenario",
-        "tm_obstacles": "random",
-        "tm_modules": ["benchmark"],
-        "robots_params": {"file": "case_1", "start": {"x": 1.0}},
-        "obstacles_params": {"static": {"n": [1, 2]}},
-    }
+def test_metadata_modes_and_params_roundtrip_through_yaml(tmp_path):
     path = tmp_path / "episode.yaml"
-    path.write_text(yaml.safe_dump(old))
+    path.write_text(yaml.safe_dump(_META_BASE))
 
     meta = MetadataWriter.read(path)
 
-    assert meta.modes == {"robots": ["scenario"], "obstacles": ["random"], "modules": ["benchmark"]}
-    assert meta.params == {"task.scenario.file": "case_1", "task.scenario.start.x": 1.0, "task.random.static.n": [1, 2]}
-    dumped = meta.model_dump(exclude_none=True)
-    assert not {"tm_robots", "tm_obstacles", "tm_modules", "robots_params", "obstacles_params"} & dumped.keys()
-
-
-def test_metadata_with_modes_and_tm_aliases_keeps_its_modes():
-    meta = RunMetadata.model_validate({**_META_BASE, "modes": {"robots": ["patrol"]}, "tm_robots": "explore"})
-    assert meta.modes == {"robots": ["patrol"]}
+    assert meta.modes == {"robots": ["scenario"]}
+    assert meta.params == {"task.scenario.file": "case_1"}
+    assert meta.model_dump(exclude_none=True)["modes"] == {"robots": ["scenario"]}
 
 
 def _write_src(tmp_path: pathlib.Path, name: str, df: pl.DataFrame) -> pathlib.Path:

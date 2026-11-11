@@ -46,6 +46,8 @@ def _meta(*integrity: str) -> RunMetadata:
         recording_started_at="2026-01-01T00:00:00+00:00",
         python_version="3.12",
         ros_distro="jazzy",
+        modes={},
+        params={},
     )
 
 

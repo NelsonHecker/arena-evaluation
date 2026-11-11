@@ -12,8 +12,6 @@ from dataclasses import dataclass, field, fields
 
 from pydantic import BaseModel, Field, model_validator
 
-from .legacy import read_metadata
-
 
 class RunMetadata(BaseModel):
     """Metadata for a single episode, serialized to episode_XXX.yaml."""
@@ -43,8 +41,8 @@ class RunMetadata(BaseModel):
     ros_distro: str
 
     task_layer: str = ""
-    modes: dict[str, list[str]] = Field(default_factory=dict)
-    params: dict[str, typing.Any] = Field(default_factory=dict)
+    modes: dict[str, list[str]]
+    params: dict[str, typing.Any]
 
     recording_ended_at: str | None = None
     episodes_recorded: int | None = None
@@ -63,12 +61,6 @@ class RunMetadata(BaseModel):
     reference_type: str | None = None
     parent_episode_id: int | None = None
     crowd_condition: typing.Literal["visible", "blind"] | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _map_legacy_fields(cls, data: object) -> object:
-        return read_metadata(data) if isinstance(data, dict) else data
-
 
 @dataclass(frozen=True)
 class RobotParams:

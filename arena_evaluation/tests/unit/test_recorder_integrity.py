@@ -77,6 +77,8 @@ def test_episode_yaml_without_integrity_reads_as_intact(tmp_path: pathlib.Path) 
                 "recording_started_at": "2026-01-01T00:00:00+00:00",
                 "python_version": "3.12",
                 "ros_distro": "jazzy",
+                "modes": {},
+                "params": {},
             }
         )
     )

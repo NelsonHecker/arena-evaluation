@@ -194,6 +194,7 @@ def _metadata(*, seed: int | None = None) -> RunMetadata:
         recording_started_at="2026-01-01T00:00:00",
         python_version="3.12",
         ros_distro="jazzy",
+        modes={},
         params={} if seed is None else {"seed": seed},
     )
 

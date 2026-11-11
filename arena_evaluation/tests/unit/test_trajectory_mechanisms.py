@@ -197,7 +197,7 @@ def test_single_panel_without_states_keeps_static_doors(tmp_path):
 def test_describe_episode_from_a_single_directory(tmp_path):
     ep_dir = tmp_path / "bench" / "episodes" / "episode_007"
     ep_dir.mkdir(parents=True)
-    (ep_dir / "episode_007.yaml").write_text("benchmark_id: bench\nplanner: dwb\nmap: m\nstage: s\nepisode_id: 7\nrecording_started_at: '2026-10-06T00:00:00+00:00'\npython_version: 3.12.3\nros_distro: jazzy\n")
+    (ep_dir / "episode_007.yaml").write_text("benchmark_id: bench\nplanner: dwb\nmap: m\nstage: s\nepisode_id: 7\nrecording_started_at: '2026-10-06T00:00:00+00:00'\npython_version: 3.12.3\nros_distro: jazzy\nmodes: {robots: [scenario]}\nparams: {}\n")
     ep = FolderManager.describe_episode(ep_dir)
     assert (ep.benchmark_id, ep.episode_id, ep.planner, ep.stage, ep.map) == ("bench", 7, "dwb", "s", "m")
     assert FolderManager.describe_episode(tmp_path / "bench") is None

@@ -11,7 +11,6 @@ Shared data types and path management utilities used across the evaluation pipel
 | `schemas.py` | Pydantic and dataclass type definitions |
 | `folder_manager.py` | Path resolution and run discovery (`FolderManager`) |
 | `manifest.py` | YAML reading and writing (`MetadataWriter`) |
-| `legacy.py` | Maps the `tm_*` fields and leaf params of records made before `modes` to `modes` and full-name `params` |
 | `exceptions.py` | Pipeline domain exceptions |
 
 ---
@@ -39,6 +38,8 @@ meta = RunMetadata(
     recording_started_at="2026-05-28T21:03:48+00:00",
     python_version="3.12.3",
     ros_distro="jazzy",
+    modes={"robots": ["scenario"], "obstacles": ["random"]},
+    params={"task.robots.file": "barn"},
 )
 ```
 
@@ -114,13 +115,13 @@ Pydantic model for entries in report manifests.
 
 ## folder_manager.py - FolderManager
 
-Resolves output paths relative to `data_root` with path traversal validation.
+Resolves output paths relative to the benchmarks root (`data_root`, the directory whose children are the `benchmarks/<id>` runs) with path traversal validation.
 
 ```python
 from arena_evaluation.storage.folder_manager import FolderManager
 from pathlib import Path
 
-fm = FolderManager(data_root=Path("/opt/arena_ws/data"))
+fm = FolderManager(data_root=Path("/opt/arena_ws/data/benchmarks"))
 
 run_dir   = fm.run_dir("my_benchmark", "dwa", "stage_1")
 mcap_path = fm.mcap_path(run_dir)

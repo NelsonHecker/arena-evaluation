@@ -147,7 +147,7 @@ def build_runs(root: pathlib.Path) -> pathlib.Path:
     (run.path / "runner.p2.log").write_text("lane p2 started\nlane p2 sim died\n")
     episode_dir = run.path / "episodes" / "episode_000"
     episode_dir.mkdir(parents=True, exist_ok=True)
-    MetadataWriter.write(RunMetadata(benchmark_id=RUN_ID, planner="dwb", map="map_empty", stage="s1", recording_started_at="2026-10-19T12:00:00", python_version="3.12", ros_distro="jazzy"), episode_dir / "episode_000.yaml")
+    MetadataWriter.write(RunMetadata(benchmark_id=RUN_ID, planner="dwb", map="map_empty", stage="s1", recording_started_at="2026-10-19T12:00:00", python_version="3.12", ros_distro="jazzy", modes={}, params={}), episode_dir / "episode_000.yaml")
     write_star_schema(run.path, metric_rows())
     empty = RunDir.create(root, EMPTY_RUN_ID, manifest(EMPTY_RUN_ID, ("dwb/s1",)))
     empty.progress.close()

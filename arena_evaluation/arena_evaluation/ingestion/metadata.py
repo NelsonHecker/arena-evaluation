@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from arena_evaluation.storage.planner_names import split_planner_name
 from arena_evaluation.storage.schemas import RunMetadata
@@ -67,6 +67,9 @@ class IngestionMetadata:
         inter_planner: str | None = None,
         task_generator_episode_id: int | None = None,
         agent_name: str = "",
+        *,
+        modes: dict[str, list[str]],
+        params: dict[str, Any],
     ) -> RunMetadata:
         """Create metadata for a single episode (new flat structure)."""
 
@@ -91,6 +94,8 @@ class IngestionMetadata:
             arena_git_dirty=IngestionMetadata.is_git_dirty(git_workspace),
             python_version=sys.version.split()[0],
             ros_distro=os.environ.get("ROS_DISTRO", "unknown"),
+            modes=modes,
+            params=params,
             env_ns_root=env_ns_root,
             is_reference=is_reference,
             reference_type=reference_type,
