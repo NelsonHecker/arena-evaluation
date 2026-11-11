@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pathlib
 
-import polars as pl
 import pytest
 
 from arena_evaluation.presentation.resolver import DataResolver

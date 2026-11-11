@@ -238,7 +238,7 @@ _BINDING_DEBT: Final[dict[str, frozenset[str]]] = {
 
 def _fixture_catalog(tmp_path: pathlib.Path) -> BenchmarkCatalog:
     """A catalog with the writer's declared fact schemas and the 1NF series tables of this branch."""
-    metrics = tmp_path / "metrics"
+    metrics = tmp_path / "episodes" / "episode_000" / "metrics"
     metrics.mkdir(parents=True)
     for stem, schema in _SERIES_SCHEMAS.items():
         pl.DataFrame(schema=schema).write_parquet(metrics / f"series_{stem}.parquet")
