@@ -53,6 +53,7 @@ from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.manifest import MetadataWriter
 from arena_evaluation.storage.schemas import (
     AlignedEpisodeBundle,
+    EpisodeDescriptor,
     RobotParams,
     RunMetadata,
 )
@@ -419,6 +420,26 @@ def test_star_schema_tables_match_authoritative_schemas_and_1nf(
     # Invariant 3: 100% Flat Tables (1NF) - zero nested List, Struct, or Array columns
     for col_name, dtype in frame.schema.items():
         assert not isinstance(dtype, (pl.List, pl.Struct, pl.Array)), f"Table {table_name} column {col_name} has nested dtype {dtype}"
+
+
+def test_status_episode_dimensions_leave_unknown_values_null() -> None:
+    """A recording-less episode knows no crowd, no policy and no size; it must not invent them."""
+    descriptor = EpisodeDescriptor(
+        episode_dir="/nonexistent/episode_000",
+        benchmark_id="bench-status",
+        episode_id=1,
+        planner="dwb",
+        stage="s0",
+        map="map_empty",
+    )
+    tables = StarSchemaBuilder().build_status_episode_tables(run_id="bench-status", episode_id=1, descriptor=descriptor)
+    episode = tables.dim_episodes.row(0, named=True)
+    assert episode["crowd_condition"] is None
+    assert episode["ped_policy_default"] is None
+    assert episode["crowd_size"] is None
+    robot = tables.dim_robots.row(0, named=True)
+    assert robot["robot_radius"] is None
+    assert "robot_radius_m" not in tables.dim_robots.columns
 
 
 def test_star_schema_empty_builder_preserves_schemas() -> None:

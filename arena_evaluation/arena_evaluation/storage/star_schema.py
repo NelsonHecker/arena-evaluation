@@ -439,9 +439,10 @@ class StarSchemaBuilder:
             "inter_planner": inter_planner,
             "dispatcher": dispatcher,
             "robot_model": robot_model,
-            "crowd_condition": "visible",
-            "ped_policy_default": "sfm",
-            "crowd_size": 0,
+            # An episode without a recording cannot know these: unknown stays NULL, never a guess.
+            "crowd_condition": None,
+            "ped_policy_default": None,
+            "crowd_size": None,
             "seed": seed_val,
             "is_reference": bool(descriptor.is_reference),
             "reference_type": descriptor.reference_type,
@@ -465,7 +466,7 @@ class StarSchemaBuilder:
             "linear_acc": _opt_float(meta_params.get("linear_acc")),
             "linear_decel": _opt_float(meta_params.get("linear_decel")),
             "robot_mass_kg": float(self.robot_params.total_mass) if self.robot_params else None,
-            "robot_radius_m": float(self.robot_params.robot_radius) if self.robot_params else None,
+            "robot_radius": float(self.robot_params.robot_radius) if self.robot_params else None,
             "static_power_w": _opt_float(meta_params.get("static_power_w")),
             "start_x": None,
             "start_y": None,
@@ -584,8 +585,6 @@ class StarSchemaBuilder:
             policies = facts.pedestrians.get_column("ped_policy").drop_nulls()
             if len(policies) > 0:
                 ped_policy_default = str(policies[0])
-        if ped_policy_default is None:
-            ped_policy_default = "sfm"
 
         crowd_size = int(episode.num_pedestrians) if episode.num_pedestrians > 0 else int(facts.pedestrians.height)
         seed_raw = human_params.get("seed") if human_params.get("seed") is not None else meta_params.get("seed", metrics_config.get("seed"))
