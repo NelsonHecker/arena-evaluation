@@ -18,6 +18,7 @@ from arena_evaluation.analytics.evidence import EvidenceStore
 from arena_evaluation.analytics.queries import QueryCatalog
 from arena_evaluation.analytics.sql_engine import PolarsSQLEngine
 from arena_evaluation.presentation.checks import DiagnosticInspector, PlotDiagnostics
+from arena_evaluation.presentation.predicate import compile_where_predicate
 from arena_evaluation.storage.schemas import PlotSpec
 
 __all__ = [
@@ -182,8 +183,7 @@ class DataResolver:
                 raise RuntimeError(f"Cannot fetch table '{table_source}' for plot '{spec.id}': catalog not initialized.")
             lf = self.catalog.get_table(table_source)
             if data_spec is not None and data_spec.where:
-                ctx = pl.SQLContext(frames={"_source": lf})
-                lf = ctx.execute(f"SELECT * FROM _source WHERE {data_spec.where}", eager=False)
+                lf = lf.filter(compile_where_predicate(data_spec.where, lf.collect_schema()))
             return lf.collect()
 
         # 5. Fallback in-memory DataFrame
