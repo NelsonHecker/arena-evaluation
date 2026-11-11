@@ -29,10 +29,15 @@ from arena_evaluation.processing.pedestrian_frames import (
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
+#: Edge-to-edge (surface) clearance, metres, at or beyond which a pair sits in Hall's public zone.
+#: The intimate and personal boundaries it stacks on are edge clearances too: each zone bound is
+#: the centre distance minus the robot and pedestrian radii (`_combined_radius_m`).
 SOCIAL_CLEARANCE_M: Final[float] = 3.6
 PEDESTRIAN_RADIUS_M: Final[float] = 0.3
 TTI_LOOKAHEAD_S: Final[float] = 5.0
 TTI_MIN_REL_SPEED_MPS: Final[float] = 0.05
+#: Wall-clock gap, nanoseconds, that still merges two stays in one zone into a single entry event.
+#: A time gap, never a distance: the zone bounds above are the distances.
 ZONE_EVENT_MERGE_GAP_NS: Final[int] = 2 * 10**9
 ZONES: Final[tuple[str, ...]] = ("intimate", "personal", "social", "public")
 

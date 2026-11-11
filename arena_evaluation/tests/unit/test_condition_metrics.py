@@ -17,6 +17,7 @@ from arena_evaluation.processing.metrics.ecological.condition_metrics import (
     _node_series,
     _operator_verdict,
     _ped_roster,
+    _resample_fleet,
     _strip_env,
     _value_at,
     _values_equal,
@@ -711,3 +712,42 @@ def test_clause_verdict_scores_structured_p_and_q():
     assert _clause_verdict({"op": "always", "p": {"field": "wardrobe.openness.door_left", "within": [0.0, 1.0]}}, ctx) is True
     assert _clause_verdict({"op": "always", "p": {"field": "wardrobe.state", "ge": 0.5}}, ctx) is None
     assert _clause_verdict({"op": "always", "p": {"field": "wardrobe.state", "ge": "half"}}, ctx) is None
+
+
+# -- fleet keys ------------------------------------------------------------
+
+
+def _fleet_pose_frame(x_m: float) -> pl.DataFrame:
+    """Two judge-pose samples of one other robot standing at `x_m`."""
+    return pl.DataFrame(
+        {
+            "t_ns": np.array([0, 1_000_000_000], dtype=np.int64),
+            "pos_x": np.array([x_m, x_m], dtype=np.float64),
+            "pos_y": np.zeros(2, dtype=np.float64),
+            "yaw": np.zeros(2, dtype=np.float64),
+        }
+    )
+
+
+def test_resample_fleet_publishes_bare_names_and_excludes_the_ego_by_full_identity():
+    t_ns = np.array([0, 1_000_000_000], dtype=np.int64)
+    fleet = {"env_0_jackal": _fleet_pose_frame(9.0), "env_1_jackal": _fleet_pose_frame(1.0)}
+
+    resampled = _resample_fleet(fleet, t_ns, ego="env_0_jackal")
+
+    assert set(resampled) == {"jackal"}
+    assert resampled["jackal"][0].tolist() == [1.0, 1.0]
+
+
+def test_a_robot_relative_condition_resolves_across_envs_instead_of_being_unknown():
+    t_ns = np.array([0, 1_000_000_000], dtype=np.int64)
+    ctx = _ctx([0, 1_000_000_000], pos_x=[10.0, 10.0], pos_y=[10.0, 10.0], zones=[_square("lobby")])
+    ctx.fleet = _resample_fleet({"env_1_jackal": _fleet_pose_frame(1.0)}, t_ns, ego="env_0_jackal")
+
+    sample = ctx.sample(0)
+    series, ok = _node_series(parse_atom("jackal in lobby"), ctx)
+
+    assert "jackal" in sample.robots
+    assert sample.point("jackal", "robot") == (1.0, 0.0)
+    assert ok is True
+    assert list(series) == [True, True]

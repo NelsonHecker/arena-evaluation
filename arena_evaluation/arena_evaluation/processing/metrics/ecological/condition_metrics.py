@@ -296,7 +296,14 @@ def _clause_verdict(clause: dict, ctx: _EvalContext) -> bool | None:
 
 
 def _resample_fleet(fleet: dict[str, pl.DataFrame], t_ns: np.ndarray, ego: str | None) -> dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Other robots' judge poses held onto the ego axis, robots without a sample before an instant are left out."""
+    """Other robots' judge poses held onto the ego axis, keyed by the bare name the judge atoms use.
+
+    The fleet arrives keyed by the full env-prefixed id (``env_1_jackal``) while a condition names a
+    robot by its bare name (``jackal``), so both sides are normalized: the evaluated robot is
+    excluded by its full identity and every remaining robot is published under its bare name, which
+    keeps same-named robots of different envs addressable instead of resolving every atom to UNKNOWN.
+    Robots without a sample before an instant are left out.
+    """
     out: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     for name, frame in fleet.items():
         if name == ego or frame is None or len(frame) == 0:
@@ -308,7 +315,7 @@ def _resample_fleet(fleet: dict[str, pl.DataFrame], t_ns: np.ndarray, ego: str |
         idx = np.searchsorted(times, t_ns, side="right") - 1
         if np.any(idx < 0):
             continue
-        out[name] = (frame["pos_x"].to_numpy()[idx], frame["pos_y"].to_numpy()[idx], frame["yaw"].to_numpy()[idx])
+        out[bare_robot_name(name)] = (frame["pos_x"].to_numpy()[idx], frame["pos_y"].to_numpy()[idx], frame["yaw"].to_numpy()[idx])
     return out
 
 
@@ -402,7 +409,7 @@ class ConditionComplianceCalculator(BaseMetricCalculator):
             ped_roster=_ped_roster(peds_df),
             pose_valid=bool(episode.start_pos),
             yaw=yaw,
-            fleet=_resample_fleet(episode.fleet, t_ns, bare_robot_name(episode.robot_name or "")),
+            fleet=_resample_fleet(episode.fleet, t_ns, episode.robot_name or ""),
             walls=load_wall_grid(self.world),
             clips=clips_on_axis(peds_df, episode.topics.get("pedestrian_gestures") if episode.topics else None, t_ns),
             peds_frames=peds_frames,

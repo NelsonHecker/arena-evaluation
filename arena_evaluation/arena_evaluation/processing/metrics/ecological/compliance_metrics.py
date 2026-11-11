@@ -19,6 +19,10 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Head-on pairing radius for the passing-rule head-on test, centre-to-centre metres (no body radii
+#: removed), so it is 2 m larger than the 2.0 m edge encounter distance of `processing/windows.py`.
+HEAD_ON_CENTRE_DISTANCE_M: float = 4.0
+
 
 @dataclasses.dataclass
 class _ZoneGeometry:
@@ -418,7 +422,7 @@ class ComplianceMetricsCalculator(BaseMetricCalculator):
         denom = speed_r * speed_p
         cos_angle = pl.when(denom > 1e-6).then((pl.col("rvx") * pl.col("vx") + pl.col("rvy") * pl.col("vy")) / denom).otherwise(0.0)
 
-        is_head_on = (dist <= 4.0) & (speed_r > 0.05) & (speed_p > 0.05) & (cos_angle < -0.3)
+        is_head_on = (dist <= HEAD_ON_CENTRE_DISTANCE_M) & (speed_r > 0.05) & (speed_p > 0.05) & (cos_angle < -0.3)
         lat_offset = pl.col("rvx") * dy - pl.col("rvy") * dx
 
         pairs_analyzed = (
