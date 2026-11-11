@@ -14,7 +14,7 @@ import subprocess
 import typing
 
 import yaml
-from arena_runtime.env.task_layer import TM_AXES, decode_modes
+from arena_runtime.env.task_layer import decode_modes
 from rclpy.parameter import Parameter
 
 from .lockstep import LockstepSummary
@@ -246,8 +246,6 @@ class ProgressLog:
     def __init__(self, path: pathlib.Path) -> None:
         self._path = path
         is_empty = not path.exists() or path.stat().st_size == 0
-        if not is_empty:
-            _upgrade_header(path)
         self._fh = path.open("a", newline="")
         if is_empty:
             self._fh.write(self._HEADER + "\n")
@@ -410,50 +408,9 @@ def _rows_by_column(sources: typing.Iterable[pathlib.Path], header: list[str]) -
         for row in records[1:]:
             if len(row) != len(src_header):
                 continue
-            by_name = _map_legacy_columns(dict(zip(src_header, row, strict=True)))
+            by_name = dict(zip(src_header, row, strict=True))
             rows.append([by_name.get(col, "") for col in header])
     return rows
-
-
-def _json_leaves(cell: str) -> dict[str, typing.Any]:
-    return {entry["name"]: entry["value"] for entry in json.loads(cell or "[]")}
-
-
-def _legacy_modes(*, robots: str | None, obstacles: str | None, modules: typing.Iterable[str] | None) -> dict[str, list[str]]:
-    """`modes` of a progress row made before modes: the tm_* fields it carried, an absent field leaves its axis out."""
-    given = dict(zip(TM_AXES, (robots, obstacles, modules), strict=True))
-    return {axis: [name for name in ([value] if isinstance(value, str) else value) if name] for axis, value in given.items() if value is not None}
-
-
-def _legacy_params(modes: dict[str, list[str]], robots_params: typing.Mapping[str, typing.Any], obstacles_params: typing.Mapping[str, typing.Any]) -> dict[str, typing.Any]:
-    """Full-name `params` of a progress row made before modes: a leaf param of the robots or obstacles mode `m` was `task.<m>.<leaf>`."""
-    robots_axis, obstacles_axis, _ = TM_AXES
-    return {f"task.{mode}.{leaf}": value for axis, leaves in ((robots_axis, robots_params), (obstacles_axis, obstacles_params)) for mode in modes.get(axis, [])[:1] for leaf, value in leaves.items()}
-
-
-def _map_legacy_columns(row: dict[str, str]) -> dict[str, str]:
-    """A progress row written before modes with its tm_* and per-axis params columns mapped to `modes` and `params_json`."""
-    if not any(f"tm_{axis}" in row for axis in TM_AXES):
-        return row
-    row = dict(row)
-    robots, obstacles, modules = (row.pop(f"tm_{axis}", None) for axis in TM_AXES)
-    modes = _legacy_modes(robots=robots, obstacles=obstacles, modules=None if modules is None else modules.split(","))
-    params = _legacy_params(modes, _json_leaves(row.pop("robots_params_json", "")), _json_leaves(row.pop("obstacles_params_json", "")))
-    return {**row, "modes": json.dumps(modes, sort_keys=True), "params_json": json.dumps([{"name": name, "value": value} for name, value in params.items()])}
-
-
-def _upgrade_header(path: pathlib.Path) -> None:
-    """Rewrite a progress csv under ProgressLog._HEADER when its header differs."""
-    lines = _csv_lines(path)
-    if not lines or lines[0].rstrip("\r\n") == ProgressLog._HEADER:
-        return
-    header = next(csv.reader([ProgressLog._HEADER]))
-    rows = _rows_by_column([path], header)
-    tmp = path.with_suffix(".csv.upgrade.tmp")
-    with tmp.open("w", newline="") as out:
-        out.write(ProgressLog._HEADER + "\n")
-        csv.writer(out).writerows(rows)
-    os.replace(tmp, path)
 
 
 def _folded_progress(path: pathlib.Path) -> tuple[list[str], list[list[str]]]:
