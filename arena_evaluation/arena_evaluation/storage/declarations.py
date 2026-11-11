@@ -853,6 +853,7 @@ _CONTACT_NULLABLE: Final[tuple[str, ...]] = (
 ) + declared_columns(FactTable.CONTACTS)
 _PEDESTRIAN_NULLABLE: Final[tuple[str, ...]] = (
     "ped_policy",
+    "is_blind",
     "desired_speed",
     "radius_m",
     "spawn_x",

@@ -1183,8 +1183,11 @@ class ScopedEvaluator:
                 "round_trips_completed": int(ped_res.get("round_trips_completed") or 0),
             }
             row.update(_declared_fact_values(ped_res, FactTable.PEDESTRIANS))
-            base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE, outcome.provenance)
-            row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
+            provenance = dict(outcome.provenance)
+            if row["is_blind"] is None:
+                provenance.setdefault("is_blind", f"is_blind:{NOT_RECORDED}")
+            base_reason = _row_null_reason(row, _PEDESTRIAN_NULLABLE, provenance)
+            row["null_reason"] = _merge_provenance_reasons(base_reason, provenance, row)
             rows.append(row)
 
         return _frame(rows, PEDESTRIAN_FACT_SCHEMA)

@@ -412,6 +412,7 @@ def test_a_pedestrian_is_blind_only_when_the_crowd_condition_is_known() -> None:
     blind = _evaluate(blind_episode).pedestrians.row(0, named=True)
 
     assert unknown["is_blind"] is None
+    assert f"is_blind:{NullReason.NOT_RECORDED.value}" in str(unknown["null_reason"])
     assert blind["is_blind"] is True
 
 
