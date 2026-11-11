@@ -39,11 +39,12 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     Trajectory2D,
     episode_encounter_windows,
     extract_ped_tracks,
-    resolve_crowd_condition,
 )
 from arena_evaluation.processing.metrics.social.proxemics import (
     pedestrian_intrusion_counts_frame,
 )
+from arena_evaluation.processing.pose_anchor import pose_frame as pose_frame_of
+from arena_evaluation.processing.validity import episode_validity
 from arena_evaluation.processing.windows import (
     ACTOR_PEDESTRIAN,
     DEFAULT_DETECTOR_PARAMS,
@@ -79,20 +80,23 @@ from arena_evaluation.storage.declarations import (
     ROBOT_FACT_SCHEMA,
     FactTable,
     MetricDeclaration,
+    NullReason,
     ScopedFactTables,
+    canonical_null_reason,
     declarations_for,
+    resolve_crowd_condition,
     write_fact_tables,
 )
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 EVALUATOR_VERSION: Final[str] = "wp2-scoped-evaluator-v1"
 
-NO_SAMPLES: Final[str] = "no_samples"
-PEDSIM_UNAVAILABLE: Final[str] = "pedsim_unavailable"
-REFERENCE_MISSING: Final[str] = "reference_missing"
-ZERO_DENOMINATOR: Final[str] = "zero_denominator"
-TOPIC_MISSING: Final[str] = "topic_missing"
-SERIES_MISSING: Final[str] = "series_missing"
+NO_SAMPLES: Final[str] = NullReason.NO_SAMPLES.value
+PEDSIM_UNAVAILABLE: Final[str] = NullReason.PEDSIM_UNAVAILABLE.value
+REFERENCE_MISSING: Final[str] = NullReason.REFERENCE_MISSING.value
+ZERO_DENOMINATOR: Final[str] = NullReason.ZERO_DENOMINATOR.value
+TOPIC_MISSING: Final[str] = NullReason.TOPIC_MISSING.value
+NOT_RECORDED: Final[str] = NullReason.NOT_RECORDED.value
 
 # Registry provenance kinds that keep the legacy `field:no_samples` base reason; any other code
 # (e.g. `reference_exceeds_path`) replaces it as the field's distinct reason.
@@ -126,6 +130,8 @@ ROBOT_ACOUSTICS_TOPIC: Final[str] = "robot_acoustics"
 CONTACT_PRE_WINDOW_S: Final[float] = 0.5
 CONTACT_POST_WINDOW_S: Final[float] = 0.5
 METRES_PER_WH_J: Final[float] = 3600.0
+#: Episode columns whose NULL means "the contact stream did not say", explained by their own code.
+_CONTACT_SUCCESS_FLAGS: Final[tuple[str, ...]] = ("success_no_ped_contact", "success_no_robot_fault")
 _ENV_PREFIX: Final[re.Pattern[str]] = re.compile(r"^env_[0-9]+_")
 
 
@@ -231,7 +237,7 @@ def _null_reason_expression(nullable: tuple[str, ...]) -> pl.Expr:
 
 
 def _merge_provenance_reasons(base_reason: str, provenance: Mapping[str, str], row: Mapping[str, object]) -> str:
-    """Combine field missingness codes with registry topic_missing and exception provenance."""
+    """Combine field missingness codes with registry topic_missing and exception provenance, on the vocabulary."""
     parts = [part for part in base_reason.split(";") if part]
     seen = set(parts)
     for key, code in provenance.items():
@@ -239,7 +245,7 @@ def _merge_provenance_reasons(base_reason: str, provenance: Mapping[str, str], r
             if code not in seen:
                 parts.append(code)
                 seen.add(code)
-    return ";".join(parts)
+    return canonical_null_reason(";".join(parts))
 
 
 def _declared_value(value: object, declaration: MetricDeclaration) -> object:
@@ -352,6 +358,38 @@ def _robot_trajectory_from_frame(robot_tracks: pl.DataFrame | None, radius_m: fl
         ),
         radius_m=radius_m,
     )
+
+
+def _contact_stream_recorded(episode: AlignedEpisodeBundle) -> bool:
+    """Whether the recording carries a collision stream at all; without one the contact counts are unknown."""
+    return _table(episode, COLLISION_CONTACTS_TOPIC) is not None or _table(episode, COLLISION_EVENTS_TOPIC) is not None
+
+
+def _success_without_contact(success: object, contacts: int, contacts_known: bool) -> bool | None:
+    """``success AND no such contact``: FALSE on any contact, TRUE only when the stream proves there were none."""
+    if success is None:
+        return None
+    if not bool(success) or contacts:
+        return False
+    return True if contacts_known else None
+
+
+def _robot_track_window(robot_tracks: pl.DataFrame | None) -> tuple[int | None, int | None]:
+    """First and last ground-truth stamp of the episode, ``(None, None)`` without a track."""
+    if not _has_rows(robot_tracks):
+        return None, None
+    stamps = typing.cast(pl.DataFrame, robot_tracks).get_column("t_ns").drop_nulls()
+    if len(stamps) == 0:
+        return None, None
+    return int(stamps.min()), int(stamps.max())
+
+
+def _episode_pose_frame(episode: AlignedEpisodeBundle, metrics: Mapping[str, Any], robot_tracks: pl.DataFrame | None) -> str | None:
+    """TF parent of the episode pose: the pipeline's published value, else the bundle's own transforms."""
+    published = metrics.get("pose_frame")
+    if isinstance(published, str) and published:
+        return published
+    return pose_frame_of(_table(episode, "tf"), _robot_track_window(robot_tracks))
 
 
 class ScopedEvaluator:
@@ -550,7 +588,7 @@ class ScopedEvaluator:
                             "ped_id": ped_id,
                             "ped_name": str(ped_names[0]) if len(ped_names) > 0 else ped_id,
                             "ped_policy": str(ped_policies[0]) if len(ped_policies) > 0 else None,
-                            "is_blind": crowd_condition == "blind",
+                            "is_blind": None if crowd_condition is None else crowd_condition == "blind",
                             "desired_speed": _float(ped_speeds[0]) if len(ped_speeds) > 0 else None,
                             "radius_m": _float(ped_radii[0]) if len(ped_radii) > 0 else None,
                             "spawn_x": _float(ped_xs[0]) if len(ped_xs) > 0 else None,
@@ -878,12 +916,11 @@ class ScopedEvaluator:
         collisions_ped = _int(metrics.get("collision_amount_pedestrian"))
         collisions_wall = _int(metrics.get("collision_amount_wall"))
         collisions_static = _int(metrics.get("collision_amount_static"))
-        # Without the recorded collision stream a zero would claim "no collision happened"; the
-        # honest value is unknown, carried as null and explained by `null_reason`.
-        # Presence of the stream, not its row count: an empty stream means "no collision happened",
-        # an absent one means "unknown". Only the second is null.
-        collision_stream = _table(episode, COLLISION_EVENTS_TOPIC) is not None
-        collision_known = collision_stream or bool(contact_rows)
+        # Without a recorded collision stream a zero would claim "no collision happened"; the honest
+        # value is unknown, carried as null and explained by `null_reason`. The stream's presence,
+        # not its row count, decides: an empty stream means "no collision happened", an absent one
+        # means "unknown" - and without a robot trajectory no contact can be detected either.
+        collision_known = _has_rows(robot_tracks) and (_contact_stream_recorded(episode) or bool(contact_rows))
         row: dict[str, object] = {
             "run_id": run_id,
             "episode_id": int(episode_id),
@@ -902,13 +939,22 @@ class ScopedEvaluator:
             "min_ped_clearance_m": _float(metrics.get("min_pedestrian_clearance")),
             "total_collisions_ped": collisions_ped if collisions_ped is not None else (pedestrian_contacts if collision_known else None),
             "total_collisions_static": ((collisions_wall or 0) + (collisions_static or 0) if collisions_wall is not None or collisions_static is not None else (static_contacts if collision_known else None)),
-            "success_no_robot_fault": None if success is None else bool(success) and robot_fault_contacts == 0,
             "mar": _float(metrics.get("mar")),
             "pfi": _float(metrics.get("pfi")),
             "robot_path_dev_m": _float(metrics.get("robot_path_deviation_m")),
             "total_acoustic_dose_pa2s": _float(metrics.get("total_acoustic_dose_pa2s")),
         }
         row.update(_declared_fact_values(metrics, FactTable.EPISODES))
+        # Derived flags come after the declared copy: they are policy verdicts, never calculator outputs.
+        row["success_no_ped_contact"] = _success_without_contact(success, pedestrian_contacts, collision_known)
+        row["success_no_robot_fault"] = _success_without_contact(success, robot_fault_contacts, collision_known)
+        row["pose_frame"] = _episode_pose_frame(episode, metrics, robot_tracks)
+        integrity = metrics.get("integrity")
+        row["is_valid_for_ranking"], row["invalid_reason"] = episode_validity(
+            robot_tracks=robot_tracks,
+            outcome_state=episode.outcome_state,
+            integrity=integrity if isinstance(integrity, (list, tuple)) else (),
+        )
         row["null_reason"] = self._episode_null_reason(episode, row, provenance or {})
         return row
 
@@ -918,12 +964,15 @@ class ScopedEvaluator:
         row: Mapping[str, object],
         provenance: Mapping[str, str],
     ) -> str:
-        """Episode provenance: missing-field codes, missing trajectory/pedestrian stream topics, and calculator exceptions."""
-        reasons = [_row_null_reason(row, _EPISODE_NULLABLE, provenance)]
+        """Episode provenance: missing-field codes, missing stream topics, the contact flags and calculator exceptions."""
+        nullable = tuple(column for column in _EPISODE_NULLABLE if column not in _CONTACT_SUCCESS_FLAGS)
+        reasons = [_row_null_reason(row, nullable, provenance)]
         if not _has_rows(_table(episode, ROBOT_TRACKS_TOPIC)):
             reasons.append(f"{TOPIC_MISSING}:{ROBOT_TRACKS_TOPIC}")
         if not _has_rows(_table(episode, PEDESTRIAN_TRACKS_TOPIC)):
             reasons.append(PEDSIM_UNAVAILABLE)
+        unknown_code = NOT_RECORDED if row.get("success") is not None else NO_SAMPLES
+        reasons.extend(f"{column}:{unknown_code}" for column in _CONTACT_SUCCESS_FLAGS if row.get(column) is None)
         base = ";".join(reason for reason in reasons if reason)
         return _merge_provenance_reasons(base, provenance, row)
 
@@ -963,17 +1012,6 @@ class ScopedEvaluator:
             row["null_reason"] = _merge_provenance_reasons(base_reason, outcome.provenance, row)
             rows.append(row)
         return rows
-
-    @staticmethod
-    def _fault_attribution(collider_kind: object, record: Mapping[str, Any]) -> str:
-        """Final blame of a contact: a static-world impact is the robot's, otherwise the counterfactual record decides."""
-        if collider_kind in ("wall", "static"):
-            return "robot"
-        if record.get("is_robot_fault") is True or record.get("is_robot_fault_lower_bound") is True:
-            return "robot"
-        if record.get("is_robot_fault") is False:
-            return "pedestrian"
-        return "unavoidable"
 
     def _encounter_fact_rows(
         self,
@@ -1128,7 +1166,8 @@ class ScopedEvaluator:
                 "ped_id": ped_id,
                 "ped_name": ident["ped_name"],
                 "ped_policy": ident["ped_policy"],
-                "is_blind": bool(ident["is_blind"]),
+                # Awareness follows the episode's crowd condition: unknown crowd, unknown awareness.
+                "is_blind": None if ident["is_blind"] is None else bool(ident["is_blind"]),
                 "desired_speed": _float(ident["desired_speed"]),
                 "radius_m": _float(ident["radius_m"]),
                 "spawn_x": _float(ident["spawn_x"]),

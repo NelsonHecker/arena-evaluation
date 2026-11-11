@@ -56,3 +56,15 @@ def resolve_pose_source(bundle: TopicBundle, window: tuple[int | None, int | Non
         kind = "tf" if classify(tracks) == "dense" else "tf_sparse"
         return tracks, PoseSource(kind, len(tracks))
     return None, PoseSource("absent", 0)
+
+
+def pose_frame(transforms: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> str | None:
+    """The TF parent the robot pose came from: the most frequent ``parent_frame`` inside the episode window."""
+    frame = _windowed(_collect(transforms), window)
+    if frame is None or "parent_frame" not in frame.columns:
+        return None
+    frame = frame.filter(pl.col("parent_frame").is_not_null())
+    if len(frame) == 0:
+        return None
+    # ties break alphabetically, so the same recording always yields the same frame
+    return str(frame.get_column("parent_frame").mode().sort()[0])

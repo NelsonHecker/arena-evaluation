@@ -25,6 +25,8 @@ from arena_evaluation.storage.declarations import (
     EPISODE_FACT_SCHEMA,
     PHASE_OUTCOME_FACT_SCHEMA,
     ROBOT_FACT_SCHEMA,
+    NullReason,
+    is_known_null_reason,
 )
 from arena_evaluation.storage.exceptions import ContractViolationError
 from arena_evaluation.storage.star_schema import (
@@ -171,6 +173,17 @@ def test_an_unexplained_null_fails(tmp_path: pathlib.Path) -> None:
     unexplained = [violation for violation in report.violations if violation.check == "null_reason_missing"]
     assert unexplained and unexplained[0].table == "fact_episodes"
     assert "time_to_goal_s" in unexplained[0].column
+
+
+def test_a_null_metric_with_a_vocabulary_reason_passes(tmp_path: pathlib.Path) -> None:
+    reason = f"time_to_goal_s:{NullReason.NO_SAMPLES.value}"
+    assert is_known_null_reason(reason)
+    root = _write_benchmark(
+        tmp_path / "benchmarks" / RUN_ID,
+        fact_episodes=_frame([_episode_row(time_to_goal_s=None, null_reason=reason)], EPISODE_FACT_SCHEMA),
+    )
+    report = check_benchmark(root)
+    assert not [violation for violation in report.violations if violation.check == "null_reason_missing"]
 
 
 def test_a_window_that_does_not_move_forward_fails(tmp_path: pathlib.Path) -> None:

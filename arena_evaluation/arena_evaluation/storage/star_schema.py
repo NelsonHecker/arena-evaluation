@@ -34,6 +34,7 @@ from arena_evaluation.storage.declarations import (
     PHASE_OUTCOME_FACT_SCHEMA,
     ROBOT_FACT_SCHEMA,
     ROBOT_TRACKS_TOPIC,
+    NullReason,
     ScopedFactTables,
     resolve_crowd_condition,
     write_fact_tables,
@@ -125,6 +126,9 @@ DIM_EPISODES_SCHEMA: Final[pl.Schema] = pl.Schema(
         "duration_s": pl.Float64,
         "outcome_state": pl.Int64,
         "outcome_info": pl.String,
+        # Why a dimension value is NULL, in the closed `null_reason` vocabulary of declarations.py:
+        # `crowd_condition:not_recorded` means the run neither launched nor recorded a visibility switch.
+        "null_reason": pl.String,
     }
 )
 
@@ -240,6 +244,26 @@ def _opt_str(value: object) -> str | None:
 def _env_from_robot_id(robot_id: str, fallback: str = "env_0") -> str:
     match = _ENV_TOKEN_RE.match(robot_id)
     return match.group(1) if match is not None else fallback
+
+
+def _lifecycle_seed(lifecycle: pl.DataFrame | pl.LazyFrame | None) -> int | None:
+    """Last recorded ``episode_lifecycle.seed`` of the episode, None when the recording carries none."""
+    if lifecycle is None:
+        return None
+    frame = lifecycle.collect() if isinstance(lifecycle, pl.LazyFrame) else lifecycle
+    if len(frame) == 0 or "seed" not in frame.columns:
+        return None
+    present = frame.get_column("seed").drop_nulls()
+    return None if len(present) == 0 else int(present[-1])
+
+
+def _recorded_seed(metadata: RunMetadata | None, lifecycle: pl.DataFrame | pl.LazyFrame | None) -> int | None:
+    """Seed of the episode: the migrated ``metadata.params['seed']``, else the recorded lifecycle seed, else None.
+
+    The episode id is an ordinal, never a seed: an episode whose run never recorded a seed stays NULL.
+    """
+    recorded = _opt_int(metadata.params.get("seed")) if metadata is not None else None
+    return recorded if recorded is not None else _lifecycle_seed(lifecycle)
 
 
 def _parse_lidar_variant(raw_model: str, robot_params: RobotParams | None) -> str | None:
@@ -427,9 +451,7 @@ class StarSchemaBuilder:
         robot_model = raw_model.partition("[")[0] or "unknown"
         world = metadata.map if metadata is not None and metadata.map else descriptor.map
         scenario = str(metadata.params.get("scenario", descriptor.stage)) if metadata is not None else descriptor.stage
-        seed_val = _opt_int(metadata.params.get("seed")) if metadata is not None else None
-        if seed_val is None:
-            seed_val = int(episode_id)
+        seed_val = metadata.params.get("seed") if metadata is not None else None
 
         row: dict[str, object] = {
             "run_id": run_id,
@@ -450,12 +472,13 @@ class StarSchemaBuilder:
             "crowd_condition": None,
             "ped_policy_default": None,
             "crowd_size": None,
-            "seed": seed_val,
+            "seed": _opt_int(seed_val),
             "is_reference": bool(descriptor.is_reference),
             "reference_type": descriptor.reference_type,
             "duration_s": None,
             "outcome_state": metadata.outcome_state if metadata is not None else None,
             "outcome_info": metadata.outcome_info if metadata is not None else None,
+            "null_reason": f"crowd_condition:{NullReason.NOT_RECORDED.value}",
         }
         meta_params = metadata.params if metadata is not None else {}
         robot_row: dict[str, object] = {
@@ -472,7 +495,7 @@ class StarSchemaBuilder:
             "max_angular_vel": _opt_float(meta_params.get("max_angular_vel")),
             "linear_acc": _opt_float(meta_params.get("linear_acc")),
             "linear_decel": _opt_float(meta_params.get("linear_decel")),
-            "robot_mass_kg": float(self.robot_params.total_mass) if self.robot_params else None,
+            "robot_mass_kg": float(self.robot_params.mass) if self.robot_params else None,
             "robot_radius": float(self.robot_params.robot_radius) if self.robot_params else None,
             "static_power_w": _opt_float(meta_params.get("static_power_w")),
             "start_x": None,
@@ -566,7 +589,7 @@ class StarSchemaBuilder:
         episode_id: int,
         env_id: str,
         robot_id: str,
-        crowd_condition: str,
+        crowd_condition: str | None,
         robot_params: RobotParams,
         descriptor: EpisodeDescriptor | None,
         metadata: RunMetadata | None,
@@ -594,10 +617,7 @@ class StarSchemaBuilder:
                 ped_policy_default = str(policies[0])
 
         crowd_size = int(episode.num_pedestrians) if episode.num_pedestrians > 0 else int(facts.pedestrians.height)
-        seed_raw = human_params.get("seed") if human_params.get("seed") is not None else meta_params.get("seed", metrics_config.get("seed"))
-        seed = _opt_int(seed_raw)
-        if seed is None:
-            seed = int(episode_id)
+        seed = _recorded_seed(metadata, (episode.topics or {}).get("episode_lifecycle"))
 
         is_reference = bool((metadata.is_reference if metadata is not None else False) or (descriptor.is_reference if descriptor is not None else False) or bool(metrics_config.get("is_reference", False)))
         reference_type = (metadata.reference_type if metadata is not None and metadata.reference_type else None) or (descriptor.reference_type if descriptor is not None and descriptor.reference_type else None) or _opt_str(metrics_config.get("reference_type"))
@@ -653,6 +673,7 @@ class StarSchemaBuilder:
             "duration_s": duration_s,
             "outcome_state": outcome_state,
             "outcome_info": outcome_info,
+            "null_reason": None if crowd_condition is not None else f"crowd_condition:{NullReason.NOT_RECORDED.value}",
         }
         return pl.DataFrame([row], schema=DIM_EPISODES_SCHEMA)
 

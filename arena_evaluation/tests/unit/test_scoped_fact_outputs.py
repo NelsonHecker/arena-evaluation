@@ -220,8 +220,8 @@ _COLLISION_CONTACTS_SCHEMA: typing.Final[dict[str, pl.DataType]] = {
     "distance": pl.Float64,
 }
 
-_CLOSER_LABELS: typing.Final[frozenset[str]] = frozenset({"robot", "pedestrian", "mutual", "static"})
-_FAULT_ATTRIBUTIONS: typing.Final[frozenset[str]] = frozenset({"robot", "pedestrian", "unavoidable"})
+_CLOSER_LABELS: typing.Final[frozenset[str]] = frozenset({"robot", "pedestrian", "other_robot", "mutual", "static"})
+_FAULT_ATTRIBUTIONS: typing.Final[frozenset[str]] = frozenset({"robot", "pedestrian", "other_robot", "mutual", "unavoidable"})
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -500,6 +500,8 @@ def _assert_closer_label_is_consistent(closer_label: object, robot_share: object
     if closer_label == "robot":
         assert robot_share > 0.5
     elif closer_label == "pedestrian":
+        assert robot_share < 0.5
+    elif closer_label == "other_robot":
         assert robot_share < 0.5
     elif closer_label == "mutual":
         assert 0.25 <= robot_share <= 0.75
@@ -960,7 +962,12 @@ def test_absent_collision_contacts_yields_empty_contacts(episode: AlignedEpisode
     row = tables.episodes.row(0, named=True)
     assert row["total_collisions_ped"] == _EPISODE_METRICS["collision_amount_pedestrian"]
     assert row["total_collisions_static"] == 4
-    assert row["success_no_robot_fault"] is True
+    # The collision stream was not recorded, so "no robot fault" is unknown, never True.
+    assert row["success_no_robot_fault"] is None
+    assert row["success_no_ped_contact"] is None
+    reason = typing.cast(str, row["null_reason"])
+    assert "success_no_robot_fault:not_recorded" in reason
+    assert "success_no_ped_contact:not_recorded" in reason
 
 
 def test_detector_edge_parameter_changes_encounter_count(episode: AlignedEpisodeBundle, tables: ScopedFactTables) -> None:
@@ -1394,4 +1401,5 @@ def test_supplied_episode_provenance_survives_into_the_fact_row(episode: Aligned
     row = tables.episodes.row(0, named=True)
 
     assert row["path_efficiency"] is None
-    assert "path_efficiency:reference_exceeds_path" in typing.cast(str, row["null_reason"])
+    # The producer's token is normalized to the closed vocabulary at publish time.
+    assert "path_efficiency:invalid_episode:reference_exceeds_path" in typing.cast(str, row["null_reason"])

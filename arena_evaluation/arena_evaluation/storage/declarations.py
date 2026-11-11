@@ -20,6 +20,98 @@ ROBOT_VISIBILITY_PARAM: Final[str] = "humansim.robots_visible"
 CrowdCondition = Literal["visible", "blind"]
 
 
+class NullReason(StrEnum):
+    """The closed ``null_reason`` vocabulary of the fact tables (01 Data Interfaces section 5).
+
+    A metric cell is NULL only with a reason drawn from this vocabulary, written
+    ``<column>:<code>`` (``<column>:<code>:<parameter>`` for the three parameterised codes in
+    :data:`NULL_REASON_PARAMETERISED`). A missing measurement is never a zero.
+    """
+
+    TOPIC_MISSING = "topic_missing"
+    PEDSIM_UNAVAILABLE = "pedsim_unavailable"
+    NO_SAMPLES = "no_samples"
+    REFERENCE_MISSING = "reference_missing"
+    NO_CONFLICT = "no_conflict"
+    ZERO_DENOMINATOR = "zero_denominator"
+    NOT_RECORDED = "not_recorded"
+    NOT_APPLICABLE = "not_applicable"
+    INVALID_EPISODE = "invalid_episode"
+    EXCEPTION = "exception"
+
+
+#: Codes that carry a parameter after the code itself.
+NULL_REASON_PARAMETERISED: Final[frozenset[str]] = frozenset({NullReason.TOPIC_MISSING.value, NullReason.INVALID_EPISODE.value, NullReason.EXCEPTION.value})
+
+#: One-line meaning of every vocabulary member, the documentation the schema tool serves.
+NULL_REASON_MEANINGS: Final[Mapping[str, str]] = {
+    f"{NullReason.TOPIC_MISSING.value}:<topic>": "the recording carries no <topic> stream, so the value was never measured",
+    NullReason.PEDSIM_UNAVAILABLE.value: "the scenario spawned no dynamic pedestrians",
+    NullReason.NO_SAMPLES.value: "the stream was recorded but holds no sample inside the window",
+    NullReason.REFERENCE_MISSING.value: "no robot-free twin episode matched this stage and seed",
+    NullReason.NO_CONFLICT.value: "clearance stayed above the encounter distance, so nothing happened",
+    NullReason.ZERO_DENOMINATOR.value: "the ratio's denominator is zero inside this window",
+    NullReason.NOT_RECORDED.value: "the recording does not carry this parameter or value",
+    NullReason.NOT_APPLICABLE.value: "the quantity has no meaning for this row's kind",
+    f"{NullReason.INVALID_EPISODE.value}:<why>": "the episode is not rankable; <why> names the defect",
+    f"{NullReason.EXCEPTION.value}:<Class>": "the calculator raised <Class>",
+}
+
+#: ``<why>`` values of ``invalid_episode:<why>``, the defects that make an episode unrankable.
+INVALID_EPISODE_REASONS: Final[Mapping[str, str]] = {
+    "pose_teleport": "the ground-truth pose jumps faster than any robot can move, so the trajectory is not physical",
+    "incomplete_recording": "the recording has no terminal outcome or reports lost sections",
+    "simulator_error": "the simulator ended the episode with FATAL",
+    "missing_stream:<topic>": "a stream the metric needs was not recorded",
+    "reference_exceeds_path": "the reference geodesic is longer than the travelled path, so path efficiency is out of range",
+}
+
+#: Producer tokens the pipeline may still emit and the vocabulary code each one becomes.
+LEGACY_NULL_REASON_CODES: Final[Mapping[str, str]] = {
+    "series_missing": NullReason.NOT_RECORDED.value,
+    "reference_exceeds_path": f"{NullReason.INVALID_EPISODE.value}:reference_exceeds_path",
+}
+
+
+def split_null_reason_item(item: str) -> tuple[str, str, str]:
+    """``(column, code, parameter)`` of one ``;``-separated provenance item; ``column`` is empty for a bare code."""
+    first, separator, rest = item.partition(":")
+    if not separator:
+        return "", item, ""
+    if first in NULL_REASON_PARAMETERISED:
+        return "", first, rest
+    code, _, parameter = rest.partition(":")
+    return first, code, parameter
+
+
+def is_known_null_reason(text: str) -> bool:
+    """Whether every item of a published ``null_reason`` is a vocabulary code with its parameter."""
+    return all(_is_known_item(item) for item in text.split(";") if item)
+
+
+def _is_known_item(item: str) -> bool:
+    """One provenance item is a known code, and a parameterised one carries its parameter."""
+    _, code, parameter = split_null_reason_item(item)
+    if code in NULL_REASON_PARAMETERISED:
+        return bool(parameter)
+    return code in NULL_REASON_MEANINGS
+
+
+def canonical_null_reason_item(item: str) -> str:
+    """One provenance item with a legacy producer token replaced by its vocabulary code."""
+    column, code, parameter = split_null_reason_item(item)
+    replacement = LEGACY_NULL_REASON_CODES.get(code)
+    if replacement is None:
+        return item
+    prefix = f"{column}:" if column else ""
+    return f"{prefix}{replacement}:{parameter}" if parameter else f"{prefix}{replacement}"
+
+
+def canonical_null_reason(text: str) -> str:
+    """``;``-joined provenance with every legacy producer token replaced by its vocabulary code."""
+    return ";".join(canonical_null_reason_item(item) for item in text.split(";") if item)
+
+
 class MetricScope(StrEnum):
     """The five first-class fact table evaluation scopes."""
 
@@ -167,30 +259,32 @@ def resolve_crowd_visibility(
     return CrowdVisibility(True, "visible", "default")
 
 
+def recorded_robot_visibility(params: Mapping[str, Any] | None) -> bool | None:
+    """Recorded ``humansim.robots_visible`` parameter, None when the recording carries none."""
+    if params is None:
+        return None
+    value = params.get(ROBOT_VISIBILITY_PARAM)
+    if value is not None:
+        return bool(value)
+    leaf = ROBOT_VISIBILITY_PARAM.rsplit(".", maxsplit=1)[-1]
+    for name, parameter in params.items():
+        if name.rsplit(".", maxsplit=1)[-1] == leaf:
+            return bool(parameter)
+    return None
+
+
 def resolve_crowd_condition(
     episode: AlignedEpisodeBundle,
     metrics_config: Mapping[str, Any] | None = None,
-) -> CrowdCondition:
-    """Crowd visibility of the episode, through the shared resolver: metrics config, accepted parameter, run metadata."""
-    accepted: bool | None = None
-    params = episode.human_params
-    if params is not None:
-        value = params.get(ROBOT_VISIBILITY_PARAM)
-        if value is not None:
-            accepted = bool(value)
-        else:
-            leaf = ROBOT_VISIBILITY_PARAM.rsplit(".", maxsplit=1)[-1]
-            for name, parameter in params.items():
-                if name.rsplit(".", maxsplit=1)[-1] == leaf:
-                    accepted = bool(parameter)
-                    break
-    visibility = resolve_crowd_visibility(accepted, None, metrics_config)
-    if accepted is not None or visibility.source == "metrics_config":
+) -> CrowdCondition | None:
+    """Crowd visibility of the episode: metrics config, recorded parameter, run metadata, else None when unknown."""
+    visibility = resolve_crowd_visibility(recorded_robot_visibility(episode.human_params), None, metrics_config)
+    if visibility.visible is not None:
         return "visible" if visibility.visible else "blind"
     run = episode.run
     if run is not None and run.crowd_condition is not None:
-        return run.crowd_condition
-    return "visible"
+        return typing.cast(CrowdCondition, run.crowd_condition)
+    return None
 
 
 _EPISODES: Final[FactTable] = FactTable.EPISODES
@@ -323,6 +417,7 @@ METRIC_DECLARATIONS: Final[tuple[MetricDeclaration, ...]] = (
     MetricDeclaration(name="spl_geodesic", unit="", fact_table=_EPISODES, dtype=pl.Float64, direction="higher", description="performance metric of the vln_metrics calculator"),
     MetricDeclaration(name="stuck", unit="", fact_table=_EPISODES, dtype=pl.Boolean, direction="lower", description="performance metric of the vln_metrics calculator"),
     MetricDeclaration(name="success_geodesic", unit="", fact_table=_EPISODES, dtype=pl.Boolean, direction="higher", description="performance metric of the vln_metrics calculator"),
+    MetricDeclaration(name="pose_frame", unit="", fact_table=_EPISODES, dtype=pl.String, direction="", description="TF parent frame the ground-truth pose came from inside the episode window (map, world, an odom frame or the simulator frame); NULL when the recording carries no transform"),
     # --- ROBOT scope -> fact_robots ----------------------------------------------------
     MetricDeclaration(name="acoustic_cost", unit="s/m", fact_table=_ROBOTS, dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
     MetricDeclaration(name="acoustic_startle_factor", unit="dBA/s", fact_table=_ROBOTS, dtype=pl.Float64, direction="lower", description="ecological metric of the acoustics calculator"),
@@ -492,7 +587,13 @@ _BASE_FACT_SCHEMAS: Final[Mapping[str, pl.Schema]] = {
             "min_ped_clearance_m": pl.Float64,
             "total_collisions_ped": pl.Int64,
             "total_collisions_static": pl.Int64,
+            # Success conjoined with "no contact of that kind"; NULL while the collision stream is unknown,
+            # FALSE as soon as one such contact is recorded, TRUE only when the stream was recorded and empty.
+            "success_no_ped_contact": pl.Boolean,
             "success_no_robot_fault": pl.Boolean,
+            # Ranking validity of the episode; invalid_reason NULL means valid (08 H1.5).
+            "is_valid_for_ranking": pl.Boolean,
+            "invalid_reason": pl.String,
             "mar": pl.Float64,
             "pfi": pl.Float64,
             "robot_path_dev_m": pl.Float64,
@@ -721,12 +822,15 @@ _EPISODE_NULLABLE: Final[tuple[str, ...]] = (
     "min_ped_clearance_m",
     "total_collisions_ped",
     "total_collisions_static",
+    "success_no_ped_contact",
     "success_no_robot_fault",
     "mar",
     "pfi",
     "robot_path_dev_m",
     "total_acoustic_dose_pa2s",
 ) + declared_columns(FactTable.EPISODES)
+# `invalid_reason` is NULL exactly when the episode is valid, so its NULL is a value: it never
+# demands a `null_reason`. `is_valid_for_ranking` is computed for every evaluated episode.
 _ENCOUNTER_NULLABLE: Final[tuple[str, ...]] = (
     "detour_time_s",
     "path_deviation_m",
@@ -744,6 +848,7 @@ _CONTACT_NULLABLE: Final[tuple[str, ...]] = (
     "robot_speed_at_impact_mps",
     "obstacle_speed_at_impact_mps",
     "closer_label",
+    "fault_attributed_to",
     "robot_closing_share",
 ) + declared_columns(FactTable.CONTACTS)
 _PEDESTRIAN_NULLABLE: Final[tuple[str, ...]] = (

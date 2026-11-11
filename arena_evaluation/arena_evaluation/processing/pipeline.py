@@ -267,23 +267,6 @@ def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict
     return {"crowd_visible": visibility.visible, "crowd_condition": visibility.condition, "crowd_visibility_source": visibility.source}
 
 
-def _pose_frame(transforms: pl.DataFrame | pl.LazyFrame | None, window: tuple[int | None, int | None]) -> str | None:
-    """The TF parent the robot pose came from: the most frequent parent_frame of the transforms inside the episode window."""
-    if transforms is None:
-        return None
-    df = transforms.collect() if isinstance(transforms, pl.LazyFrame) else transforms
-    start, end = window
-    if start is not None:
-        df = df.filter(pl.col("t_ns") >= start)
-    if end is not None:
-        df = df.filter(pl.col("t_ns") <= end)
-    df = df.filter(pl.col("parent_frame").is_not_null())
-    if len(df) == 0:
-        return None
-    # ties break alphabetically, so the same recording always yields the same frame
-    return str(df["parent_frame"].mode().sort()[0])
-
-
 def _episode_endpoints(
     aligned_df: pl.DataFrame,
     plan: pl.DataFrame | pl.LazyFrame | None,
@@ -381,7 +364,7 @@ from arena_evaluation.processing.native_bundle import NativeBundle
 from arena_evaluation.processing.parquet_store import TopicParquetStore
 from arena_evaluation.processing.pedestrian_frames import ALIGN_TOLERANCE_NS as _ALIGN_TOLERANCE_NS
 from arena_evaluation.processing.pedestrian_frames import peak_pedestrian_count
-from arena_evaluation.processing.pose_anchor import resolve_pose_source
+from arena_evaluation.processing.pose_anchor import pose_frame, resolve_pose_source
 from arena_evaluation.processing.pose_segments import ride_arrival_times
 from arena_evaluation.storage.manifest import MetadataWriter
 
@@ -907,7 +890,7 @@ class ProcessingPipeline:
                     ep_metrics["reference_type"] = ep.reference_type
                     ep_metrics["integrity"] = integrity
                     ep_metrics["pose_source"] = pose_source.kind
-                    ep_metrics["pose_frame"] = _pose_frame(bundle.tf, window)
+                    ep_metrics["pose_frame"] = pose_frame(bundle.tf, window)
                     ep_metrics.update(_crowd_visibility(bundle.episode_lifecycle, episode_manifest))
                     ep_metrics["pose_samples"] = pose_source.samples
                     ep_metrics["status"] = _STATUS_EVALUATED

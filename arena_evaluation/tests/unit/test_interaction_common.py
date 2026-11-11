@@ -17,12 +17,12 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     extract_ped_tracks,
     merge_intervals_ns,
     pedestrian_encounter_spans,
-    resolve_crowd_condition,
     resolve_ped_track,
     resolve_robot_trajectory,
 )
 from arena_evaluation.processing.metrics.social.proxemics import ProxemicsCalculator
 from arena_evaluation.processing.windows import empty_encounter_windows
+from arena_evaluation.storage.declarations import resolve_crowd_condition
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 NS_PER_S = 1_000_000_000
@@ -327,10 +327,10 @@ def test_extract_ped_tracks_drops_non_finite_positions() -> None:
         ({"crowd_visible": True}, "visible"),
         ({"robots_visible": True}, "visible"),
         ({"robots_visible": False}, "blind"),
-        ({}, "visible"),
+        ({}, None),
     ],
 )
-def test_resolve_crowd_condition_honours_explicit_metrics_config(config: dict[str, object], expected: str) -> None:
+def test_resolve_crowd_condition_honours_explicit_metrics_config(config: dict[str, object], expected: str | None) -> None:
     assert resolve_crowd_condition(_episode({}), config) == expected
 
 
