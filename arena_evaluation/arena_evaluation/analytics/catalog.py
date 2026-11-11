@@ -2,6 +2,14 @@
 
 Registers the nine Star Schema base tables (``dim_*`` and ``fact_*``) and
 exposes canonical analytical views as pure Polars ``LazyFrame`` query plans.
+
+Ranking rule of ``v_planner_scorecard``: ``episodes_count`` counts every episode
+in the group, ``valid_episodes`` counts those whose ``is_valid_for_ranking`` is TRUE,
+and ``excluded_episodes`` is the remainder. Success rates and metric means are
+computed over ``valid_episodes`` only (NULL when a group has no valid episode);
+encounter and contact totals cover every episode in the group. An invalid episode is
+therefore never silently dropped: it stays in the counts and explicitly leaves the
+ranking aggregates.
 """
 
 from __future__ import annotations
@@ -183,6 +191,7 @@ _DIM_TREATMENT_COLS: Final[tuple[str, ...]] = (
 _BLAME_LABELS: Final[dict[str, str]] = {
     "robot_blame_contacts": "robot",
     "pedestrian_blame_contacts": "pedestrian",
+    "other_robot_contacts": "other_robot",
     "mutual_contacts": "mutual",
     "static_contacts": "static",
 }
@@ -390,6 +399,8 @@ class BenchmarkCatalog:
         # segment for a plain name and the middle segment for a three-part name.
         planner_parts = pl.col("planner").str.split("-")
         local_planner = pl.when(pl.col("planner").is_null() | (pl.col("planner") == "")).then(pl.lit("unknown")).when(planner_parts.list.len() >= 3).then(planner_parts.list.get(1, null_on_oob=True)).otherwise(planner_parts.list.get(0, null_on_oob=True)).alias("local_planner")
+        # fact_episodes publishes the ranking validity and the pose provenance; both stay
+        # exposed here so a reader never has to re-read the fact file to explain a NULL.
         v_episode_summary = fact_ep.join(dim_ep.select(_DIM_EPISODE_VIEW_COLS), on=list(_JOIN_KEYS), how="left").join(dim_rob.select(_DIM_ROBOT_VIEW_COLS), on=list(_JOIN_KEYS), how="left").with_columns(local_planner)
         self._tables["v_episode_summary"] = v_episode_summary
 
@@ -402,6 +413,7 @@ class BenchmarkCatalog:
 
         scorecard_group_cols = ("world", "scenario", "crowd_condition", "planner", "dispatcher", "robot_model")
         contact_sum_cols = (*_BLAME_LABELS.keys(), "unavoidable_contacts")
+        valid_for_ranking = pl.col("is_valid_for_ranking").fill_null(False)
 
         self._tables["v_planner_scorecard"] = (
             v_episode_summary.join(enc_counts, on=list(_JOIN_KEYS), how="left")
@@ -409,11 +421,14 @@ class BenchmarkCatalog:
             .group_by(scorecard_group_cols)
             .agg(
                 episodes_count=pl.len().cast(pl.Int64),
-                success_rate=pl.col("success").cast(pl.Float64).mean(),
-                success_no_robot_fault_rate=pl.col("success_no_robot_fault").cast(pl.Float64).mean(),
-                mean_time_to_goal_s=pl.col("time_to_goal_s").mean(),
-                mean_path_efficiency=pl.col("path_efficiency").mean(),
-                mean_energy_wh=pl.col("total_energy_wh").mean(),
+                valid_episodes=valid_for_ranking.sum().cast(pl.Int64),
+                excluded_episodes=(pl.len() - valid_for_ranking.sum()).cast(pl.Int64),
+                success_rate=pl.col("success").cast(pl.Float64).filter(valid_for_ranking).mean(),
+                success_no_ped_contact_rate=pl.col("success_no_ped_contact").cast(pl.Float64).filter(valid_for_ranking).mean(),
+                success_no_robot_fault_rate=pl.col("success_no_robot_fault").cast(pl.Float64).filter(valid_for_ranking).mean(),
+                mean_time_to_goal_s=pl.col("time_to_goal_s").filter(valid_for_ranking).mean(),
+                mean_path_efficiency=pl.col("path_efficiency").filter(valid_for_ranking).mean(),
+                mean_energy_wh=pl.col("total_energy_wh").filter(valid_for_ranking).mean(),
                 total_encounters=pl.col("encounter_count").fill_null(0).sum().cast(pl.Int64),
                 total_contacts=pl.col("contact_count").fill_null(0).sum().cast(pl.Int64),
                 **{col: pl.col(col).fill_null(0).sum().cast(pl.Int64) for col in contact_sum_cols},

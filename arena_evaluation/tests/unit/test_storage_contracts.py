@@ -52,7 +52,8 @@ def _episode_row(episode_id: int = 0, **overrides: object) -> dict[str, object]:
         "robot_id": ROBOT_ID,
         "success": True,
         "time_to_goal_s": 5.0,
-        "null_reason": "fixture:no_metric",
+        "is_valid_for_ranking": True,
+        "null_reason": "result:not_recorded",
         **overrides,
     }
 
@@ -67,7 +68,7 @@ def _encounter_row(**overrides: object) -> dict[str, object]:
         "actor_2": "Pedestrian_1",
         "t_start_ns": 0,
         "t_end_ns": 1_000_000_000,
-        "null_reason": "fixture:no_metric",
+        "null_reason": "detour_time_s:no_samples",
         **overrides,
     }
 
@@ -156,7 +157,7 @@ def test_an_orphan_fact_row_fails(tmp_path: pathlib.Path) -> None:
     root = _write_benchmark(
         tmp_path / "benchmarks" / RUN_ID,
         fact_episodes=_frame([_episode_row()], EPISODE_FACT_SCHEMA),
-        fact_robots=_frame([{"run_id": RUN_ID, "episode_id": 0, "env_id": "env_0", "robot_id": "ghost", "null_reason": "fixture:no_metric"}], ROBOT_FACT_SCHEMA),
+        fact_robots=_frame([{"run_id": RUN_ID, "episode_id": 0, "env_id": "env_0", "robot_id": "ghost", "null_reason": None}], ROBOT_FACT_SCHEMA),
     )
     report = check_benchmark(root)
     orphans = [violation for violation in report.violations if violation.check == "orphan_fact"]
@@ -186,6 +187,41 @@ def test_a_null_metric_with_a_vocabulary_reason_passes(tmp_path: pathlib.Path) -
     assert not [violation for violation in report.violations if violation.check == "null_reason_missing"]
 
 
+def test_an_unknown_null_reason_code_fails_and_names_the_table(tmp_path: pathlib.Path) -> None:
+    root = _write_benchmark(
+        tmp_path / "benchmarks" / RUN_ID,
+        fact_episodes=_frame([_episode_row(null_reason="result:made_up")], EPISODE_FACT_SCHEMA),
+    )
+    report = check_benchmark(root)
+    unknown = [violation for violation in report.violations if violation.check == "null_reason_unknown"]
+    assert unknown and unknown[0].table == "fact_episodes"
+    assert unknown[0].column == "null_reason"
+    assert "made_up" in unknown[0].message()
+
+
+def test_a_parameterised_invalid_episode_reason_passes(tmp_path: pathlib.Path) -> None:
+    reason = "path_efficiency:invalid_episode:reference_exceeds_path"
+    assert is_known_null_reason(reason)
+    root = _write_benchmark(
+        tmp_path / "benchmarks" / RUN_ID,
+        fact_episodes=_frame([_episode_row(null_reason=reason)], EPISODE_FACT_SCHEMA),
+    )
+    report = check_benchmark(root)
+    assert not [violation for violation in report.violations if violation.check == "null_reason_unknown"]
+
+
+def test_a_fact_without_a_ranking_verdict_fails(tmp_path: pathlib.Path) -> None:
+    root = _write_benchmark(
+        tmp_path / "benchmarks" / RUN_ID,
+        fact_episodes=_frame([_episode_row(is_valid_for_ranking=None)], EPISODE_FACT_SCHEMA),
+    )
+    report = check_benchmark(root)
+    invalid = [violation for violation in report.violations if violation.check == "ranking_validity_null"]
+    assert invalid and invalid[0].table == "fact_episodes"
+    assert invalid[0].column == "is_valid_for_ranking"
+    assert "1 rows" in invalid[0].detail
+
+
 def test_a_window_that_does_not_move_forward_fails(tmp_path: pathlib.Path) -> None:
     root = _write_benchmark(
         tmp_path / "benchmarks" / RUN_ID,
@@ -210,7 +246,7 @@ def test_a_child_count_that_disagrees_with_the_parent_counter_fails(tmp_path: pa
     root = _write_benchmark(
         tmp_path / "benchmarks" / RUN_ID,
         fact_episodes=_frame([_episode_row(phases_total=2)], EPISODE_FACT_SCHEMA),
-        fact_phase_outcomes=_frame([{"run_id": RUN_ID, "episode_id": 0, "robot_id": ROBOT_ID, "phase_idx": 0, "met": True, "null_reason": "fixture:no_metric"}], PHASE_OUTCOME_FACT_SCHEMA),
+        fact_phase_outcomes=_frame([{"run_id": RUN_ID, "episode_id": 0, "robot_id": ROBOT_ID, "phase_idx": 0, "met": True, "null_reason": None}], PHASE_OUTCOME_FACT_SCHEMA),
     )
     report = check_benchmark(root)
     assert any(violation.check == "child_count" and violation.table == "fact_episodes" for violation in report.violations)
@@ -237,6 +273,7 @@ def test_write_contract_report_round_trips_the_report(tmp_path: pathlib.Path) ->
     report = ContractReport(benchmark_dir=tmp_path, violations=(ContractViolation(table="fact_episodes", column="episode_id", check="key_duplicate", detail="2 rows"),), checked_tables=("fact_episodes",))
     path = write_contract_report(report, tmp_path / "report.yaml")
     assert yaml.safe_load(path.read_text(encoding="utf-8")) == report.as_dict()
+
 
 def test_in_memory_dimensions_are_checked_before_a_file_exists(tmp_path: pathlib.Path) -> None:
     root = _write_benchmark(

@@ -26,7 +26,6 @@ def _gt(xs: list[float], ys: list[float]) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "t_ns": times,
-            "t_ns": times,
             "pos_x_gt": [float(x) for x in xs],
             "pos_y_gt": [float(y) for y in ys],
             "yaw_gt": [0.0] * len(xs),
@@ -118,4 +117,4 @@ def test_reference_longer_than_the_travelled_path_is_null_with_a_distinct_reason
     results = PathEfficiencyCalculator(_params()).calculate(episode, {"path_length": 10.0, "theta_star_length": 11.0})
 
     assert results["path_efficiency"] is None
-    assert results["path_efficiency_null_reason"] == "reference_exceeds_path"
+    assert results["path_efficiency_null_reason"] == "invalid_episode:reference_exceeds_path"

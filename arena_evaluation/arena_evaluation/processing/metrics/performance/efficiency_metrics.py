@@ -4,6 +4,7 @@ import math
 import typing
 
 from arena_evaluation.processing.metrics.base import NULL_REASON_SUFFIX, BaseMetricCalculator
+from arena_evaluation.storage.declarations import NullReason
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 
@@ -20,7 +21,7 @@ def _finite_positive(value: object) -> float | None:
     return number
 
 
-_REFERENCE_EXCEEDS_PATH: typing.Final[str] = "reference_exceeds_path"
+_REFERENCE_EXCEEDS_PATH: typing.Final[str] = f"{NullReason.INVALID_EPISODE.value}:reference_exceeds_path"
 
 
 class PathEfficiencyCalculator(BaseMetricCalculator):
@@ -28,9 +29,10 @@ class PathEfficiencyCalculator(BaseMetricCalculator):
 
     The reference is the mission route through every task goal the robot reached, not just the
     current start -> goal leg. A null result carries its reason: ``no_samples`` when the reference
-    or the path is unavailable, ``reference_exceeds_path`` when the travelled path is shorter than
-    the route. The travelled length is sampled ground truth, so it can undercount by a few
-    percent; a route longer than the path is that sampling anomaly, not an efficiency above one.
+    or the path is unavailable, ``invalid_episode:reference_exceeds_path`` when the travelled path
+    is shorter than the route. The travelled length is sampled ground truth, so it can undercount
+    by a few percent; a route longer than the path is that sampling anomaly, not an efficiency
+    above one.
     """
 
     NAME = "path_efficiency"

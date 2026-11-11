@@ -138,7 +138,7 @@ def test_registry_reports_the_missing_series_and_never_returns_a_value() -> None
         available_topics={"robot_tracks", "pedestrian_tracks"},
     )
     assert outcome["aeps_linear_s"] is None
-    assert outcome.provenance.get("aeps_linear_s") == "aeps_linear_s:series_missing:acoustic_exposure"
+    assert outcome.provenance.get("aeps_linear_s") == "aeps_linear_s:not_recorded:acoustic_exposure"
 
 
 def test_e_cot_penalizes_collisions_and_intrusion_rate() -> None:

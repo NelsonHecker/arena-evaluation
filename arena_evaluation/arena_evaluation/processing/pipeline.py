@@ -258,12 +258,7 @@ def _accepted_robots_visible(record: pl.DataFrame | pl.LazyFrame | None) -> bool
 
 def _crowd_visibility(record: pl.DataFrame | pl.LazyFrame | None, manifest: dict[str, typing.Any] | None) -> dict[str, typing.Any]:
     """The crowd visibility columns of one episode row, from the shared policy in declarations."""
-    visibility = resolve_crowd_visibility(
-        _accepted_robots_visible(record),
-        manifest,
-        None,
-        record_present=record is not None,
-    )
+    visibility = resolve_crowd_visibility(_accepted_robots_visible(record), manifest, None)
     return {"crowd_visible": visibility.visible, "crowd_condition": visibility.condition, "crowd_visibility_source": visibility.source}
 
 

@@ -66,12 +66,6 @@ INVALID_EPISODE_REASONS: Final[Mapping[str, str]] = {
     "reference_exceeds_path": "the reference geodesic is longer than the travelled path, so path efficiency is out of range",
 }
 
-#: Producer tokens the pipeline may still emit and the vocabulary code each one becomes.
-LEGACY_NULL_REASON_CODES: Final[Mapping[str, str]] = {
-    "series_missing": NullReason.NOT_RECORDED.value,
-    "reference_exceeds_path": f"{NullReason.INVALID_EPISODE.value}:reference_exceeds_path",
-}
-
 
 def split_null_reason_item(item: str) -> tuple[str, str, str]:
     """``(column, code, parameter)`` of one ``;``-separated provenance item; ``column`` is empty for a bare code."""
@@ -97,19 +91,14 @@ def _is_known_item(item: str) -> bool:
     return code in NULL_REASON_MEANINGS
 
 
-def canonical_null_reason_item(item: str) -> str:
-    """One provenance item with a legacy producer token replaced by its vocabulary code."""
-    column, code, parameter = split_null_reason_item(item)
-    replacement = LEGACY_NULL_REASON_CODES.get(code)
-    if replacement is None:
-        return item
-    prefix = f"{column}:" if column else ""
-    return f"{prefix}{replacement}:{parameter}" if parameter else f"{prefix}{replacement}"
-
-
 def canonical_null_reason(text: str) -> str:
-    """``;``-joined provenance with every legacy producer token replaced by its vocabulary code."""
-    return ";".join(canonical_null_reason_item(item) for item in text.split(";") if item)
+    """Join the non-empty provenance items; producers already emit ``NullReason`` codes.
+
+    Kept as the join used by the scoped evaluator while its call site is removed; it no
+    longer rewrites producer tokens, so an unknown code reaches the publish-time contract
+    check instead of being silently mapped.
+    """
+    return ";".join(item for item in text.split(";") if item)
 
 
 class MetricScope(StrEnum):
@@ -220,25 +209,16 @@ def launch_robots_visible(manifest: Mapping[str, Any] | None) -> bool | None:
     return visible_flag(launch.get(_CROWD_LAUNCH_KEY)) if isinstance(launch, dict) else None
 
 
-def stages_set_robots_visible(manifest: Mapping[str, Any] | None) -> bool:
-    """Whether any stage of the suite sets robots_visible, so a record-less episode has no single value."""
-    for stage in ((manifest or {}).get("suite") or {}).get("stages") or []:
-        if not isinstance(stage, dict):
-            continue
-        humansim = (stage.get("config") or {}).get("humansim") or {}
-        if "robots_visible" in humansim:
-            return True
-    return False
-
-
 def resolve_crowd_visibility(
     accepted: bool | None,
     manifest: Mapping[str, Any] | None,
     metrics_config: Mapping[str, Any] | None = None,
-    *,
-    record_present: bool = True,
 ) -> CrowdVisibility:
-    """Crowd visibility of one episode: metrics config, accepted parameter, run manifest, then the default."""
+    """Crowd visibility of one episode: metrics config, accepted parameter, run manifest, else unknown.
+
+    Nothing declares it for a run-level status row, so that row publishes NULL rather than
+    inventing "visible"; the trusted ``dim_episodes`` path resolves the same way.
+    """
     config = metrics_config or {}
     configured = config.get("crowd_condition")
     if configured in ("blind", "visible"):
@@ -254,9 +234,7 @@ def resolve_crowd_visibility(
     launched = launch_robots_visible(manifest)
     if launched is not None:
         return CrowdVisibility(launched, "visible" if launched else "blind", "launch_arg")
-    if not record_present and stages_set_robots_visible(manifest):
-        return CrowdVisibility(None, None, None)
-    return CrowdVisibility(True, "visible", "default")
+    return CrowdVisibility(None, None, None)
 
 
 def recorded_robot_visibility(params: Mapping[str, Any] | None) -> bool | None:

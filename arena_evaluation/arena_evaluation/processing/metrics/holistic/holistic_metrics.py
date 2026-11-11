@@ -4,7 +4,7 @@ AEPS integrates the published acoustic-exposure series over the frames whose nea
 inside the personal-space band. Both inputs are declared 1NF series dependencies: `acoustic_exposure`
 carries the per-pedestrian level and `proxemics_extended` the per-frame nearest-pedestrian clearance,
 so the metric reads the same tables the report consumes instead of retired nested list outputs. The
-registry publishes `series_missing:<stem>` and a null value when a declared table is absent or empty;
+registry publishes `not_recorded:<stem>` and a null value when a declared table is absent or empty;
 the integral is never substituted with a nominal 45 dBA floor.
 """
 

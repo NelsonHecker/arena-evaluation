@@ -442,16 +442,8 @@ def test_every_published_null_reason_is_in_the_closed_vocabulary() -> None:
             assert is_known_null_reason(str(reason)), f"{name}: {reason}"
 
 
-@pytest.mark.parametrize(
-    ("produced", "canonical"),
-    [
-        ("path_efficiency:series_missing:path_series", "path_efficiency:not_recorded:path_series"),
-        ("reference_exceeds_path", "invalid_episode:reference_exceeds_path"),
-        ("path_length_m:no_samples", "path_length_m:no_samples"),
-    ],
-)
-def test_legacy_producer_codes_are_canonicalised(produced: str, canonical: str) -> None:
-    assert canonical_null_reason(produced) == canonical
+def test_canonical_null_reason_only_joins_items() -> None:
+    assert canonical_null_reason("path_length_m:no_samples;;result:not_recorded") == "path_length_m:no_samples;result:not_recorded"
 
 
 def test_an_unknown_null_reason_code_is_rejected() -> None:

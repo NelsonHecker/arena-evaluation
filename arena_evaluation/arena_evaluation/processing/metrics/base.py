@@ -90,7 +90,7 @@ class BaseMetricCalculator(ABC):
     OUTPUT_DIRECTIONS: dict[str, str] = {}
     # 1NF series tables this calculator reads. The pipeline publishes every series before scope
     # evaluation; the registry skips a calculator whose declared table is absent or empty and
-    # explains the nulls with `series_missing:<stem>` provenance.
+    # explains the nulls with `not_recorded:<stem>` provenance.
     SERIES_DEPENDS_ON: typing.ClassVar[tuple[str, ...]] = ()
     # Natural key of the series table this calculator publishes: one row per key tuple.
     SERIES_KEY: typing.ClassVar[tuple[str, ...]] = ("t_ns",)

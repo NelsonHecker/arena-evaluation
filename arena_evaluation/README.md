@@ -32,10 +32,11 @@ carries none from `arena_robots.characterization`, the module the
 +---------------------------------------------------------------------+
 |  Layer 3 - Processing  (processing/)                                |
 |  MCAPReader -> TopicParquetStore -> TopicAligner -> MetricRegistry  |
-|  -> ParquetStore                                                    |
+|  -> ScopedEvaluator -> star-schema writers                          |
 |  Reads episode MCAPs offline, aligns multi-rate topics onto the     |
-|  odom axis, and computes metrics.                                   |
-|  Output: metrics.parquet + combined_metrics.parquet                 |
+|  odom axis, and computes scoped metrics.                            |
+|  Output: per-episode topics/ and metrics/fact_* + metrics/series_*, |
+|  benchmark dim_*, and the canonical v_* catalog views.              |
 +-------------------------+-------------------------------------------+
                          | Parquet files
                          v
@@ -146,6 +147,36 @@ arena evaluation run --benchmark-dir <run_id>
 arena evaluation run --benchmark-dir <run_id> --report-manifest characterization
 ```
 
+### Stored data layout
+
+The pipeline stores every measurement once, at the grain that produces it:
+
+```
+benchmarks/<run_id>/
+|-- dim_episodes.parquet             # one row per episode and robot
+|-- dim_robots.parquet
+|-- dim_pedestrians.parquet
+|-- dim_world_entities.parquet
+`-- episodes/
+    `-- episode_XXX/
+        |-- episode_XXX.mcap
+        |-- topics/                  # extracted telemetry, one parquet per topic
+        `-- metrics/
+            |-- fact_episodes.parquet # one row per episode and robot
+            |-- fact_encounters.parquet
+            |-- fact_contacts.parquet
+            |-- fact_pedestrians.parquet
+            |-- fact_robots.parquet
+            |-- fact_edge_cases.parquet ... fact_collisions.parquet
+            `-- series_*.parquet      # 1NF per-sample series tables
+```
+
+`analytics.catalog.BenchmarkCatalog` scans those files lazily and exposes the canonical
+views (`v_episode_summary`, `v_planner_scorecard`, `v_contact_blame_summary`,
+`v_encounter_summary`) plus the joined `v_series_*` views. The MCP `evaluation` domain
+reads the same catalog, so a report, an SQL query and an MCP tool answer from one
+stored copy; there is no benchmark-level `combined_metrics.parquet`.
+
 ### Report manifests
 
 Report layouts are declarative YAML files in `configs/benchmark/manifests/`. Built-in manifests: `standard`, `ecological`, `social`, `safety`, `characterization`.
@@ -166,9 +197,9 @@ usage: arena evaluation <command> [--run-dir DIR | --benchmark-dir DIR] [--outpu
 
 Commands:
   extract   Extract topics from MCAP into Parquet files
-  process   Compute metrics and write metrics.parquet
+  process   Compute scoped metrics and write per-episode facts and series
   run       Full pipeline: extract -> process -> report + plots
-  report    Generate report.html from existing metrics.parquet
+  report    Generate report.html from the canonical catalog views
   plot      Generate static PNG plots only
   acoustic  Acoustic analysis subcommands (list, animate, snapshot)
 ```
@@ -176,7 +207,7 @@ Commands:
 | Flag | Description |
 |---|---|
 | `--benchmark-dir DIR...` | Benchmark root directories, every episode under them |
-| `--run-dir DIR...` | Single `episode_NNN` directories: `process` and `extract` handle each alone, `report` and `plot` merge their `metrics.parquet` |
+| `--run-dir DIR...` | Single `episode_NNN` directories: `process` and `extract` handle each alone, `report` and `plot` read their per-episode facts and series |
 | `--output-dir DIR` | Output directory for reports and plots (defaults to first input dir) |
 | `--workers N` | Worker count for parallel processing (`-1` = auto CPU count) |
 | `--force-extract` | Force re-extraction of MCAP files |

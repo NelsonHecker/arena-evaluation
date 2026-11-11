@@ -272,7 +272,7 @@ class MetricRegistry:
                         if key not in results:
                             results[key] = None
                         if results.get(key) is None:
-                            provenance[key] = f"{key}:series_missing:{missing_series}"
+                            provenance[key] = f"{key}:not_recorded:{missing_series}"
                     continue
 
                 if calc.REQUIRES_PEDSIM and not pedsim_available:

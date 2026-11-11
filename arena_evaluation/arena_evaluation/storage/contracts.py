@@ -22,6 +22,7 @@ from arena_evaluation.storage.declarations import (
     FACT_TABLE_NAMES,
     FACT_TABLES_WITHOUT_ROW_KEY,
     FactTable,
+    is_known_null_reason,
     nullable_columns,
 )
 from arena_evaluation.storage.exceptions import ContractViolationError
@@ -232,7 +233,7 @@ def _check_actor_pairs(views: Mapping[str, pl.LazyFrame]) -> list[ContractViolat
 def _check_child_counts(views: Mapping[str, pl.LazyFrame]) -> list[ContractViolation]:
     """A parent counter equals the number of child rows it claims."""
     violations: list[ContractViolation] = []
-    for child, (counter, child_table) in _CHILD_COUNT_CHECKS.items():
+    for _child, (counter, child_table) in _CHILD_COUNT_CHECKS.items():
         parent = views["fact_episodes"].select([*_IDENTITY_KEYS, counter])
         child_counts = views[child_table].group_by(list(_IDENTITY_KEYS)).agg(pl.len().alias("child_rows"))
         mismatched = parent.filter(pl.col(counter).is_not_null()).join(child_counts, on=list(_IDENTITY_KEYS), how="left").with_columns(pl.col("child_rows").fill_null(0)).filter(pl.col("child_rows") != pl.col(counter))
@@ -261,6 +262,32 @@ def _check_null_reasons(views: Mapping[str, pl.LazyFrame]) -> list[ContractViola
     return violations
 
 
+def _check_null_reason_vocabulary(views: Mapping[str, pl.LazyFrame]) -> list[ContractViolation]:
+    """Every emitted ``null_reason`` is a code of the closed vocabulary, parameter included."""
+    violations: list[ContractViolation] = []
+    for name in FACT_TABLE_NAMES:
+        table_name = f"fact_{name}"
+        emitted = views[table_name].select(pl.col("null_reason").drop_nulls().unique()).collect().get_column("null_reason")
+        unknown = emitted.filter(~emitted.map_elements(is_known_null_reason, return_dtype=pl.Boolean))
+        if not unknown.is_empty():
+            violations.append(ContractViolation(table=table_name, column="null_reason", check="null_reason_unknown", detail=f"{unknown.len()} code(s) outside the vocabulary, first {unknown[0]!r}"))
+    return violations
+
+
+def _check_ranking_validity(views: Mapping[str, pl.LazyFrame]) -> list[ContractViolation]:
+    """A published fact row always states whether it is valid for ranking; NULL is not valid."""
+    violations: list[ContractViolation] = []
+    for name in FACT_TABLE_NAMES:
+        table_name = f"fact_{name}"
+        frame = views[table_name]
+        if "is_valid_for_ranking" not in frame.collect_schema().names():
+            continue
+        count = frame.filter(pl.col("is_valid_for_ranking").is_null()).select(pl.len()).collect().item()
+        if count:
+            violations.append(ContractViolation(table=table_name, column="is_valid_for_ranking", check="ranking_validity_null", detail=f"{count} rows without a ranking verdict"))
+    return violations
+
+
 def check_benchmark(path: pathlib.Path, *, dimensions: StarSchemaTables | None = None) -> ContractReport:
     """Run every 08 H1.6 publish-time check over the benchmark stored at ``path``.
 
@@ -281,6 +308,8 @@ def check_benchmark(path: pathlib.Path, *, dimensions: StarSchemaTables | None =
         *_check_actor_pairs(views),
         *_check_child_counts(views),
         *_check_null_reasons(views),
+        *_check_null_reason_vocabulary(views),
+        *_check_ranking_validity(views),
     ]
     return ContractReport(benchmark_dir=benchmark_dir, violations=tuple(violations), checked_tables=tuple(views))
 

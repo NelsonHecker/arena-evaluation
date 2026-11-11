@@ -1,6 +1,0 @@
-metric_key,reason
-char_total_energy_j,"new 1NF characterization total, replaces the legacy list-endpoint convention; not a parity key"
-char_mean_efficiency,new characterization aggregate over the 1NF series; not a parity key
-char_leq_dba,new characterization radiated-power level over the 1NF series; not a parity key
-char_mean_energy_intensity_j_m,new characterization energy intensity over the 1NF series; not a parity key
-char_sample_count,new sample-count provenance for the 1NF characterization series; not a parity key

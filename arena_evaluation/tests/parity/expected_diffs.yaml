@@ -174,6 +174,41 @@ entries:
     kind: null_fill
     reason: "zone/door compliance is null without the recorded world semantics or an annotated world; the legacy frame published a fabricated 0"
 
+  # --- overhaul agreement: 2.0 m edge-to-edge encounter detector -------------------
+  - metric_key: ci_max
+    star_table: fact_encounters
+    star_column: ci_max
+    kind: ground_truth
+    reason: "encounter membership is now the 2.0 m surface-to-surface edge decision (ENCOUNTER_EDGE_DISTANCE_M); a window may start or end at a different frame than the legacy centre-distance detector, so the per-window extreme can move"
+  - metric_key: tti_min
+    star_table: fact_encounters
+    star_column: tti_min
+    kind: ground_truth
+    reason: "2.0 m edge-to-edge encounter membership changes the frames inside a window, so the per-window minimum closing time can differ from the legacy detector"
+  - metric_key: max_speed_intimate_zone
+    star_table: fact_encounters
+    star_column: max_speed_intimate_zone
+    kind: ground_truth
+    reason: "2.0 m edge-to-edge encounter membership changes window boundaries, so the per-window maximum inside the intimate zone can differ from the legacy detector"
+
+  # --- overhaul agreement: one fault/success policy --------------------------------
+  - metric_key: success
+    kind: ground_truth
+    reason: "success now conjoins the recorded verdict with the fault policy of the same contact stream; a contact the policy attributes to the robot changes the success flag even when the goal was reached"
+  - metric_key: result
+    kind: ground_truth
+    reason: "result follows the same single fault/success policy as success; the recorded verdict is mapped once, not re-derived per consumer"
+
+  # --- overhaul agreement: NULL is not zero ----------------------------------------
+  # The dedicated null_fill entries above are the authoritative list; this note keeps the
+  # cross-cutting change visible next to the other overhaul agreements.
+  # --- overhaul agreement: odometry -> /tf ground truth -----------------------------
+  # The ground_truth entries above record the moved source; this note keeps the change visible.
+  # --- overhaul agreement: seed/crowd unknown is NULL ------------------------------
+  # Cross-cutting dimension note; see notes below.
+  # --- overhaul agreement: name changes --------------------------------------------
+  # Cross-cutting identity note; see notes below.
+
 relocated_series:
   - reason: "characterization per-sample arrays moved to the 1NF characterization series table; the legacy combined_metrics list is the pre-port mirror"
     metric_keys:
@@ -273,3 +308,18 @@ notes:
   - topic: port_eco_input
     change: "reviewed expected changes"
     reason: "the port-eco expected-change list (characterization GT, acoustic exposure forward-fill, motion nulls, energy_extended priors, collision nulls, clearance time base, semantic mutation removal) is folded into entries above."
+  - topic: edge_detector
+    change: "2.0 m surface-to-surface edge decision"
+    reason: "the overhaul replaced the legacy centre-distance encounter membership with ENCOUNTER_EDGE_DISTANCE_M = 2.0; affected encounter reductions carry ground_truth entries"
+  - topic: fault_success_policy
+    change: "one policy for fault and success"
+    reason: "success, result and the collision counts now read the same contact attribution; the legacy frame derived them through separate paths"
+  - topic: null_not_zero
+    change: "0.0 -> null"
+    reason: "the port keeps a missing measurement NULL with a null_reason; the old frame fabricated zeros. Every null_fill entry above is part of this agreement"
+  - topic: seed_crowd_unknown
+    change: "unknown dimension values are NULL"
+    reason: "dim_episodes.seed and dim_episodes.crowd_condition stay NULL when the recording and the run manifest declare neither; the legacy status row published a fabricated visible/seed value"
+  - topic: identity_names
+    change: "robot instance suffix"
+    reason: "runtime robot ids carry an instance suffix (env_0_jackal_0) while the frozen baseline stores env_0_jackal; the harness strips the trailing _<n> before joining, so a name change is not a metric difference"

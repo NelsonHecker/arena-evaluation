@@ -1391,15 +1391,15 @@ def test_child_fact_tables_are_empty_without_their_episode_lists(
 def test_row_null_reason_prefers_a_calculator_provenance_code():
     row: dict[str, object] = {"path_efficiency": None}
 
-    assert _row_null_reason(row, ("path_efficiency",), {"path_efficiency": "path_efficiency:reference_exceeds_path"}) == "path_efficiency:reference_exceeds_path"
+    assert _row_null_reason(row, ("path_efficiency",), {"path_efficiency": "path_efficiency:invalid_episode:reference_exceeds_path"}) == "path_efficiency:invalid_episode:reference_exceeds_path"
     assert _row_null_reason(row, ("path_efficiency",)) == "path_efficiency:no_samples"
 
 
 def test_supplied_episode_provenance_survives_into_the_fact_row(episode: AlignedEpisodeBundle) -> None:
-    tables = _evaluate(episode, episode_metrics={}, episode_provenance={"path_efficiency": "path_efficiency:reference_exceeds_path"})
+    tables = _evaluate(episode, episode_metrics={}, episode_provenance={"path_efficiency": "path_efficiency:invalid_episode:reference_exceeds_path"})
 
     row = tables.episodes.row(0, named=True)
 
     assert row["path_efficiency"] is None
-    # The producer's token is normalized to the closed vocabulary at publish time.
+    # The producer emits the closed-vocabulary code directly; publishing does not rewrite it.
     assert "path_efficiency:invalid_episode:reference_exceeds_path" in typing.cast(str, row["null_reason"])
