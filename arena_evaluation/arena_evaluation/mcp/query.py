@@ -1,13 +1,16 @@
 """MCP Query Gateway and Evidence Store Tools (Layer 4).
 
-Exposes OLAP SQL query execution, transient vs. pinned evidence persistence,
-stored query declaration management, and evidence index querying.
+Exposes OLAP SQL query execution with a capped inline preview, transient vs. pinned
+evidence persistence, stored query declaration management, and evidence index querying.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+import difflib
+import re
+from typing import Annotated, Any, Final
 
+import polars as pl
 import pydantic
 from arena_mcp.core import ToolError
 
@@ -25,18 +28,69 @@ __all__ = [
     "evaluation_query_save",
 ]
 
+PREVIEW_ROWS: Final[int] = 200
+_TABLE_MISS = re.compile(r"relation '([^']+)' was not found")
+_COLUMN_MISS = re.compile(r'unable to find column "([^"]+)"')
+_VALID_COLUMNS = re.compile(r"valid columns: \[(.*?)\]", re.DOTALL)
+_FROM_TABLE = re.compile(r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 
-@domain.tool(read_only=False)
+
+def _closest(missing: str, candidates: tuple[str, ...] | list[str]) -> list[str]:
+    return difflib.get_close_matches(missing, candidates, n=5, cutoff=0.5)
+
+
+def _named(names: list[str]) -> str:
+    return f"; closest: {', '.join(names)}" if names else ""
+
+
+def _shown(names: tuple[str, ...] | list[str]) -> str:
+    ordered = sorted(names)
+    return ", ".join(ordered[:20]) + (" ..." if len(ordered) > 20 else "")
+
+
+def _column_candidates(catalog: BenchmarkCatalog, message: str, sql: str) -> list[str]:
+    """The columns the failed query could have named: the engine's own list, else the FROM table's, else every table's."""
+    valid = _VALID_COLUMNS.search(message)
+    if valid is not None:
+        return [name.strip().strip('"') for name in valid.group(1).split(",")]
+    source = _FROM_TABLE.search(sql)
+    if source is not None and source.group(1) in catalog.table_names():
+        return catalog.get_table(source.group(1)).collect_schema().names()
+    return sorted({name for table in catalog.table_names() for name in catalog.get_table(table).collect_schema().names()})
+
+
+def _query_error(exc: Exception, catalog: BenchmarkCatalog, sql: str) -> ToolError:
+    """A ToolError naming the closest valid table or column when the SQL engine reports one."""
+    message = str(exc)
+    table = _TABLE_MISS.search(message)
+    if table is not None:
+        missing = table.group(1)
+        return ToolError(
+            f"unknown table {missing!r}{_named(_closest(missing, catalog.table_names()))}",
+            hint=f"tables: {_shown(catalog.table_names())}; evaluation_read_metrics shows the episode summary columns",
+        )
+    column = _COLUMN_MISS.search(message)
+    if column is not None:
+        missing = column.group(1)
+        return ToolError(
+            f"unknown column {missing!r}{_named(_closest(missing, _column_candidates(catalog, message, sql)))}",
+            hint="evaluation_read_metrics lists the episode summary columns; evaluation_slice previews one table's rows",
+        )
+    return ToolError(f"Query execution failed: {exc}", hint="evaluation_read_metrics lists the run's summary columns")
+
+
+@domain.tool(read_only=False, destructive=False, idempotent=False)
 def evaluation_query(
     run_id: OptionalRunId = None,
     query: Annotated[str | None, pydantic.Field(description="Ad-hoc read-only SQL query to execute")] = None,
     *,
     stored_query: Annotated[str | None, pydantic.Field(description="Name of stored query declaration to execute")] = None,
     params: Annotated[dict[str, Any] | None, pydantic.Field(description="Parameters for stored query or SQL placeholders")] = None,
-    pin_evidence: Annotated[bool, pydantic.Field(description="Persist query result as content-addressed evidence")] = False,
-    purpose: Annotated[str, pydantic.Field(description="Hypothesis or purpose for pinning evidence")] = "",
+    pin_evidence: Annotated[bool, pydantic.Field(description="Persist the full query result as content-addressed evidence")] = False,
+    purpose: Annotated[str, pydantic.Field(description="Hypothesis or purpose for pinning evidence, a non-empty purpose pins too")] = "",
+    limit: Annotated[int, pydantic.Field(description="rows of the inline preview, the full result stays in pinned evidence", ge=1)] = PREVIEW_ROWS,
 ) -> dict[str, Any]:
-    """Execute an ad-hoc or stored analytical SQL query over the lakehouse catalog with transient or pinned evidence output."""
+    """Execute an ad-hoc or stored analytical SQL query and return a capped preview: row_count, returned_rows, truncated, columns and data; pin_evidence=true pins the full result."""
     if query is None and stored_query is None:
         raise ToolError("Must provide either 'query' or 'stored_query'", hint="evaluation_queries lists stored queries")
     if query is not None and stored_query is not None:
@@ -69,20 +123,26 @@ def evaluation_query(
             try:
                 sql_to_run = validate_readonly_sql(clean_query)
             except Exception as exc:
-                raise ToolError(f"Invalid SQL query: {exc}") from exc
+                raise ToolError(f"Invalid SQL query: {exc}", hint="only one read-only SELECT or WITH ... SELECT statement is accepted") from exc
         operation = f"sql:{clean_query}"
 
     try:
-        df = engine.query(sql_to_run)
+        plan = engine.query_lazy(sql_to_run)
+        row_count = plan.select(pl.len()).collect().item()
+        preview = plan.head(limit).collect()
     except Exception as exc:
-        raise ToolError(f"Query execution failed: {exc}") from exc
+        raise _query_error(exc, catalog, sql_to_run) from exc
 
-    should_pin = (pin_evidence or bool(purpose.strip())) and df.height > 0
+    returned_rows = preview.height
+    truncated = row_count > returned_rows
+    should_pin = (pin_evidence or bool(purpose.strip())) and row_count > 0
     if should_pin:
-        ev_dir = benchmark_path / "evidence"
-        store = EvidenceStore(evidence_dir=ev_dir)
-        rec = store.record(
-            df,
+        try:
+            frame = plan.collect()
+        except Exception as exc:
+            raise _query_error(exc, catalog, sql_to_run) from exc
+        rec = EvidenceStore(evidence_dir=benchmark_path / "evidence").record(
+            frame,
             kind="sql",
             operation=operation,
             purpose=purpose.strip(),
@@ -93,10 +153,13 @@ def evaluation_query(
             "pin_status": "pinned",
             "evidence_id": rec.evidence_id,
             "purpose": rec.purpose,
-            "row_count": df.height,
-            "columns": list(df.columns),
+            "row_count": row_count,
+            "returned_rows": returned_rows,
+            "truncated": truncated,
+            "limit": limit,
+            "columns": list(preview.columns),
             "artifact_path": str(rec.artifact_path) if rec.artifact_path is not None else None,
-            "data": df.to_dicts(),
+            "data": preview.to_dicts(),
         }
 
     return {
@@ -104,10 +167,13 @@ def evaluation_query(
         "pin_status": "transient",
         "evidence_id": None,
         "purpose": "",
-        "row_count": df.height,
-        "columns": list(df.columns),
+        "row_count": row_count,
+        "returned_rows": returned_rows,
+        "truncated": truncated,
+        "limit": limit,
+        "columns": list(preview.columns),
         "artifact_path": None,
-        "data": df.to_dicts(),
+        "data": preview.to_dicts(),
     }
 
 
@@ -118,7 +184,7 @@ def evaluation_queries() -> list[dict[str, Any]]:
     return [q.to_dict() for q in q_catalog.list_queries()]
 
 
-@domain.tool(read_only=False)
+@domain.tool(read_only=False, destructive=True, idempotent=True)
 def evaluation_query_save(
     name: Annotated[str, pydantic.Field(description="Unique identifier for the query declaration")],
     description: Annotated[str, pydantic.Field(description="Description of what this analytical query computes")],
