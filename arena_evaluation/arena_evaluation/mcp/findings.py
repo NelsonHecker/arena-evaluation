@@ -24,8 +24,8 @@ from arena_mcp.core import ToolError
 from arena_evaluation.analytics.evidence import EvidenceStore
 from arena_evaluation.analytics.queries import QueryCatalog
 
-from .base import RunId, component, domain, run_path
-from .runs import Note, write_notes
+from .base import RunId, atomic_write_text, component, domain, file_lock, run_path
+from .runs import FINDING_NOTE_PREFIX, Note, write_notes
 
 __all__ = [
     "Finding",
@@ -40,7 +40,6 @@ __all__ = [
 
 FINDINGS_FILENAME: Final[str] = "findings.yaml"
 DEFAULT_REPORT: Final[str] = "report.html"
-NOTE_LABEL_PREFIX: Final[str] = "finding"
 
 
 class FindingStatus(StrEnum):
@@ -49,6 +48,13 @@ class FindingStatus(StrEnum):
     DRAFT = "draft"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+
+
+_ALLOWED_TRANSITIONS: Final[dict[FindingStatus, frozenset[FindingStatus]]] = {
+    FindingStatus.DRAFT: frozenset({FindingStatus.ACCEPTED, FindingStatus.REJECTED}),
+    FindingStatus.ACCEPTED: frozenset({FindingStatus.REJECTED}),
+    FindingStatus.REJECTED: frozenset(),
+}
 
 
 class Finding(pydantic.BaseModel):
@@ -110,18 +116,16 @@ def load_findings(path: pathlib.Path) -> list[Finding]:
 
 
 def write_findings(path: pathlib.Path, findings: list[Finding]) -> None:
-    """Persist the findings document with the same load/write pattern as ``notes.yaml``."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Atomically persist the findings document; the caller holds ``file_lock(path)`` around the read-modify-write."""
     payload = {"findings": [finding.model_dump(mode="json") for finding in findings]}
-    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    atomic_write_text(path, yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
 
 
-def _finding(path: pathlib.Path, finding_id: str) -> tuple[list[Finding], Finding]:
-    """The findings document and the one finding it holds, a ToolError when the id is unknown."""
-    findings = load_findings(path)
+def _finding(findings: list[Finding], finding_id: str) -> Finding:
+    """The one finding of the document with finding_id, a ToolError when the id is unknown."""
     for finding in findings:
         if finding.finding_id == finding_id:
-            return findings, finding
+            return finding
     raise ToolError(f"no finding {finding_id!r} in this run", hint="evaluation_findings lists them")
 
 
@@ -180,7 +184,25 @@ def _checked_figure(run_dir: pathlib.Path, figure_path: str) -> str:
         return str(resolved)
 
 
-@domain.tool()
+def _reviewed_status(status: str) -> FindingStatus:
+    """The FindingStatus named by status, a ToolError with the three valid names when it names none."""
+    try:
+        return FindingStatus(status)
+    except ValueError:
+        raise ToolError(f"unknown finding status {status!r}", hint="draft, accepted or rejected") from None
+
+
+def _checked_transition(finding: Finding, target: FindingStatus) -> None:
+    """Refuse a status move outside draft -> accepted|rejected, accepted -> rejected."""
+    if finding.status is target or target in _ALLOWED_TRANSITIONS[finding.status]:
+        return
+    raise ToolError(
+        f"finding {finding.finding_id} is {finding.status.value}, it cannot become {target.value}",
+        hint="draft becomes accepted or rejected, accepted becomes rejected; a rejected finding needs a new finding",
+    )
+
+
+@domain.tool(read_only=False, destructive=False, idempotent=False)
 def evaluation_finding_create(
     run_id: RunId,
     claim: Annotated[str, pydantic.Field(description="the empirical claim, one sentence")],
@@ -203,23 +225,29 @@ def evaluation_finding_create(
     run_dir = path.parent
     if query is not None and stored_query is not None:
         raise ToolError("pass the SQL or a stored query name, not both", hint="evaluation_queries lists stored queries")
-    findings = load_findings(path)
-    finding = Finding(
-        finding_id=_new_finding_id(findings),
-        claim=_checked_claim(claim),
-        status=FindingStatus.DRAFT,
-        created_at=datetime.datetime.now(tz=datetime.UTC).isoformat(timespec="seconds"),
-        episode_id=episode_id,
-        encounter_id=encounter_id,
-        contact_id=contact_id,
-        pedestrian_id=pedestrian_id,
-        query=query,
-        stored_query=None if stored_query is None else _checked_stored_query(run_dir, stored_query),
-        evidence_id=None if evidence_id is None else _checked_evidence(run_dir, evidence_id),
-        numbers=_checked_numbers(numbers),
-        figure_path=None if figure_path is None else _checked_figure(run_dir, figure_path),
-    )
-    write_findings(path, [*findings, finding])
+    checked_stored_query = None if stored_query is None else _checked_stored_query(run_dir, stored_query)
+    checked_evidence = None if evidence_id is None else _checked_evidence(run_dir, evidence_id)
+    checked_figure = None if figure_path is None else _checked_figure(run_dir, figure_path)
+    checked_numbers = _checked_numbers(numbers)
+    checked_claim = _checked_claim(claim)
+    with file_lock(path):
+        findings = load_findings(path)
+        finding = Finding(
+            finding_id=_new_finding_id(findings),
+            claim=checked_claim,
+            status=FindingStatus.DRAFT,
+            created_at=datetime.datetime.now(tz=datetime.UTC).isoformat(timespec="seconds"),
+            episode_id=episode_id,
+            encounter_id=encounter_id,
+            contact_id=contact_id,
+            pedestrian_id=pedestrian_id,
+            query=query,
+            stored_query=checked_stored_query,
+            evidence_id=checked_evidence,
+            numbers=checked_numbers,
+            figure_path=checked_figure,
+        )
+        write_findings(path, [*findings, finding])
     return finding
 
 
@@ -230,45 +258,62 @@ def evaluation_findings(run_id: RunId) -> FindingsResponse:
     return FindingsResponse(run_id=run_id, n_findings=len(findings), findings=findings)
 
 
-@domain.tool()
+@domain.tool(read_only=False, destructive=True, idempotent=True)
 def evaluation_finding_status(
     run_id: RunId,
     finding_id: Annotated[str, pydantic.Field(description="finding to review, from evaluation_findings")],
     status: Annotated[Literal["draft", "accepted", "rejected"], pydantic.Field(description="new review state")],
 ) -> Finding:
-    """Move one finding between draft, accepted and rejected."""
+    """Move one finding between draft, accepted and rejected; a rejected finding never moves back."""
     path = findings_path(run_id)
-    findings, finding = _finding(path, finding_id)
-    reviewed = finding.model_copy(update={"status": FindingStatus(status)})
-    write_findings(path, [reviewed if item.finding_id == finding_id else item for item in findings])
+    target = _reviewed_status(status)
+    with file_lock(path):
+        findings = load_findings(path)
+        finding = _finding(findings, finding_id)
+        _checked_transition(finding, target)
+        if finding.status is target:
+            return finding
+        reviewed = finding.model_copy(update={"status": target})
+        write_findings(path, [reviewed if item.finding_id == finding_id else item for item in findings])
     return reviewed
 
 
-@domain.tool()
+def _report_token(run_dir: pathlib.Path, report: str) -> str:
+    """The report file or run-local manifest name the finding is attached to."""
+    report_file = run_dir / report
+    manifest = run_dir / f"{component(report.removesuffix('.yaml'), 'report')}.yaml"
+    if report_file.is_file():
+        return report_file.name
+    if manifest.is_file():
+        return manifest.name
+    raise ToolError(f"run {run_dir.name!r} has no report {report!r}", hint="evaluation_report writes report.html; evaluation_create_manifest writes <name>.yaml in the run")
+
+
+@domain.tool(read_only=False, destructive=False, idempotent=True)
 def evaluation_finding_attach(
     run_id: RunId,
     finding_id: Annotated[str, pydantic.Field(description="finding to attach, from evaluation_findings")],
     report: Annotated[str, pydantic.Field(description="report.html or the run-local manifest name the finding belongs to")] = DEFAULT_REPORT,
 ) -> FindingAttachResponse:
-    """Attach a finding to a report: record the report on the finding and append its note so the report renders it.
+    """Attach an accepted finding to a report: record the report on the finding and append its note so the report renders it.
 
     The note row goes into the existing ``notes.yaml`` (label ``finding:<id>``), the same store the
     report builder already renders next to its tables, so no second presentation store is invented.
     """
-    run_dir = findings_path(run_id).parent
-    report_file = run_dir / report
-    manifest = run_dir / f"{component(report.removesuffix('.yaml'), 'report')}.yaml"
-    if report_file.is_file():
-        report_token = report_file.name
-    elif manifest.is_file():
-        report_token = manifest.name
-    else:
-        raise ToolError(f"run {run_id!r} has no report {report!r}", hint="evaluation_report writes report.html; evaluation_create_manifest writes <name>.yaml in the run")
-    path = findings_path(run_id)
-    findings, finding = _finding(path, finding_id)
-    attached = finding.model_copy(update={"report": report_token})
-    write_findings(path, [attached if item.finding_id == finding_id else item for item in findings])
-    note_label = f"{NOTE_LABEL_PREFIX}:{finding_id}"
+    run_dir = run_path(run_id)
+    report_token = _report_token(run_dir, report)
+    path = run_dir / FINDINGS_FILENAME
+    with file_lock(path):
+        findings = load_findings(path)
+        finding = _finding(findings, finding_id)
+        if finding.status is not FindingStatus.ACCEPTED:
+            raise ToolError(
+                f"finding {finding_id} is {finding.status.value}, only an accepted finding can be attached",
+                hint=f"evaluation_finding_status {run_id} {finding_id} accepted reviews it first",
+            )
+        attached = finding.model_copy(update={"report": report_token})
+        write_findings(path, [attached if item.finding_id == finding_id else item for item in findings])
+    note_label = f"{FINDING_NOTE_PREFIX}{finding_id}"
     notes_path = run_dir / "notes.yaml"
     write_notes(notes_path, [Note(label=note_label, value=f"{attached.claim} [{attached.status.value}]")], "merge")
     return FindingAttachResponse(
