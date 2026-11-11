@@ -30,6 +30,7 @@ def test_server_lists_every_tool_resource_and_template(tmp_path):
     tools, resources, templates, prompts = run_session(body, server_env(tmp_path), ("evaluation",))
     assert sorted(tool.name for tool in tools) == sorted(spec.name for spec in domain.tools)
     assert all(tool.name.startswith("evaluation_") and tool.description for tool in tools)
+    assert "evaluation_append_insight" not in {tool.name for tool in tools}
     destructive = {tool.name for tool in tools if tool.annotations.destructive_hint}
     assert {"evaluation_benchmark", "evaluation_preflight", "evaluation_stop", "evaluation_kill", "evaluation_record_start", "evaluation_record_stop"} <= destructive
     assert {str(resource.uri) for resource in resources} >= {"arena://evaluation/runs", "arena://evaluation/suites", "arena://evaluation/contests", "arena://evaluation/manifests"}
@@ -128,7 +129,6 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
             ("lane_console", "evaluation_console", {"run_id": RUN_ID, "lane": "p2"}),
             ("episode", "evaluation_read_episode", {"run_id": RUN_ID, "episode_id": 0}),
             ("written", "evaluation_write_notes", {"run_id": RUN_ID, "notes": [{"label": "a", "value": "1"}]}),
-            ("insight", "evaluation_append_insight", {"run_id": RUN_ID, "label": "b", "value": "2"}),
             ("notes", "evaluation_read_notes", {"run_id": RUN_ID}),
             ("metrics", "evaluation_read_metrics", {"run_id": RUN_ID}),
             ("query", "evaluation_query_metrics", {"run_id": RUN_ID, "group_by": ["planner"], "metrics": ["time_to_goal_s"], "filter": {"stage": "s1"}, "sort_by": "time_to_goal_s"}),
@@ -168,7 +168,7 @@ def test_run_and_analysis_tools_read_shared_runs(tmp_path):
     assert out["console"]["alive"] is False
     assert out["lane_console"]["logs"] == {"runner.p2.log": ["lane p2 started", "lane p2 sim died"]}
     assert out["episode"]["metadata"]["planner"] == "dwb"
-    assert out["notes"]["notes"] == [{"label": "a", "value": "1"}, {"label": "b", "value": "2"}]
+    assert out["notes"]["notes"] == [{"label": "a", "value": "1"}]
     assert out["metrics"]["column_stats"]["success"]["dtype"] == "Boolean"
     assert [row["planner"] for row in out["query"]["data"]] == ["dwb_social", "dwb"]
     assert {row["stage"] for row in out["aggregate"]["data"]} == {"s1", "s2"}

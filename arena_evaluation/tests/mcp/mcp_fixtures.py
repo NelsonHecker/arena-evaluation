@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import json
 import os
@@ -25,12 +26,12 @@ def _record(world: str, outcome: int) -> object:
     return EpisodeRecord(world=world, seed=7, modes=encode_modes({"robots": ["random"], "obstacles": ["random"]}), robots=["jackal"], outcome_state=outcome, outcome_info="")
 
 
-def _manifest(run_id: str, steps: tuple[str, ...]) -> object:
+def manifest(run_id: str, steps: tuple[str, ...] = STEPS, *, created_at: str = "2026-10-19T12:00:00+00:00") -> object:
     from arena_evaluation.benchmark.state import Manifest
 
     return Manifest(
         run_id=run_id,
-        created_at="2026-10-19T12:00:00+00:00",
+        created_at=created_at,
         arena_git_sha=None,
         arena_git_dirty=False,
         cli_args=["--suite", "basic", "--contest", "basic"],
@@ -114,6 +115,15 @@ def _iso(timestamp: float) -> str:
     return datetime.datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
 
 
+def build_run(root: pathlib.Path, folder: str, *, manifest_run_id: str | None = None, created_at: str = "2026-10-19T12:00:00+00:00", steps: tuple[str, ...] = STEPS) -> pathlib.Path:
+    """One run folder with a manifest and its empty state and progress writers."""
+    from arena_evaluation.benchmark.state import RunDir
+
+    run = RunDir.create(root, folder, manifest(manifest_run_id or folder, steps, created_at=created_at))
+    run.progress.close()
+    return run.path
+
+
 def build_runs(root: pathlib.Path) -> pathlib.Path:
     """A benchmark run written by the package's own writers: manifest, state and progress plus a second lane, an episode, logs and the Star Schema."""
     from arena_evaluation.benchmark.state import RunDir
@@ -123,13 +133,13 @@ def build_runs(root: pathlib.Path) -> pathlib.Path:
 
     root.mkdir(parents=True, exist_ok=True)
     now = time.time()
-    manifest = _manifest(RUN_ID, STEPS)
-    run = RunDir.create(root, RUN_ID, manifest)
+    manifest_record = manifest(RUN_ID, STEPS)
+    run = RunDir.create(root, RUN_ID, manifest_record)
     run.state.write({"dwb/s1": StepResult("dwb/s1", "ok", 0, now - 60, now - 30, None, None, episodes_run=2), "unhindered_peds/s1": StepResult("unhindered_peds/s1", "in_progress", 0, now - 10, None, None, None)})
     for episode in range(2):
         run.progress.append(ts_iso=_iso(now - 55 + episode), run_id=RUN_ID, step_key="dwb/s1", contestant="dwb", stage="s1", env_id=0, episode_id=episode, episode_record=_record("map_empty", 2), started_at=now - 60, ended_at=now - 45)
     run.progress.close()
-    lane = RunDir.create(root, RUN_ID, manifest, lane="p2")
+    lane = RunDir.create(root, RUN_ID, manifest_record, lane="p2")
     lane.state.write({"dwb_social/s1": StepResult("dwb_social/s1", "failed", 1, now - 50, now - 20, StepErrorKind.SIM_DEAD, "gz died")})
     lane.progress.append(ts_iso=_iso(now - 40), run_id=RUN_ID, step_key="dwb_social/s1", contestant="dwb_social", stage="s1", env_id=1, episode_id=2, episode_record=_record("map_empty", 3), started_at=now - 50, ended_at=now - 20)
     lane.progress.close()
@@ -139,9 +149,61 @@ def build_runs(root: pathlib.Path) -> pathlib.Path:
     episode_dir.mkdir(parents=True, exist_ok=True)
     MetadataWriter.write(RunMetadata(benchmark_id=RUN_ID, planner="dwb", map="map_empty", stage="s1", recording_started_at="2026-10-19T12:00:00", python_version="3.12", ros_distro="jazzy"), episode_dir / "episode_000.yaml")
     write_star_schema(run.path, metric_rows())
-    empty = RunDir.create(root, EMPTY_RUN_ID, _manifest(EMPTY_RUN_ID, ("dwb/s1",)))
+    empty = RunDir.create(root, EMPTY_RUN_ID, manifest(EMPTY_RUN_ID, ("dwb/s1",)))
     empty.progress.close()
     return run.path
+
+
+@contextlib.contextmanager
+def arena_data(tmp_path: pathlib.Path) -> object:
+    """ARENA_DATA_DIR pointing at tmp_path/data for direct tool calls, restored afterwards."""
+    previous = os.environ.get("ARENA_DATA_DIR")
+    os.environ["ARENA_DATA_DIR"] = str(tmp_path / "data")
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("ARENA_DATA_DIR", None)
+        else:
+            os.environ["ARENA_DATA_DIR"] = previous
+
+
+def build_query_run(root: pathlib.Path, run_id: str = "query-run", rows: int = 10_000) -> pathlib.Path:
+    """A run directory whose dim_episodes has rows episodes, the table a capped SELECT reads."""
+    from arena_evaluation.storage.star_schema import DIM_EPISODES_SCHEMA
+
+    run_dir = root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    records = [
+        {
+            "run_id": run_id,
+            "episode_id": episode,
+            "env_id": "env_0",
+            "robot_id": "robot_0",
+            "benchmark_id": run_id,
+            "suite_name": "basic",
+            "contest_name": "basic",
+            "stage": "s1",
+            "world": "map_empty",
+            "scenario": "",
+            "planner": "dwb",
+            "inter_planner": "",
+            "dispatcher": "",
+            "robot_model": "jackal",
+            "crowd_condition": "visible",
+            "ped_policy_default": "sfm",
+            "crowd_size": 0,
+            "seed": episode,
+            "is_reference": False,
+            "reference_type": "",
+            "duration_s": 1.0,
+            "outcome_state": 2,
+            "outcome_info": "",
+        }
+        for episode in range(rows)
+    ]
+    pl.DataFrame(records, schema=DIM_EPISODES_SCHEMA).write_parquet(run_dir / "dim_episodes.parquet")
+    return run_dir
 
 
 def server_env(tmp_path: pathlib.Path, **extra: str) -> dict[str, str]:

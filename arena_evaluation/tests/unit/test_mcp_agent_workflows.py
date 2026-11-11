@@ -474,6 +474,7 @@ def test_finding_accepts_pinned_evidence_and_a_stored_query(run: pathlib.Path) -
 
 def test_finding_attach_needs_a_report(run: pathlib.Path) -> None:
     finding = evaluation_finding_create(RUN_ID, "claim")
+    evaluation_finding_status(RUN_ID, finding.finding_id, "accepted")
     with pytest.raises(ToolError, match="has no report"):
         evaluation_finding_attach(RUN_ID, finding.finding_id)
 
