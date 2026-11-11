@@ -3,6 +3,9 @@
 - Seeds are fixed per scenario and shared by both arms, so a difference is taken per (scenario, seed).
 - Resampling is a cluster bootstrap over scenarios: a drawn scenario brings all of its seeds.
 - 95 % percentile intervals, printed unadjusted.
+- The two-sided p-value is the shifted-null cluster-bootstrap test implemented once in
+  :func:`arena_evaluation.analytics.stats.cluster_bootstrap_p_value`, so a difference and its
+  interval are reported by the same procedure the OLAP analytics use.
 - A difference "excludes zero" when its two-sided bootstrap p < alpha after Holm within its family.
 """
 
@@ -15,11 +18,14 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import polars as pl
 
+from arena_evaluation.analytics.stats import cluster_bootstrap_p_value
+
 DEFAULT_BOOT = 10_000
+DEFAULT_P_SEED = 42
 ALPHA = 0.05
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class BootResult:
     estimate: float
     ci_low: float
@@ -36,8 +42,14 @@ def cluster_bootstrap(
     n_boot: int = DEFAULT_BOOT,
     rng: np.random.Generator | None = None,
     level: float = 0.95,
+    p_seed: int = DEFAULT_P_SEED,
 ) -> BootResult:
-    """Percentile bootstrap over whole clusters, with a two-sided p that is below 1 - level exactly when the interval excludes zero."""
+    """Percentile bootstrap over whole clusters, with the shifted-null two-sided p-value.
+
+    ``p_seed`` seeds the shifted-null test on its own so the interval and the test are each
+    reproducible; the p-value itself is :func:`arena_evaluation.analytics.stats.cluster_bootstrap_p_value`
+    and tests the pooled mean of the drawn clusters.
+    """
     clusters = [np.asarray(c, dtype=float) for c in clusters]
     clusters = [c[np.isfinite(c)] if c.ndim == 1 else c for c in clusters]
     clusters = [c for c in clusters if len(c) > 0]
@@ -63,7 +75,13 @@ def cluster_bootstrap(
         return BootResult(estimate, float("nan"), float("nan"), float("nan"), k, n_pairs)
     tail = (1.0 - level) / 2.0
     lo, hi = np.quantile(draws, [tail, 1.0 - tail])
-    p = min(1.0, 2.0 * min(np.mean(draws <= 0.0), np.mean(draws >= 0.0)))
+    p = cluster_bootstrap_p_value(
+        [float(np.sum(c)) for c in clusters],
+        [float(len(c)) for c in clusters],
+        observed=estimate,
+        n_boot=n_boot,
+        random_seed=p_seed,
+    )
     return BootResult(float(estimate), float(lo), float(hi), float(p), k, n_pairs)
 
 

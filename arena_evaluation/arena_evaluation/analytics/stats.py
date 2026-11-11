@@ -1,8 +1,9 @@
 """Statistical Procedures for Benchmark OLAP Analytics (Layer 4).
 
-Provides vectorized cluster-bootstrap confidence intervals, paired treatment
-difference tests, rank-swap matrices, Kendall's coefficient of concordance W,
-and deterministic discovery/verification seed cohort partitioning.
+Provides vectorized cluster-bootstrap confidence intervals and their two-sided
+shifted-null p-value, paired treatment difference tests, rank-swap matrices,
+Kendall's coefficient of concordance W, and deterministic
+discovery/verification seed cohort partitioning.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ __all__ = [
     "PairedDiffResult",
     "RANK_SWAP_MATRIX_SCHEMA",
     "cluster_bootstrap_ci",
+    "cluster_bootstrap_p_value",
     "kendalls_w",
     "paired_treatment_diff",
     "rank_swap_matrix",
@@ -242,6 +244,45 @@ def cluster_bootstrap_ci(
     return pl.DataFrame(rows, schema=out_schema)
 
 
+def cluster_bootstrap_p_value(
+    cluster_sums: Sequence[float],
+    cluster_counts: Sequence[float],
+    *,
+    observed: float,
+    n_boot: int = 2000,
+    random_seed: int = 42,
+) -> float:
+    """Two-sided p-value of H0: the pooled cluster mean is zero, from a shifted-null cluster bootstrap.
+
+    ``cluster_sums`` and ``cluster_counts`` are one pooled difference sum and one pair count per
+    cluster (scenario, seed, ...), the sufficient statistics of the pooled mean. A resample draws
+    whole clusters with replacement, so it keeps every pair inside a drawn cluster. The null
+    distribution is the centred bootstrap: each cluster sum is shifted by ``observed`` times its
+    count, which moves the resampled mean onto H0 while preserving the between-cluster spread.
+    The p-value is the share of null draws at least as far from zero as the observed estimate,
+    with the ``(1 + extremes) / (n_boot + 1)`` correction so a finite number of draws cannot
+    report p = 0. This is the single implementation both ``paired_treatment_diff`` and
+    ``experiments.stats.cluster_bootstrap`` report.
+    """
+    if n_boot < 1:
+        raise ValueError(f"n_boot must be >= 1, got {n_boot}")
+
+    sums = np.asarray(cluster_sums, dtype=np.float64)
+    counts = np.asarray(cluster_counts, dtype=np.float64)
+    n_clusters = int(sums.size)
+    if n_clusters < 2:
+        # One cluster resamples to itself: the test cannot separate the estimate from its
+        # sampling noise, so only an exactly-zero estimate is compatible with H0.
+        return 1.0 if abs(observed) <= 1e-12 else 0.0
+
+    idx = np.random.default_rng(random_seed).integers(0, n_clusters, size=(n_boot, n_clusters))
+    drawn_counts = counts[idx].sum(axis=1)
+    centered_sums = sums - observed * counts
+    null_means = centered_sums[idx].sum(axis=1) / np.maximum(drawn_counts, 1.0)
+    extreme_count = int(np.count_nonzero(np.abs(null_means) >= abs(observed)))
+    return float((1 + extreme_count) / (n_boot + 1))
+
+
 def paired_treatment_diff(
     frame: pl.LazyFrame | pl.DataFrame,
     metric_col: str,
@@ -350,7 +391,6 @@ def paired_treatment_diff(
     if n_clusters == 1:
         ci_low = mean_diff
         ci_high = mean_diff
-        p_value = 1.0 if abs(mean_diff) <= 1e-12 else 0.0
     else:
         rng = np.random.default_rng(random_seed)
         idx = rng.integers(0, n_clusters, size=(n_boot, n_clusters))
@@ -361,11 +401,7 @@ def paired_treatment_diff(
         ci_low = float(np.quantile(boot_means, alpha / 2.0))
         ci_high = float(np.quantile(boot_means, 1.0 - alpha / 2.0))
 
-        # Shifted null bootstrap distribution for two-sided H0: mean_diff == 0
-        centered_sums = c_sums - mean_diff * c_cnts
-        null_boot_means = np.sum(centered_sums[idx], axis=1) / np.maximum(boot_cnts, 1.0)
-        extreme_count = int(np.sum(np.abs(null_boot_means) >= abs(mean_diff)))
-        p_value = float((1 + extreme_count) / (n_boot + 1))
+    p_value = cluster_bootstrap_p_value(c_sums, c_cnts, observed=mean_diff, n_boot=n_boot, random_seed=random_seed)
 
     summary_df = pl.DataFrame(
         [
