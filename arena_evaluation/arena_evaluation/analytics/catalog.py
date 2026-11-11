@@ -15,7 +15,6 @@ ranking aggregates.
 from __future__ import annotations
 
 import pathlib
-import re
 from collections.abc import Mapping, Sequence
 from typing import Final
 
@@ -27,6 +26,7 @@ from arena_evaluation.storage.star_schema import (
     STAR_TABLE_NAMES,
     StarSchemaTables,
     episode_directories,
+    episode_directory_id,
     scan_star_schema,
 )
 
@@ -134,8 +134,6 @@ TELEMETRY_TABLE_SCHEMAS: Final[dict[str, dict[str, pl.DataType | type[pl.DataTyp
         "distance": pl.Float64,
     },
 }
-
-_EPISODE_DIR_RE: Final[re.Pattern[str]] = re.compile(r"^episode_(\d+)$")
 
 _JOIN_KEYS: Final[tuple[str, ...]] = ("run_id", "episode_id", "robot_id")
 
@@ -363,10 +361,7 @@ class BenchmarkCatalog:
 
         frames_by_table: dict[str, list[pl.LazyFrame]] = {}
         for ep_dir in episode_directories(benchmark_dir):
-            match = _EPISODE_DIR_RE.match(ep_dir.name)
-            if match is None:
-                continue
-            ep_id = int(match.group(1))
+            ep_id = episode_directory_id(ep_dir)
             source_dir = ep_dir / "topics"
             if not source_dir.is_dir():
                 continue
