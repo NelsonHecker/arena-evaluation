@@ -207,7 +207,10 @@ def evaluation_slice(
         episode_id = int(contact_row["episode_id"])
         linked_encounter = contact_row["encounter_id"]
         if encounter_id is not None and linked_encounter is not None and linked_encounter != encounter_id:
-            raise ToolError(f"contact {contact_id!r} belongs to encounter {linked_encounter!r}, not {encounter_id!r}")
+            raise ToolError(
+                f"contact {contact_id!r} belongs to encounter {linked_encounter!r}, not {encounter_id!r}",
+                hint=f"pass encounter_id {linked_encounter!r} or omit it",
+            )
         if encounter_id is None:
             encounter_id = linked_encounter
 
@@ -217,7 +220,7 @@ def evaluation_slice(
         episode_id = int(encounter_row["episode_id"])
 
     if episode_id is None:
-        raise ToolError("no episode resolved from the given ids")
+        raise ToolError("no episode resolved from the given ids", hint="evaluation_progress lists the run's episode ids")
 
     contact_rows = contacts.filter(pl.col("episode_id") == episode_id)
     if contact_id is not None:

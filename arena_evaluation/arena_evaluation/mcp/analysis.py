@@ -192,7 +192,10 @@ def correlation_frame(frame: pl.DataFrame, metrics: list[str]) -> dict[str, Any]
 
     columns(frame, metrics, "metric")
     if len(metrics) < 2:
-        raise ToolError("correlation needs at least two metrics")
+        raise ToolError(
+            "correlation needs at least two metrics",
+            hint="pass at least two metric names, e.g. ['time_to_goal_s', 'path_length_m']",
+        )
     lists = [name for name in metrics if isinstance(frame.schema[name], pl.List)]
     if lists:
         raise ToolError(f"{', '.join(lists)} hold one list per episode, correlate scalar metrics", hint="evaluation_read_metrics shows each column's dtype")
@@ -299,7 +302,7 @@ def evaluation_query_metrics(
     rows = means(frame, group_by, metrics)
     if sort_by is not None:
         if sort_by not in metrics:
-            raise ToolError(f"sort_by {sort_by!r} is not one of the metrics {metrics}")
+            raise ToolError(f"sort_by {sort_by!r} is not one of the metrics {metrics}", hint=f"sort_by must be one of {metrics}")
         rows.sort(key=lambda row: (row[sort_by] is None, -(row[sort_by] or 0.0) if descending else (row[sort_by] or 0.0)))
     return {"run_id": run_id, "n_rows": len(rows), "data": rows}
 

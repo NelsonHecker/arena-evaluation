@@ -112,7 +112,10 @@ def load_findings(path: pathlib.Path) -> list[Finding]:
     try:
         return [Finding.model_validate(row) for row in rows]
     except pydantic.ValidationError as exc:
-        raise ToolError(f"{path.name} carries an invalid finding: {exc}") from exc
+        raise ToolError(
+            f"{path.name} carries an invalid finding: {exc}",
+            hint="fix the named finding, or delete it; evaluation_findings lists the stored findings",
+        ) from exc
 
 
 def write_findings(path: pathlib.Path, findings: list[Finding]) -> None:
@@ -142,7 +145,7 @@ def _new_finding_id(findings: list[Finding]) -> str:
 def _checked_claim(claim: str) -> str:
     text = claim.strip()
     if not text:
-        raise ToolError("a finding needs a claim")
+        raise ToolError("a finding needs a claim", hint="pass the empirical claim as one sentence")
     return text
 
 
@@ -152,7 +155,10 @@ def _checked_numbers(numbers: dict[str, float] | None) -> dict[str, float]:
         return {}
     non_finite = sorted(key for key, value in numbers.items() if not math.isfinite(value))
     if non_finite:
-        raise ToolError(f"finding numbers must be finite, got {', '.join(non_finite)}")
+        raise ToolError(
+            f"finding numbers must be finite, got {', '.join(non_finite)}",
+            hint="pass finite numbers, e.g. {'min_clearance_m': 0.42}",
+        )
     return dict(numbers)
 
 

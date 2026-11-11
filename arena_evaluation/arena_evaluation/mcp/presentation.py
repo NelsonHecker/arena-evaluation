@@ -27,7 +27,7 @@ from arena_evaluation.presentation.resolver import (
 from arena_evaluation.presentation.static_renderer import StaticRenderer
 from arena_evaluation.storage.schemas import PlotSpec
 
-from .base import OptionalRunId, YamlText, component, domain, parse_yaml, run_path
+from .base import OptionalRunId, YamlText, atomic_write_text, component, domain, parse_yaml, run_path
 
 __all__ = [
     "evaluation_plot_declarations",
@@ -96,12 +96,18 @@ def evaluation_read_plot_declaration(
     text = path.read_text(encoding="utf-8")
     parsed = parse_yaml(text, f"plot declaration '{safe_name}'")
     if not isinstance(parsed, dict):
-        raise ToolError(f"Plot declaration '{safe_name}' must be a YAML mapping")
+        raise ToolError(
+            f"Plot declaration '{safe_name}' must be a YAML mapping",
+            hint="make the declaration a YAML mapping with id, type and data",
+        )
 
     try:
         spec = PlotSpec.model_validate(parsed)
     except Exception as exc:
-        raise ToolError(f"Invalid PlotSpec schema in declaration '{safe_name}': {exc}") from exc
+        raise ToolError(
+            f"Invalid PlotSpec schema in declaration '{safe_name}': {exc}",
+            hint="fix the PlotSpec fields; evaluation_plot_declarations shows a valid declaration",
+        ) from exc
 
     return {
         "name": safe_name,
@@ -119,12 +125,15 @@ def evaluation_save_plot_declaration(
     safe_name = component(name.removesuffix(".yaml").removesuffix(".yml"), "name")
     parsed = parse_yaml(yaml_text, "yaml_text")
     if not isinstance(parsed, dict):
-        raise ToolError("Plot declaration YAML must be a mapping")
+        raise ToolError("Plot declaration YAML must be a mapping", hint="make yaml_text a YAML mapping with id, type and data")
 
     try:
         spec = PlotSpec.model_validate(parsed)
     except Exception as exc:
-        raise ToolError(f"Invalid PlotSpec schema: {exc}") from exc
+        raise ToolError(
+            f"Invalid PlotSpec schema: {exc}",
+            hint="fix the PlotSpec fields; evaluation_plot_declarations shows a valid document",
+        ) from exc
 
     target_dir: pathlib.Path | None = None
     for d in _DEFAULT_RECIPE_SEARCH_DIRS:
@@ -136,7 +145,7 @@ def evaluation_save_plot_declaration(
 
     target_dir.mkdir(parents=True, exist_ok=True)
     file_path = target_dir / f"{safe_name}.yaml"
-    file_path.write_text(yaml_text.strip() + "\n", encoding="utf-8")
+    atomic_write_text(file_path, yaml_text.strip() + "\n")
 
     return {
         "status": "saved",
@@ -175,7 +184,7 @@ def evaluation_render_plot(
             hint="evaluation_plot_declarations lists available recipes",
         )
     if declaration is not None and spec_yaml is not None:
-        raise ToolError("Cannot provide both 'declaration' and 'spec_yaml'")
+        raise ToolError("Cannot provide both 'declaration' and 'spec_yaml'", hint="pass declaration or spec_yaml, not both")
 
     if declaration is not None:
         safe_decl = component(declaration.removesuffix(".yaml").removesuffix(".yml"), "declaration")
@@ -187,21 +196,30 @@ def evaluation_render_plot(
             )
         raw_recipe = yaml.safe_load(recipe_path.read_text(encoding="utf-8"))
         if not isinstance(raw_recipe, dict):
-            raise ToolError(f"Recipe '{safe_decl}' is not a valid YAML mapping")
+            raise ToolError(
+                f"Recipe '{safe_decl}' is not a valid YAML mapping",
+                hint="make the recipe a YAML mapping with id, type and data",
+            )
         merged = _deep_merge_dict(raw_recipe, overrides or {})
         try:
             spec = PlotSpec.model_validate(merged)
         except Exception as exc:
-            raise ToolError(f"Invalid PlotSpec schema in recipe '{safe_decl}': {exc}") from exc
+            raise ToolError(
+                f"Invalid PlotSpec schema in recipe '{safe_decl}': {exc}",
+                hint="fix the recipe's PlotSpec fields; evaluation_plot_declarations shows a valid recipe",
+            ) from exc
     else:
         parsed = parse_yaml(spec_yaml or "", "spec_yaml")
         if not isinstance(parsed, dict):
-            raise ToolError("spec_yaml must be a YAML mapping")
+            raise ToolError("spec_yaml must be a YAML mapping", hint="make spec_yaml a YAML mapping with id, type and data")
         merged = _deep_merge_dict(parsed, overrides or {})
         try:
             spec = PlotSpec.model_validate(merged)
         except Exception as exc:
-            raise ToolError(f"Invalid PlotSpec schema: {exc}") from exc
+            raise ToolError(
+                f"Invalid PlotSpec schema: {exc}",
+                hint="fix the PlotSpec fields; evaluation_plot_declarations shows a valid document",
+            ) from exc
 
     benchmark_path = run_path(run_id)
     catalog = BenchmarkCatalog(benchmark_path)
@@ -221,7 +239,10 @@ def evaluation_render_plot(
     try:
         df, diagnostics = resolver.resolve(spec)
     except Exception as exc:
-        raise ToolError(f"Failed to resolve data for plot '{spec.id}': {exc}") from exc
+        raise ToolError(
+            f"Failed to resolve data for plot '{spec.id}': {exc}",
+            hint="check the spec's data source with evaluation_read_metrics or evaluation_evidence",
+        ) from exc
 
     if df.is_empty():
         plot_id = spec.id or declaration or "plot"
@@ -239,17 +260,23 @@ def evaluation_render_plot(
         plotly_renderer = PlotlyRenderer(units={})
         html_body = plotly_renderer.render(spec, df, run_dir=benchmark_path)
         if html_body is None:
-            raise ToolError(f"Plotly renderer failed to produce output for '{spec.id}'")
+            raise ToolError(
+                f"Plotly renderer failed to produce output for '{spec.id}'",
+                hint="use output_format='html' only for a plotly-compatible spec; try png",
+            )
         if isinstance(html_body, list):
             html_body = "\n".join(html_body)
 
         full_html = f"<!DOCTYPE html>\n<html>\n<head>\n<title>{spec.title or clean_stem}</title>\n<script src=\"https://cdn.plot.ly/plotly-2.35.2.min.js\"></script>\n</head>\n<body style='margin: 0; padding: 12px; font-family: sans-serif;'>\n{html_body}\n</body>\n</html>\n"
-        out_file.write_text(full_html, encoding="utf-8")
+        atomic_write_text(out_file, full_html)
     else:
         static_renderer = StaticRenderer(generate_gifs=False, units={})
         static_renderer.render(spec, df, out_path=out_file, run_dir=benchmark_path)
         if not out_file.is_file() or out_file.stat().st_size == 0:
-            raise ToolError(f"Static renderer failed to produce output at {out_file}")
+            raise ToolError(
+                f"Static renderer failed to produce output at {out_file}",
+                hint="check the plot data and try output_format='png'",
+            )
 
     return {
         "plot_path": str(out_file),

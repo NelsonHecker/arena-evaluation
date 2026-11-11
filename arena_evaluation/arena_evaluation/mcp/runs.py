@@ -37,7 +37,10 @@ def launch_tokens(launch_args: dict[str, LaunchValue] | None, **named: LaunchVal
     chosen = {key.replace("__", "."): value for key, value in named.items() if value is not None}
     clash = sorted(set(chosen) & set(launch_args or {}))
     if clash:
-        raise ToolError(f"{', '.join(clash)} given both as a parameter and in launch_args")
+        raise ToolError(
+            f"{', '.join(clash)} given both as a parameter and in launch_args",
+            hint="set each value once, either as its parameter or in launch_args",
+        )
     return [f"{key}:={launch_value(value)}" for key, value in {**chosen, **(launch_args or {})}.items()]
 
 
@@ -83,7 +86,10 @@ def benchmark_argv(
     """The `arena evaluation benchmark` arguments for these options, always naming the run id."""
     if resume:
         if suite is not None or contest is not None:
-            raise ToolError("a resumed run replays its stored suite and contest, do not pass them")
+            raise ToolError(
+                "a resumed run replays its stored suite and contest, do not pass them",
+                hint="drop suite and contest; evaluation_benchmark resume=true replays the stored run",
+            )
         argv = ["--resume", component(run_id, "run_id")]
     else:
         if suite is None or contest is None:
@@ -231,7 +237,10 @@ async def evaluation_benchmark(
         if run_id is None:
             run_id = await asyncio.to_thread(find_most_recent_resumable, root)
             if run_id is None:
-                raise ToolError(f"no resumable run in {root}")
+                raise ToolError(
+                    f"no resumable run in {root}",
+                    hint=f"evaluation_runs lists resumable runs in {root}, or start a fresh benchmark with suite and contest",
+                )
         elif not (root / component(run_id, "run_id") / "manifest.yaml").is_file():
             raise ToolError(f"no run {run_id!r} to resume in {root}", hint="evaluation_runs lists the runs")
     else:
@@ -474,7 +483,7 @@ def evaluation_write_notes(run_id: RunId, notes: list[Note], mode: Literal["repl
 def pipeline_inputs(run_ids: list[str] | None, episode_dirs: list[str] | None) -> tuple[str, list[pathlib.Path]]:
     """The input flag and directories of a processing verb: run directories, the latest run, or episode directories."""
     if run_ids and episode_dirs:
-        raise ToolError("pass run_ids or episode_dirs, not both")
+        raise ToolError("pass run_ids or episode_dirs, not both", hint="pick one input: run_ids for whole runs, episode_dirs for single episode folders")
     if episode_dirs:
         root = data_root()
         paths = []

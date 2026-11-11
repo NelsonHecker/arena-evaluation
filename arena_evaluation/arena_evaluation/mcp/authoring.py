@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Final
 import pydantic
 from arena_mcp.core import ToolError
 
-from .base import YamlText, config_stem, domain, parse_yaml, run_path
+from .base import YamlText, atomic_write_text, config_stem, domain, parse_yaml, run_path
 from .catalog import config_identifier, config_names
 
 if TYPE_CHECKING:
@@ -586,14 +586,17 @@ def evaluation_create_manifest(
         manifest.name = name
         yaml_content = yaml.safe_dump(manifest.model_dump(exclude_none=True), sort_keys=False)
     elif yaml_content is None or template is not None:
-        raise ToolError("pass yaml_content or template")
+        raise ToolError("pass yaml_content or template", hint="pass yaml_content, or template from evaluation_manifests")
     verdict = check_manifest(parse_yaml(yaml_content, "manifest"))
     if not verdict["valid"]:
-        raise ToolError("manifest does not validate: " + "; ".join(verdict["problems"]))
+        raise ToolError(
+            "manifest does not validate: " + "; ".join(verdict["problems"]),
+            hint="fix the listed problems, or start from a template in evaluation_manifests",
+        )
     if run_id is None:
         return {"path": str(write_config("manifest", name, yaml_content, overwrite=overwrite)), **verdict}
     path = run_path(run_id) / f"{config_stem(name)}.yaml"
     if path.exists() and not overwrite:
         raise ToolError(f"{path} exists", hint="pick another name or pass overwrite=true")
-    path.write_text(yaml_content)
+    atomic_write_text(path, yaml_content)
     return {"path": str(path), **verdict}

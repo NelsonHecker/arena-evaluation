@@ -26,7 +26,10 @@ async def _record(
     request = RecordEpisode.Request(command=command, episode_id=episode_id, outcome_state=outcome_state, outcome_info=outcome_info)
     response = await ROS.call(RecordEpisode, f"{node}/start_episode", request, hint=NO_RECORDER)
     if not response.success:
-        raise ToolError(f"recorder refused to {'stop' if stop else 'start'} episode {episode_id}: {response.message}")
+        raise ToolError(
+            f"recorder refused to {'stop' if stop else 'start'} episode {episode_id}: {response.message}",
+            hint="evaluation_recorded_topics shows the env's recorder state, or pass another env_id",
+        )
     return {"recorder": f"{node}/start_episode", "message": response.message}
 
 

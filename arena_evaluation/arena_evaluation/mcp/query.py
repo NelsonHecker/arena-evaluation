@@ -94,7 +94,7 @@ def evaluation_query(
     if query is None and stored_query is None:
         raise ToolError("Must provide either 'query' or 'stored_query'", hint="evaluation_queries lists stored queries")
     if query is not None and stored_query is not None:
-        raise ToolError("Cannot provide both 'query' and 'stored_query'")
+        raise ToolError("Cannot provide both 'query' and 'stored_query'", hint="pass exactly one of query or stored_query; evaluation_queries lists stored queries")
 
     benchmark_path = run_path(run_id)
     catalog = BenchmarkCatalog(benchmark_path)
@@ -109,7 +109,10 @@ def evaluation_query(
         try:
             sql_to_run = decl.render_sql(params)
         except ValueError as exc:
-            raise ToolError(f"Invalid parameters for {stored_query!r}: {exc}") from exc
+            raise ToolError(
+                f"Invalid parameters for {stored_query!r}: {exc}",
+                hint="evaluation_queries shows the declaration's parameters and defaults",
+            ) from exc
         operation = f"stored_query:{stored_query}"
     else:
         clean_query = query.strip() if query is not None else ""
@@ -118,7 +121,10 @@ def evaluation_query(
             try:
                 sql_to_run = decl.render_sql(params)
             except ValueError as exc:
-                raise ToolError(f"Invalid query parameters: {exc}") from exc
+                raise ToolError(
+                    f"Invalid query parameters: {exc}",
+                    hint="pass :placeholder names as params, or drop params for SQL without placeholders",
+                ) from exc
         else:
             try:
                 sql_to_run = validate_readonly_sql(clean_query)
@@ -205,7 +211,10 @@ def evaluation_query_save(
     try:
         _ = decl.render_sql(decl.default_parameters())
     except Exception as exc:
-        raise ToolError(f"Query declaration validation failed: {exc}") from exc
+        raise ToolError(
+            f"Query declaration validation failed: {exc}",
+            hint="fix the SQL or the parameter declarations and save it again",
+        ) from exc
 
     q_catalog = QueryCatalog()
     saved = q_catalog.save_query(
@@ -242,7 +251,10 @@ def evaluation_evidence(
             rec = store.get(clean_ev_id)
             df = store.read_frame(clean_ev_id)
         except KeyError as exc:
-            raise ToolError(f"Evidence {clean_ev_id!r} not found in run {benchmark_path.name!r}") from exc
+            raise ToolError(
+                f"Evidence {clean_ev_id!r} not found in run {benchmark_path.name!r}",
+                hint="evaluation_evidence lists the run's pinned evidence ids",
+            ) from exc
         return {
             "run_id": benchmark_path.name,
             "evidence_id": rec.evidence_id,
