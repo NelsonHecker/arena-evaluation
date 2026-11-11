@@ -10,7 +10,7 @@ import jinja2
 import polars as pl
 
 from arena_evaluation.analytics.catalog import BenchmarkCatalog
-from arena_evaluation.presentation.checks import PlotDiagnostics
+from arena_evaluation.presentation.checks import BuildChecks, CheckStage, PlotCheck, PlotDiagnostics
 from arena_evaluation.presentation.data_sources import EPISODE_SUMMARY_VIEW, data_source_table
 from arena_evaluation.presentation.manifest_registry import resolve_manifest
 from arena_evaluation.presentation.plotly_renderer import PlotlyRenderer
@@ -81,6 +81,23 @@ def _format_metric(value: float, template: str | None) -> str:
     if value != value:
         return "N/A"
     return template.format(value) if template else f"{value:.3f}"
+
+
+def _failed_checks_html(failures: tuple[PlotCheck, ...]) -> str:
+    """Appendix table of the failed plot checks and the reason each one failed."""
+    if not failures:
+        return ""
+    head = "".join(f"<th>{html_escape.escape(name)}</th>" for name in ("Plot", "Title", "Stage", "Reason"))
+    body = "".join(
+        "<tr>"
+        + "".join(
+            f"<td>{html_escape.escape(value)}</td>"
+            for value in (failure.plot_id, failure.title, str(failure.stage), failure.detail)
+        )
+        + "</tr>"
+        for failure in failures
+    )
+    return f'<p>Every failed check is listed here and counted in the build result. A dropped or failed plot is never silently omitted from this report.</p><table class="dataframe"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
 
 
 def _labelled(df: pl.DataFrame, group_cols: list[str]) -> pl.DataFrame:
@@ -162,6 +179,7 @@ class ReportBuilder:
         self._source_frames: dict[str, pl.DataFrame] = {}
         self._merged_df: pl.DataFrame | None = None
         self._agent_notes: dict[str, str] | None = None
+        self._build_checks = BuildChecks(plots_total=0, failures=())
 
     @classmethod
     def from_dirs(
@@ -183,6 +201,7 @@ class ReportBuilder:
         instance._source_frames = {}
         instance._manifest_obj = None
         instance._agent_notes = None
+        instance._build_checks = BuildChecks(plots_total=0, failures=())
 
         if manifest is not None:
             instance._manifest_obj = manifest if isinstance(manifest, VizManifest) else resolve_manifest(manifest, benchmark_dir=instance.benchmark_dir)
@@ -205,6 +224,11 @@ class ReportBuilder:
         table = data_source_table(instance._manifest_obj.data_source) if instance._manifest_obj is not None else data_source_table(None)
         instance._merged_df = instance._sources.frame(table)
         return instance
+
+    @property
+    def build_checks(self) -> BuildChecks:
+        """The failed checks of the last build, the same rows the report appendix lists."""
+        return self._build_checks
 
     def _load_primary_frame(self, manifest: VizManifest) -> pl.DataFrame | None:
         """Load the manifest's primary frame from its Star Schema table or view."""
@@ -264,6 +288,10 @@ class ReportBuilder:
         static_renderer = StaticRenderer(generate_gifs=self.generate_gifs, units=units)
 
         html_plots = []
+        failures: list[PlotCheck] = []
+
+        def record_failure(spec: PlotSpec, stage: CheckStage, detail: str) -> None:
+            failures.append(PlotCheck(plot_id=spec.id, title=spec.title, stage=stage, detail=detail))
 
         resolver = DataResolver(catalog=self._sources.catalogs[0], benchmark_dir=self.benchmark_dir)
 
@@ -274,12 +302,14 @@ class ReportBuilder:
             try:
                 plot_df, diagnostics = resolver.resolve(resolved_spec, fallback_df=fallback_df)
             except Exception as e:
-                print(f"Skipping plot '{resolved_spec.id}': {e}")
+                record_failure(resolved_spec, CheckStage.LOAD, str(e))
+                print(f"Failed check: cannot load data for plot '{resolved_spec.id}': {e}")
                 continue
 
             if diagnostics.status == "FAILED":
                 issues_str = "; ".join(diagnostics.issues) if diagnostics.issues else "Quality gate rejected"
-                print(f"Warning: Plot '{resolved_spec.id}' failed quality gate: {issues_str}")
+                record_failure(resolved_spec, CheckStage.QUALITY, issues_str)
+                print(f"Failed check: plot '{resolved_spec.id}' failed the quality gate: {issues_str}")
                 gate_card = f'<div class="plot-gate-card gate-failed"><strong>[Plot Quality Gate Rejected]</strong> {html_escape.escape(issues_str)}</div>'
                 note_html = self._plot_note_html(resolved_spec)
                 html_plots.append((resolved_spec.layout_group, gate_card + note_html, resolved_spec.title))
@@ -291,14 +321,16 @@ class ReportBuilder:
             try:
                 static_renderer.render(resolved_spec, plot_df, png_path, run_dir=self.output_dir)
             except Exception as e:
-                print(f"Warning: Failed to render static plot {resolved_spec.id}: {e}")
+                record_failure(resolved_spec, CheckStage.STATIC, str(e))
+                print(f"Failed check: cannot render static plot '{resolved_spec.id}': {e}")
 
             if resolved_spec.options.get("vector_svg", False):
                 svg_path = self.plots_dir / f"{resolved_spec.id}.svg"
                 try:
                     static_renderer.render(resolved_spec, plot_df, svg_path, run_dir=self.output_dir)
                 except Exception as e:
-                    print(f"Warning: Failed to render vector plot {resolved_spec.id}: {e}")
+                    record_failure(resolved_spec, CheckStage.STATIC, f"vector SVG: {e}")
+                    print(f"Failed check: cannot render vector plot '{resolved_spec.id}': {e}")
 
             try:
                 html_chunk = plotly_renderer.render(resolved_spec, plot_df, run_dir=self.output_dir)
@@ -311,7 +343,10 @@ class ReportBuilder:
                     else:
                         html_plots.append((resolved_spec.layout_group, html_chunk + full_note, resolved_spec.title))
             except Exception as e:
-                print(f"Warning: Failed to render interactive plot {resolved_spec.id}: {e}")
+                record_failure(resolved_spec, CheckStage.INTERACTIVE, str(e))
+                print(f"Failed check: cannot render interactive plot '{resolved_spec.id}': {e}")
+
+        self._build_checks = BuildChecks(plots_total=len(manifest.plots), failures=tuple(failures))
 
         if manifest.summary:
             summary_html = self._generate_summary_table_manifest(df, manifest)
@@ -322,7 +357,7 @@ class ReportBuilder:
 
         report_title = manifest.title or self.output_dir.name
 
-        html_content = self._assemble_html(summary_html, html_plots, report_title, manifest)
+        html_content = self._assemble_html(summary_html, html_plots, report_title, manifest, appendix_html=_failed_checks_html(self._build_checks.failures))
         with open(self.report_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
@@ -334,6 +369,7 @@ class ReportBuilder:
 
         self._write_note_file(manifest)
 
+        print(f"Plot checks: {self._build_checks.plots_total} plots, {self._build_checks.passed_count} passed, {self._build_checks.failed_count} failed")
         print(f"Report generated successfully: {self.report_path}")
         print(f"Static plots saved to: {self.plots_dir}")
         return self.report_path
@@ -508,6 +544,8 @@ class ReportBuilder:
         plot_htmls: list[tuple[str | None, str, str]],
         report_title: str,
         manifest: VizManifest,
+        *,
+        appendix_html: str = "",
     ) -> str:
         """Template for the final HTML report using Jinja2."""
         grouped_plots = {}
@@ -537,4 +575,4 @@ class ReportBuilder:
 
         generated_on = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        return template.render(benchmark_id=report_title, report_dir=str(self.output_dir.resolve()), generated_on=generated_on, summary_html=summary_html, overview_plots=overview_plots, plot_groups=plot_groups)
+        return template.render(benchmark_id=report_title, report_dir=str(self.output_dir.resolve()), generated_on=generated_on, summary_html=summary_html, overview_plots=overview_plots, plot_groups=plot_groups, appendix_html=appendix_html)

@@ -6,6 +6,7 @@ Provides automated plot quality and integrity gate checks before rendering.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -14,7 +15,10 @@ if TYPE_CHECKING:
     from arena_evaluation.storage.schemas import PlotSpec
 
 __all__ = [
+    "BuildChecks",
+    "CheckStage",
     "DiagnosticInspector",
+    "PlotCheck",
     "PlotDiagnostics",
 ]
 
@@ -54,6 +58,47 @@ class PlotDiagnostics:
             "cardinality": dict(self.cardinality),
             "warnings": list(self.warnings),
         }
+
+
+class CheckStage(StrEnum):
+    """The build step that refused a plot."""
+
+    LOAD = "load"
+    QUALITY = "quality gate"
+    STATIC = "static plot"
+    INTERACTIVE = "interactive plot"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PlotCheck:
+    """One plot that failed a build step, with the reason the build recorded."""
+
+    plot_id: str
+    title: str
+    stage: CheckStage
+    detail: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BuildChecks:
+    """The failed checks of one report build against the plots its manifest asked for."""
+
+    plots_total: int
+    failures: tuple[PlotCheck, ...]
+
+    @property
+    def failed_count(self) -> int:
+        """Plots that failed at least one build step."""
+        return len({failure.plot_id for failure in self.failures})
+
+    @property
+    def passed_count(self) -> int:
+        """Plots that rendered on every step of the build."""
+        return self.plots_total - self.failed_count
+
+    def for_plot(self, plot_id: str) -> tuple[PlotCheck, ...]:
+        """Every failed step of one plot, in build order."""
+        return tuple(failure for failure in self.failures if failure.plot_id == plot_id)
 
 
 class DiagnosticInspector:

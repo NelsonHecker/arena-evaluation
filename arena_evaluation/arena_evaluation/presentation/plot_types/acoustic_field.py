@@ -21,7 +21,6 @@ from arena_evaluation.processing.acoustics.impedance_grid import (
     downsample_mask,
     downsample_occupancy,
 )
-from arena_evaluation.storage.exceptions import AcousticsError
 
 if typing.TYPE_CHECKING:
     from matplotlib.artist import Artist
@@ -50,12 +49,9 @@ class AcousticFieldRenderer(BasePlotRenderer):
     PLOT_TYPE = "acoustic_field"
 
     @staticmethod
-    def _load_grid_and_meta(map_name: str, run_dir: pathlib.Path | None = None) -> tuple[np.ndarray, dict] | None:
-        try:
-            barrier = load_barrier_map(map_name, run_dir=run_dir)
-        except AcousticsError as error:
-            logger.error("Acoustic plot skipped: %s", error)
-            return None
+    def _load_grid_and_meta(map_name: str, run_dir: pathlib.Path | None = None) -> tuple[np.ndarray, dict]:
+        """The occupancy grid and geometry of a map; AcousticsError propagates as a failed plot check."""
+        barrier = load_barrier_map(map_name, run_dir=run_dir)
         meta = {"resolution": barrier.resolution, "origin": barrier.origin, "doors": barrier_door_tl(barrier)}
         return barrier.occupancy, meta
 
@@ -283,10 +279,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if not map_name:
             return ""
 
-        result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
-        if result is None:
-            return ""
-        grid, meta = result
+        grid, meta = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
         resolution = meta["resolution"]
         ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
         downsample = int(self.spec.options.get("downsample", 1))
@@ -443,10 +436,7 @@ class AcousticFieldRenderer(BasePlotRenderer):
         if not map_name:
             return
 
-        result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
-        if result is None:
-            return
-        grid, meta = result
+        grid, meta = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
         resolution = meta["resolution"]
         ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
         downsample = int(self.spec.options.get("downsample", 1))
@@ -1211,10 +1201,7 @@ class AcousticFieldAnimationRenderer(AcousticFieldRenderer):
         if not map_name:
             return
 
-        result = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
-        if result is None:
-            return
-        grid, meta = result
+        grid, meta = self._load_grid_and_meta(map_name, run_dir=self.run_dir)
         resolution = meta["resolution"]
         ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
 
