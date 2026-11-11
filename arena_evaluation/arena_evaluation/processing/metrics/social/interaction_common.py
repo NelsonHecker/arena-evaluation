@@ -31,9 +31,6 @@ UNIDENTIFIED_ROBOT_ID: Final[str] = "robot"
 NS_PER_S: Final[float] = 1e9
 ROBOT_TRACKS_TOPIC: Final[str] = "robot_tracks"
 PEDESTRIAN_TRACKS_TOPIC: Final[str] = "pedestrian_tracks"
-ROBOT_VISIBILITY_PARAM: Final[str] = "humansim.robots_visible"
-
-CrowdCondition = typing.Literal["blind", "visible"]
 
 NATIVE_ROBOT_COLUMNS: Final[tuple[str, ...]] = ("t_ns", "x", "y", "yaw", "vx", "vy")
 
@@ -331,41 +328,6 @@ def _first_float(series: pl.Series) -> float | None:
     """First non-null value of a float series, None when every value is null."""
     present = series.drop_nulls()
     return float(present[0]) if len(present) > 0 else None
-
-
-def resolve_crowd_condition(
-    episode: AlignedEpisodeBundle,
-    metrics_config: Mapping[str, typing.Any] | None = None,
-) -> CrowdCondition:
-    """Crowd visibility of the episode: explicit metrics config first, else the recorded humansim parameter, else visible."""
-    config = metrics_config or {}
-    configured = config.get("crowd_condition")
-    if configured in ("blind", "visible"):
-        return "blind" if configured == "blind" else "visible"
-    for key in ("crowd_visible", "robots_visible"):
-        visible = config.get(key)
-        if visible is not None:
-            return "visible" if bool(visible) else "blind"
-
-    recorded = _recorded_robot_visibility(episode)
-    if recorded is not None:
-        return "visible" if recorded else "blind"
-    return "visible"
-
-
-def _recorded_robot_visibility(episode: AlignedEpisodeBundle) -> bool | None:
-    """Recorded ``humansim.robots_visible`` parameter, None when the recording carries none."""
-    params = episode.human_params
-    if params is None:
-        return None
-    value = params.get(ROBOT_VISIBILITY_PARAM)
-    if value is not None:
-        return bool(value)
-    visibility_leaf = ROBOT_VISIBILITY_PARAM.rsplit(".", maxsplit=1)[-1]
-    for name, parameter in params.items():
-        if name.rsplit(".", maxsplit=1)[-1] == visibility_leaf:
-            return bool(parameter)
-    return None
 
 
 def contiguous_spans(mask: np.ndarray, t_ns: np.ndarray, merge_gap_ns: int) -> list[tuple[int, int]]:

@@ -15,33 +15,36 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_PED_RADIUS_M,
     NS_PER_S,
     ROBOT_TRACKS_TOPIC,
-    CrowdCondition,
     PedTrack,
     Trajectory2D,
     contiguous_spans,
     episode_table,
     extract_episode_ped_tracks,
     merge_intervals_ns,
-    resolve_crowd_condition,
     resolve_ped_track,
     resolve_robot_trajectory,
 )
+from arena_evaluation.storage.declarations import CrowdCondition, resolve_crowd_condition
 
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 PRE_CONTACT_WINDOW_S: Final[float] = 0.5
 POST_CONTACT_WINDOW_S: Final[float] = 0.5
+#: Wall-clock gap, seconds, that still merges two recorded contact samples of the same target into one contact.
 CONTACT_MERGE_GAP_S: Final[float] = 0.25
-STOPPED_SPEED_MPS: Final[float] = 0.05
-MOVING_SPEED_MPS: Final[float] = 0.15
-DOMINANT_SHARE: Final[float] = 0.70
+#: Share of the closing speed (dimensionless, 0..1) the robot must contribute to be the sole closer.
+DOMINANT_CLOSING_SHARE: Final[float] = 0.70
 PEDESTRIAN_KIND: Final[str] = "pedestrian"
+ROBOT_KIND: Final[str] = "robot"
+#: Collider kinds that move on their own and therefore get a closing-share attribution.
+TRACKED_KINDS: Final[frozenset[str]] = frozenset({PEDESTRIAN_KIND, ROBOT_KIND})
 PEDESTRIAN_KIND_PATTERN: Final[str] = "ped|human"
 COLLISION_CONTACTS_TOPIC: Final[str] = "collision_contacts"
 COLLISION_EVENTS_TOPIC: Final[str] = "collision_events"
 
-CloserLabel = typing.Literal["robot", "pedestrian", "mutual", "static"]
+CloserLabel = typing.Literal["robot", "pedestrian", "other_robot", "mutual", "static"]
+FaultAttribution = typing.Literal["robot", "pedestrian", "other_robot", "mutual", "unavoidable"]
 CounterfactualRegime = typing.Literal["blind_exact", "reactive_approx", "unavailable"]
 
 
@@ -62,7 +65,7 @@ class ContactContext:
     """Episode-level context needed to attribute a ContactEvent."""
 
     robot: Trajectory2D
-    crowd_condition: CrowdCondition = "visible"
+    crowd_condition: CrowdCondition | None = None
     default_ped_radius_m: float = DEFAULT_PED_RADIUS_M
     pre_window_s: float = PRE_CONTACT_WINDOW_S
     post_window_s: float = POST_CONTACT_WINDOW_S
@@ -83,8 +86,9 @@ class ContactAttributionRecord:
     target_ped_name: str | None
     v_close_robot_mps: float
     v_close_target_mps: float
-    s_robot: float
-    closer_label: CloserLabel
+    s_robot: float | None
+    closer_label: CloserLabel | None
+    fault_attributed_to: FaultAttribution | None
     v_robot_impact_mps: float
     v_target_impact_mps: float
     relative_impact_speed_mps: float
@@ -95,30 +99,84 @@ class ContactAttributionRecord:
     is_robot_fault_lower_bound: bool | None
 
 
-def classify_closer_label(
+@dataclass(frozen=True, slots=True)
+class FaultPolicy:
+    """The one contact fault policy: who closed in, who is to blame and the robot-fault verdicts."""
+
+    closer_label: CloserLabel | None
+    fault_attributed_to: FaultAttribution | None
+    robot_closing_share: float | None
+    is_robot_fault: bool | None
+    is_robot_fault_lower_bound: bool | None
+
+
+def _closing_share(v_close_robot_mps: float, v_close_target_mps: float) -> float:
+    """Robot share of the closing speed, 0.5 when neither body closes (two bodies at rest)."""
+    closing_robot = max(0.0, float(v_close_robot_mps))
+    closing_target = max(0.0, float(v_close_target_mps))
+    total = closing_robot + closing_target
+    return float(closing_robot / total) if total > 1e-9 else 0.5
+
+
+def _policy(
+    *,
+    closer_label: CloserLabel | None,
+    fault_attributed_to: FaultAttribution | None,
+    share: float | None,
+    verdict: bool | None,
+    regime: CounterfactualRegime,
+) -> FaultPolicy:
+    """Gate one verdict by the counterfactual evidence standard: exact blame only in the blind regime."""
+    match regime:
+        case "blind_exact":
+            return FaultPolicy(closer_label, fault_attributed_to, share, verdict, None)
+        case "reactive_approx":
+            return FaultPolicy(closer_label, fault_attributed_to, share, None, verdict)
+        case _:
+            return FaultPolicy(closer_label, fault_attributed_to, share, None, None)
+
+
+def classify_contact_fault(
+    *,
+    collider_kind: str,
     v_close_robot_mps: float,
     v_close_target_mps: float,
-    obstacle_kind: str = PEDESTRIAN_KIND,
-) -> tuple[CloserLabel, float]:
-    """Classify contact closing speeds into closer_label and robot closing share s_robot."""
-    if obstacle_kind != PEDESTRIAN_KIND:
-        return "static", (1.0 if v_close_robot_mps > 0.0 else 0.0)
+    counterfactual_freeze_persists: bool | None,
+    counterfactual_regime: CounterfactualRegime,
+    target_speed_known: bool = True,
+) -> FaultPolicy:
+    """The single fault policy of a contact: closing shares and the freeze test into label, blame and verdicts.
 
-    v_r_pos = max(0.0, float(v_close_robot_mps))
-    v_t_pos = max(0.0, float(v_close_target_mps))
-    denom = v_r_pos + v_t_pos
-    s_robot = float(v_r_pos / denom) if denom > 1e-9 else 0.5
+    A wall or static collider is always the robot's fault. A moving collider is attributed by the
+    robot's share of the closing speed: at or above :data:`DOMINANT_CLOSING_SHARE` the robot closed
+    in, at or below its complement the other body did, otherwise the contact is mutual. A mutual
+    contact is ``unavoidable`` when the frozen-robot counterfactual still collides, and only counts
+    as the robot's fault when freezing the robot provably avoids it; two bodies at rest therefore
+    stay unknown instead of silently becoming robot faults. Without a measured target speed the
+    share is not computable and every verdict is NULL.
+    """
+    share = _closing_share(v_close_robot_mps, v_close_target_mps)
+    if collider_kind not in TRACKED_KINDS:
+        # A static-world impact needs no crowd reaction: the robot hit it in both evidence standards.
+        return FaultPolicy(closer_label="static", fault_attributed_to="robot", robot_closing_share=share, is_robot_fault=True, is_robot_fault_lower_bound=True)
+    if not target_speed_known:
+        return _policy(closer_label=None, fault_attributed_to=None, share=None, verdict=None, regime=counterfactual_regime)
 
-    if v_close_robot_mps <= STOPPED_SPEED_MPS and v_close_target_mps > MOVING_SPEED_MPS:
-        return "pedestrian", s_robot
-    if v_close_target_mps <= STOPPED_SPEED_MPS and v_close_robot_mps > MOVING_SPEED_MPS:
-        return "robot", s_robot
-    if v_close_robot_mps > STOPPED_SPEED_MPS or v_close_target_mps > STOPPED_SPEED_MPS:
-        if s_robot >= DOMINANT_SHARE:
-            return "robot", s_robot
-        if s_robot <= (1.0 - DOMINANT_SHARE):
-            return "pedestrian", s_robot
-    return "mutual", s_robot
+    target_label: CloserLabel = "pedestrian" if collider_kind == PEDESTRIAN_KIND else "other_robot"
+    if share >= DOMINANT_CLOSING_SHARE:
+        return _policy(closer_label="robot", fault_attributed_to="robot", share=share, verdict=True, regime=counterfactual_regime)
+    if share <= 1.0 - DOMINANT_CLOSING_SHARE:
+        return _policy(closer_label=target_label, fault_attributed_to=typing.cast(FaultAttribution, target_label), share=share, verdict=False, regime=counterfactual_regime)
+
+    persists = counterfactual_freeze_persists
+    unavoidable = persists is not False
+    return _policy(
+        closer_label="mutual",
+        fault_attributed_to="unavoidable" if unavoidable else "mutual",
+        share=share,
+        verdict=None if unavoidable else True,
+        regime=counterfactual_regime,
+    )
 
 
 def compute_closing_speeds(event: ContactEvent, context: ContactContext) -> tuple[float, float]:
@@ -155,7 +213,13 @@ def evaluate_frozen_robot_counterfactual(
     event: ContactEvent,
     context: ContactContext,
 ) -> tuple[CounterfactualRegime, float | None, bool | None]:
-    """Frozen-robot counterfactual test over [t0 - pre_window_s, t0 + post_window_s]."""
+    """Frozen-robot counterfactual test over [t0 - pre_window_s, t0 + post_window_s].
+
+    Only a pedestrian is not expected to react to the frozen robot, so only that pair yields an
+    exact or approximated freeze verdict; another robot sees the stop and reacts, so its contact
+    keeps the closing-share attribution alone. An unrecorded crowd condition is not blind: the
+    test stays an approximation rather than claiming an exact counterfactual.
+    """
     track = event.track
     if event.obstacle_kind != PEDESTRIAN_KIND or track is None or len(track.t_ns) == 0 or len(context.robot.t_ns) == 0:
         return "unavailable", None, None
@@ -183,16 +247,16 @@ def attribute_single_contact(
     event: ContactEvent,
     context: ContactContext,
 ) -> ContactAttributionRecord:
-    """Compute full attribution record for a single ContactEvent."""
+    """Compute full attribution record for a single ContactEvent, through the one fault policy."""
     v_close_r, v_close_t = compute_closing_speeds(event, context)
-    closer_label, s_robot = classify_closer_label(v_close_r, v_close_t, event.obstacle_kind)
+    target_known = event.obstacle_kind not in TRACKED_KINDS or (event.track is not None and len(event.track.t_ns) > 0)
 
     t0_arr = np.asarray([event.t0_ns], dtype=np.int64)
     r_at_t0 = context.robot.resample_onto(t0_arr)
     rvx_0, rvy_0 = float(r_at_t0.vx[0]), float(r_at_t0.vy[0])
     v_robot_impact = float(np.hypot(rvx_0, rvy_0))
 
-    if event.obstacle_kind == PEDESTRIAN_KIND and event.track is not None and len(event.track.t_ns) > 0:
+    if target_known and event.obstacle_kind in TRACKED_KINDS and event.track is not None and len(event.track.t_ns) > 0:
         p_at_t0 = event.track.trajectory.resample_onto(t0_arr)
         pvx_0, pvy_0 = float(p_at_t0.vx[0]), float(p_at_t0.vy[0])
         v_target_impact = float(np.hypot(pvx_0, pvy_0))
@@ -202,9 +266,14 @@ def attribute_single_contact(
         rel_impact = v_robot_impact
 
     regime, min_dist_m, persists = evaluate_frozen_robot_counterfactual(event, context)
-    fault_predicate = (closer_label in ("robot", "mutual", "static")) or (persists is False)
-    is_robot_fault: bool | None = bool(fault_predicate) if regime == "blind_exact" else None
-    is_robot_fault_lb: bool | None = bool(fault_predicate) if regime == "reactive_approx" else None
+    policy = classify_contact_fault(
+        collider_kind=event.obstacle_kind,
+        v_close_robot_mps=v_close_r,
+        v_close_target_mps=v_close_t,
+        counterfactual_freeze_persists=persists,
+        counterfactual_regime=regime,
+        target_speed_known=target_known,
+    )
 
     ep_start_ns = int(context.robot.t_ns[0]) if len(context.robot.t_ns) > 0 else event.t0_ns
     return ContactAttributionRecord(
@@ -219,16 +288,17 @@ def attribute_single_contact(
         target_ped_name=event.track.ped_name if event.track is not None else None,
         v_close_robot_mps=v_close_r,
         v_close_target_mps=v_close_t,
-        s_robot=s_robot,
-        closer_label=closer_label,
+        s_robot=policy.robot_closing_share,
+        closer_label=policy.closer_label,
+        fault_attributed_to=policy.fault_attributed_to,
         v_robot_impact_mps=v_robot_impact,
         v_target_impact_mps=v_target_impact,
         relative_impact_speed_mps=rel_impact,
         counterfactual_regime=regime,
         counterfactual_freeze_min_dist_m=min_dist_m,
         counterfactual_freeze_persists=persists,
-        is_robot_fault=is_robot_fault,
-        is_robot_fault_lower_bound=is_robot_fault_lb,
+        is_robot_fault=policy.is_robot_fault,
+        is_robot_fault_lower_bound=policy.is_robot_fault_lower_bound,
     )
 
 
@@ -375,7 +445,7 @@ def _contacts_from_table(
     events: list[ContactEvent] = []
     for t0_ns, t_end_ns, obstacle_kind, obstacle_id, obstacle_x, obstacle_y in zip(t0_values, end_values, kind_values, id_values, x_values, y_values, strict=True):
         robot_at_t0 = robot.resample_onto(np.asarray([int(t0_ns)], dtype=np.int64))
-        track = _match_track(str(obstacle_id), tracks, robot_at_t0) if obstacle_kind == PEDESTRIAN_KIND else None
+        track = _match_track(str(obstacle_id), tracks, robot_at_t0) if obstacle_kind in TRACKED_KINDS else None
         resolved_id = str(obstacle_id) or (track.ped_id if track is not None else PEDESTRIAN_KIND)
         events.append(
             ContactEvent(
@@ -409,8 +479,9 @@ def _contacts_from_clearance(
         robot_window = robot.slice_ns(t_lo, t_hi)
         pedestrian_window = track.trajectory.resample_onto(robot_window.t_ns)
         ped_radius_m = track.radius_m if track.radius_m is not None else DEFAULT_PED_RADIUS_M
-        clearance_m = np.hypot(pedestrian_window.x - robot_window.x, pedestrian_window.y - robot_window.y) - (robot.radius_m + ped_radius_m)
-        spans = contiguous_spans(clearance_m <= 0.0, robot_window.t_ns, merge_gap_ns)
+        # Surface-to-surface (edge) clearance in metres: the centre distance minus both body radii.
+        edge_clearance_m = np.hypot(pedestrian_window.x - robot_window.x, pedestrian_window.y - robot_window.y) - (robot.radius_m + ped_radius_m)
+        spans = contiguous_spans(edge_clearance_m <= 0.0, robot_window.t_ns, merge_gap_ns)
         events.extend(
             ContactEvent(
                 t0_ns=int(robot_window.t_ns[start]),
@@ -574,8 +645,8 @@ class ContactAttributionCalculator(BaseMetricCalculator):
         obstacle_kind = str(self.metrics_config.get("obstacle_kind", PEDESTRIAN_KIND)).lower()
         obstacle_id = str(self.metrics_config.get("obstacle_id", ""))
 
-        track = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id")) if obstacle_kind == PEDESTRIAN_KIND else None
-        if track is None and obstacle_kind == PEDESTRIAN_KIND:
+        track = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id")) if obstacle_kind in TRACKED_KINDS else None
+        if track is None and obstacle_kind in TRACKED_KINDS:
             robot_at_t0 = robot.resample_onto(np.asarray([t0_ns], dtype=np.int64))
             track = _match_track(obstacle_id, tracks, robot_at_t0)
         resolved_id = obstacle_id or (track.ped_name if track is not None else obstacle_kind)
@@ -639,6 +710,7 @@ class ContactAttributionCalculator(BaseMetricCalculator):
                 "contact_v_close_target_mps": None,
                 "contact_s_robot": None,
                 "closer_label": None,
+                "fault_attributed_to": None,
                 "counterfactual_regime": None,
                 "counterfactual_freeze_min_dist_m": None,
                 "counterfactual_freeze_persists": None,
@@ -660,12 +732,14 @@ class ContactAttributionCalculator(BaseMetricCalculator):
         blind_faults = [r.is_robot_fault for r in records if r.is_robot_fault is not None]
         reactive_faults = [r.is_robot_fault_lower_bound for r in records if r.is_robot_fault_lower_bound is not None]
         persists_vals = [r.counterfactual_freeze_persists for r in records if r.counterfactual_freeze_persists is not None]
+        shares = [r.s_robot for r in records if r.s_robot is not None]
 
         return {
             "contact_v_close_robot_mps": float(max(r.v_close_robot_mps for r in records)) if len(records) > 1 else primary.v_close_robot_mps,
             "contact_v_close_target_mps": float(max(r.v_close_target_mps for r in records)) if len(records) > 1 else primary.v_close_target_mps,
-            "contact_s_robot": float(max(r.s_robot for r in records)) if len(records) > 1 else primary.s_robot,
+            "contact_s_robot": float(max(shares)) if shares else None,
             "closer_label": primary.closer_label,
+            "fault_attributed_to": primary.fault_attributed_to,
             "counterfactual_regime": primary.counterfactual_regime,
             "counterfactual_freeze_min_dist_m": float(min(freeze_dists)) if freeze_dists else None,
             "counterfactual_freeze_persists": primary.counterfactual_freeze_persists if len(records) == 1 else (bool(all(persists_vals)) if persists_vals else None),
@@ -692,22 +766,18 @@ class ContactAttributionCalculator(BaseMetricCalculator):
         res = self.summarize_records(self.attribute_all_contacts(episode))
         records = res.get("contact_records", [])
         rec = records[0] if records else {}
-        collider_kind = str(self.metrics_config.get("obstacle_kind", rec.get("obstacle_kind", "pedestrian"))).lower()
-        fault = "unavoidable"
-        if collider_kind in ("wall", "static"):
-            fault = "robot"
-        elif rec.get("is_robot_fault") is True or rec.get("is_robot_fault_lower_bound") is True:
-            fault = "robot"
-        elif rec.get("is_robot_fault") is False:
-            fault = "pedestrian"
+        return self._with_contact_fact_values(res, rec)
 
+    @staticmethod
+    def _with_contact_fact_values(res: dict[str, typing.Any], record: Mapping[str, typing.Any]) -> dict[str, typing.Any]:
+        """Add the fact-table aliases of one attribution record; the fault label is the policy's verdict, never re-derived."""
         res.update(
             {
-                "impact_speed_mps": rec.get("relative_impact_speed_mps"),
-                "robot_speed_at_impact_mps": rec.get("v_robot_impact_mps"),
-                "obstacle_speed_at_impact_mps": rec.get("v_target_impact_mps"),
-                "robot_closing_share": rec.get("s_robot"),
-                "fault_attributed_to": fault,
+                "impact_speed_mps": record.get("relative_impact_speed_mps"),
+                "robot_speed_at_impact_mps": record.get("v_robot_impact_mps"),
+                "obstacle_speed_at_impact_mps": record.get("v_target_impact_mps"),
+                "robot_closing_share": record.get("s_robot"),
+                "fault_attributed_to": record.get("fault_attributed_to"),
             }
         )
         return res
@@ -725,29 +795,23 @@ class ContactAttributionCalculator(BaseMetricCalculator):
         t0_ns = int(scope_slice.t_start_ns)
         t_end_ns = int(scope_slice.t_end_ns)
         raw_collider_kind = str(scope_slice.identity.get("collider_kind", PEDESTRIAN_KIND)).lower()
-        obstacle_kind = PEDESTRIAN_KIND if raw_collider_kind in (PEDESTRIAN_KIND, "robot") else raw_collider_kind
+        # Another robot stays a robot: routing it through the pedestrian path fabricated pedestrian
+        # aliases and blamed the other robot as a pedestrian.
+        obstacle_kind = raw_collider_kind
         obstacle_id = str(scope_slice.identity.get("obstacle_id", ""))
         static_point = _configured_static_point(scope_slice.identity.get("static_point"), obstacle_kind)
         configured_crowd = scope_slice.identity.get("crowd_condition")
-        crowd_condition: CrowdCondition = "blind" if configured_crowd == "blind" else ("visible" if configured_crowd == "visible" else resolve_crowd_condition(episode, self.metrics_config))
+        recorded_crowd = resolve_crowd_condition(episode, self.metrics_config)
+        crowd_condition: CrowdCondition | None = configured_crowd if configured_crowd in ("blind", "visible") else recorded_crowd
 
         robot, _yaw = resolve_robot_trajectory(self, episode)
         if len(robot.t_ns) == 0:
-            empty_res = self.summarize_records([])
-            empty_res.update(
-                {
-                    "impact_speed_mps": None,
-                    "robot_speed_at_impact_mps": None,
-                    "obstacle_speed_at_impact_mps": None,
-                    "robot_closing_share": None,
-                    "fault_attributed_to": "robot" if raw_collider_kind in ("wall", "static") else "unavoidable",
-                }
-            )
-            return empty_res
+            return self._with_contact_fact_values(self.summarize_records([]), {})
 
         tracks = extract_episode_ped_tracks(episode)
-        track = resolve_ped_track(tracks, obstacle_id) if obstacle_kind == PEDESTRIAN_KIND else None
-        if track is None and obstacle_kind == PEDESTRIAN_KIND:
+        tracked = obstacle_kind in TRACKED_KINDS
+        track = resolve_ped_track(tracks, obstacle_id) if tracked else None
+        if track is None and tracked:
             robot_at_t0 = robot.resample_onto(np.asarray([t0_ns], dtype=np.int64))
             track = _match_track(obstacle_id, tracks, robot_at_t0)
 
@@ -768,22 +832,4 @@ class ContactAttributionCalculator(BaseMetricCalculator):
             post_window_s=float(scope_slice.identity.get("post_contact_window_s", self.metrics_config.get("post_contact_window_s", POST_CONTACT_WINDOW_S))),
         )
         record = attribute_single_contact(0, event, context)
-        res = self.summarize_records([record])
-        fault = "unavoidable"
-        if raw_collider_kind in ("wall", "static"):
-            fault = "robot"
-        elif record.is_robot_fault is True or record.is_robot_fault_lower_bound is True:
-            fault = "robot"
-        elif record.is_robot_fault is False:
-            fault = "pedestrian"
-
-        res.update(
-            {
-                "impact_speed_mps": record.relative_impact_speed_mps,
-                "robot_speed_at_impact_mps": record.v_robot_impact_mps,
-                "obstacle_speed_at_impact_mps": record.v_target_impact_mps,
-                "robot_closing_share": record.s_robot,
-                "fault_attributed_to": fault,
-            }
-        )
-        return res
+        return self._with_contact_fact_values(self.summarize_records([record]), asdict(record))

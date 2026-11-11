@@ -9,7 +9,7 @@ from flat_peds import flat_peds
 
 from arena_evaluation.processing.metrics.safety.contact_attribution import (
     ContactAttributionCalculator,
-    classify_closer_label,
+    classify_contact_fault,
 )
 from arena_evaluation.processing.telemetry.writer import TABLE_SCHEMAS
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
@@ -129,27 +129,88 @@ def _multi_contact_episode() -> AlignedEpisodeBundle:
 
 
 def test_classify_closer_label_thresholds() -> None:
-    label_static, s_static = classify_closer_label(0.8, 0.0, obstacle_kind="wall")
-    assert label_static == "static"
-    assert s_static == pytest.approx(1.0)
+    """Fault matrix: wall, dominant robot, dominant pedestrian, mutual and two bodies at rest."""
+    static = classify_contact_fault(collider_kind="wall", v_close_robot_mps=0.8, v_close_target_mps=0.0, counterfactual_freeze_persists=None, counterfactual_regime="unavailable")
+    assert (static.closer_label, static.fault_attributed_to, static.is_robot_fault) == ("static", "robot", True)
 
-    label_ped, s_ped = classify_closer_label(0.02, 1.0, obstacle_kind="pedestrian")
-    assert label_ped == "pedestrian"
-    assert s_ped < 0.05
+    ped = classify_contact_fault(collider_kind="pedestrian", v_close_robot_mps=0.02, v_close_target_mps=1.0, counterfactual_freeze_persists=True, counterfactual_regime="blind_exact")
+    assert (ped.closer_label, ped.fault_attributed_to, ped.is_robot_fault) == ("pedestrian", "pedestrian", False)
+    assert ped.robot_closing_share < 0.05
 
-    label_rob, s_rob = classify_closer_label(1.2, 0.01, obstacle_kind="pedestrian")
-    assert label_rob == "robot"
-    assert s_rob > 0.95
+    robot = classify_contact_fault(collider_kind="pedestrian", v_close_robot_mps=1.2, v_close_target_mps=0.01, counterfactual_freeze_persists=False, counterfactual_regime="blind_exact")
+    assert (robot.closer_label, robot.fault_attributed_to, robot.is_robot_fault) == ("robot", "robot", True)
+    assert robot.robot_closing_share > 0.95
 
-    label_mut, s_mut = classify_closer_label(0.6, 0.6, obstacle_kind="pedestrian")
-    assert label_mut == "mutual"
-    assert s_mut == pytest.approx(0.5)
+    mutual = classify_contact_fault(collider_kind="pedestrian", v_close_robot_mps=0.6, v_close_target_mps=0.6, counterfactual_freeze_persists=True, counterfactual_regime="blind_exact")
+    assert (mutual.closer_label, mutual.fault_attributed_to, mutual.is_robot_fault) == ("mutual", "unavoidable", None)
+    assert mutual.robot_closing_share == pytest.approx(0.5)
 
-    label_dom_r, _ = classify_closer_label(0.75, 0.25, obstacle_kind="pedestrian")
-    assert label_dom_r == "robot"
+    dominant_robot = classify_contact_fault(collider_kind="pedestrian", v_close_robot_mps=0.75, v_close_target_mps=0.25, counterfactual_freeze_persists=None, counterfactual_regime="unavailable")
+    assert dominant_robot.closer_label == "robot"
 
-    label_dom_p, _ = classify_closer_label(0.25, 0.75, obstacle_kind="pedestrian")
-    assert label_dom_p == "pedestrian"
+    dominant_ped = classify_contact_fault(collider_kind="pedestrian", v_close_robot_mps=0.25, v_close_target_mps=0.75, counterfactual_freeze_persists=None, counterfactual_regime="unavailable")
+    assert dominant_ped.closer_label == "pedestrian"
+
+
+@pytest.mark.parametrize(
+    ("v_robot", "v_target", "persists", "expected_fault", "expected_strict"),
+    [
+        (0.0, 0.0, True, "unavoidable", None),
+        (0.0, 0.0, None, "unavoidable", None),
+        (0.5, 0.5, False, "mutual", True),
+    ],
+    ids=["two-bodies-at-rest", "no-counterfactual", "avoidable-mutual"],
+)
+def test_mutual_contacts_are_never_silently_robot_faults(v_robot: float, v_target: float, persists: bool | None, expected_fault: str, expected_strict: bool | None) -> None:
+    policy = classify_contact_fault(
+        collider_kind="pedestrian",
+        v_close_robot_mps=v_robot,
+        v_close_target_mps=v_target,
+        counterfactual_freeze_persists=persists,
+        counterfactual_regime="blind_exact",
+    )
+
+    assert policy.closer_label == "mutual"
+    assert policy.fault_attributed_to == expected_fault
+    assert policy.is_robot_fault is expected_strict
+
+
+def test_a_robot_collider_is_never_labelled_a_pedestrian() -> None:
+    other_closes = classify_contact_fault(collider_kind="robot", v_close_robot_mps=0.1, v_close_target_mps=0.9, counterfactual_freeze_persists=None, counterfactual_regime="blind_exact")
+
+    assert other_closes.closer_label == "other_robot"
+    assert other_closes.fault_attributed_to == "other_robot"
+    assert other_closes.is_robot_fault is False
+
+
+def test_an_unknown_target_speed_leaves_every_verdict_null() -> None:
+    policy = classify_contact_fault(
+        collider_kind="pedestrian",
+        v_close_robot_mps=1.0,
+        v_close_target_mps=0.0,
+        counterfactual_freeze_persists=None,
+        counterfactual_regime="unavailable",
+        target_speed_known=False,
+    )
+
+    assert policy.closer_label is None
+    assert policy.fault_attributed_to is None
+    assert policy.robot_closing_share is None
+    assert policy.is_robot_fault is None
+
+
+@pytest.mark.parametrize(("regime", "strict", "lower"), [("blind_exact", True, None), ("reactive_approx", None, True)])
+def test_the_evidence_standard_gates_the_fault_verdict(regime: str, strict: bool | None, lower: bool | None) -> None:
+    policy = classify_contact_fault(
+        collider_kind="pedestrian",
+        v_close_robot_mps=1.2,
+        v_close_target_mps=0.01,
+        counterfactual_freeze_persists=False,
+        counterfactual_regime=regime,  # type: ignore[arg-type]
+    )
+
+    assert policy.is_robot_fault is strict
+    assert policy.is_robot_fault_lower_bound is lower
 
 
 def test_stationary_robot_struck_by_pedestrian_in_blind_regime_is_not_robot_fault() -> None:
@@ -184,7 +245,8 @@ def test_multi_contact_episode_attributes_every_contact_including_static() -> No
     assert out["contact_count"] == 3
     assert out["contact_closer_robot_count"] == 2
     assert out["contact_closer_static_count"] == 1
-    assert out["contact_robot_fault_count"] == 2
+    # The wall contact is the robot's fault too, so every contact counts.
+    assert out["contact_robot_fault_count"] == 3
     assert out["contact_passive_ped_impact_count"] == 0
     records = out["contact_records"]
     assert [record["t0_s"] for record in records] == pytest.approx([1.0, 3.0, 5.0])
@@ -194,7 +256,8 @@ def test_multi_contact_episode_attributes_every_contact_including_static() -> No
     assert records[2]["obstacle_kind"] == "wall"
     assert records[2]["counterfactual_regime"] == "unavailable"
     assert records[2]["counterfactual_freeze_min_dist_m"] is None
-    assert records[2]["is_robot_fault"] is None
+    assert records[2]["fault_attributed_to"] == "robot"
+    assert records[2]["is_robot_fault"] is True
 
 
 @pytest.mark.parametrize("topics", [None, {"robot_tracks": _template("robot_tracks")}], ids=["absent", "empty"])
