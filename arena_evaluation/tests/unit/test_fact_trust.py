@@ -323,6 +323,19 @@ def test_teleport_reason_is_none_for_a_physical_trajectory() -> None:
     assert teleport_reason(None) is None
 
 
+def test_teleport_reason_ignores_tf_sample_jitter() -> None:
+    """A 0.8 m step inside 33 ms is 24 m/s but continuous: TF latency jitter, not a teleport."""
+    jittered = pl.DataFrame({"t_ns": [0, 33_333_333, 66_666_666, 100_000_000], "x": [0.0, 0.8, 0.82, 0.84], "y": [0.0, 0.0, 0.0, 0.0]})
+
+    assert teleport_reason(jittered) is None
+
+
+def test_teleport_reason_flags_a_step_above_one_metre() -> None:
+    jumped = pl.DataFrame({"t_ns": [0, 33_333_333], "x": [0.0, 1.2], "y": [0.0, 0.0]})
+
+    assert teleport_reason(jumped) == "invalid_episode:pose_teleport"
+
+
 # --- pose frame ----------------------------------------------------------------------------
 
 

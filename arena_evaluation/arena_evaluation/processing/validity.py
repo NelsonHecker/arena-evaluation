@@ -22,9 +22,10 @@ __all__ = ["ROBOT_TRACKS_TOPIC", "episode_validity", "invalid_episode", "telepor
 
 ROBOT_TRACKS_TOPIC: Final[str] = "robot_tracks"
 
-#: Fastest planar speed a ground robot can plausibly reach between two samples, m/s.
-TELEPORT_SPEED_MPS: Final[float] = 5.0
-#: A displacement inside one sample stamp larger than this is a pose jump even without a clock advance, m.
+#: A single-sample ground-truth displacement larger than this is a pose jump, m. A speed gate alone is
+#: not usable: TF samples carry latency jitter, so a 0.17-0.8 m step inside 33 ms looks like 5-24 m/s
+#: while the trajectory stays continuous. Measured over the 620-episode fig6 set, the largest single
+#: step is 0.8 m and a speed-only gate flags 80/617 episodes that never teleport; only resets exceed 1 m.
 TELEPORT_STEP_M: Final[float] = 1.0
 
 #: ``arena_runtime_msgs/EpisodeRecord`` terminal states: 2 SUCCESS, 3 FAILED, 4 SKIPPED, 5 FATAL.
@@ -42,17 +43,14 @@ def invalid_episode(why: str) -> str:
 
 
 def teleport_reason(tracks: pl.DataFrame | None) -> str | None:
-    """``invalid_episode:pose_teleport`` when consecutive ground-truth samples jump faster than a robot moves."""
+    """``invalid_episode:pose_teleport`` when consecutive ground-truth samples jump more than a robot can travel."""
     if tracks is None or len(tracks) < 2 or not {"t_ns", "x", "y"} <= set(tracks.columns):
         return None
     rows = tracks.select("t_ns", "x", "y").drop_nulls().sort("t_ns")
     if len(rows) < 2:
         return None
     steps_m = np.hypot(np.diff(rows.get_column("x").to_numpy().astype(np.float64)), np.diff(rows.get_column("y").to_numpy().astype(np.float64)))
-    dt_s = np.diff(rows.get_column("t_ns").to_numpy().astype(np.int64)).astype(np.float64) / 1e9
-    advances = dt_s > 0.0
-    speed_mps = steps_m / np.where(advances, dt_s, 1.0)
-    impossible = (advances & (speed_mps > TELEPORT_SPEED_MPS)) | (~advances & (steps_m > TELEPORT_STEP_M))
+    impossible = steps_m > TELEPORT_STEP_M
     return None if not bool(np.any(impossible)) else invalid_episode("pose_teleport")
 
 
