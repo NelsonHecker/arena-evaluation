@@ -130,7 +130,9 @@ def _write_episode(
         path_length_m=path_length_m,
         time_to_goal_s=time_to_goal_s,
         total_energy_wh=energy_wh,
-        null_reason=("fixture:no_metric;mar:no_samples;pfi:no_samples;robot_path_dev_m:no_samples;kcsc_wh:no_samples;relative_throughput:no_samples"),
+        is_valid_for_ranking=True,
+        invalid_reason=None,
+        null_reason=("result:not_applicable;mar:no_samples;pfi:no_samples;robot_path_dev_m:no_samples;kcsc_wh:no_samples;relative_throughput:no_samples"),
     )
     fact.write_parquet(episode_dir / "metrics" / "fact_episodes.parquet")
     _one_row(
@@ -139,7 +141,7 @@ def _write_episode(
         episode_id=episode_id,
         env_id="env_0",
         ped_id="Pedestrian_1",
-        null_reason="fixture:no_metric;ped_path_deflection_m:no_samples",
+        null_reason="ped_name:not_applicable;ped_path_deflection_m:no_samples",
     ).write_parquet(episode_dir / "metrics" / "fact_pedestrians.parquet")
     if robot_path_points is not None:
         rows = [
@@ -279,7 +281,7 @@ def test_patch_fact_pedestrians_records_the_missing_reference(tmp_path: pathlib.
     frame = pl.read_parquet(pathlib.Path(contestant.episode_dir) / "metrics" / "fact_pedestrians.parquet")
     patched = patch_fact_pedestrians(frame, plan)
     reason = patched.to_dicts()[0]["null_reason"]
-    assert "fixture:no_metric" in reason
+    assert "ped_name:not_applicable" in reason
     assert "ped_path_deflection_m:reference_missing:unhindered_peds" in reason
 
 

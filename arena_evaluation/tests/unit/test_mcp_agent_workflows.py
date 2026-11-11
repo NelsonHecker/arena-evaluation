@@ -252,7 +252,7 @@ def _write_series(run_dir: pathlib.Path) -> None:
         ],
         schema=SERIES_EXPOSURE_SCHEMA,
     )
-    metrics_dir = run_dir / "metrics"
+    metrics_dir = run_dir / "episodes" / "episode_000" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     series.write_parquet(metrics_dir / "series_acoustic_exposure.parquet")
 
@@ -268,7 +268,7 @@ def run(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path
 
 
 def _persisted(run_dir: pathlib.Path, table: str) -> pl.DataFrame:
-    return pl.read_parquet(run_dir / "metrics" / f"{table}.parquet")
+    return pl.read_parquet(run_dir / "episodes" / "episode_000" / "metrics" / f"{table}.parquet")
 
 
 # --- slices ------------------------------------------------------------------
