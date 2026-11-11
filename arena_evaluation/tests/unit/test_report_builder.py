@@ -202,7 +202,9 @@ def test_status_table_empty_when_every_episode_is_evaluated() -> None:
 def test_report_builder_reads_a_consolidated_series_table(tmp_path: pathlib.Path) -> None:
     """A 1NF series table is a first-class catalog source: long-format samples, never list columns."""
     benchmark_dir = _benchmark(tmp_path)
-    pl.DataFrame({"planner": ["dwa", "mppi"], "power_w": [10.0, 20.0]}).write_parquet(benchmark_dir / "metrics" / "series_characterization.parquet")
+    series_dir = benchmark_dir / "episodes" / "episode_000" / "metrics"
+    series_dir.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame({"planner": ["dwa", "mppi"], "power_w": [10.0, 20.0]}).write_parquet(series_dir / "series_characterization.parquet")
     manifest = VizManifest(
         name="series",
         title="Series Report",

@@ -7,6 +7,10 @@ carry the same information, one row per entity per stamp.
 
 from __future__ import annotations
 
+import polars as pl
+import pyarrow as pa
+
+from arena_evaluation.analytics.catalog import TELEMETRY_TABLE_SCHEMAS
 from arena_evaluation.processing.telemetry import writer as telemetry_writer
 
 
@@ -49,3 +53,19 @@ def test_every_robot_table_uses_the_canonical_column_names() -> None:
     for name in robot_tables:
         names = _names(name)
         assert {"t_ns", "env_id"} <= names, name
+
+def test_catalog_telemetry_schemas_match_the_writer() -> None:
+    """The catalog declares the writer's columns, plus the episode key it injects; no alias names."""
+    arrow_to_polars = {
+        pa.int64(): pl.Int64,
+        pa.float64(): pl.Float64,
+        pa.string(): pl.String,
+        pa.bool_(): pl.Boolean,
+    }
+    for table, schema in TELEMETRY_TABLE_SCHEMAS.items():
+        writer_schema = telemetry_writer.TABLE_SCHEMAS[table]
+        assert set(schema) - {"episode_id"} <= set(writer_schema.names), table
+        for column, dtype in schema.items():
+            if column == "episode_id":
+                continue
+            assert dtype == arrow_to_polars[writer_schema.field(column).type], (table, column)

@@ -18,6 +18,7 @@ from arena_evaluation.storage.star_schema import (
     STAR_SCHEMA_SCHEMAS,
     STAR_TABLE_NAMES,
     StarSchemaTables,
+    episode_directories,
     scan_star_schema,
 )
 
@@ -50,53 +51,79 @@ TELEMETRY_TABLE_NAMES: Final[tuple[str, ...]] = (
 TELEMETRY_TABLE_SCHEMAS: Final[dict[str, dict[str, pl.DataType | type[pl.DataType]]]] = {
     "robot_tracks": {
         "episode_id": pl.Int64,
-        "timestamp_ns": pl.Int64,
         "t_ns": pl.Int64,
+        "env_id": pl.String,
+        "robot_id": pl.String,
         "x": pl.Float64,
         "y": pl.Float64,
+        "z": pl.Float64,
         "yaw": pl.Float64,
         "vx": pl.Float64,
         "vy": pl.Float64,
-        "omega": pl.Float64,
+        "vz": pl.Float64,
+        "omega_z": pl.Float64,
         "speed_mps": pl.Float64,
+        "pose_source": pl.String,
     },
     "pedestrian_tracks": {
         "episode_id": pl.Int64,
-        "timestamp_ns": pl.Int64,
         "t_ns": pl.Int64,
+        "env_id": pl.String,
         "ped_id": pl.String,
+        "ped_name": pl.String,
         "x": pl.Float64,
         "y": pl.Float64,
+        "z": pl.Float64,
         "yaw": pl.Float64,
         "vx": pl.Float64,
         "vy": pl.Float64,
+        "vz": pl.Float64,
         "speed_mps": pl.Float64,
+        "radius_m": pl.Float64,
+        "desired_speed": pl.Float64,
+        "policy": pl.String,
+        "agent_type": pl.String,
+        "animation_state": pl.Int64,
+        "interaction_id": pl.Int64,
+        "interaction_type": pl.Int64,
+        "gait_phase": pl.Float64,
+        "gait_cadence": pl.Float64,
     },
     "robot_power": {
         "episode_id": pl.Int64,
-        "timestamp_ns": pl.Int64,
         "t_ns": pl.Int64,
-        "mechanical_power_w": pl.Float64,
-        "electrical_power_w": pl.Float64,
-        "static_power_w": pl.Float64,
+        "env_id": pl.String,
+        "robot_id": pl.String,
         "total_power_w": pl.Float64,
+        "static_power_w": pl.Float64,
+        "total_mech_power_w": pl.Float64,
+        "total_thermal_power_w": pl.Float64,
     },
     "robot_acoustics": {
         "episode_id": pl.Int64,
-        "timestamp_ns": pl.Int64,
         "t_ns": pl.Int64,
-        "sound_pressure_pa": pl.Float64,
-        "sound_exposure_dose_pa2s": pl.Float64,
+        "env_id": pl.String,
+        "robot_id": pl.String,
+        "total_level_af_dba": pl.Float64,
+        "total_level_zf_db": pl.Float64,
+        "baseline_level_dba": pl.Float64,
+        "drivetrain_level_dba": pl.Float64,
+        "operating_state": pl.String,
+        "calibration_status": pl.String,
+        "uncertainty_dba": pl.Float64,
+        "validity_flags": pl.Int64,
     },
     "collision_contacts": {
         "episode_id": pl.Int64,
-        "timestamp_ns": pl.Int64,
         "t_ns": pl.Int64,
-        "contact_id": pl.String,
-        "other_id": pl.String,
-        "impact_speed_mps": pl.Float64,
-        "robot_closing_share": pl.Float64,
-        "closer_label": pl.String,
+        "env_id": pl.String,
+        "robot_id": pl.String,
+        "obstacle_id": pl.String,
+        "kind": pl.String,
+        "obstacle_x": pl.Float64,
+        "obstacle_y": pl.Float64,
+        "obstacle_z": pl.Float64,
+        "distance": pl.Float64,
     },
 }
 
@@ -226,12 +253,16 @@ class BenchmarkCatalog:
         self._register_evidence_index(source_dir)
 
     def _register_series_tables(self, benchmark_dir: pathlib.Path) -> None:
-        """Register the consolidated 1NF long-format ``series_*.parquet`` tables under ``benchmark_dir / metrics``."""
-        metrics_dir = benchmark_dir / "metrics"
-        if not metrics_dir.is_dir():
-            return
-        for path in sorted(metrics_dir.glob(f"{SERIES_TABLE_PREFIX}*.parquet")):
-            self._tables[path.stem] = pl.scan_parquet(path)
+        """Register one lazy view per ``series_*`` stem over the per-episode stored files (D6/D7)."""
+        paths_by_stem: dict[str, list[pathlib.Path]] = {}
+        for episode_dir in episode_directories(benchmark_dir):
+            metrics_dir = episode_dir / "metrics"
+            if not metrics_dir.is_dir():
+                continue
+            for path in sorted(metrics_dir.glob(f"{SERIES_TABLE_PREFIX}*.parquet")):
+                paths_by_stem.setdefault(path.stem, []).append(path)
+        for stem, paths in paths_by_stem.items():
+            self._tables[stem] = pl.scan_parquet(paths)
 
     def _load_from_mapping(self, source: Mapping[str, pl.LazyFrame | pl.DataFrame]) -> None:
         for name, schema in STAR_SCHEMA_SCHEMAS.items():
@@ -252,10 +283,7 @@ class BenchmarkCatalog:
         for tname, tschema in TELEMETRY_TABLE_SCHEMAS.items():
             if tname not in self._tables:
                 self._tables[tname] = pl.LazyFrame(schema=tschema)
-
-            synced_lf = _sync_bidirectional_aliases(self._tables[tname], [("timestamp_ns", "t_ns")])
-            self._tables[tname] = synced_lf
-            self._tables[f"telemetry_{tname}"] = synced_lf
+            self._tables[f"telemetry_{tname}"] = self._tables[tname]
 
         self._tables["fact_episodes"] = _sync_bidirectional_aliases(
             self._tables["fact_episodes"],
@@ -324,19 +352,14 @@ class BenchmarkCatalog:
         if not episodes_root.is_dir():
             return
 
-        ep_dirs = sorted(
-            {path for pattern in ("episode_*", "*/episode_*") for path in episodes_root.glob(pattern) if path.is_dir() and _EPISODE_DIR_RE.match(path.name) is not None},
-            key=lambda p: int(p.name.split("_")[-1]),
-        )
-
         frames_by_table: dict[str, list[pl.LazyFrame]] = {}
-        for ep_dir in ep_dirs:
+        for ep_dir in episode_directories(benchmark_dir):
             match = _EPISODE_DIR_RE.match(ep_dir.name)
             if match is None:
                 continue
             ep_id = int(match.group(1))
-            source_dir = next((d for d in (ep_dir / "telemetry", ep_dir / "topics") if d.is_dir()), None)
-            if source_dir is None:
+            source_dir = ep_dir / "topics"
+            if not source_dir.is_dir():
                 continue
 
             for parquet_path in sorted(source_dir.glob("*.parquet")):

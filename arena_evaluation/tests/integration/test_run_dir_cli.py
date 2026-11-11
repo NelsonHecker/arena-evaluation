@@ -3,8 +3,6 @@ import shutil
 import subprocess
 import sys
 
-import polars as pl
-
 FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_benchmark" / "episodes" / "episode_000"
 
 
@@ -30,9 +28,8 @@ def test_process_run_dir_writes_the_episode_star_schema(tmp_path: pathlib.Path) 
     result = _cli("process", "--run-dir", str(episode))
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"Metrics written to: {episode / 'metrics'}" in result.stdout
-    dimensions = pl.read_parquet(episode / "metrics" / "dim_episodes.parquet")
-    assert dimensions.height == 1
-    assert dimensions["planner"][0] == "dwb"
+    assert (episode / "metrics" / "fact_episodes.parquet").is_file()
+    assert not (episode / "metrics" / "dim_episodes.parquet").exists()
 
 
 def test_run_run_dir_processes_and_reports(tmp_path: pathlib.Path) -> None:
@@ -40,6 +37,6 @@ def test_run_run_dir_processes_and_reports(tmp_path: pathlib.Path) -> None:
     out = tmp_path / "report"
     result = _cli("run", "--run-dir", str(episode), "--output-dir", str(out))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (episode / "metrics" / "dim_episodes.parquet").exists()
+    assert (episode / "metrics" / "fact_episodes.parquet").exists()
     assert "Report generation complete." in result.stdout
     assert any(out.iterdir())

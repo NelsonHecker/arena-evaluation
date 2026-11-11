@@ -25,6 +25,7 @@ from arena_evaluation.storage.star_schema import (
     DIM_EPISODES_SCHEMA,
     EPISODE_FACT_SCHEMA,
     PEDESTRIAN_FACT_SCHEMA,
+    scan_star_schema,
 )
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.manifest import MetadataWriter
@@ -127,15 +128,16 @@ def _write_episode(
         path_length_m=path_length_m,
         time_to_goal_s=time_to_goal_s,
         total_energy_wh=energy_wh,
-        null_reason=("mar:no_samples;pfi:no_samples;robot_path_dev_m:no_samples;kcsc_wh:no_samples;relative_throughput:no_samples"),
+        null_reason=("fixture:no_metric;mar:no_samples;pfi:no_samples;robot_path_dev_m:no_samples;kcsc_wh:no_samples;relative_throughput:no_samples"),
     )
     fact.write_parquet(episode_dir / "metrics" / "fact_episodes.parquet")
     _one_row(
         PEDESTRIAN_FACT_SCHEMA,
         run_id=RUN_ID,
         episode_id=episode_id,
+        env_id="env_0",
         ped_id="Pedestrian_1",
-        null_reason="ped_path_deflection_m:no_samples",
+        null_reason="fixture:no_metric;ped_path_deflection_m:no_samples",
     ).write_parquet(episode_dir / "metrics" / "fact_pedestrians.parquet")
     if robot_path_points is not None:
         rows = [
@@ -275,7 +277,8 @@ def test_patch_fact_pedestrians_records_the_missing_reference(tmp_path: pathlib.
     frame = pl.read_parquet(pathlib.Path(contestant.episode_dir) / "metrics" / "fact_pedestrians.parquet")
     patched = patch_fact_pedestrians(frame, plan)
     reason = patched.to_dicts()[0]["null_reason"]
-    assert reason == "ped_path_deflection_m:reference_missing:unhindered_peds"
+    assert "fixture:no_metric" in reason
+    assert "ped_path_deflection_m:reference_missing:unhindered_peds" in reason
 
 
 def test_apply_plan_to_disk_round_trips_the_values(tmp_path: pathlib.Path):
@@ -309,7 +312,7 @@ def test_process_benchmark_reconciles_already_evaluated_episodes(tmp_path: pathl
     combined = pipeline.process_benchmark(RUN_ID)
 
     assert combined is not None
-    facts = pl.read_parquet(combined / "metrics" / "fact_episodes.parquet")
+    facts = scan_star_schema(combined)["fact_episodes"].collect()
     contestant = facts.filter(pl.col("episode_id") == descriptors[0].episode_id).to_dicts()[0]
     assert contestant["mar"] == pytest.approx(1.0)
     assert contestant["pfi"] == pytest.approx(1.0)

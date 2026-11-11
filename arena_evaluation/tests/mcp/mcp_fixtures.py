@@ -96,16 +96,18 @@ def metric_rows() -> list[dict]:
 
 
 def write_star_schema(benchmark_dir: pathlib.Path, rows: list[dict]) -> None:
-    """Write the canonical episode dimension/fact tables the analysis catalog scans."""
+    """Write the canonical benchmark dimension and per-episode fact tables the catalog scans."""
     from arena_evaluation.storage.declarations import EPISODE_FACT_SCHEMA
     from arena_evaluation.storage.star_schema import DIM_EPISODES_SCHEMA
 
     benchmark_dir.mkdir(parents=True, exist_ok=True)
     resolved = [{"run_id": "run", "robot_id": "robot_0", "env_id": "env_0", **row} for row in rows]
     pl.DataFrame([{name: row.get(name) for name in DIM_EPISODES_SCHEMA.names()} for row in resolved], schema=DIM_EPISODES_SCHEMA).write_parquet(benchmark_dir / "dim_episodes.parquet")
-    metrics = benchmark_dir / "metrics"
-    metrics.mkdir(exist_ok=True)
-    pl.DataFrame([{name: row.get(name) for name in EPISODE_FACT_SCHEMA.names()} for row in resolved], schema=EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
+    for episode_id in sorted({int(row["episode_id"]) for row in resolved}):
+        metrics = benchmark_dir / "episodes" / f"episode_{episode_id:03d}" / "metrics"
+        metrics.mkdir(parents=True, exist_ok=True)
+        episode_rows = [row for row in resolved if int(row["episode_id"]) == episode_id]
+        pl.DataFrame([{name: row.get(name) for name in EPISODE_FACT_SCHEMA.names()} for row in episode_rows], schema=EPISODE_FACT_SCHEMA).write_parquet(metrics / "fact_episodes.parquet")
 
 
 def _iso(timestamp: float) -> str:

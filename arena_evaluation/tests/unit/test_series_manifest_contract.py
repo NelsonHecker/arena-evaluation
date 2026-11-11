@@ -88,7 +88,8 @@ def _catalog(tmp_path: pathlib.Path) -> BenchmarkCatalog:
         tmp_path,
         [{"episode_id": 0, "planner": "dwb", "robot_id": "robot_0", "stage": "s1", "world": "map_empty", "is_reference": False}],
     )
-    metrics = tmp_path / "metrics"
+    metrics = tmp_path / "episodes" / "episode_000" / "metrics"
+    metrics.mkdir(parents=True, exist_ok=True)
     for name, schema in SERIES_SCHEMAS.items():
         pl.DataFrame(schema=schema).write_parquet(metrics / f"series_{name}.parquet")
     return BenchmarkCatalog.from_directory(tmp_path)

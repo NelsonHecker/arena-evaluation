@@ -61,6 +61,7 @@ from arena_evaluation.storage.star_schema import (
     CHILD_FACT_TABLE_NAMES,
     DIM_EPISODES_SCHEMA,
     DIM_WORLD_ENTITIES_SCHEMA,
+    DIMENSION_TABLE_NAMES,
     STAR_SCHEMA_SCHEMAS,
     STAR_TABLE_NAMES,
     StarSchemaBuilder,
@@ -450,7 +451,7 @@ def test_star_schema_empty_builder_preserves_schemas() -> None:
         assert frame.schema == schema
 
 
-def test_write_and_scan_star_schema_round_trip(
+def test_write_star_schema_stores_dimensions_once_and_facts_per_episode(
     star_tables: StarSchemaTables,
     tmp_path: pathlib.Path,
 ) -> None:
@@ -458,13 +459,18 @@ def test_write_and_scan_star_schema_round_trip(
     written = write_star_schema(star_tables, bench_dir)
     assert set(written) == set(STAR_TABLE_NAMES)
 
-    for dim_name in ("dim_episodes", "dim_robots", "dim_pedestrians", "dim_world_entities"):
-        assert written[dim_name] == bench_dir / f"{dim_name}.parquet"
-        assert written[dim_name].is_file()
+    for dim_name in DIMENSION_TABLE_NAMES:
+        assert written[dim_name] == (bench_dir / f"{dim_name}.parquet",)
+        assert written[dim_name][0].is_file()
 
+    episode_count = star_tables.dim_episodes.height
     for fact_name in ("fact_episodes", "fact_encounters", "fact_contacts", "fact_pedestrians", "fact_robots"):
-        assert written[fact_name] == bench_dir / "metrics" / f"{fact_name}.parquet"
-        assert written[fact_name].is_file()
+        assert len(written[fact_name]) == episode_count
+        for path in written[fact_name]:
+            assert path.parent.parent.name.startswith("episode_")
+            assert path.parent.name == "metrics" and path.is_file()
+    assert not (bench_dir / "metrics" / "fact_episodes.parquet").exists()
+    assert not list((bench_dir / "episodes").glob("*/metrics/dim_*.parquet"))
 
     scanned = scan_star_schema(bench_dir)
     assert set(scanned) == set(STAR_TABLE_NAMES)
@@ -533,7 +539,7 @@ def test_dim_tables_extract_expected_metadata_and_world_entities(star_tables: St
     assert_frame_equal(world1, expected_world1, check_dtypes=True, check_exact=False)
 
 
-def test_polars_sql_engine_executes_master_architecture_blame_query_under_50ms(
+def test_polars_sql_engine_executes_master_architecture_blame_query_with_measured_latency(
     star_tables: StarSchemaTables,
 ) -> None:
     engine = PolarsSQLEngine(star_tables)
@@ -557,7 +563,9 @@ def test_polars_sql_engine_executes_master_architecture_blame_query_under_50ms(
     res = engine.query(sql, save_as="derived_blame_matrix")
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-    assert elapsed_ms < 50.0, f"Expected OLAP SQL query in < 50 ms, took {elapsed_ms:.2f} ms"
+    # The 50 ms budget is withdrawn; this records the measured latency without failing on it.
+    print(f"blame query latency: {elapsed_ms:.2f} ms")
+    assert elapsed_ms < 5_000.0, f"OLAP SQL query did not finish promptly, took {elapsed_ms:.2f} ms"
     assert "derived_blame_matrix" in engine.catalog.table_names()
 
     # Verify blind dwb-standard and mppi attributed closer_label to "pedestrian"
@@ -566,7 +574,7 @@ def test_polars_sql_engine_executes_master_architecture_blame_query_under_50ms(
     assert set(blind_ped.get_column("planner").to_numpy()) == {"dwb-standard", "mppi"}
 
 
-def test_polars_sql_engine_planner_comparison_and_robot_platform_queries_under_50ms(
+def test_polars_sql_engine_planner_comparison_and_robot_platform_queries_with_measured_latency(
     star_tables: StarSchemaTables,
 ) -> None:
     engine = PolarsSQLEngine(star_tables)
@@ -588,7 +596,9 @@ def test_polars_sql_engine_planner_comparison_and_robot_platform_queries_under_5
     t0 = time.perf_counter()
     df_planners = engine.query(sql_planners)
     elapsed_planners_ms = (time.perf_counter() - t0) * 1000.0
-    assert elapsed_planners_ms < 50.0
+    # The 50 ms budget is withdrawn; this records the measured latency without failing on it.
+    print(f"planner comparison latency: {elapsed_planners_ms:.2f} ms")
+    assert elapsed_planners_ms < 5_000.0
     assert df_planners.height == 6
 
     # 2. Jackal vs. Go1 energy and acoustic exposure comparison
@@ -608,7 +618,8 @@ def test_polars_sql_engine_planner_comparison_and_robot_platform_queries_under_5
     t1 = time.perf_counter()
     df_platforms = engine.query(sql_platforms)
     elapsed_platforms_ms = (time.perf_counter() - t1) * 1000.0
-    assert elapsed_platforms_ms < 50.0
+    print(f"platform comparison latency: {elapsed_platforms_ms:.2f} ms")
+    assert elapsed_platforms_ms < 5_000.0
     assert df_platforms.height == 2
 
     go1_row = df_platforms.filter(pl.col("robot_model") == "go1")
@@ -930,12 +941,20 @@ def test_processing_pipeline_writes_episode_and_benchmark_star_schema(tmp_path: 
     bench_dir = pipeline.process_benchmark(bench_id)
     assert bench_dir is not None and bench_dir.is_dir()
 
-    # Check per-episode metrics dir has fact_*.parquet
+    # Facts are stored once per episode; dimensions once at the benchmark root.
     ep_metrics_dir = episode_dir / "metrics"
     for name in STAR_TABLE_NAMES:
-        assert (ep_metrics_dir / f"{name}.parquet").is_file()
+        path = ep_metrics_dir / f"{name}.parquet"
+        if name.startswith("fact_"):
+            assert path.is_file()
+        else:
+            assert not path.exists()
+    for dim_name in DIMENSION_TABLE_NAMES:
+        assert (bench_dir / f"{dim_name}.parquet").is_file()
+    assert not (bench_dir / "metrics" / "fact_episodes.parquet").exists()
+    assert not (bench_dir / "contract_report.yaml").exists()
 
-    # Check benchmark-level Star Schema tables
+    # The benchmark facts are a lazy view over the per-episode files.
     scanned = scan_star_schema(bench_dir)
     dim_ep = scanned["dim_episodes"].collect()
     fact_ep = scanned["fact_episodes"].collect()

@@ -689,7 +689,7 @@ class ProcessingPipeline:
 
         episode_dir = pathlib.Path(ep.episode_dir)
 
-        if not force_extract and (episode_dir / "metrics" / "dim_episodes.parquet").exists():
+        if not force_extract and (episode_dir / "metrics" / "fact_episodes.parquet").exists():
             return EpisodeEvaluation(
                 episode_id=ep.episode_id,
                 rows=[],
@@ -1061,7 +1061,15 @@ class ProcessingPipeline:
                 f"Phase 3 Twin reconciliation: {len(plan.episodes)} episode rows against {len(twin_index.peds_by_stage)} pedestrian and {len(twin_index.robot_by_stage_planner)} robot references, {published} fact tables published",
                 flush=True,
             )
-        return self._consolidate_benchmark_star(benchmark_id, episodes)
+        from arena_evaluation.storage.contracts import enforce_benchmark_contract
+        from arena_evaluation.storage.star_schema import write_benchmark_dimensions
+
+        benchmark_dir = self.folder_manager.benchmark_dir(benchmark_id)
+        dimensions = self._consolidate_benchmark_dimensions(benchmark_id, episodes, evaluations)
+        enforce_benchmark_contract(benchmark_dir, dimensions=dimensions)
+        write_benchmark_dimensions(dimensions, benchmark_dir)
+        print(f"Done. {len(episodes)} episodes -> {benchmark_dir}")
+        return benchmark_dir
 
     def extract_benchmark(self, benchmark_id: str, force_extract: bool = False) -> None:
         """Extract all episodes in a benchmark."""
@@ -1230,47 +1238,70 @@ class ProcessingPipeline:
         all_metrics = [row for evaluation in evaluations for row in evaluation.rows]
         _print_status_summary(all_metrics)
         if not all_metrics:
-            # Every episode was already evaluated: the per-episode Star Schema on disk is the result.
-            # Consolidate it at benchmark level so the run is queryable without re-evaluating it.
-            print("All episodes already processed; reconciling the twin metrics and consolidating the Star Schema.")
+            # Every episode was already evaluated: the per-episode facts are the stored result.
+            # Publish the benchmark dimensions and the fact views without re-evaluating.
+            print("All episodes already processed; reconciling the twin metrics and publishing the benchmark views.")
             return self._publish_and_consolidate(benchmark_id, episodes, evaluations)
 
         return self._publish_and_consolidate(benchmark_id, episodes, evaluations)
 
-    def _consolidate_benchmark_star(self, benchmark_id: str, episodes: list[EpisodeDescriptor]) -> pathlib.Path | None:
-        """Consolidate the per-episode Star Schema tables (and series) at benchmark level."""
+    def _consolidate_benchmark_dimensions(
+        self,
+        benchmark_id: str,
+        episodes: list[EpisodeDescriptor],
+        evaluations: list[EpisodeEvaluation],
+    ) -> StarSchemaTables:
+        """Build the four benchmark-level dimensions once, before any of them is written.
+
+        A freshly evaluated episode contributes its in-memory dimensions. An episode this run
+        skipped keeps the benchmark-root row when one exists; otherwise its dimensions are
+        rebuilt from its stored facts, so every stored fact still resolves to a dimension row.
+        """
+        from arena_evaluation.storage.manifest import MetadataWriter
         from arena_evaluation.storage.star_schema import (
+            DIMENSION_TABLE_NAMES,
             StarSchemaBuilder,
+            StarSchemaTables,
+            dimensions_from_stored_episode,
+            read_benchmark_dimensions,
             read_episode_star_tables,
-            write_star_schema,
         )
 
         benchmark_dir = self.folder_manager.benchmark_dir(benchmark_id)
-        collected_star: list[StarSchemaTables] = []
-        fallback_builder = StarSchemaBuilder()
-        for ep in episodes:
-            ep_metrics_dir = pathlib.Path(ep.episode_dir) / "metrics"
-            ep_star = read_episode_star_tables(ep_metrics_dir)
-            if ep_star is None:
-                ep_star = fallback_builder.build_status_episode_tables(
-                    run_id=ep.benchmark_id or benchmark_id,
-                    episode_id=ep.episode_id,
-                    descriptor=ep,
-                )
-            collected_star.append(ep_star)
+        existing = read_benchmark_dimensions(benchmark_dir)
+        evaluated: dict[int, list[StarSchemaTables]] = {}
+        for evaluation in evaluations:
+            if evaluation.star_tables is not None:
+                evaluated.setdefault(evaluation.episode_id, []).append(evaluation.star_tables)
 
-        benchmark_star = StarSchemaBuilder.concat_tables(collected_star)
-        write_star_schema(benchmark_star, benchmark_dir)
+        merged: dict[str, list[pl.DataFrame]] = {name: [] for name in DIMENSION_TABLE_NAMES}
+        for episode in episodes:
+            episode_dir = pathlib.Path(episode.episode_dir)
+            evaluated_tables = evaluated.get(episode.episode_id, [])
+            if evaluated_tables:
+                frames = StarSchemaBuilder.concat_tables(evaluated_tables).dimension_tables()
+            elif existing is not None and not existing["dim_episodes"].filter(pl.col("episode_id") == episode.episode_id).is_empty():
+                frames = {name: frame.filter(pl.col("episode_id") == episode.episode_id) for name, frame in existing.items()}
+            else:
+                stored = read_episode_star_tables(episode_dir / "metrics") or StarSchemaTables.empty()
+                metadata = None
+                yaml_path = episode_dir / f"{episode_dir.name}.yaml"
+                if not yaml_path.exists():
+                    yaml_path = episode_dir / "metadata.yaml"
+                if yaml_path.exists():
+                    try:
+                        metadata = MetadataWriter.read(yaml_path)
+                    except Exception as error:
+                        _log.warning(f"episode_{episode.episode_id:03d}: could not read metadata for dimensions: {error}")
+                frames = dimensions_from_stored_episode(
+                    stored,
+                    run_id=episode.benchmark_id or benchmark_id,
+                    episode_id=episode.episode_id,
+                    descriptor=episode,
+                    metadata=metadata,
+                ).dimension_tables()
+            for name, frame in frames.items():
+                merged[name].append(frame)
 
-        series_parts: dict[str, list[pl.DataFrame]] = {}
-        for ep in episodes:
-            for path in sorted((pathlib.Path(ep.episode_dir) / "metrics").glob("series_*.parquet")):
-                series_parts.setdefault(path.stem.removeprefix("series_"), []).append(pl.read_parquet(path))
-        if series_parts:
-            series_dir = benchmark_dir / "metrics"
-            series_dir.mkdir(parents=True, exist_ok=True)
-            for stem, frames in series_parts.items():
-                pl.concat(frames, how="vertical_relaxed").write_parquet(series_dir / f"series_{stem}.parquet")
-
-        print(f"Done. {len(collected_star)} episodes -> {benchmark_dir}")
-        return benchmark_dir
+        dimension_frames = {name: frames[0] if len(frames) == 1 else pl.concat(frames, how="vertical") for name, frames in merged.items()}
+        return dataclasses.replace(StarSchemaTables.empty(), **dimension_frames)

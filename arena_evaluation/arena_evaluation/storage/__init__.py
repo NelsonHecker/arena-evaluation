@@ -19,6 +19,7 @@ from .declarations import (
 from .exceptions import (
     ArenaEvaluationError,
     CircularDependencyError,
+    ContractViolationError,
     ManifestGenerationError,
     MetricCalculationError,
     RobotNotFoundError,
@@ -57,6 +58,7 @@ __all__ = [
     "AlignedEpisodeBundle",
     "PlotSpec",
     "ArenaEvaluationError",
+    "ContractViolationError",
     "MetricCalculationError",
     "CircularDependencyError",
     "SchemaViolationError",

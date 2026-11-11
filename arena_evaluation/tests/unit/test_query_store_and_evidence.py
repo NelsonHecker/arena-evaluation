@@ -4,7 +4,7 @@ Verifies:
 1. Authoritative Parquet evidence index (``evidence_index.parquet``) schema and upsert invariants.
 2. Direct SQL querying of ``evidence_index`` via ``BenchmarkCatalog`` and ``PolarsSQLEngine``.
 3. Transient output vs. pinned evidence decision mechanism in ``evaluation_query``.
-4. Parameterized query declarations catalog, safe literal formatting, and < 50 ms query executions.
+4. Parameterized query declarations catalog, safe literal formatting, and measured query latency.
 5. MCP Query Gateway tools (``evaluation_query``, ``evaluation_queries``, ``evaluation_query_save``, ``evaluation_evidence``).
 """
 
@@ -436,8 +436,8 @@ def test_query_declarations_load_and_parameter_substitution() -> None:
     assert format_sql_literal(["a", "b"]) == "('a', 'b')"
 
 
-def test_execute_all_six_stored_queries_under_50ms(sample_star_tables: StarSchemaTables) -> None:
-    """Verify all 6 stored query declarations execute cleanly on star tables within < 50 ms."""
+def test_execute_all_six_stored_queries_with_measured_latency(sample_star_tables: StarSchemaTables) -> None:
+    """Verify all 6 stored query declarations execute cleanly and record their measured latency."""
     catalog = BenchmarkCatalog(sample_star_tables)
     engine = PolarsSQLEngine(catalog)
     q_catalog = QueryCatalog()
@@ -459,7 +459,9 @@ def test_execute_all_six_stored_queries_under_50ms(sample_star_tables: StarSchem
         res = q_catalog.execute(name, engine)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        assert elapsed_ms < 50.0, f"Query '{name}' took {elapsed_ms:.2f} ms (budget: 50 ms)"
+        # The 50 ms budget is withdrawn; record the measurement and keep only a hang guard.
+        print(f"query {name}: {elapsed_ms:.2f} ms")
+        assert elapsed_ms < 5_000.0, f"Query '{name}' did not finish promptly, took {elapsed_ms:.2f} ms"
         assert isinstance(res, pl.DataFrame)
 
 

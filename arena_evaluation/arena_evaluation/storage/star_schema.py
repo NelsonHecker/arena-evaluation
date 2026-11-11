@@ -76,8 +76,14 @@ __all__ = [
     "STAR_TABLE_NAMES",
     "StarSchemaBuilder",
     "StarSchemaTables",
+    "dimensions_from_stored_episode",
+    "episode_directories",
+    "read_benchmark_dimensions",
     "read_episode_star_tables",
+    "scan_dimensions",
+    "scan_fact_views",
     "scan_star_schema",
+    "write_benchmark_dimensions",
     "write_episode_star_tables",
     "write_star_schema",
 ]
@@ -205,6 +211,7 @@ STAR_SCHEMA_SCHEMAS: Final[dict[str, pl.Schema]] = {
 }
 
 _ENV_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^(env_\d+)")
+_EPISODE_DIR_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^episode_\d+$")
 _LIDAR_BRACKET_RE: Final[re.Pattern[str]] = re.compile(r"lidar=([a-zA-Z0-9_\-]+)")
 _WORLD_ENTITIES_TOPIC: Final[str] = "world_entities"
 _WORLD_SEMANTICS_TOPIC: Final[str] = "world_semantics"
@@ -796,23 +803,86 @@ class StarSchemaBuilder:
         )
 
 
-def write_episode_star_tables(tables: StarSchemaTables, directory: pathlib.Path) -> dict[str, pathlib.Path]:
-    """Write per-episode dimension and fact tables into ``directory`` (e.g. ``episode_dir / 'metrics'``)."""
-    directory.mkdir(parents=True, exist_ok=True)
+def episode_directories(benchmark_dir: pathlib.Path) -> tuple[pathlib.Path, ...]:
+    """Every ``episode_NNN`` directory under ``benchmark_dir / 'episodes'``, flat or one stage folder deep."""
+    episodes_root = benchmark_dir / "episodes"
+    if not episodes_root.is_dir():
+        return ()
+    found: list[pathlib.Path] = [path for path in episodes_root.iterdir() if path.is_dir() and _EPISODE_DIR_NAME_RE.match(path.name)]
+    for stage_dir in episodes_root.iterdir():
+        if stage_dir.is_dir() and not _EPISODE_DIR_NAME_RE.match(stage_dir.name):
+            found.extend(path for path in stage_dir.iterdir() if path.is_dir() and _EPISODE_DIR_NAME_RE.match(path.name))
+    return tuple(sorted(found, key=lambda path: str(path)))
+
+
+def _episode_fact_paths(episode_dirs: Sequence[pathlib.Path], table_name: str) -> tuple[pathlib.Path, ...]:
+    """The stored ``fact_<name>.parquet`` of every episode that has one, in episode-folder order."""
+    return tuple(path for episode_dir in episode_dirs if (path := episode_dir / "metrics" / f"{table_name}.parquet").is_file())
+
+
+def _scan_paths(paths: Sequence[pathlib.Path], schema: pl.Schema) -> pl.LazyFrame:
+    """Lazy vertical union of the stored files, a typed empty frame when none exists (L1, I2)."""
+    if not paths:
+        return pl.LazyFrame(schema=schema)
+    return pl.scan_parquet(paths)
+
+
+def scan_fact_views(benchmark_dir: pathlib.Path) -> dict[str, pl.LazyFrame]:
+    """Lazy benchmark-level ``fact_*`` views over the per-episode ``episodes/*/metrics/fact_*.parquet`` files.
+
+    Every fact is stored once, in its episode folder. The benchmark table is the scan of those
+    files, so projection and predicate pushdown reach the Parquet readers (D6/D7).
+    """
+    episode_dirs = episode_directories(benchmark_dir)
+    return {f"fact_{name}": _scan_paths(_episode_fact_paths(episode_dirs, f"fact_{name}"), schema) for name, schema in FACT_SCHEMAS.items()}
+
+
+def scan_dimensions(benchmark_dir: pathlib.Path) -> dict[str, pl.LazyFrame]:
+    """Lazy ``dim_*`` tables stored once at the benchmark root, typed empty when absent."""
+    return {name: (pl.scan_parquet(path) if (path := benchmark_dir / f"{name}.parquet").is_file() else pl.LazyFrame(schema=schema)) for name, schema in DIMENSION_SCHEMAS.items()}
+
+
+def read_benchmark_dimensions(benchmark_dir: pathlib.Path) -> dict[str, pl.DataFrame] | None:
+    """The benchmark-root dimension frames, None when the benchmark has not published them yet."""
+    if not (benchmark_dir / "dim_episodes.parquet").is_file():
+        return None
+    loaded: dict[str, pl.DataFrame] = {}
+    for name, schema in DIMENSION_SCHEMAS.items():
+        path = benchmark_dir / f"{name}.parquet"
+        loaded[name] = pl.read_parquet(path).select(list(schema.names())).cast(schema) if path.is_file() else pl.DataFrame(schema=schema)
+    return loaded
+
+
+def write_benchmark_dimensions(tables: StarSchemaTables, benchmark_dir: pathlib.Path) -> dict[str, pathlib.Path]:
+    """Write the four ``dim_*.parquet`` tables once at ``benchmark_dir``, the only stored benchmark table."""
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, pathlib.Path] = {}
-    for name, frame in tables.by_name().items():
-        path = directory / f"{name}.parquet"
-        frame.write_parquet(path)
+    for name, frame in tables.dimension_tables().items():
+        path = benchmark_dir / f"{name}.parquet"
+        frame.select(list(DIMENSION_SCHEMAS[name].names())).cast(DIMENSION_SCHEMAS[name]).write_parquet(path)
         written[name] = path
     return written
 
 
+def write_episode_star_tables(tables: StarSchemaTables, directory: pathlib.Path) -> dict[str, pathlib.Path]:
+    """Write the episode's ``fact_*.parquet`` tables into ``directory`` (e.g. ``episode_dir / 'metrics'``).
+
+    Dimensions are benchmark-level and are never copied into the episode folder (D7).
+    """
+    write_fact_tables(
+        ScopedFactTables(**{name.removeprefix("fact_"): frame for name, frame in tables.fact_tables().items()}),
+        directory,
+    )
+    return {name: directory / f"{name}.parquet" for name in tables.fact_tables()}
+
+
 def read_episode_star_tables(directory: pathlib.Path) -> StarSchemaTables | None:
-    """Read per-episode dimension and fact tables from ``directory``, returning None when absent."""
-    if not directory.is_dir():
-        return None
-    dim_ep_path = directory / "dim_episodes.parquet"
-    if not dim_ep_path.is_file():
+    """Read the stored episode tables from ``directory``, None when the episode has no facts.
+
+    Per-episode dimensions are only read when a pre-overhaul folder still carries them; the
+    canonical layout keeps them at the benchmark root.
+    """
+    if not directory.is_dir() or not (directory / "fact_episodes.parquet").is_file():
         return None
 
     loaded: dict[str, pl.DataFrame] = {}
@@ -826,49 +896,105 @@ def read_episode_star_tables(directory: pathlib.Path) -> StarSchemaTables | None
     return StarSchemaTables(**loaded)
 
 
-def write_star_schema(tables: StarSchemaTables, benchmark_dir: pathlib.Path) -> dict[str, pathlib.Path]:
-    """Write ``dim_*.parquet`` at ``benchmark_dir`` and ``fact_*.parquet`` under ``benchmark_dir / 'metrics'``."""
-    benchmark_dir.mkdir(parents=True, exist_ok=True)
-    metrics_dir = benchmark_dir / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
+def _episode_ids(tables: StarSchemaTables) -> tuple[int, ...]:
+    """Every episode id the star tables carry, from the facts and the episode dimension."""
+    ids: set[int] = set()
+    for frame in tables.fact_tables().values():
+        ids.update(int(value) for value in frame.get_column("episode_id").drop_nulls().unique().to_list())
+    ids.update(int(value) for value in tables.dim_episodes.get_column("episode_id").drop_nulls().unique().to_list())
+    return tuple(sorted(ids))
 
-    written: dict[str, pathlib.Path] = {}
-    for name, frame in tables.dimension_tables().items():
-        path = benchmark_dir / f"{name}.parquet"
-        frame.write_parquet(path)
-        written[name] = path
 
-    fact_frames = tables.fact_tables()
-    write_fact_tables(
-        ScopedFactTables(**{name.removeprefix("fact_"): frame for name, frame in fact_frames.items()}),
-        metrics_dir,
-    )
-    for name in fact_frames:
-        written[name] = metrics_dir / f"{name}.parquet"
+def write_star_schema(tables: StarSchemaTables, benchmark_dir: pathlib.Path) -> dict[str, tuple[pathlib.Path, ...]]:
+    """Write the canonical storage layout: dimensions once at the root, facts once per episode.
 
-    return written
+    This is the fixture/round-trip writer; the pipeline writes each table at its own boundary.
+    Returns every written file keyed by table name, so a caller can assert the layout.
+    """
+    written: dict[str, list[pathlib.Path]] = {name: [] for name in STAR_TABLE_NAMES}
+    for name, path in write_benchmark_dimensions(tables, benchmark_dir).items():
+        written[name].append(path)
+
+    for episode_id in _episode_ids(tables):
+        episode_metrics = benchmark_dir / "episodes" / f"episode_{episode_id:03d}" / "metrics"
+        episode_metrics.mkdir(parents=True, exist_ok=True)
+        for table_name, frame in tables.fact_tables().items():
+            schema = FACT_SCHEMAS[table_name.removeprefix("fact_")]
+            path = episode_metrics / f"{table_name}.parquet"
+            frame.filter(pl.col("episode_id") == episode_id).select(list(schema.names())).cast(schema).write_parquet(path)
+            written[table_name].append(path)
+
+    return {name: tuple(paths) for name, paths in written.items()}
 
 
 def scan_star_schema(benchmark_dir: pathlib.Path) -> dict[str, pl.LazyFrame]:
-    """Lazily scan all dimension and fact Parquet tables from ``benchmark_dir`` via ``pl.scan_parquet`` (L1)."""
-    metrics_dir = benchmark_dir / "metrics"
-    scanned: dict[str, pl.LazyFrame] = {}
+    """Lazily scan the star schema: stored dimensions at the root, facts as per-episode views (L1)."""
+    return {**scan_dimensions(benchmark_dir), **scan_fact_views(benchmark_dir)}
 
-    for name, schema in DIMENSION_SCHEMAS.items():
-        path = benchmark_dir / f"{name}.parquet"
-        if path.is_file():
-            scanned[name] = pl.scan_parquet(path)
-        else:
-            scanned[name] = pl.LazyFrame(schema=schema)
 
-    for short_name, schema in FACT_SCHEMAS.items():
-        table_name = f"fact_{short_name}"
-        path = metrics_dir / f"{table_name}.parquet"
-        if not path.is_file():
-            path = benchmark_dir / f"{table_name}.parquet"
-        if path.is_file():
-            scanned[table_name] = pl.scan_parquet(path)
-        else:
-            scanned[table_name] = pl.LazyFrame(schema=schema)
+_PEDESTRIAN_DIMENSION_SOURCES: Final[dict[str, str | None]] = {
+    "run_id": "run_id",
+    "episode_id": "episode_id",
+    "env_id": "env_id",
+    "ped_id": "ped_id",
+    "ped_name": "ped_name",
+    "agent_type": None,
+    "ped_policy": "ped_policy",
+    "is_blind": "is_blind",
+    "desired_speed": "desired_speed",
+    "radius_m": "radius_m",
+    "spawn_x": "spawn_x",
+    "spawn_y": "spawn_y",
+    "spawn_yaw": "spawn_yaw",
+    "waypoints_count": None,
+}
 
-    return scanned
+
+def _pedestrian_dimension(facts: pl.DataFrame) -> pl.DataFrame:
+    """The pedestrian dimension columns a stored pedestrian fact carries, absent ones NULL."""
+    expressions = [(pl.col(source) if source is not None else pl.lit(None, dtype=DIM_PEDESTRIANS_SCHEMA[name])).alias(name) for name, source in _PEDESTRIAN_DIMENSION_SOURCES.items()]
+    return facts.lazy().select(expressions).cast(DIM_PEDESTRIANS_SCHEMA).collect()
+
+
+def dimensions_from_stored_episode(
+    facts: StarSchemaTables,
+    *,
+    run_id: str,
+    episode_id: int,
+    descriptor: EpisodeDescriptor,
+    metadata: RunMetadata | None = None,
+) -> StarSchemaTables:
+    """Rebuild an episode's dimensions from its stored facts when no benchmark-root dimensions exist.
+
+    The identity columns (run_id, episode_id, robot_id, env_id, ped_id) come from the facts, so
+    every stored fact keeps its dimension row; the descriptor supplies planner, stage and world.
+    """
+    run_ids = facts.fact_episodes.get_column("run_id").drop_nulls().unique().to_list()
+    resolved_run_id = str(run_ids[0]) if run_ids else run_id
+    robot_ids = facts.fact_episodes.get_column("robot_id").drop_nulls().unique().to_list()
+    builder = StarSchemaBuilder()
+    status_tables = [
+        builder.build_status_episode_tables(
+            run_id=resolved_run_id,
+            episode_id=episode_id,
+            descriptor=descriptor,
+            metadata=metadata,
+            robot_id=str(robot_id),
+        )
+        for robot_id in robot_ids
+    ] or [
+        builder.build_status_episode_tables(
+            run_id=resolved_run_id,
+            episode_id=episode_id,
+            descriptor=descriptor,
+            metadata=metadata,
+        )
+    ]
+    dim_episodes = pl.concat([tables.dim_episodes for tables in status_tables], how="vertical")
+    dim_robots = pl.concat([tables.dim_robots for tables in status_tables], how="vertical")
+    return dataclasses.replace(
+        StarSchemaTables.empty(),
+        dim_episodes=dim_episodes,
+        dim_robots=dim_robots,
+        dim_pedestrians=_pedestrian_dimension(facts.fact_pedestrians),
+    )

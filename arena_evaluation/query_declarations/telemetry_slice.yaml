@@ -17,7 +17,7 @@ parameters:
 sql: |
   SELECT
       t.episode_id,
-      t.timestamp_ns,
+      t.t_ns,
       t.x,
       t.y,
       t.yaw,
@@ -26,6 +26,6 @@ sql: |
       t.speed_mps
   FROM robot_tracks t
   WHERE t.episode_id = :episode_id
-    AND t.timestamp_ns >= :start_t_ns
-    AND t.timestamp_ns <= :end_t_ns
-  ORDER BY t.timestamp_ns
+    AND t.t_ns >= :start_t_ns
+    AND t.t_ns <= :end_t_ns
+  ORDER BY t.t_ns

@@ -784,6 +784,46 @@ _COLLISION_NULLABLE: Final[tuple[str, ...]] = (
 )
 
 
+_NULLABLE_BY_TABLE: Final[dict[str, tuple[str, ...]]] = {
+    FactTable.EPISODES.value: _EPISODE_NULLABLE,
+    FactTable.ENCOUNTERS.value: _ENCOUNTER_NULLABLE,
+    FactTable.CONTACTS.value: _CONTACT_NULLABLE,
+    FactTable.PEDESTRIANS.value: _PEDESTRIAN_NULLABLE,
+    FactTable.ROBOTS.value: _ROBOT_NULLABLE,
+    FactTable.EDGE_CASES.value: _EDGE_CASE_NULLABLE,
+    FactTable.FORMATIONS.value: _FORMATION_NULLABLE,
+    FactTable.PHASE_OUTCOMES.value: _PHASE_OUTCOME_NULLABLE,
+    FactTable.JUDGE_DISAGREEMENTS.value: _JUDGE_DISAGREEMENT_NULLABLE,
+    FactTable.MECHANISM_STATES.value: _MECHANISM_STATE_NULLABLE,
+    FactTable.COLLISIONS.value: _COLLISION_NULLABLE,
+}
+
+
+def nullable_columns(table: FactTable) -> tuple[str, ...]:
+    """Fact columns that may be NULL, each of which requires a ``null_reason`` when it is."""
+    return _NULLABLE_BY_TABLE[table.value]
+
+
+# Row keys of each fact table. Two child tables have no stable row key: one row per list
+# element spread over two element columns (formations) and change-point rows without a time
+# axis (mechanism_states); their identity keys are still checked non-null.
+FACT_KEY_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
+    FactTable.EPISODES.value: ("run_id", "episode_id", "robot_id"),
+    FactTable.ENCOUNTERS.value: ("run_id", "episode_id", "robot_id", "encounter_id"),
+    FactTable.CONTACTS.value: ("run_id", "episode_id", "robot_id", "contact_id"),
+    FactTable.PEDESTRIANS.value: ("run_id", "episode_id", "env_id", "ped_id"),
+    FactTable.ROBOTS.value: ("run_id", "episode_id", "env_id", "robot_id"),
+    FactTable.EDGE_CASES.value: ("run_id", "episode_id", "robot_id", "case_idx", "kind", "ordinal"),
+    FactTable.FORMATIONS.value: ("run_id", "episode_id", "robot_id"),
+    FactTable.PHASE_OUTCOMES.value: ("run_id", "episode_id", "robot_id", "phase_idx"),
+    FactTable.JUDGE_DISAGREEMENTS.value: ("run_id", "episode_id", "robot_id", "disagreement_idx"),
+    FactTable.MECHANISM_STATES.value: ("run_id", "episode_id", "robot_id"),
+    FactTable.COLLISIONS.value: ("run_id", "episode_id", "robot_id", "collision_idx"),
+}
+
+FACT_TABLES_WITHOUT_ROW_KEY: Final[frozenset[str]] = frozenset({FactTable.FORMATIONS.value, FactTable.MECHANISM_STATES.value})
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class ScopedFactTables:
     """The eleven typed fact tables of one evaluated episode."""

@@ -40,6 +40,12 @@ class MetricInputError(ArenaEvaluationError):
     pass
 
 
+class ContractViolationError(ArenaEvaluationError):
+    """Raised when the stored benchmark breaks the publish-time contract; nothing partial is published."""
+
+    pass
+
+
 class AcousticsError(MetricInputError):
     """Raised when the acoustic metric cannot run because its world or barrier map is missing."""
 
