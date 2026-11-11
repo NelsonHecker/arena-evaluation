@@ -10,12 +10,15 @@ import pathlib
 
 import polars as pl
 import pytest
+import yaml
 from polars.testing import assert_frame_equal
 
 from arena_evaluation.analytics.catalog import BenchmarkCatalog
 from arena_evaluation.storage.declarations import EPISODE_FACT_SCHEMA
 from arena_evaluation.storage.star_schema import (
     DIM_EPISODES_SCHEMA,
+    episode_directories,
+    episode_directory_id,
     DIM_PEDESTRIANS_SCHEMA,
     DIM_ROBOTS_SCHEMA,
     DIM_WORLD_ENTITIES_SCHEMA,
@@ -181,3 +184,52 @@ def test_series_view_equals_the_per_episode_concat(
     assert_frame_equal(catalog.get_table("series_path_metrics").collect().sort("episode_id", "t_ns"), expected, check_dtypes=True)
     joined = catalog.get_table("v_series_path_metrics").collect()
     assert joined.height == expected.height
+
+
+def test_same_named_episodes_under_different_stage_dirs_stay_distinct(tmp_path: pathlib.Path) -> None:
+    """``stage_a/episode_000`` and ``stage_b/episode_000`` are two paths and two run-wide ids."""
+    root = tmp_path / "benchmarks" / "staged"
+    episode_dirs: list[pathlib.Path] = []
+    for stage, episode_id in (("stage_a", 0), ("stage_b", 1)):
+        episode_dir = root / "episodes" / stage / "episode_000"
+        metrics = episode_dir / "metrics"
+        metrics.mkdir(parents=True)
+        metadata = {
+            "benchmark_id": "staged",
+            "planner": "dwb",
+            "map": "map_empty",
+            "stage": stage,
+            "episode_id": episode_id,
+            "recording_started_at": "2026-01-01T00:00:00+00:00",
+            "python_version": "3.12",
+            "ros_distro": "jazzy",
+        }
+        (episode_dir / "metadata.yaml").write_text(yaml.safe_dump(metadata, sort_keys=False), encoding="utf-8")
+        _frame(
+            [
+                {
+                    "run_id": RUN_ID,
+                    "episode_id": episode_id,
+                    "robot_id": ROBOT_ID,
+                    "success": True,
+                    "time_to_goal_s": 5.0 + episode_id,
+                    "null_reason": "fixture",
+                }
+            ],
+            EPISODE_FACT_SCHEMA,
+        ).write_parquet(metrics / "fact_episodes.parquet")
+        _frame(
+            [{"run_id": RUN_ID, "episode_id": episode_id, "robot_id": ROBOT_ID, "t_ns": 0, "x_m": 0.0, "y_m": 0.0}],
+            SERIES_SCHEMA,
+        ).write_parquet(metrics / "series_path_metrics.parquet")
+        episode_dirs.append(episode_dir)
+
+    found = episode_directories(root)
+    assert found == tuple(sorted(episode_dirs, key=str))
+    assert [episode_directory_id(path) for path in found] == [0, 1]
+
+    facts = scan_star_schema(root)["fact_episodes"].collect().sort("episode_id")
+    assert facts.get_column("episode_id").to_list() == [0, 1]
+
+    series = BenchmarkCatalog.from_directory(root).get_table("series_path_metrics").collect().sort("episode_id")
+    assert series.get_column("episode_id").to_list() == [0, 1]

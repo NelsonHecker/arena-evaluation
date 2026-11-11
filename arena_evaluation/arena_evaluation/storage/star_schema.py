@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 import polars as pl
+import yaml
 
 from arena_evaluation.storage.declarations import (
     CHILD_FACT_TABLE_NAMES,
@@ -79,6 +80,7 @@ __all__ = [
     "StarSchemaTables",
     "dimensions_from_stored_episode",
     "episode_directories",
+    "episode_directory_id",
     "read_benchmark_dimensions",
     "read_episode_star_tables",
     "scan_dimensions",
@@ -215,7 +217,7 @@ STAR_SCHEMA_SCHEMAS: Final[dict[str, pl.Schema]] = {
 }
 
 _ENV_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^(env_\d+)")
-_EPISODE_DIR_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^episode_\d+$")
+_EPISODE_DIR_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^episode_(\d+)$")
 _LIDAR_BRACKET_RE: Final[re.Pattern[str]] = re.compile(r"lidar=([a-zA-Z0-9_\-]+)")
 _WORLD_ENTITIES_TOPIC: Final[str] = "world_entities"
 _WORLD_SEMANTICS_TOPIC: Final[str] = "world_semantics"
@@ -834,6 +836,25 @@ def episode_directories(benchmark_dir: pathlib.Path) -> tuple[pathlib.Path, ...]
         if stage_dir.is_dir() and not _EPISODE_DIR_NAME_RE.match(stage_dir.name):
             found.extend(path for path in stage_dir.iterdir() if path.is_dir() and _EPISODE_DIR_NAME_RE.match(path.name))
     return tuple(sorted(found, key=lambda path: str(path)))
+
+
+def episode_directory_id(episode_dir: pathlib.Path) -> int:
+    """The run-wide episode id of an ``episode_NNN`` folder, from its recorded metadata.
+
+    A stage layout can name two folders ``episode_000``: the trailing integer is only a
+    local ordinal, while the metadata the recorder wrote carries the run-wide id. The
+    folder name is the fallback for a folder that has no metadata yet.
+    """
+    for metadata_path in (episode_dir / f"{episode_dir.name}.yaml", episode_dir / "metadata.yaml"):
+        if not metadata_path.is_file():
+            continue
+        payload = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and payload.get("episode_id") is not None:
+            return int(payload["episode_id"])
+    match = _EPISODE_DIR_NAME_RE.match(episode_dir.name)
+    if match is None:
+        raise ValueError(f"{episode_dir} is not an episode_NNN directory")
+    return int(match.group(1))
 
 
 def _episode_fact_paths(episode_dirs: Sequence[pathlib.Path], table_name: str) -> tuple[pathlib.Path, ...]:
