@@ -9,18 +9,17 @@ import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.social.interaction_common import (
-    DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
     PEDESTRIAN_TRACKS_TOPIC,
     ROBOT_TRACKS_TOPIC,
-    EncounterSpec,
     PedTrack,
     Trajectory2D,
-    detect_encounters,
+    detector_params_from_config,
     episode_table,
     extract_episode_ped_tracks,
     extract_ped_tracks,
     merge_intervals_ns,
+    pedestrian_encounter_spans,
     resolve_ped_track,
     resolve_robot_trajectory,
 )
@@ -525,20 +524,16 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         )
         return context, tracks
 
-    def _records(self, context: RobotCostContext, tracks: Mapping[str, PedTrack]) -> list[EncounterCostRecord]:
-        """Encounter cost records of the explicitly scoped pedestrian, else of every detected encounter."""
+    def _records(self, episode: AlignedEpisodeBundle, context: RobotCostContext, tracks: Mapping[str, PedTrack]) -> list[EncounterCostRecord]:
+        """Encounter cost records of the explicitly scoped pedestrian, else of every pedestrian encounter window."""
         target_track = resolve_ped_track(tracks, self.metrics_config.get("target_agent_id"), self.metrics_config.get("target_agent_name"))
         if target_track is not None:
             window_start_ns = int(self.metrics_config.get("window_start_ns", max(int(context.robot.t_ns[0]), int(target_track.t_ns[0]))))
             window_end_ns = int(self.metrics_config.get("window_end_ns", min(int(context.robot.t_ns[-1]), int(target_track.t_ns[-1]))))
             return [evaluate_single_encounter_costs(target_track, (window_start_ns, window_end_ns), context)]
 
-        spec = EncounterSpec(
-            distance_threshold_m=float(self.metrics_config.get("encounter_distance_m", DEFAULT_ENCOUNTER_DIST_M)),
-            default_ped_radius_m=context.default_ped_radius_m,
-        )
-        encounters = detect_encounters(context.robot, tracks, spec)
-        return [evaluate_single_encounter_costs(tracks[encounter.ped_id], (encounter.t_start_ns, encounter.t_end_ns), context) for encounter in encounters]
+        spans = pedestrian_encounter_spans(episode, float(self.robot_params.robot_radius), detector_params_from_config(self.metrics_config))
+        return [evaluate_single_encounter_costs(tracks[ped_id], (t_start_ns, t_end_ns), context) for ped_id, t_start_ns, t_end_ns in spans]
 
     def calculate_encounters(
         self,
@@ -549,7 +544,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         context, tracks = self._build_context(episode, reference_episode)
         if len(context.robot.t_ns) < 2 or not tracks:
             return []
-        return self._records(context, tracks)
+        return self._records(episode, context, tracks)
 
     def calculate(
         self,
@@ -561,7 +556,7 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         context, tracks = self._build_context(episode)
         if len(context.robot.t_ns) < 2 or not tracks:
             return {key: None for key in self.output_keys()}
-        records = self._records(context, tracks)
+        records = self._records(episode, context, tracks)
         if len(records) == 1:
             return _single_record_outputs(records[0])
         return rollup_encounter_cost_records(records, context)
@@ -583,8 +578,6 @@ class EncounterCostsCalculator(BaseMetricCalculator):
         actor_2 = scope_slice.identity.get("actor_2")
         actor_2_kind = str(scope_slice.identity.get("actor_2_kind", "pedestrian")).lower()
         target_track = resolve_ped_track(tracks, actor_2) if actor_2 is not None else None
-        if target_track is None and len(tracks) == 1:
-            target_track = next(iter(tracks.values()))
         if target_track is None:
             return {key: None for key in self.output_keys()}
 

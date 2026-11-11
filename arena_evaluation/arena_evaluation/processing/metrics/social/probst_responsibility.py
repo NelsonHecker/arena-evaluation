@@ -9,16 +9,15 @@ import numpy as np
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator, MetricScope, ScopeSlice
 from arena_evaluation.processing.metrics.social.interaction_common import (
-    DEFAULT_ENCOUNTER_DIST_M,
     DEFAULT_PED_RADIUS_M,
     NS_PER_S,
     PEDESTRIAN_TRACKS_TOPIC,
     ROBOT_TRACKS_TOPIC,
-    EncounterSpec,
     PedTrack,
     Trajectory2D,
-    detect_encounters,
+    detector_params_from_config,
     extract_episode_ped_tracks,
+    pedestrian_encounter_spans,
     resolve_ped_track,
     resolve_robot_trajectory,
 )
@@ -514,16 +513,10 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
             coll, ps = self.evaluate_encounter_track(robot, target, bounds)
             return self._format_output(coll, ps)
 
-        if len(tracks) == 1:
-            coll, ps = self.evaluate_encounter_track(robot, next(iter(tracks.values())))
-            return self._format_output(coll, ps)
-
-        spec = EncounterSpec(
-            distance_threshold_m=float(self.metrics_config.get("encounter_distance_m", DEFAULT_ENCOUNTER_DIST_M)),
-            default_ped_radius_m=float(self.metrics_config.get("default_ped_radius_m", DEFAULT_PED_RADIUS_M)),
-        )
-        encounters = detect_encounters(robot, tracks, spec)
-        evaluated = [self.evaluate_encounter_track(robot, tracks[encounter.ped_id], (encounter.t_start_ns, encounter.t_end_ns)) for encounter in encounters] if encounters else [self.evaluate_encounter_track(robot, track) for track in tracks.values()]
+        spans = pedestrian_encounter_spans(episode, float(self.robot_params.robot_radius), detector_params_from_config(self.metrics_config))
+        evaluated = [self.evaluate_encounter_track(robot, tracks[ped_id], (t_start_ns, t_end_ns)) for ped_id, t_start_ns, t_end_ns in spans]
+        if not evaluated:
+            return self._empty_output()
         coll_results = [coll for coll, _ in evaluated]
         ps_results = [ps for _, ps in evaluated]
         return self._format_output(rollup_probst_results(coll_results), rollup_probst_results(ps_results))
@@ -555,9 +548,8 @@ class ProbstResponsibilityCalculator(BaseMetricCalculator):
             if len(robot.t_ns) < 2 or not tracks:
                 return self._empty_output()
             actor_2 = scope_slice.identity.get("actor_2")
-            target = resolve_ped_track(tracks, actor_2) if actor_2 is not None else None
-            if target is None and len(tracks) == 1:
-                target = next(iter(tracks.values()))
+            actor_2_kind = str(scope_slice.identity.get("actor_2_kind", "pedestrian")).lower()
+            target = resolve_ped_track(tracks, actor_2) if actor_2 is not None and actor_2_kind == "pedestrian" else None
             if target is None:
                 return self._empty_output()
             coll, ps = self.evaluate_encounter_track(robot, target, (scope_slice.t_start_ns, scope_slice.t_end_ns))

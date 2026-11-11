@@ -5,20 +5,24 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 import pytest
+from polars.testing import assert_series_equal
 
 from arena_evaluation.processing.metrics.social.interaction_common import (
     DEFAULT_PED_RADIUS_M,
-    EncounterSpec,
     Trajectory2D,
+    _identity_aliases,
     contiguous_spans,
-    detect_encounters,
+    episode_encounter_windows,
     extract_episode_ped_tracks,
     extract_ped_tracks,
     merge_intervals_ns,
+    pedestrian_encounter_spans,
     resolve_crowd_condition,
+    resolve_ped_track,
     resolve_robot_trajectory,
 )
 from arena_evaluation.processing.metrics.social.proxemics import ProxemicsCalculator
+from arena_evaluation.processing.windows import empty_encounter_windows
 from arena_evaluation.storage.schemas import AlignedEpisodeBundle, RobotParams
 
 NS_PER_S = 1_000_000_000
@@ -49,7 +53,11 @@ _ROBOT_SCHEMA = pl.Schema(
 )
 
 
-def _episode(topics: dict[str, pl.DataFrame], human_params: dict[str, object] | None = None) -> AlignedEpisodeBundle:
+def _episode(
+    topics: dict[str, pl.DataFrame],
+    human_params: dict[str, object] | None = None,
+    fleet: dict[str, pl.DataFrame] | None = None,
+) -> AlignedEpisodeBundle:
     return AlignedEpisodeBundle(
         episode_id=1,
         data=pl.DataFrame(),
@@ -57,6 +65,7 @@ def _episode(topics: dict[str, pl.DataFrame], human_params: dict[str, object] | 
         goal_pos=[1.0, 0.0, 0.0],
         topics=topics,
         human_params=human_params,
+        fleet=fleet or {},
     )
 
 
@@ -374,44 +383,63 @@ def test_merge_intervals_ns_unions_overlapping_intervals(intervals: list[tuple[i
     assert merge_intervals_ns(intervals) == expected
 
 
-def test_detect_encounters_builds_a_window_with_surface_clearance() -> None:
-    robot = _trajectory([0.0, 1.0, 2.0, 3.0, 4.0], [0.0, 1.0, 2.0, 3.0, 4.0], vx=[1.0, 1.0, 1.0, 1.0, 1.0], radius_m=ROBOT_RADIUS_M)
-    pedestrian = extract_ped_tracks(
-        pl.DataFrame(
-            [_ped_row(int(t * NS_PER_S), "Pedestrian_1", 2.0, 0.0, radius_m=0.3) for t in range(5)],
+def _encounter_episode(*, with_pedestrians: bool = True, fleet: dict[str, pl.DataFrame] | None = None) -> AlignedEpisodeBundle:
+    """Robot at x = t and one pedestrian 2 m ahead on the robot's line."""
+    robot = _robot_frame(t_s=np.arange(5.0), x=np.arange(5.0), y=np.zeros(5), vx=np.ones(5), vy=np.zeros(5))
+    topics = {"robot_tracks": robot}
+    if with_pedestrians:
+        topics["pedestrian_tracks"] = pl.DataFrame(
+            [_ped_row(t * NS_PER_S, "Pedestrian_1", 2.0, 0.0, ped_name="alice", radius_m=0.3) for t in range(5)],
             schema=_PED_SCHEMA,
         )
+    return _episode(topics, fleet=fleet)
+
+
+def _fleet_poses(radius_m: float) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "t_ns": np.arange(5) * NS_PER_S,
+            "pos_x": np.full(5, 0.5, dtype=np.float64),
+            "pos_y": np.zeros(5, dtype=np.float64),
+            "yaw": np.zeros(5, dtype=np.float64),
+            "radius_m": np.full(5, radius_m, dtype=np.float64),
+        },
+        schema={"t_ns": pl.Int64, "pos_x": pl.Float64, "pos_y": pl.Float64, "yaw": pl.Float64, "radius_m": pl.Float64},
     )
 
-    windows = detect_encounters(robot, pedestrian)
 
-    assert len(windows) == 1
-    window = windows[0]
-    assert window.ped_id == "Pedestrian_1"
-    assert window.t_start_ns == 0
-    assert window.t_end_ns == 4 * NS_PER_S
-    assert window.t_min_ns == 2 * NS_PER_S
-    assert window.min_dist_m == pytest.approx(0.0, abs=1e-9)
-    assert window.min_clearance_m == pytest.approx(-(ROBOT_RADIUS_M + 0.3), abs=1e-9)
+def test_episode_and_fact_windows_share_one_membership_rule() -> None:
+    episode = _encounter_episode()
 
+    fact_windows = episode_encounter_windows(episode, ROBOT_RADIUS_M)
+    spans = pedestrian_encounter_spans(episode, ROBOT_RADIUS_M)
 
-def test_detect_encounters_splits_contact_runs_across_the_merge_gap() -> None:
-    robot = _trajectory([0.0, 2.0, 4.0, 6.0, 4.0, 2.0, 0.0], [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vx=[2.0] * 7, radius_m=ROBOT_RADIUS_M)
-    pedestrian = extract_ped_tracks(pl.DataFrame([_ped_row(int(t * NS_PER_S), "Pedestrian_2", 3.0, 0.0) for t in range(7)], schema=_PED_SCHEMA))
-
-    windows = detect_encounters(robot, pedestrian, EncounterSpec(distance_threshold_m=2.0, merge_gap_s=1.5))
-
-    assert [window.t_start_ns for window in windows] == [1 * NS_PER_S, 4 * NS_PER_S]
-    assert [window.min_dist_m for window in windows] == pytest.approx([1.0, 1.0])
+    assert fact_windows.height == 1
+    assert_series_equal(fact_windows["actor_id"], pl.Series("actor_id", ["Pedestrian_1"], dtype=pl.String))
+    assert spans == [("Pedestrian_1", 0, 4 * NS_PER_S)]
 
 
-@pytest.mark.parametrize("distance_threshold_m", [0.5, 1.0])
-def test_detect_encounters_respects_the_distance_threshold(distance_threshold_m: float) -> None:
-    robot = _trajectory([0.0, 1.0, 2.0], [0.0, 1.0, 2.0], radius_m=ROBOT_RADIUS_M)
-    pedestrian = extract_ped_tracks(pl.DataFrame([_ped_row(int(t * NS_PER_S), "Pedestrian_3", 2.0, 2.0) for t in range(3)], schema=_PED_SCHEMA))
+def test_episode_encounters_exclude_robot_actors_from_pedestrian_metrics() -> None:
+    episode = _encounter_episode(with_pedestrians=False, fleet={"env_0_robot_2": _fleet_poses(0.25)})
 
-    assert detect_encounters(robot, pedestrian, EncounterSpec(distance_threshold_m=distance_threshold_m)) == []
+    fact_windows = episode_encounter_windows(episode, ROBOT_RADIUS_M)
+
+    assert fact_windows.height == 1
+    assert_series_equal(fact_windows["actor_kind"], pl.Series("actor_kind", ["robot"], dtype=pl.String))
+    assert pedestrian_encounter_spans(episode, ROBOT_RADIUS_M) == []
 
 
-def test_detect_encounters_without_tracks_is_empty() -> None:
-    assert detect_encounters(_trajectory([0.0, 1.0], [0.0, 1.0]), {}) == []
+def test_episode_encounter_windows_without_tracks_is_empty() -> None:
+    windows = episode_encounter_windows(_episode({}), ROBOT_RADIUS_M)
+
+    assert windows.height == 0
+    assert windows.schema == empty_encounter_windows().schema
+
+
+def test_resolve_ped_track_never_aliases_a_robot_to_a_pedestrian() -> None:
+    tracks = extract_ped_tracks(pl.DataFrame([_ped_row(0, "Pedestrian_2", 1.0, 0.0, ped_name="bob")], schema=_PED_SCHEMA))
+
+    assert _identity_aliases("robot_2") == {"robot_2"}
+    assert resolve_ped_track(tracks, "robot_2") is None
+    assert resolve_ped_track(tracks, "ped_2") is not None
+    assert resolve_ped_track(tracks, 2) is not None

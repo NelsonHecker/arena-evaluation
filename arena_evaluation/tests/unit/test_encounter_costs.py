@@ -173,7 +173,7 @@ def test_reference_twin_matches_pedestrian_by_name() -> None:
         episode_id=1,
     )
     reference_episode = _bundle({"pedestrian_tracks": reference_peds}, episode_id=2)
-    calculator = _calculator({"reference_episode": reference_episode, "encounter_distance_m": 10.0})
+    calculator = _calculator({"reference_episode": reference_episode, "encounter_edge_distance_m": 10.0})
 
     outputs = calculator.calculate(episode, {})
 
@@ -306,7 +306,7 @@ def test_reference_episode_without_matching_name_reports_no_pedestrian_costs() -
         }
     )
     reference_episode = _bundle({"pedestrian_tracks": reference_peds}, episode_id=2)
-    calculator = _calculator({"reference_episode": reference_episode, "encounter_distance_m": 10.0})
+    calculator = _calculator({"reference_episode": reference_episode, "encounter_edge_distance_m": 10.0})
 
     outputs = calculator.calculate(episode, {})
 
@@ -316,8 +316,8 @@ def test_reference_episode_without_matching_name_reports_no_pedestrian_costs() -
     assert outputs["cost_ped_delay_s"] is None
 
 
-@pytest.mark.parametrize(("distance_threshold_m", "expected_count", "expected_time_s"), [(2.0, 0, 0.0), (4.0, 1, 1.0)])
-def test_encounter_distance_threshold_controls_detection(distance_threshold_m: float, expected_count: int, expected_time_s: float) -> None:
+@pytest.mark.parametrize(("edge_threshold_m", "expected_count", "expected_time_s"), [(2.0, 0, 0.0), (4.0, 1, 1.0)])
+def test_encounter_edge_threshold_controls_detection(edge_threshold_m: float, expected_count: int, expected_time_s: float) -> None:
     t_ns = _t_ns_axis(1.0)
     stationary_x = np.zeros(len(t_ns))
     pedestrians = flat_peds([(int(t_ns), [{"ped_id": "Pedestrian_1", "ped_name": "alice", "x": 3.0, "y": 0.0}]) for t_ns in t_ns])
@@ -327,7 +327,7 @@ def test_encounter_distance_threshold_controls_detection(distance_threshold_m: f
             "pedestrian_tracks": pedestrians,
         }
     )
-    calculator = _calculator({"encounter_distance_m": distance_threshold_m})
+    calculator = _calculator({"encounter_edge_distance_m": edge_threshold_m})
 
     outputs = calculator.calculate(episode, {})
 

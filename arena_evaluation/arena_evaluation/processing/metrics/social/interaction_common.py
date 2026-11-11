@@ -10,14 +10,24 @@ import polars as pl
 
 from arena_evaluation.processing.metrics.base import BaseMetricCalculator
 from arena_evaluation.processing.metrics.ecological.mechanism_common import entity_name
-from arena_evaluation.processing.windows import ENCOUNTER_DISTANCE_M
+from arena_evaluation.processing.windows import (
+    ACTOR_PEDESTRIAN,
+    DEFAULT_DETECTOR_PARAMS,
+    ENCOUNTER_EDGE_DISTANCE_M,
+    ENCOUNTER_MERGE_GAP_S,
+    DetectorParams,
+    detect_encounter_windows_lf,
+    empty_encounter_windows,
+    fleet_pairs_lf,
+    pedestrian_pairs_lf,
+)
 
 if typing.TYPE_CHECKING:
     from arena_evaluation.storage.schemas import AlignedEpisodeBundle
 
 DEFAULT_PED_RADIUS_M: Final[float] = 0.3
-DEFAULT_ENCOUNTER_DIST_M: Final[float] = ENCOUNTER_DISTANCE_M
-DEFAULT_MERGE_GAP_S: Final[float] = 1.0
+PEDESTRIAN_ID_PREFIXES: Final[tuple[str, ...]] = ("ped", "pedestrian")
+UNIDENTIFIED_ROBOT_ID: Final[str] = "robot"
 NS_PER_S: Final[float] = 1e9
 ROBOT_TRACKS_TOPIC: Final[str] = "robot_tracks"
 PEDESTRIAN_TRACKS_TOPIC: Final[str] = "pedestrian_tracks"
@@ -142,31 +152,6 @@ class PedTrack:
         return self.trajectory.vy
 
 
-@dataclass(frozen=True, slots=True)
-class EncounterWindow:
-    """Contiguous robot-pedestrian encounter interval."""
-
-    ped_id: str
-    ped_name: str
-    t_start_ns: int
-    t_end_ns: int
-    t_min_ns: int
-    min_dist_m: float
-    min_clearance_m: float
-
-
-@dataclass(frozen=True, slots=True)
-class EncounterSpec:
-    """Parameters governing encounter segmentation."""
-
-    distance_threshold_m: float = DEFAULT_ENCOUNTER_DIST_M
-    merge_gap_s: float = DEFAULT_MERGE_GAP_S
-    default_ped_radius_m: float = DEFAULT_PED_RADIUS_M
-
-
-DEFAULT_ENCOUNTER_SPEC = EncounterSpec()
-
-
 def episode_table(episode: AlignedEpisodeBundle, topic: str) -> pl.DataFrame | None:
     """Collected flat table of an episode topic, None when the recording carries none."""
     topics = episode.topics
@@ -234,13 +219,69 @@ def resolve_ped_track(tracks: Mapping[str, PedTrack], target_agent_id: int | str
 
 
 def _identity_aliases(value: str) -> set[str]:
-    """Case-insensitive identity tokens of a ped id/name, accepting the bare numeric suffix and its ``ped_<n>`` form."""
+    """Case-insensitive identity tokens of a pedestrian id/name; another actor kind never gains a ``ped_<n>`` alias."""
     normalized = value.strip().lower()
-    aliases = {normalized}
-    suffix = normalized.rsplit("_", maxsplit=1)[-1]
-    if suffix.isdigit():
-        aliases |= {suffix, f"ped_{suffix}", f"pedestrian_{suffix}"}
-    return aliases
+    if normalized.isdigit():
+        return {normalized, f"ped_{normalized}", f"pedestrian_{normalized}"}
+    prefix, separator, suffix = normalized.rpartition("_")
+    if separator and suffix.isdigit() and prefix in PEDESTRIAN_ID_PREFIXES:
+        return {normalized, suffix, f"ped_{suffix}", f"pedestrian_{suffix}"}
+    return {normalized}
+
+
+def detector_params_from_config(metrics_config: Mapping[str, typing.Any]) -> DetectorParams:
+    """Detector parameters of a metrics config, only the edge distance and merge gap being metric-configurable."""
+    return DetectorParams(
+        encounter_edge_distance_m=float(metrics_config.get("encounter_edge_distance_m", ENCOUNTER_EDGE_DISTANCE_M)),
+        encounter_merge_gap_s=float(metrics_config.get("encounter_merge_gap_s", ENCOUNTER_MERGE_GAP_S)),
+    )
+
+
+def episode_encounter_windows(
+    episode: AlignedEpisodeBundle,
+    robot_radius_m: float,
+    params: DetectorParams = DEFAULT_DETECTOR_PARAMS,
+) -> pl.DataFrame:
+    """Encounter windows of the episode robot with its pedestrians and fleet robots from ``windows.py``."""
+    robot_tracks = episode_table(episode, ROBOT_TRACKS_TOPIC)
+    if robot_tracks is None or len(robot_tracks) == 0:
+        return empty_encounter_windows()
+    robot = robot_tracks.select(
+        pl.col("t_ns").cast(pl.Int64),
+        pl.col("x").cast(pl.Float64),
+        pl.col("y").cast(pl.Float64),
+        pl.col("yaw").cast(pl.Float64),
+        pl.col("vx").cast(pl.Float64),
+        pl.col("vy").cast(pl.Float64),
+    ).with_columns(robot_id=pl.lit(episode.robot_name or UNIDENTIFIED_ROBOT_ID))
+    pairs: list[pl.LazyFrame] = []
+    pedestrian_tracks = episode_table(episode, PEDESTRIAN_TRACKS_TOPIC)
+    if pedestrian_tracks is not None and len(pedestrian_tracks) > 0:
+        pairs.append(pedestrian_pairs_lf(robot, pedestrian_tracks, robot_radius_m, params))
+    if episode.fleet:
+        pairs.append(fleet_pairs_lf(robot, episode.fleet, robot_radius_m, params))
+    if not pairs:
+        return empty_encounter_windows()
+    pairs_lf = pairs[0] if len(pairs) == 1 else pl.concat(pairs)
+    return detect_encounter_windows_lf(pairs_lf, params).collect()
+
+
+def pedestrian_encounter_spans(
+    episode: AlignedEpisodeBundle,
+    robot_radius_m: float,
+    params: DetectorParams = DEFAULT_DETECTOR_PARAMS,
+) -> list[tuple[str, int, int]]:
+    """(pedestrian id, start, end) of every pedestrian encounter window, robot actors excluded."""
+    windows = episode_encounter_windows(episode, robot_radius_m, params)
+    pedestrian = windows.filter(pl.col("actor_kind") == ACTOR_PEDESTRIAN)
+    return list(
+        zip(
+            pedestrian.get_column("actor_id").to_numpy(),
+            pedestrian.get_column("t_start_ns").to_numpy().astype(np.int64),
+            pedestrian.get_column("t_end_ns").to_numpy().astype(np.int64),
+            strict=True,
+        )
+    )
 
 
 def _track_from_frame(frame: pl.DataFrame) -> PedTrack:
@@ -335,54 +376,6 @@ def contiguous_spans(mask: np.ndarray, t_ns: np.ndarray, merge_gap_ns: int) -> l
     breaks = np.flatnonzero(np.diff(t_ns[hits]) > merge_gap_ns) + 1
     edges = np.concatenate(([0], breaks, [len(hits)]))
     return [(int(hits[start]), int(hits[end - 1])) for start, end in zip(edges[:-1], edges[1:], strict=True)]
-
-
-def _agent_encounters(robot: Trajectory2D, track: PedTrack, spec: EncounterSpec) -> list[EncounterWindow]:
-    """Encounter windows between the robot and a single pedestrian."""
-    if len(robot.t_ns) == 0 or len(track.t_ns) == 0:
-        return []
-    t_lo = max(int(robot.t_ns[0]), int(track.t_ns[0]))
-    t_hi = min(int(robot.t_ns[-1]), int(track.t_ns[-1]))
-    if t_hi < t_lo:
-        return []
-
-    robot_window = robot.slice_ns(t_lo, t_hi)
-    pedestrian_window = track.trajectory.resample_onto(robot_window.t_ns)
-    distances = np.hypot(pedestrian_window.x - robot_window.x, pedestrian_window.y - robot_window.y)
-    merge_gap_ns = int(round(spec.merge_gap_s * NS_PER_S))
-    spans = contiguous_spans(distances <= spec.distance_threshold_m, robot_window.t_ns, merge_gap_ns)
-
-    pedestrian_radius_m = track.radius_m if track.radius_m is not None else spec.default_ped_radius_m
-    surface_margin_m = robot.radius_m + pedestrian_radius_m
-    windows: list[EncounterWindow] = []
-    for start, end in spans:
-        span_distances = distances[start : end + 1]
-        span_time_ns = robot_window.t_ns[start : end + 1]
-        nearest = int(np.argmin(span_distances))
-        min_dist_m = float(span_distances[nearest])
-        windows.append(
-            EncounterWindow(
-                ped_id=track.ped_id,
-                ped_name=track.ped_name,
-                t_start_ns=int(span_time_ns[0]),
-                t_end_ns=int(span_time_ns[-1]),
-                t_min_ns=int(span_time_ns[nearest]),
-                min_dist_m=min_dist_m,
-                min_clearance_m=min_dist_m - surface_margin_m,
-            )
-        )
-    return windows
-
-
-def detect_encounters(
-    robot: Trajectory2D,
-    tracks: Mapping[str, PedTrack],
-    spec: EncounterSpec = DEFAULT_ENCOUNTER_SPEC,
-) -> list[EncounterWindow]:
-    """Segment robot-pedestrian trajectories into sorted EncounterWindow instances."""
-    windows = [window for track in tracks.values() for window in _agent_encounters(robot, track, spec)]
-    windows.sort(key=lambda window: (window.t_start_ns, window.ped_id))
-    return windows
 
 
 def merge_intervals_ns(intervals: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:

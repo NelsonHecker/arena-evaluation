@@ -37,6 +37,7 @@ from arena_evaluation.processing.metrics.social.interaction_common import (
     PEDESTRIAN_TRACKS_TOPIC,
     ROBOT_TRACKS_TOPIC,
     Trajectory2D,
+    episode_encounter_windows,
     extract_ped_tracks,
     resolve_crowd_condition,
 )
@@ -48,11 +49,8 @@ from arena_evaluation.processing.windows import (
     DEFAULT_DETECTOR_PARAMS,
     DetectorParams,
     detect_contact_windows_lf,
-    detect_encounter_windows_lf,
     empty_contact_windows,
     empty_encounter_windows,
-    fleet_pairs_lf,
-    pedestrian_pairs_lf,
 )
 from arena_evaluation.storage.declarations import (
     _COLLISION_NULLABLE,
@@ -378,7 +376,7 @@ class ScopedEvaluator:
         encounter_windows = empty_encounter_windows()
 
         if _has_rows(robot_tracks):
-            encounter_windows = self._detect_encounters(materialized, typing.cast(pl.DataFrame, robot_tracks), pedestrian_tracks)
+            encounter_windows = self._detect_encounters(materialized)
             contact_windows = self._detect_contacts(
                 materialized,
                 encounter_windows,
@@ -686,36 +684,9 @@ class ScopedEvaluator:
             collisions=self._collision_fact_frame(materialized, **child_identity),
         )
 
-    def _detect_encounters(
-        self,
-        episode: AlignedEpisodeBundle,
-        robot_tracks: pl.DataFrame,
-        pedestrian_tracks: pl.DataFrame | None,
-    ) -> pl.DataFrame:
-        """Encounter windows of this robot with its pedestrians and other fleet robots."""
-        pairs = []
-        if _has_rows(pedestrian_tracks):
-            pairs.append(
-                pedestrian_pairs_lf(
-                    robot_tracks,
-                    typing.cast(pl.DataFrame, pedestrian_tracks),
-                    float(self.robot_params.robot_radius),
-                    self.detector_params,
-                )
-            )
-        if episode.fleet:
-            pairs.append(
-                fleet_pairs_lf(
-                    robot_tracks,
-                    episode.fleet,
-                    float(self.robot_params.robot_radius),
-                    params=self.detector_params,
-                )
-            )
-        if not pairs:
-            return empty_encounter_windows()
-        pairs_lf = pairs[0] if len(pairs) == 1 else pl.concat(pairs)
-        return detect_encounter_windows_lf(pairs_lf, self.detector_params).collect()
+    def _detect_encounters(self, episode: AlignedEpisodeBundle) -> pl.DataFrame:
+        """Encounter windows of this robot with its pedestrians and other fleet robots, from the one detector."""
+        return episode_encounter_windows(episode, float(self.robot_params.robot_radius), params=self.detector_params)
 
     def _detect_contacts(
         self,

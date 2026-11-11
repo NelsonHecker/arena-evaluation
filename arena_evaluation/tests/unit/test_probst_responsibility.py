@@ -8,10 +8,9 @@ import pytest
 from flat_peds import flat_peds
 
 from arena_evaluation.processing.metrics.social.interaction_common import (
-    DEFAULT_ENCOUNTER_SPEC,
     Trajectory2D,
-    detect_encounters,
     extract_episode_ped_tracks,
+    pedestrian_encounter_spans,
     resolve_robot_trajectory,
 )
 from arena_evaluation.processing.metrics.social.probst_responsibility import (
@@ -252,8 +251,15 @@ def test_probst_calculator_encounter_and_pre_contact_scopes() -> None:
     out_enc = calc.calculate(ep, {})
     assert set(out_enc) == set(calc.output_keys())
     assert out_enc["probst_c_total"] is not None and out_enc["probst_c_total"] > 0.0
-    assert out_enc["probst_r_robot"] is not None and out_enc["probst_r_robot"] > 0.5
     assert out_enc["probst_ps_c_total"] is not None and out_enc["probst_ps_c_total"] > 0.0
+
+    robot, _ = resolve_robot_trajectory(calc, ep)
+    tracks = extract_episode_ped_tracks(ep)
+    spans = pedestrian_encounter_spans(ep, 0.4)
+    assert len(spans) == 1
+    window_result, _ = calc.evaluate_encounter_track(robot, tracks["Pedestrian_1"], (spans[0][1], spans[0][2]))
+    assert out_enc["probst_c_total"] == pytest.approx(window_result.c_total, abs=1e-12)
+    assert out_enc["probst_r_robot"] == pytest.approx(window_result.r_robot, abs=1e-12)
 
     out_pre = calc.calculate_pre_contact(ep, int(3.0 * 1e9), "Pedestrian_1")
     assert out_pre["probst_c_total"] is not None and out_pre["probst_c_total"] > 0.0
@@ -381,9 +387,9 @@ def test_calculate_with_two_pedestrians_rolls_up_additive_parts() -> None:
 
     robot, _ = resolve_robot_trajectory(calc, episode)
     tracks = extract_episode_ped_tracks(episode)
-    encounters = detect_encounters(robot, tracks, DEFAULT_ENCOUNTER_SPEC)
-    assert len(encounters) == 2
-    rolled = rollup_probst_results([calc.evaluate_encounter_track(robot, tracks[encounter.ped_id], (encounter.t_start_ns, encounter.t_end_ns))[0] for encounter in encounters])
+    spans = pedestrian_encounter_spans(episode, 0.4)
+    assert len(spans) == 2
+    rolled = rollup_probst_results([calc.evaluate_encounter_track(robot, tracks[ped_id], (t_start_ns, t_end_ns))[0] for ped_id, t_start_ns, t_end_ns in spans])
 
     out = calc.calculate(episode, {})
     assert set(out) == set(calc.output_keys())
