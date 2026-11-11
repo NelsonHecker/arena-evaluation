@@ -11,7 +11,7 @@ import pathlib
 
 import pytest
 
-import arena_evaluation.storage.folder_manager as folder_manager_mod
+import arena_evaluation.storage.data_root as data_root_mod
 from arena_evaluation.storage.folder_manager import FolderManager
 from arena_evaluation.storage.manifest import MetadataWriter
 from arena_evaluation.storage.schemas import EpisodeDescriptor, RunMetadata
@@ -41,6 +41,8 @@ def _make_metadata(
         recording_started_at="2026-01-01T00:00:00+00:00",
         python_version="3.12.3",
         ros_distro="jazzy",
+        modes={},
+        params={},
         is_reference=is_reference,
         reference_type=reference_type,
     )
@@ -100,14 +102,25 @@ def test_init_accepts_str_data_root(tmp_path: pathlib.Path):
 
 def test_init_default_root_uses_package_share(monkeypatch, tmp_path: pathlib.Path):
     share = tmp_path / "share" / "arena_evaluation"
-    monkeypatch.setattr(
-        folder_manager_mod,
-        "get_package_share_directory",
-        lambda pkg: str(share),
-    )
+    monkeypatch.delenv("ARENA_DATA_DIR", raising=False)
+    monkeypatch.setattr(data_root_mod, "get_package_share_directory", lambda pkg: str(share))
     fm = FolderManager()
-    assert fm.data_root == share / "data"
+    assert fm.data_root == (share / "data").resolve()
     assert fm.data_root.is_dir()
+
+
+def test_init_default_root_follows_arena_data_dir(monkeypatch, tmp_path: pathlib.Path):
+    monkeypatch.setenv("ARENA_DATA_DIR", str(tmp_path))
+    fm = FolderManager()
+    assert fm.data_root == (tmp_path / "benchmarks").resolve()
+    assert fm.data_root.is_dir()
+
+
+def test_benchmark_dir_resolves_only_the_benchmarks_root(tmp_path: pathlib.Path):
+    (tmp_path / "runs" / "bench").mkdir(parents=True)
+    (tmp_path / "benchmarks" / "bench").mkdir(parents=True)
+    fm = FolderManager(tmp_path)
+    assert fm.benchmark_dir("bench") == (tmp_path / "bench").resolve()
 
 
 # ---------------------------------------------------------------------------

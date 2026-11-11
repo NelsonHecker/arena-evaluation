@@ -2,23 +2,17 @@ from __future__ import annotations
 
 import pathlib
 
-from ament_index_python.packages import get_package_share_directory
-
+from .data_root import benchmarks_root
 from .manifest import MetadataWriter
 from .schemas import EpisodeDescriptor
 
 
 class FolderManager:
-    """Manages directory paths within data_root for evaluation runs."""
+    """Paths of the benchmarks root, the directory whose children are the `benchmarks/<id>` runs."""
 
-    def __init__(self, data_root: pathlib.Path | None = None):
-        if data_root is None:
-            self.data_root = pathlib.Path(get_package_share_directory("arena_evaluation")) / "data"
-        else:
-            self.data_root = pathlib.Path(data_root).resolve()
-
-        if not self.data_root.exists():
-            self.data_root.mkdir(parents=True, exist_ok=True)
+    def __init__(self, data_root: pathlib.Path | str | None = None):
+        self.data_root = (benchmarks_root() if data_root is None else pathlib.Path(data_root)).resolve()
+        self.data_root.mkdir(parents=True, exist_ok=True)
 
     def _safe_resolve(self, target: pathlib.Path) -> pathlib.Path:
         """Resolve path and ensure it remains within data_root."""
@@ -30,26 +24,12 @@ class FolderManager:
         return resolved
 
     def benchmark_dir(self, benchmark_id: str) -> pathlib.Path:
-        """Return the root directory for a benchmark: the first layout that exists, else the default one."""
-        for cand in [
-            self.data_root / benchmark_id,
-            self.data_root / "runs" / benchmark_id,
-            self.data_root / "benchmarks" / benchmark_id,
-        ]:
-            if cand.is_dir():
-                return self._safe_resolve(cand)
+        """Return the benchmark's directory under the benchmarks root."""
         return self._safe_resolve(self.data_root / benchmark_id)
 
     def episodes_dir(self, benchmark_id: str) -> pathlib.Path:
-        """Return the episodes directory for a benchmark or run."""
-        for cand in [
-            self.data_root / benchmark_id / "episodes",
-            self.data_root / "runs" / benchmark_id / "episodes",
-            self.data_root / "benchmarks" / benchmark_id / "episodes",
-        ]:
-            if cand.is_dir():
-                return self._safe_resolve(cand)
-        return self._safe_resolve(self.data_root / benchmark_id / "episodes")
+        """Return the episodes directory of a benchmark."""
+        return self._safe_resolve(self.benchmark_dir(benchmark_id) / "episodes")
 
     def episode_dir(self, benchmark_id: str, episode_id: int) -> pathlib.Path:
         """Return the directory for a specific episode."""

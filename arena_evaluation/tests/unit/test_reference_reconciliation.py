@@ -107,6 +107,8 @@ def _write_episode(
             recording_started_at="2026-11-10T00:00:00",
             python_version="3.12",
             ros_distro="jazzy",
+            modes={},
+            params={},
         ),
         episode_dir / f"episode_{episode_id:03d}.yaml",
     )
@@ -307,7 +309,7 @@ def test_robot_and_pedestrian_paths_are_read_from_the_series_tables(tmp_path: pa
 def test_process_benchmark_reconciles_already_evaluated_episodes(tmp_path: pathlib.Path):
     """Regression for the ordering bug: a fully cached run still gets its reconciled values into the facts."""
     root, descriptors = _twin_benchmark(tmp_path)
-    pipeline = ProcessingPipeline(FolderManager(data_root=root.parent.parent), workers=1)
+    pipeline = ProcessingPipeline(FolderManager(data_root=root.parent), workers=1)
 
     combined = pipeline.process_benchmark(RUN_ID)
 

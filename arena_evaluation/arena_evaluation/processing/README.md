@@ -77,7 +77,7 @@ aligned_df = TopicAligner(tolerance_ns=100_000_000).align(bundle)
 Orchestrates extraction and metric computation.
 
 ```python
-fm = FolderManager(data_root=Path("/opt/arena_ws/data"))
+fm = FolderManager(data_root=Path("/opt/arena_ws/data/benchmarks"))
 ProcessingPipeline(fm, workers=-1).process_benchmark("my_benchmark")
 ```
 
