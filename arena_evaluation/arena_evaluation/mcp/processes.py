@@ -20,7 +20,7 @@ def evaluation_ps() -> dict[str, Any]:
     return {"processes": running_processes()}
 
 
-@domain.tool(destructive=True)
+@domain.tool(read_only=False, destructive=True, idempotent=False)
 async def evaluation_kill(
     pids: Annotated[list[int] | None, pydantic.Field(description="pids from evaluation_ps, each must be a classified arena process")] = None,
     kind: Annotated[Kind | None, pydantic.Field(description="every process of this kind, ignored when pids are given")] = None,

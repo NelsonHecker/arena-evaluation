@@ -110,7 +110,7 @@ def evaluation_read_plot_declaration(
     }
 
 
-@domain.tool(read_only=False)
+@domain.tool(read_only=False, destructive=True, idempotent=True)
 def evaluation_save_plot_declaration(
     name: Annotated[str, pydantic.Field(description="Unique identifier for the plot declaration")],
     yaml_text: YamlText,
@@ -147,7 +147,7 @@ def evaluation_save_plot_declaration(
     }
 
 
-@domain.tool(read_only=False)
+@domain.tool(read_only=False, destructive=False, idempotent=True)
 def evaluation_render_plot(
     run_id: OptionalRunId = None,
     *,

@@ -30,13 +30,13 @@ async def _record(
     return {"recorder": f"{node}/start_episode", "message": response.message}
 
 
-@domain.tool(destructive=True)
+@domain.tool(read_only=False, destructive=True, idempotent=False)
 async def evaluation_record_start(episode_id: Annotated[int, pydantic.Field(ge=0)], env_id: EnvId = None) -> dict[str, Any]:
     """Open a new episode recording on an env's recorder, closing the open one."""
     return await _record(env_id, episode_id, stop=False)
 
 
-@domain.tool(destructive=True)
+@domain.tool(read_only=False, destructive=True, idempotent=False)
 async def evaluation_record_stop(
     episode_id: Annotated[int, pydantic.Field(ge=0)],
     outcome: Annotated[Literal["success", "failed", "skipped", "fatal"], pydantic.Field(description="terminal outcome stored in the episode metadata")],

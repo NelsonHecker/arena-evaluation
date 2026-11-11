@@ -546,7 +546,7 @@ def evaluation_validate_manifest(yaml_content: YamlText) -> dict[str, Any]:
     return check_manifest(parse_yaml(yaml_content, "manifest"))
 
 
-@domain.tool()
+@domain.tool(read_only=False, destructive=True, idempotent=False)
 def evaluation_create_suite(name: str, yaml_content: YamlText, overwrite: Overwrite = False) -> dict[str, Any]:
     """Validate a suite (evaluation_config_schema and episode_task_modes give its keys) and write it where the runner resolves it by name."""
     verdict = check_suite(parse_yaml(yaml_content, "suite"))
@@ -555,7 +555,7 @@ def evaluation_create_suite(name: str, yaml_content: YamlText, overwrite: Overwr
     return {"path": str(write_config("suite", name, yaml_content, overwrite=overwrite)), **verdict}
 
 
-@domain.tool()
+@domain.tool(read_only=False, destructive=True, idempotent=False)
 def evaluation_create_contest(name: str, yaml_content: YamlText, overwrite: Overwrite = False) -> dict[str, Any]:
     """Validate a contest (planners_list gives the planner names) and write it where the runner resolves it by name."""
     verdict = check_contest(parse_yaml(yaml_content, "contest"))
@@ -564,7 +564,7 @@ def evaluation_create_contest(name: str, yaml_content: YamlText, overwrite: Over
     return {"path": str(write_config("contest", name, yaml_content, overwrite=overwrite)), **verdict}
 
 
-@domain.tool()
+@domain.tool(read_only=False, destructive=True, idempotent=False)
 def evaluation_create_manifest(
     name: str,
     *,
