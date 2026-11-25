@@ -3,7 +3,6 @@ from __future__ import annotations
 import array
 import csv
 import dataclasses
-import datetime
 import fcntl
 import hashlib
 import json
@@ -139,7 +138,9 @@ def _load_steps(state_path: pathlib.Path) -> dict[str, StepResult]:
             error_detail=error_detail,
             episodes_run=val.get("episodes_run", 0),
             episodes_failed=val.get("episodes_failed", 0),
+            episodes_weak=val.get("episodes_weak", 0),
             episodes_compromised=val.get("episodes_compromised", 0),
+            episodes_worst_progress=val.get("episodes_worst_progress"),
             lockstep=LockstepSummary.from_dict(val["lockstep"]) if val.get("lockstep") else None,
         )
     return steps
@@ -157,7 +158,9 @@ def _dump_steps(steps: typing.Mapping[str, StepResult]) -> str:
                 "error_detail": v.error_detail,
                 "episodes_run": v.episodes_run,
                 "episodes_failed": v.episodes_failed,
+                "episodes_weak": v.episodes_weak,
                 "episodes_compromised": v.episodes_compromised,
+                "episodes_worst_progress": v.episodes_worst_progress,
                 "lockstep": v.lockstep.to_dict() if v.lockstep is not None else None,
             }
             for k, v in steps.items()
@@ -316,8 +319,8 @@ class ProgressLog:
     def close(self) -> None:
         self._fh.close()
 
-    def dedupe_in_place(self, started: typing.Mapping[str, float]) -> None:
-        """Remove duplicate (step_key, episode_id) rows, keeping the latest by ts_iso, and move rows of a step's earlier attempts to the superseded file; drops old comment lines."""
+    def dedupe_in_place(self) -> None:
+        """Keep the latest attempt of every episode, move earlier attempts to the superseded file, and drop comment lines."""
         self._fh.flush()
         path = self._path
 
@@ -328,11 +331,11 @@ class ProgressLog:
 
         header_line = raw_rows[0]
         header = next(csv.reader([header_line]))
-        best = _latest_rows(header, (next(csv.reader([line])) for line in raw_rows[1:]))
-        ts_iso_idx = header.index("ts_iso")
-        current, superseded = _split_attempts(header, best.values(), started)
+        rows = [row for row in csv.reader(raw_rows[1:]) if len(row) == len(header)]
+        latest, superseded = _split_latest(header, rows)
         _keep_superseded(path.parent, header, superseded)
-        deduped = sorted(current, key=lambda r: r[ts_iso_idx])
+        ts_iso_idx = header.index("ts_iso")
+        deduped = sorted(latest, key=lambda row: (row[ts_iso_idx], row))
 
         tmp = path.with_suffix(".csv.tmp")
         with tmp.open("w", newline="") as out:
@@ -357,35 +360,45 @@ def _csv_lines(path: pathlib.Path) -> list[str]:
         return [line for line in fh if line.rstrip("\n") and not line.startswith("#")]
 
 
+def _row_identity(header: list[str], row: list[str]) -> tuple[str, str]:
+    """Identity of one episode attempt: its step key and its deterministic seed.
+
+    The seed is the episode index inside the step, so a resumed episode keeps the same identity
+    and its new row replaces the earlier attempt. Rows that predate seeded runs fall back to the
+    environment episode id.
+    """
+    step_key = row[header.index("step_key")]
+    seed = row[header.index("seed")]
+    if seed:
+        return (step_key, f"seed:{seed}")
+    return (step_key, f"episode:{row[header.index('episode_id')]}")
+
+
+def _row_timestamp(header: list[str], row: list[str]) -> str:
+    return row[header.index("ts_iso")]
+
+
 def _latest_rows(header: list[str], rows: typing.Iterable[list[str]]) -> dict[tuple[str, str], list[str]]:
-    """Rows keyed by (step_key, episode_id), keeping the latest ts_iso."""
-    step_key_idx = header.index("step_key")
-    episode_id_idx = header.index("episode_id")
-    ts_iso_idx = header.index("ts_iso")
+    """Rows keyed by episode identity, keeping the latest ts_iso."""
     best: dict[tuple[str, str], list[str]] = {}
     for row in rows:
-        key = (row[step_key_idx], row[episode_id_idx])
+        key = _row_identity(header, row)
         existing = best.get(key)
-        if existing is None or row[ts_iso_idx] > existing[ts_iso_idx]:
+        if existing is None or _row_timestamp(header, row) > _row_timestamp(header, existing):
             best[key] = row
     return best
 
 
-def _split_attempts(
-    header: list[str],
-    rows: typing.Iterable[list[str]],
-    started: typing.Mapping[str, float],
-) -> tuple[list[list[str]], list[list[str]]]:
-    """Rows of each step's latest attempt, from its started_at on, and rows of its earlier attempts."""
-    step_key_idx = header.index("step_key")
-    ts_iso_idx = header.index("ts_iso")
-    current: list[list[str]] = []
-    superseded: list[list[str]] = []
-    for row in rows:
-        start = started.get(row[step_key_idx])
-        earlier = start is not None and datetime.datetime.fromisoformat(row[ts_iso_idx]).timestamp() < start
-        (superseded if earlier else current).append(row)
-    return current, superseded
+def _split_latest(header: list[str], rows: typing.Iterable[list[str]]) -> tuple[list[list[str]], list[list[str]]]:
+    """The latest attempt of every episode, and the rows of its earlier attempts.
+
+    A row copied into progress.csv from a lane file is the same attempt, not an earlier one, so
+    only a strictly older timestamp is superseded.
+    """
+    materialized = list(rows)
+    best = _latest_rows(header, materialized)
+    superseded = [row for row in materialized if _row_timestamp(header, row) < _row_timestamp(header, best[_row_identity(header, row)])]
+    return list(best.values()), superseded
 
 
 def _keep_superseded(directory: pathlib.Path, header: list[str], rows: list[list[str]]) -> None:
@@ -423,26 +436,64 @@ def _rows_by_column(sources: typing.Iterable[pathlib.Path], header: list[str]) -
     return rows
 
 
-def _folded_progress(path: pathlib.Path) -> tuple[list[str], list[list[str]]]:
+def _read_progress_sources(path: pathlib.Path) -> tuple[list[str], list[list[str]]]:
+    """Header and rows of progress.csv plus every lane's progress file, without writing anything."""
     sources = [p for p in (path / "progress.csv", *sorted(path.glob("progress.*.csv"))) if p.exists()]
     header = next(csv.reader([ProgressLog._HEADER]))
-    rows = _rows_by_column(sources, header)
+    return header, _rows_by_column(sources, header)
+
+
+def _folded_progress(path: pathlib.Path) -> tuple[list[str], list[list[str]]]:
+    header, rows = _read_progress_sources(path)
+    latest, _ = _split_latest(header, rows)
     ts_iso_idx = header.index("ts_iso")
-    return header, sorted(_latest_rows(header, rows).values(), key=lambda r: (r[ts_iso_idx], r))
+    return header, sorted(latest, key=lambda row: (row[ts_iso_idx], row))
+
+
+def _typed_row(header: list[str], row: list[str]) -> dict[str, object]:
+    """One progress row with its numeric columns parsed and empty cells as None."""
+    record: dict[str, object] = dict(zip(header, row, strict=True))
+    for column in ("env_id", "episode_id", "seed", "outcome_state"):
+        raw = record[column]
+        if raw == "":
+            record[column] = None
+        else:
+            try:
+                record[column] = int(str(raw))
+            except ValueError:
+                record[column] = None
+    runtime = record["runtime_s"]
+    if runtime == "":
+        record["runtime_s"] = None
+    else:
+        try:
+            record["runtime_s"] = float(str(runtime))
+        except ValueError:
+            record["runtime_s"] = None
+    return record
+
+
+def resume_rows(path: pathlib.Path, *, step_key: str | None = None) -> list[dict[str, object]]:
+    """Typed rows of a run's progress ledger, latest attempt per episode, for the resume planner."""
+    header, rows = _read_progress_sources(path)
+    latest, _ = _split_latest(header, rows)
+    ts_iso_idx = header.index("ts_iso")
+    typed = (_typed_row(header, row) for row in sorted(latest, key=lambda row: (row[ts_iso_idx], row)))
+    return [row for row in typed if step_key is None or row.get("step_key") == step_key]
 
 
 def progress_rows(path: pathlib.Path) -> list[dict[str, str]]:
-    """Rows of progress.csv and every lane's progress file, latest per (step_key, episode_id), oldest first, without writing anything."""
+    """Rows of progress.csv and every lane's progress file, latest attempt per episode, oldest first, without writing anything."""
     header, folded = _folded_progress(path)
     return [dict(zip(header, row, strict=True)) for row in folded]
 
 
-def _fold_progress(path: pathlib.Path, started: typing.Mapping[str, float]) -> None:
-    header, latest = _folded_progress(path)
-    ts_iso_idx = header.index("ts_iso")
-    current, superseded = _split_attempts(header, latest, started)
+def _fold_progress(path: pathlib.Path) -> None:
+    header, rows = _read_progress_sources(path)
+    latest, superseded = _split_latest(header, rows)
     _keep_superseded(path, header, superseded)
-    folded = sorted(current, key=lambda r: (r[ts_iso_idx], r))
+    ts_iso_idx = header.index("ts_iso")
+    folded = sorted(latest, key=lambda row: (row[ts_iso_idx], row))
     tmp = path / "progress.csv.fold.tmp"
     with tmp.open("w", newline="") as out:
         writer = csv.writer(out)
@@ -459,7 +510,7 @@ def fold_run_dir(path: pathlib.Path) -> None:
         tmp = path / ".benchmark_state.json.fold.tmp"
         tmp.write_text(_dump_steps(dict(sorted(steps.items()))))
         os.replace(tmp, path / StateFile._STATE_FILENAME)
-        _fold_progress(path, {key: result.started_at for key, result in steps.items()})
+        _fold_progress(path)
 
 
 class ManifestMismatchError(ValueError):
@@ -577,11 +628,12 @@ class RunDir:
         with (episodes_dir / ".episode_id.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             first = 0
-            for d in episodes_dir.glob("episode_*"):
-                try:
-                    first = max(first, int(d.name.split("_")[1]) + 1)
-                except (IndexError, ValueError):
-                    pass
+            for root in (episodes_dir, episodes_dir / ".superseded"):
+                for directory in root.glob("episode_*"):
+                    try:
+                        first = max(first, int(directory.name.split("_")[1].split("_", 1)[0]) + 1)
+                    except (IndexError, ValueError):
+                        pass
             if counter.exists():
                 first = max(first, int(counter.read_text().strip() or 0))
             tmp = episodes_dir / ".next_episode_id.tmp"

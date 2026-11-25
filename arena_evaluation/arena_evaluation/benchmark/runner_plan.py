@@ -44,7 +44,8 @@ from ..storage.config_layout import CONFIG_KINDS, bundle_config_file
 from ..storage.planner_names import split_planner_name
 from .config import Contest, Contestant, Suite, stage_modes
 from .lockstep import format_table
-from .state import Manifest, capture_git_sha, compute_config_hash
+from .resume import StepResumeDecision, load_episode_dirs, plan_resume
+from .state import Manifest, capture_git_sha, compute_config_hash, resume_rows
 from .step import Step, StepErrorKind, StepResult
 from .tree import ContestIdentifier, SuiteIdentifier
 
@@ -200,17 +201,6 @@ def _yaml_str(value: object) -> str:
     return json.dumps(str(value))
 
 
-class _WithSteps(typing.Protocol):
-    steps: dict[str, StepResult]
-
-
-class _HasStateSteps(typing.Protocol):
-    """Structural interface required by build_pending: any object with .state.steps."""
-
-    @property
-    def state(self) -> _WithSteps: ...
-
-
 def _launch_key(k: str) -> str:
     """Contest cap keys stay bare (`mobile`, `arm.<x>`, `planner`), launch args live under `robot.`."""
     return f"robot.{k}" if k.split(".", 1)[0] in _CAP_KEYS else k
@@ -296,29 +286,34 @@ def _all_steps_grid(
     return steps
 
 
-def build_pending(
+def plan_pending_steps(
     suite: Suite,
     contest: Contest,
     scale_episodes: float,
-    run_dir: _HasStateSteps,
+    run_dir_path: pathlib.Path,
+    state_steps: typing.Mapping[str, StepResult],
     retry_failed: bool,
-    record_root: pathlib.Path,
-) -> list[Step]:
-    """Return the list of steps that still need to be run."""
-    state_steps = run_dir.state.steps
-    pending: list[Step] = []
-    for step in _all_steps_grid(suite, contest, scale_episodes, record_root):
-        existing = state_steps.get(step.key)
-        if existing is None:
-            pending.append(step)
-            continue
-        if existing.status == "ok":
-            continue
-        lost = existing.error_kind is None and existing.episodes_run == 0
-        if existing.status == "failed" and not retry_failed and not lost and existing.error_kind not in _RETRY_ON_RESUME:
-            continue
-        pending.append(step)
-    return pending
+) -> list[StepResumeDecision]:
+    """Per-episode resume plan for every step of the grid.
+
+    The progress ledger and the live episode directories are authoritative: the state file only
+    says which steps failed systemically and therefore have their recorded failures retried too.
+    """
+    grid = _all_steps_grid(suite, contest, scale_episodes, record_root=run_dir_path)
+    rows_by_key: dict[str, list[dict[str, object]]] = {}
+    for row in resume_rows(run_dir_path):
+        key = row.get("step_key")
+        if isinstance(key, str):
+            rows_by_key.setdefault(key, []).append(row)
+    live_dirs = load_episode_dirs(run_dir_path / "episodes")
+    retry_recorded_keys = {key for key, result in state_steps.items() if result.error_kind in _RETRY_ON_RESUME}
+    return plan_resume(
+        grid,
+        rows_by_key,
+        live_dirs,
+        retry_failed=retry_failed,
+        retry_recorded_keys=retry_recorded_keys,
+    )
 
 
 def resolve_planner_identity(contestant: Contestant) -> tuple[str, str]:

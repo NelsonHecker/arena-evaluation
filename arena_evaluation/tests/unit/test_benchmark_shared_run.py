@@ -66,10 +66,10 @@ def _result(key: str, status: str, started_at: float, **overrides: object) -> St
     return StepResult(**fields)  # type: ignore[arg-type]
 
 
-def _record(info: str = "") -> types.SimpleNamespace:
+def _record(info: str = "", seed: int = 1) -> types.SimpleNamespace:
     return types.SimpleNamespace(
         world="map1",
-        seed=1,
+        seed=seed,
         modes=encode_modes({"robots": ["random"], "obstacles": ["random"], "modules": []}),
         robots=["jackal"],
         outcome_state=2,
@@ -82,7 +82,7 @@ def _record(info: str = "") -> types.SimpleNamespace:
     )
 
 
-def _append(log: ProgressLog, ts: str, step_key: str, episode_id: int, info: str = "") -> None:
+def _append(log: ProgressLog, ts: str, step_key: str, episode_id: int, info: str = "", *, seed: int | None = None) -> None:
     log.append(
         ts_iso=ts,
         run_id="shared-run",
@@ -91,7 +91,7 @@ def _append(log: ProgressLog, ts: str, step_key: str, episode_id: int, info: str
         stage=step_key.split("/")[1],
         env_id=0,
         episode_id=episode_id,
-        episode_record=_record(info),
+        episode_record=_record(info, episode_id if seed is None else seed),
         started_at=0.0,
         ended_at=1.0,
     )
@@ -185,8 +185,8 @@ def test_fold_moves_rows_of_a_rerun_steps_earlier_attempt_to_the_superseded_file
             )
         }
     )
-    _append(p1.progress, "2026-10-03T10:00:01+00:00", "a/s", 0, "first attempt")
-    _append(p1.progress, "2026-10-03T10:00:04+00:00", "a/s", 1, "rerun")
+    _append(p1.progress, "2026-10-03T10:00:01+00:00", "a/s", 0, "first attempt", seed=0)
+    _append(p1.progress, "2026-10-03T10:00:04+00:00", "a/s", 1, "rerun", seed=0)
 
     fold_run_dir(run)
     fold_run_dir(run)

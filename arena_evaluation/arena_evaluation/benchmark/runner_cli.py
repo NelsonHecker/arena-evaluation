@@ -45,10 +45,16 @@ _OPTIONS: tuple[tuple[tuple[str, ...], _OptionKwargs], ...] = (
             "nargs": "?",
             "const": "__auto__",
             "default": None,
-            "help": "Resume a prior run. Bare --resume picks the most recent resumable; --resume <run_id> opens that run explicitly.",
+            "help": "Resume a prior run at episode granularity. Bare --resume picks the most recent resumable; --resume <run_id> opens that run explicitly. Recorded episodes are kept, missing ones run again.",
         },
     ),
-    (("--retry-failed",), {"action": "store_true"}),
+    (
+        ("--retry-failed",),
+        {
+            "action": "store_true",
+            "help": "On resume, rerun recorded episodes whose outcome was not SUCCESS too, not only missing ones.",
+        },
+    ),
     (
         ("--retries",),
         {

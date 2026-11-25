@@ -22,13 +22,13 @@ EMPTY_RUN_ID = "20261019-110000-empty-empty"
 STEPS = ("dwb/s1", "dwb_social/s1", "unhindered_peds/s1", "dwb/s2")
 
 
-def _record(world: str, outcome: int) -> object:
+def _record(world: str, outcome: int, seed: int = 7) -> object:
     from arena_runtime.env.task_layer import encode_modes
     from arena_runtime_msgs.msg import EpisodeRecord
 
     return EpisodeRecord(
         world=world,
-        seed=7,
+        seed=seed,
         modes=encode_modes({"robots": ["random"], "obstacles": ["random"]}),
         robots=["jackal"],
         outcome_state=outcome,
@@ -405,7 +405,7 @@ def build_runs(root: pathlib.Path) -> pathlib.Path:
             stage="s1",
             env_id=0,
             episode_id=episode,
-            episode_record=_record("map_empty", 2),
+            episode_record=_record("map_empty", 2, episode),
             started_at=now - 60,
             ended_at=now - 45,
         )
@@ -432,7 +432,7 @@ def build_runs(root: pathlib.Path) -> pathlib.Path:
         stage="s1",
         env_id=1,
         episode_id=2,
-        episode_record=_record("map_empty", 3),
+        episode_record=_record("map_empty", 3, 2),
         started_at=now - 50,
         ended_at=now - 20,
     )

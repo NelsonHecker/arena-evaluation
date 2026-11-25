@@ -9,6 +9,7 @@ import datetime
 import logging
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import time
@@ -35,6 +36,7 @@ from rclpy.task import Future
 
 from .lockstep import LockstepSummary, format_report, format_table
 from .progress_display import BenchmarkProgressDisplay
+from .resume import StepResumeDecision, load_episode_dirs, plan_step, retire_episode_dir, seed_for_episode
 from .runner_plan import (
     _ADAPTER_RESET_FAILED,
     _ARENA_ORPHAN_GRACE_S,
@@ -45,11 +47,11 @@ from .runner_plan import (
     _HUNG_EXIT_CODE,
     _LOOP_DEADLINE_S,
     _OUTCOME_LABELS,
+    _RETRY_ON_RESUME,
     _SIM_STALL_S,
     _SYSTEMIC,
     ARENA_NODE_FQN,
     STATE_TOPIC,
-    _all_steps_grid,
     _EnvDied,
     _is_substantive_log_line,
     _new_env_logs,
@@ -74,6 +76,7 @@ from .runner_plan import (
     stage_request,
     step_status,
 )
+from .state import resume_rows
 from .step import Step, StepErrorKind, StepResult
 
 _T = typing.TypeVar("_T")
@@ -141,9 +144,15 @@ if typing.TYPE_CHECKING:
         _runtime_started_at: float
         _runtime_up: asyncio.Event
         _parent_episode_map: dict[tuple[str, str, int], int]
+        _kept_counts: dict[str, tuple[int, int]]
+        _kept_compromised: dict[str, int]
+        _episodes_run_this_process: int
         _state_pub: Publisher
 
-        def _build_pending(self) -> list[Step]: ...
+        def _build_pending(self) -> list[StepResumeDecision]: ...
+        def _apply_decision(self, decision: StepResumeDecision, episode_subsets: dict[str, tuple[int, ...]]) -> None: ...
+        def _cleanup_stale_episodes(self, decisions: typing.Iterable[StepResumeDecision]) -> None: ...
+        def _refresh_step_resume(self, step: Step, episode_subsets: dict[str, tuple[int, ...]]) -> StepResumeDecision: ...
 
 else:
 
@@ -784,6 +793,7 @@ if typing.TYPE_CHECKING:
         async def _best_effort_despawn(self, env_id: int, timeout: float) -> None: ...
         async def _despawn_env(self, env_id: int) -> None: ...
         async def _push_stage_config(self, env_id: int, step: Step) -> None: ...
+        async def _run_episodes(self, step: Step, env_id: int, slot_index: int = 0, episode_subset: typing.Iterable[int] | None = None) -> StepResult: ...
         async def _recover_sim(self, reason: str, generation: int) -> None: ...
         async def _restart_arena(self) -> None: ...
         async def _spawn_and_setup_env(
@@ -828,6 +838,63 @@ class _RunnerExecMixin(_RunnerExecHost):
             state=state,
             sim_start=sim_start,
         )
+
+    def _apply_decision(self, decision: StepResumeDecision, episode_subsets: dict[str, tuple[int, ...]]) -> None:
+        """Record what a step keeps and which episode indices this session still runs."""
+        step = decision.step
+        if decision.kept_run:
+            self._kept_counts[step.key] = (decision.kept_run, decision.kept_failed)
+            self._kept_compromised[step.key] = decision.kept_compromised
+        else:
+            self._kept_counts.pop(step.key, None)
+            self._kept_compromised.pop(step.key, None)
+        if not step.is_reference:
+            for ep_idx, sim_episode_id in decision.kept_sim_ids.items():
+                self._parent_episode_map[(step.contestant.name, step.stage.name, ep_idx)] = sim_episode_id
+                self._parent_episode_map[("__stage__", step.stage.name, ep_idx)] = sim_episode_id
+        if decision.run_indices:
+            episode_subsets[step.key] = tuple(decision.run_indices)
+        else:
+            episode_subsets.pop(step.key, None)
+
+    def _cleanup_stale_episodes(self, decisions: typing.Iterable[StepResumeDecision]) -> None:
+        """Delete unclosed episode dirs and retire recorded ones before their episodes are re-run."""
+        deleted = retired = 0
+        superseded_root = self._run_dir.path / "episodes" / ".superseded"
+        for decision in decisions:
+            for path in decision.delete_dirs:
+                if not path.exists():
+                    continue
+                try:
+                    shutil.rmtree(path)
+                    deleted += 1
+                except OSError as exc:
+                    _log.warning(f"resume: failed to delete unclosed episode dir {path}: {exc}")
+            for path in decision.retire_dirs:
+                if not path.exists() or path.parent.name == ".superseded":
+                    continue
+                try:
+                    destination = retire_episode_dir(path, superseded_root)
+                    _log.info(f"resume: retired {path.name} -> .superseded/{destination.name}")
+                    retired += 1
+                except OSError as exc:
+                    _log.warning(f"resume: failed to retire episode dir {path}: {exc}")
+        if deleted or retired:
+            _log.info(f"resume: episode cleanup deleted {deleted} unclosed dir(s), retired {retired} recorded dir(s)")
+
+    def _refresh_step_resume(self, step: Step, episode_subsets: dict[str, tuple[int, ...]]) -> StepResumeDecision:
+        """Re-plan one step before an in-process retry, so a retry continues where the failed attempt stopped."""
+        existing = self._run_dir.state.steps.get(step.key)
+        force_retry = self._retry_failed or (existing is not None and existing.error_kind in _RETRY_ON_RESUME)
+        decision = plan_step(
+            step,
+            resume_rows(self._run_dir.path, step_key=step.key),
+            load_episode_dirs(self._run_dir.path / "episodes"),
+            force_retry=force_retry,
+        )
+        self._cleanup_stale_episodes([decision])
+        self._apply_decision(decision, episode_subsets)
+        return decision
 
     async def _stop_recording(self, env_id: int, episode_id: int, rec: EpisodeRecord) -> None:
         recorder = self._recorder_clients.get(env_id)
@@ -884,10 +951,15 @@ class _RunnerExecMixin(_RunnerExecHost):
             lockstep=lockstep,
         )
 
-    async def _run_episodes(self, step: Step, env_id: int, slot_index: int = 0) -> StepResult:
-        """Drive all episodes for one step. Env is already up and clients are set up."""
+    async def _run_episodes(self, step: Step, env_id: int, slot_index: int = 0, episode_subset: typing.Iterable[int] | None = None) -> StepResult:
+        """Drive this session's episodes for one step. Env is already up and clients are set up."""
         started = time.time()
-        episodes_run = episodes_failed = episodes_weak = episodes_compromised = 0
+        kept_run, kept_failed = self._kept_counts.get(step.key, (0, 0))
+        episodes_run = kept_run
+        episodes_failed = kept_failed
+        episodes_weak = 0
+        episodes_compromised = self._kept_compromised.get(step.key, 0)
+        ep_indices = tuple(episode_subset) if episode_subset is not None else tuple(range(step.episodes))
         worst_progress: float | None = None
         sim_s = 0.0
         stalled = False
@@ -930,7 +1002,7 @@ class _RunnerExecMixin(_RunnerExecHost):
             )
 
         try:
-            for ep_idx in range(step.episodes):
+            for ep_idx in ep_indices:
                 self._update_slot(
                     slot_index,
                     env_id,
@@ -941,7 +1013,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                 )
                 goal = RunEpisode.Goal()
                 goal.world = step.stage.map
-                goal.seed = step.stage.seed + ep_idx if step.stage.seed is not None else ep_idx
+                goal.seed = seed_for_episode(step.stage.seed, ep_idx)
                 window.append((step.key, ep_idx))
                 self._lockstep.open(window[-1], time.time(), env=env_fqn)
                 ep_started_sim = self.sim_time.to_seconds()
@@ -1021,6 +1093,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                     _fold_window()
                     continue
                 episodes_run += 1
+                self._episodes_run_this_process += 1
                 if rec.outcome_state == EpisodeRecord.FAILED:
                     episodes_failed += 1
                 if rec.integrity:
@@ -1082,6 +1155,7 @@ class _RunnerExecMixin(_RunnerExecHost):
         *,
         started: float | None = None,
     ) -> StepResult:
+        kept_run, kept_failed = self._kept_counts.get(step.key, (0, 0))
         return StepResult(
             step.key,
             "failed",
@@ -1090,11 +1164,14 @@ class _RunnerExecMixin(_RunnerExecHost):
             time.time(),
             error_kind,
             detail,
+            episodes_run=kept_run,
+            episodes_failed=kept_failed,
+            episodes_compromised=self._kept_compromised.get(step.key, 0),
             episodes_total=step.episodes,
         )
 
-    async def _run_step(self, step: Step, env_id: int, slot_index: int) -> StepResult:
-        """Push the stage config, then drive the step's episodes."""
+    async def _run_step(self, step: Step, env_id: int, slot_index: int, episode_subset: typing.Iterable[int] | None = None) -> StepResult:
+        """Push the stage config, then drive this session's episodes of the step."""
         started = time.time()
         try:
             await self._push_stage_config(env_id, step)
@@ -1111,7 +1188,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                 f"stage config failed: {exc}",
                 started=started,
             )
-        return await self._run_episodes(step, env_id, slot_index)
+        return await self._run_episodes(step, env_id, slot_index, episode_subset)
 
     def _fail_remaining(
         self,
@@ -1205,6 +1282,7 @@ class _RunnerExecMixin(_RunnerExecHost):
         q: asyncio.Queue,
         slot_index: int,
         flush_cb: typing.Callable,
+        episode_subsets: dict[str, tuple[int, ...]] | None = None,
     ) -> bool:
         env_id: int | None = None
         env_ns_root = ""
@@ -1241,19 +1319,21 @@ class _RunnerExecMixin(_RunnerExecHost):
                     step = q.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+                episode_subset = episode_subsets.get(step.key) if episode_subsets is not None else None
+                episode_count = len(episode_subset) if episode_subset is not None else step.episodes
                 recorder_proc = None
                 if step.record_dir is not None:
                     if self._shared is None:
                         episode_id_offset = self._global_episode_id_offset
-                        self._global_episode_id_offset += step.episodes
+                        self._global_episode_id_offset += episode_count
                     else:
-                        episode_id_offset = self._run_dir.reserve_episode_ids(step.episodes)
+                        episode_id_offset = self._run_dir.reserve_episode_ids(episode_count)
                     recorder_proc = await self._start_recorder(step, env_id, env_ns_root, episode_id_offset)
                 self._update_slot(slot_index, env_id, step, 0, "SETTING_UP")
-                _log.info(f"Starting step {step.key} (env={env_id}, {step.episodes} episodes)")
+                _log.info(f"Starting step {step.key} (env={env_id}, {episode_count}/{step.episodes} episodes)")
                 sim_death_reason: str | None = None
                 try:
-                    step_result = await self._run_step(step, env_id, slot_index)
+                    step_result = await self._run_step(step, env_id, slot_index, episode_subset)
                 except asyncio.CancelledError:
                     while not q.empty():
                         try:
@@ -1283,8 +1363,28 @@ class _RunnerExecMixin(_RunnerExecHost):
                 else:
                     may_retry, _ = self._retry_budget.record(step.key, sim_death_generation=None)
                 if may_retry:
-                    _log.warning(f"retrying {step.key} (attempt {self._retry_budget.attempts[step.key]}/{self._retry_budget.limit}, {step_result.error_kind}: {step_result.error_detail})")
-                    _requeue_front(q, step)
+                    decision = self._refresh_step_resume(step, episode_subsets) if episode_subsets is not None else None
+                    if decision is not None and not decision.run_indices:
+                        kept_run, kept_failed = self._kept_counts.get(step.key, (0, 0))
+                        reconciled = StepResult(
+                            step.key,
+                            step_status(kept_run, step.episodes),
+                            env_id,
+                            time.time(),
+                            time.time(),
+                            None,
+                            None,
+                            episodes_run=kept_run,
+                            episodes_failed=kept_failed,
+                            episodes_compromised=self._kept_compromised.get(step.key, 0),
+                            episodes_total=step.episodes,
+                        )
+                        _log.info(f"{step.key}: every episode is recorded after all, not retrying")
+                        if flush_cb(reconciled):
+                            return True
+                    else:
+                        _log.warning(f"retrying {step.key} (attempt {self._retry_budget.attempts[step.key]}/{self._retry_budget.limit}, {step_result.error_kind}: {step_result.error_detail})")
+                        _requeue_front(q, step)
                 elif flush_cb(step_result):
                     return True
                 if env_id is not None:
@@ -1337,6 +1437,7 @@ class _RunnerExecMixin(_RunnerExecHost):
         attached: collections.Counter,
         claim: typing.Callable[[str], bool],
         flush_cb: typing.Callable,
+        episode_subsets: dict[str, tuple[int, ...]],
     ) -> bool:
         try:
             while (index := pick_block(block_queues, attached, claim)) is not None:
@@ -1344,7 +1445,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                 self._sim_used = True
                 attached[id(queue)] += 1
                 try:
-                    abort = await self._run_group_queue(rep_step, queue, slot_index, flush_cb)
+                    abort = await self._run_group_queue(rep_step, queue, slot_index, flush_cb, episode_subsets)
                 finally:
                     attached[id(queue)] -= 1
                 if abort:
@@ -1360,6 +1461,7 @@ class _RunnerExecMixin(_RunnerExecHost):
         claim_keys: list[str],
         claim: typing.Callable[[str], bool],
         flush_cb: typing.Callable,
+        episode_subsets: dict[str, tuple[int, ...]],
     ) -> bool:
         block_queues: list[tuple] = []
         for block, claim_key in zip(blocks, claim_keys, strict=True):
@@ -1371,7 +1473,7 @@ class _RunnerExecMixin(_RunnerExecHost):
         attached: collections.Counter[int] = collections.Counter()
         in_flight = {
             asyncio.create_task(
-                self._worker(slot, block_queues, attached, claim, flush_cb),
+                self._worker(slot, block_queues, attached, claim, flush_cb, episode_subsets),
                 name=f"worker_{slot}",
             )
             for slot in range(cap)
@@ -1390,32 +1492,68 @@ class _RunnerExecMixin(_RunnerExecHost):
                     await asyncio.gather(*in_flight, return_exceptions=True)
 
     def _episode_id_offset(self) -> int:
+        """First episode id that no live or retired directory and no lane counter has used."""
         offset = 0
         episodes_dir = self._run_dir.path / "episodes"
-        if episodes_dir.exists():
-            for directory in episodes_dir.glob("episode_*"):
+        for root in (episodes_dir, episodes_dir / ".superseded"):
+            if not root.is_dir():
+                continue
+            for directory in root.glob("episode_*"):
                 try:
-                    offset = max(offset, int(directory.name.split("_")[1]) + 1)
-                except Exception:
+                    offset = max(offset, int(directory.name.split("_")[1].split("_", 1)[0]) + 1)
+                except (IndexError, ValueError):
                     pass
+        counter = episodes_dir / ".next_episode_id"
+        if counter.is_file():
+            with contextlib.suppress(ValueError):
+                offset = max(offset, int(counter.read_text().strip() or 0))
         return offset
 
     async def _run_steps(self) -> int:
-        pending = self._build_pending()
+        decisions = self._build_pending()
+        self._parent_episode_map.clear()
+        self._kept_counts.clear()
+        self._kept_compromised.clear()
+        episode_subsets: dict[str, tuple[int, ...]] = {}
+        for decision in decisions:
+            self._apply_decision(decision, episode_subsets)
+        pending = [decision.step for decision in decisions if decision.run_indices]
+        self._cleanup_stale_episodes(decisions)
         results: dict[str, StepResult] = dict(self._run_dir.state.steps)
-        steps_total = len(results) + len(pending)
+        owned: set[str] = set()
+        now = time.time()
+        for decision in decisions:
+            if decision.run_indices:
+                continue
+            existing = results.get(decision.step.key)
+            reconciled_status = step_status(decision.kept_run, decision.step.episodes)
+            if existing is not None and existing.status == reconciled_status and existing.episodes_run == decision.kept_run and existing.episodes_failed == decision.kept_failed and existing.error_kind is None and existing.error_detail is None:
+                continue
+            results[decision.step.key] = StepResult(
+                decision.step.key,
+                reconciled_status,
+                None,
+                existing.started_at if existing is not None else now,
+                existing.ended_at if existing is not None else now,
+                None,
+                None,
+                episodes_run=decision.kept_run,
+                episodes_failed=decision.kept_failed,
+                episodes_compromised=max(decision.kept_compromised, existing.episodes_compromised if existing is not None else 0),
+                episodes_weak=existing.episodes_weak if existing is not None else 0,
+                episodes_worst_progress=existing.episodes_worst_progress if existing is not None else None,
+                episodes_total=decision.step.episodes,
+            )
+            owned.add(decision.step.key)
+        steps_total = len(results.keys() | {decision.step.key for decision in decisions})
+        self._episodes_run_this_process = 0
         self._publish_state(results, steps_total)
         _log.info(f"benchmark: signalled READY on {STATE_TOPIC}")
-        await self._start_arena()
+        if pending:
+            await self._start_arena()
         self._global_episode_id_offset = self._episode_id_offset()
         self._total_groups = len(group_pending(pending, self._simulator, self._world_swap))
-        step_map: dict[str, Step] = {
-            step.key: step
-            for step in (
-                *_all_steps_grid(self._suite, self._contest, self._scale_episodes, self._run_dir.path),
-                *pending,
-            )
-        }
+        step_map: dict[str, Step] = {decision.step.key: decision.step for decision in decisions}
         self._progress = BenchmarkProgressDisplay(
             title=f"Arena Benchmark: {self._suite.name} | {self._contest.name}",
             total_steps=steps_total,
@@ -1425,10 +1563,12 @@ class _RunnerExecMixin(_RunnerExecHost):
             live_path=self._run_dir.live_path,
             lane=self._run_dir.lane,
         )
-        owned: set[str] = set()
 
         def _write_state() -> None:
             self._run_dir.state.write(results if self._shared is None else {key: results[key] for key in owned})
+
+        if owned:
+            _write_state()
 
         def _flush_step_result(res: StepResult) -> bool:
             results[res.key] = res
@@ -1452,7 +1592,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                     error_detail=res.error_detail,
                     sim_sec=res.sim_s,
                 )
-            return sum(r.episodes_run for r in results.values()) == 0 and res.status == "failed" and res.error_kind in _SYSTEMIC
+            return self._episodes_run_this_process == 0 and res.status == "failed" and res.error_kind in _SYSTEMIC
 
         world_maps: list[str | None] = [None] if self._world_swap else list(dict.fromkeys(step.stage.map for step in pending))
         aborted_systemic = False
@@ -1485,6 +1625,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                             [all_claim_keys[index] for index in batch],
                             _claim,
                             _flush_step_result,
+                            episode_subsets,
                         ):
                             aborted_systemic = True
                             _log.error("benchmark: worker hit a systemic setup failure; aborting run")
@@ -1492,7 +1633,7 @@ class _RunnerExecMixin(_RunnerExecHost):
                     if aborted_systemic:
                         break
             finally:
-                self._run_dir.progress.dedupe_in_place({key: result.started_at for key, result in results.items()})
+                self._run_dir.progress.dedupe_in_place()
                 self._publish_state(results, steps_total)
 
         rows = [

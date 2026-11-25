@@ -629,19 +629,21 @@ def test_service_callback_unknown_command():
 # Topic callbacks: episode_record / semantic_snapshot / robots_fleet
 
 
-def _episode_message(episode_id=3, outcome=1):
+def _episode_message(episode_id=3, outcome=1, seed=0):
     msg = EpisodeRecord()
     msg.episode_id = episode_id
     msg.outcome_state = outcome
     msg.outcome_info = ""
+    msg.seed = seed
     return msg
 
 
 def test_episode_record_callback_begins_new_episode(env_node):
     env_node.current_time = 5000
-    env_node.episode_record_callback(_episode_message(outcome=1))
+    env_node.episode_record_callback(_episode_message(outcome=1, seed=7))
     assert env_node.current_sim_episode_id == 3
     assert env_node.current_metadata.task_generator_episode_id == 3
+    assert env_node.current_metadata.seed == 7
     env_node._close_current_writer()
     rows = _mcap_rows(env_node.episodes_root / "episode_000" / "episode_000.mcap")
     assert [(topic, ts) for topic, _, ts in rows] == [("env_0/state/episode", 5000)]

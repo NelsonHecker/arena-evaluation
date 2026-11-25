@@ -19,9 +19,9 @@ from arena_evaluation.benchmark.state import (
     RunDir,
     _params_to_json,
     find_most_recent_resumable,
+    resume_rows,
 )
 from arena_evaluation.benchmark.step import StepResult
-
 
 # helpers
 
@@ -304,11 +304,34 @@ def _write_log_lines(path: pathlib.Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _progress_line(ts_iso: str, *, episode_id: int, seed: int, step_key: str = "k", outcome_state: int = 1) -> str:
+    values = dict.fromkeys(_HEADERS, "")
+    values.update(
+        ts_iso=ts_iso,
+        run_id="r",
+        step_key=step_key,
+        contestant="c",
+        stage="s",
+        episode_id=str(episode_id),
+        is_reference="false",
+        world="w",
+        seed=str(seed),
+        modes="{}",
+        outcome_state=str(outcome_state),
+        started_at="0",
+        ended_at="1",
+        runtime_s="1",
+        params_json="[]",
+        integrity="[]",
+    )
+    return ",".join(values[column] for column in _HEADERS)
+
+
 def test_dedupe_comment_only_noop(tmp_path: pathlib.Path):
     path = tmp_path / "progress.csv"
     path.write_text("# only a comment\n")
     log = ProgressLog(path)
-    log.dedupe_in_place({})
+    log.dedupe_in_place()
     log.close()
     assert path.read_text() == "# only a comment\n"
 
@@ -319,15 +342,15 @@ def test_dedupe_keeps_latest_ts_and_sorts(tmp_path: pathlib.Path):
         path,
         [
             ",".join(_HEADERS),
-            "2026-01-01T00:00:03+00:00,r,k,c,s,,3,,false,,w,1,o,o,m,b,1,,1,2,1,[],[],,",
-            "2026-01-01T00:00:01+00:00,r,k,c,s,,1,,false,,w,1,o,o,m,b,1,,1,2,1,[],[],,",
-            "2026-01-01T00:00:02+00:00,r,k,c,s,,2,,false,,w,1,o,o,m,b,1,,1,2,1,[],[],,",
-            "2026-01-01T00:00:00+00:00,r,k,c,s,,2,,false,,w,1,o,o,m,b,1,,1,2,1,[],[],,",
-            "2026-01-01T00:00:05+00:00,r,k,c,s,,1,,false,,w,1,o,o,m,b,1,,1,2,1,[],[],,",
+            _progress_line("2026-01-01T00:00:03+00:00", episode_id=3, seed=3),
+            _progress_line("2026-01-01T00:00:01+00:00", episode_id=1, seed=1),
+            _progress_line("2026-01-01T00:00:02+00:00", episode_id=2, seed=2),
+            _progress_line("2026-01-01T00:00:00+00:00", episode_id=2, seed=2),
+            _progress_line("2026-01-01T00:00:05+00:00", episode_id=1, seed=1),
         ],
     )
     log = ProgressLog(path)
-    log.dedupe_in_place({})
+    log.dedupe_in_place()
     log.close()
     with path.open(newline="") as fh:
         rows = list(csv.DictReader(fh))
@@ -336,6 +359,23 @@ def test_dedupe_keeps_latest_ts_and_sorts(tmp_path: pathlib.Path):
     assert [r["episode_id"] for r in rows] == ["2", "3", "1"]
     assert rows[0]["ts_iso"] == "2026-01-01T00:00:02+00:00"
     assert rows[-1]["ts_iso"] == "2026-01-01T00:00:05+00:00"
+
+
+def test_resume_rows_keeps_the_latest_attempt_with_parsed_numbers(tmp_path: pathlib.Path):
+    path = tmp_path / "progress.csv"
+    _write_log_lines(
+        path,
+        [
+            ",".join(_HEADERS),
+            _progress_line("2026-01-01T00:00:01+00:00", episode_id=0, seed=7, outcome_state=2),
+            _progress_line("2026-01-01T00:00:05+00:00", episode_id=11, seed=7, outcome_state=3),
+        ],
+    )
+
+    rows = resume_rows(tmp_path)
+
+    assert len(rows) == 1
+    assert (rows[0]["seed"], rows[0]["episode_id"], rows[0]["outcome_state"]) == (7, 11, 3)
 
 
 # RunDir

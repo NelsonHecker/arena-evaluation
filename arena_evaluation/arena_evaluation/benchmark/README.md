@@ -6,9 +6,10 @@ Runs multi-planner benchmark campaigns: spawns simulation environments, drives e
 
 | File | Purpose |
 |---|---|
-| `runner.py` | `BenchmarkRunner`: spawns environments, executes episodes via `RunEpisode`, writes `progress.csv` and `.benchmark_state.json` |
+| `runner.py` | `BenchmarkRunner`: plans the per-episode work, spawns environments, executes episodes via `RunEpisode`, writes `progress.csv` and `.benchmark_state.json` |
 | `config.py` | `Suite` and `Contest` parsers: YAML schema, the suite's `task_layer`, stage `modes` per axis, sweep expansion, inline contest resolution |
-| `state.py` | `Manifest`, `RunDir`, `StateFile`: run manifest, config hash, resume discovery, git SHA capture |
+| `state.py` | `Manifest`, `RunDir`, `StateFile`, progress ledger: run manifest, config hash, per-episode identity, resume discovery, git SHA capture |
+| `resume.py` | Per-episode resume planner: keeps recorded episodes, schedules missing ones and classifies the directories to retire or delete |
 | `step.py` | `Step`, `StepResult`, `StepErrorKind`: grid model for contestant x stage combinations |
 | `debug.py` | Process introspection: `running_processes()`, `tail_console()`, `console_log_path()` |
 | `dashboard.py`, `dashboard.html` | Live web dashboard (`arena evaluation serve`, `--viz`): `run_status`, `run_detail`, the HTTP server and its page |
@@ -44,7 +45,7 @@ Run output structure in `$ARENA_DATA_DIR/benchmarks/<run_id>/`:
 <run_id>/
 |-- manifest.yaml              # Config snapshot
 |-- progress.csv               # Append-only, one row per episode
-|-- superseded_progress.csv    # Rows of a step's earlier attempts, kept out of progress.csv
+|-- superseded_progress.csv    # Rows of an episode's earlier attempts, kept out of progress.csv
 |-- runner.log                 # Python logging and launch output
 |-- roslog/                    # ROS_LOG_DIR of this run's runtime, arena_env_<id>_<ts>.log per spawned env
 |-- .benchmark_state.json      # Per-step status
@@ -52,6 +53,7 @@ Run output structure in `$ARENA_DATA_DIR/benchmarks/<run_id>/`:
 |   |-- episode_000/
 |   |   |-- episode_000.mcap
 |   |   `-- episode_000.yaml
+|   |-- .superseded/           # Replaced recordings of episodes that were re-run
 |   `-- ...
 |-- analysis/                  # Run-local reports/<name>/report.yaml, plots/<name>/plot.yaml, queries/<name>/query.yaml, evidence/
 `-- reports/<name>/            # Rendered report.html with the Plotly bundle inline, plots/*.png
@@ -81,9 +83,10 @@ plus a generation counter); the others wait for the new generation and then spaw
 A cell that ends `failed` with a systemic kind (`sim_dead`, `env_setup`, `robot_setup`) is
 retried up to `--retries` times (default 1, `0` never retries, `-1` retries forever). Every
 retry runs on a fresh env: the current env is despawned, the cell goes back to the head of its
-block queue, and a sim death recovers the runtime first. A retried attempt is not recorded, so
-only a cell's final outcome reaches `progress.csv`, the state file and the progress display.
-A cell that exhausts its retries is recorded failed and the queue moves on with a fresh env.
+block queue, and a sim death recovers the runtime first. A retry continues where the failed
+attempt stopped: if `progress.csv` already holds some of the cell's episodes, only the missing
+ones run, and a replaced recording moves to `episodes/.superseded/`. A cell that exhausts its
+retries is recorded failed and the queue moves on with a fresh env.
 `--max-sim-deaths` (default 3) is the breaker that always stands: that many distinct sim deaths
 abort the run (exit 1) whatever `--retries` allows. A cell that exhausts its retries while no
 episode has run anywhere aborts the run as a setup failure.
@@ -248,7 +251,9 @@ that path.
 
 ## Run State
 
-`StateFile` manages `.benchmark_state.json` atomically. Each step has status: `ok | partial | failed | skipped | in_progress`. The status tells how completely a step recorded its episodes, not how its planner did: `ok` recorded every episode whatever the outcomes, `partial` lost some (no `EpisodeRecord`, a sim stall), `failed` recorded none or hit an error. Interrupted runs resume with `--resume <run_id>`, which reruns `partial`, `skipped` and `in_progress` steps, and `failed` ones that recorded no episode without an error, or whose error is systemic or a sim stall, or all with `--retry-failed`. A rerun replaces the step's episodes: when progress is deduped or folded, rows written before the step's latest `started_at` move to `superseded_progress.csv`.
+`StateFile` manages `.benchmark_state.json` atomically. Each step has status: `ok | partial | failed | skipped | in_progress`. The status tells how completely a step recorded its episodes, not how its planner did: `ok` recorded every episode whatever the outcomes, `partial` lost some (no `EpisodeRecord`, a sim stall), `failed` recorded none or hit an error.
+
+`progress.csv` is the per-episode ledger and `episodes/` holds the recordings, so resume is planned per episode, not per step: `--resume <run_id>` keeps every episode that has both a final `EpisodeRecord` and a recording, reruns the episodes that are missing (no row or no recording), and leaves the rest of the run untouched. An episode's identity is its step key plus its deterministic seed (`stage.seed + episode_index`, or the episode index when the stage has no seed), so a re-run of the same episode gets the same identity and its new row replaces the earlier attempt in `progress.csv`; earlier attempts move to `superseded_progress.csv` and their recordings to `episodes/.superseded/`. A recorded non-SUCCESS episode is kept by default; `--retry-failed` also reruns it, and a step whose state carries a systemic or sim-stall error has its recorded failures retried too. A step with every episode kept is reconciled from the ledger and never spawns a simulation. `find_most_recent_resumable` still picks the newest run whose state is not all `ok`.
 
 Run ID format: `{YYYYMMDD-HHMMSS}-{suite}-{contest}`, `{YYYYMMDD-HHMMSS}-{lane}-{suite}-{contest}` inside a lane, `{YYYYMMDD-HHMMSS}-{suite}-x{N}` for `--lanes N`.
 

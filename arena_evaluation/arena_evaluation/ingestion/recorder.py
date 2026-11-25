@@ -1108,6 +1108,7 @@ class DataRecorderNode(ROSParamServer, EpisodeWriter):
             self.current_metadata.params = self._record_params(msg)
 
             self.current_metadata.task_generator_episode_id = int(msg.episode_id)
+            self.current_metadata.seed = int(msg.seed)
             if int(msg.outcome_state) in _TERMINAL_OUTCOMES:
                 self.current_metadata.outcome_state = int(msg.outcome_state)
                 self.current_metadata.outcome_info = str(msg.outcome_info)

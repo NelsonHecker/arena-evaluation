@@ -36,6 +36,7 @@ from . import dashboard, runner_cli, runner_impl, runner_plan
 from .config import Contest, Suite
 from .lockstep import LockstepMonitor
 from .progress_display import BenchmarkProgressDisplay
+from .resume import StepResumeDecision
 from .runner_cli import data_root
 from .runner_plan import (
     ARENA_NODE_FQN,
@@ -44,7 +45,6 @@ from .runner_plan import (
     _default_run_id,
     block_claim_key,
     build_launch_args,
-    build_pending,
     cell_verdict,
     closed_fraction,
     compromised_table,
@@ -52,6 +52,7 @@ from .runner_plan import (
     episode_line,
     group_pending,
     pick_block,
+    plan_pending_steps,
     resolve_planner_identity,
     robot_has_depth_camera,
     runtime_launch_args,
@@ -60,7 +61,6 @@ from .runner_plan import (
     step_status,
 )
 from .state import RunDir, compute_config_hash, find_most_recent_resumable
-from .step import Step
 
 __all__ = [
     "ARENA_NODE_FQN",
@@ -70,7 +70,7 @@ __all__ = [
     "_default_run_id",
     "block_claim_key",
     "build_launch_args",
-    "build_pending",
+    "plan_pending_steps",
     "cell_verdict",
     "cli_main",
     "closed_fraction",
@@ -258,6 +258,9 @@ class BenchmarkRunner(runner_impl._RunnerEnvMixin, runner_impl._RunnerExecMixin,
         self._runtime_up = asyncio.Event()
         self._arena_watch: asyncio.Task | None = None
         self._parent_episode_map: dict[tuple[str, str, int], int] = {}
+        self._kept_counts: dict[str, tuple[int, int]] = {}
+        self._kept_compromised: dict[str, int] = {}
+        self._episodes_run_this_process = 0
         self._progress: BenchmarkProgressDisplay | None = None
         self.create_subscription(EnvRegistry, "/arena/state/envs", self._on_envs, runner_plan._LATCHED)
         self.create_subscription(SimState, runner_plan.SIM_STATE_TOPIC, self._on_sim_state, runner_plan._LATCHED)
@@ -265,14 +268,14 @@ class BenchmarkRunner(runner_impl._RunnerEnvMixin, runner_impl._RunnerExecMixin,
         self.create_subscription(HoldRegistry, "/arena/state/holders", self._on_holders, runner_plan._LATCHED)
         self._state_pub = self.create_publisher(BenchmarkState, STATE_TOPIC, runner_plan._LATCHED)
 
-    def _build_pending(self) -> list[Step]:
-        return build_pending(
+    def _build_pending(self) -> list[StepResumeDecision]:
+        return plan_pending_steps(
             suite=self._suite,
             contest=self._contest,
             scale_episodes=self._scale_episodes,
-            run_dir=self._run_dir,
+            run_dir_path=self._run_dir.path,
+            state_steps=self._run_dir.state.steps,
             retry_failed=self._retry_failed,
-            record_root=self._run_dir.path,
         )
 
     async def setup(self) -> None:

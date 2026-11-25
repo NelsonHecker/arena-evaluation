@@ -10,7 +10,21 @@ import pytest
 
 rclpy = pytest.importorskip("rclpy")
 
-from arena_evaluation.benchmark.config import Contestant, Contest, Suite  # noqa: E402
+from arena_evaluation_msgs.srv import RecordEpisode  # noqa: E402
+from arena_runtime_msgs.action import RunEpisode  # noqa: E402
+from arena_runtime_msgs.msg import (  # noqa: E402
+    EnvRecord,
+    EnvRegistry,
+    EpisodeRecord,  # noqa: E402
+    HoldEntry,
+    HoldRegistry,
+    LockstepStatus,
+    SimState,
+)
+from arena_runtime_msgs.srv import QueueEpisode  # noqa: E402
+from rcl_interfaces.srv import GetParameters, SetParameters  # noqa: E402
+
+from arena_evaluation.benchmark.config import Contest, Contestant, Suite  # noqa: E402
 from arena_evaluation.benchmark.progress_display import BenchmarkProgressDisplay  # noqa: E402
 from arena_evaluation.benchmark.runner import (  # noqa: E402
     ARENA_NODE_FQN,
@@ -18,19 +32,6 @@ from arena_evaluation.benchmark.runner import (  # noqa: E402
 )
 from arena_evaluation.benchmark.state import Manifest, RunDir  # noqa: E402
 from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult  # noqa: E402
-from arena_evaluation_msgs.srv import RecordEpisode  # noqa: E402
-from arena_runtime_msgs.msg import (  # noqa: E402
-    EnvRecord,
-    EnvRegistry,
-    HoldEntry,
-    HoldRegistry,
-    LockstepStatus,
-    SimState,
-)
-from rcl_interfaces.srv import GetParameters, SetParameters  # noqa: E402
-from arena_runtime_msgs.action import RunEpisode  # noqa: E402
-from arena_runtime_msgs.msg import EpisodeRecord  # noqa: E402
-from arena_runtime_msgs.srv import QueueEpisode  # noqa: E402
 
 T = typing.TypeVar("T")
 
@@ -330,12 +331,12 @@ def test_env_teardown_releases_every_client_and_setup_is_idempotent(
     assert _drive(tmp_path, body) == [0] * 9
 
 
-def test_pending_steps_come_from_the_run_state(tmp_path: pathlib.Path):
-    async def body(runner: BenchmarkRunner) -> list[str]:
+def test_pending_steps_come_from_the_episode_ledger_not_the_state_alone(tmp_path: pathlib.Path):
+    async def body(runner: BenchmarkRunner) -> list[tuple[str, list[int], int]]:
         runner._run_dir.state.write({"dwb/s1": StepResult("dwb/s1", "ok", 0, 0.0, 1.0, None, None)})
-        return [s.key for s in runner._build_pending()]
+        return [(decision.step.key, decision.run_indices, decision.kept_run) for decision in runner._build_pending()]
 
-    assert _drive(tmp_path, body) == []
+    assert _drive(tmp_path, body) == [("dwb/s1", [0], 0)]
 
 
 def test_despawning_an_env_the_registry_no_longer_lists_only_tears_down_clients(

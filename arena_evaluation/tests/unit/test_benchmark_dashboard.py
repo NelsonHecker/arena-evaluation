@@ -60,10 +60,10 @@ def _manifest(created_at: str) -> Manifest:
     )
 
 
-def _record(outcome: int, info: str = "") -> types.SimpleNamespace:
+def _record(outcome: int, info: str = "", seed: int = 1) -> types.SimpleNamespace:
     return types.SimpleNamespace(
         world="map_empty",
-        seed=1,
+        seed=seed,
         modes=encode_modes({"robots": ["random"], "obstacles": ["random"], "modules": []}),
         robots=["jackal"],
         outcome_state=outcome,
@@ -118,7 +118,7 @@ def run_dir(tmp_path: pathlib.Path) -> RunDir:
             stage="s1",
             env_id=0,
             episode_id=episode_id,
-            episode_record=_record(outcome, "collision" if outcome == 3 else ""),
+            episode_record=_record(outcome, "collision" if outcome == 3 else "", episode_id),
             started_at=0.0,
             ended_at=4.0,
         )

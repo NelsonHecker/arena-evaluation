@@ -9,6 +9,8 @@ import pathlib
 from typing import Annotated, Any, Final, Literal
 
 import pydantic
+from arena_mcp.core import JOBS, ROS, Job, ToolError, cli, msgs, proc
+from arena_mcp.core.jobs import RUNNING, SUCCEEDED
 
 from arena_evaluation.benchmark.dashboard import find_rendered_reports
 from arena_evaluation.storage.config_layout import (
@@ -17,8 +19,6 @@ from arena_evaluation.storage.config_layout import (
     run_analysis_root,
 )
 from arena_evaluation.storage.star_schema import has_star_schema
-from arena_mcp.core import JOBS, ROS, Job, ToolError, cli, msgs, proc
-from arena_mcp.core.jobs import RUNNING, SUCCEEDED
 
 from .base import (
     OptionalRunId,
@@ -332,7 +332,7 @@ async def evaluation_benchmark(
         bool,
         pydantic.Field(description="continue run_id (or the most recent resumable run) from its stored config"),
     ] = False,
-    retry_failed: Annotated[bool, pydantic.Field(description="on resume also rerun failed steps")] = False,
+    retry_failed: Annotated[bool, pydantic.Field(description="on resume also rerun episodes whose recorded outcome was not SUCCESS")] = False,
     retries: Annotated[
         int | None,
         pydantic.Field(description="retries per cell after a systemic failure, -1 forever, 0 never (runner default 1)"),

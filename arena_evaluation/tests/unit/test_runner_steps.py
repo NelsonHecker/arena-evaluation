@@ -4,18 +4,17 @@ import pathlib
 
 import pytest
 
-from arena_evaluation.benchmark.config import Contestant, Contest, Suite
+from arena_evaluation.benchmark.config import Contest, Contestant, Suite
+from arena_evaluation.benchmark.resume import OnDiskEpisode, decide_step, seed_for_episode
 from arena_evaluation.benchmark.runner import (
     _default_run_id,
     build_launch_args,
-    build_pending,
     group_pending,
     resolve_planner_identity,
     robot_has_depth_camera,
     runtime_launch_args,
 )
-from arena_evaluation.benchmark.state import Manifest, RunDir
-from arena_evaluation.benchmark.step import Step, StepErrorKind, StepResult
+from arena_evaluation.benchmark.step import Step
 
 RANDOM_ROBOTS = "random"
 RANDOM_OBSTACLES = "random"
@@ -65,10 +64,6 @@ def _step(
         stage=stage or _stage(),
         **kwargs,
     )
-
-
-def _result(key: str, status: str, kind: StepErrorKind | None = None) -> StepResult:
-    return StepResult(key, status, 0, 0.0, 1.0, kind, None)
 
 
 def test_launch_args_carry_stage_optim_overrides():
@@ -122,38 +117,29 @@ def test_runtime_launch_args_keep_an_explicit_paused_lockstep():
     assert runtime_launch_args({"lockstep": "True"}, {"lockstep.paused": "true"})["lockstep.paused"] == "true"
 
 
-def test_pending_skips_ok_and_plain_failures_but_retries_systemic_ones(
+def test_resume_plan_runs_missing_episodes_and_optionally_retries_failures(
     tmp_path: pathlib.Path,
 ):
-    suite = _suite(*(_stage(f"s{i}") for i in range(5)))
-    states = {
-        "a/s0": _result("a/s0", "ok"),
-        "a/s1": _result("a/s1", "failed", StepErrorKind.INTERNAL),
-        "a/s2": _result("a/s2", "failed", StepErrorKind.SIM_DEAD),
-        "a/s3": _result("a/s3", "partial"),
-    }
-    RunDir.create(tmp_path, "r", _manifest("0" * 40)).state.write(states)
-    run_dir = RunDir.open(tmp_path, "r")
+    step = _step(stage=_stage("s0", episodes=4), episodes=4)
+    live = [
+        OnDiskEpisode(path=tmp_path / "episode_000", number=0, planner="dwb", stage="s0", sim_episode_id=100, seed=7, outcome_state=2, mcap_bytes=128, has_recording=True),
+        OnDiskEpisode(path=tmp_path / "episode_001", number=1, planner="dwb", stage="s0", sim_episode_id=101, seed=8, outcome_state=3, mcap_bytes=128, has_recording=True),
+        OnDiskEpisode(path=tmp_path / "episode_003", number=3, planner="dwb", stage="s0", sim_episode_id=103, seed=10, outcome_state=2, mcap_bytes=128, has_recording=True),
+    ]
+    rows = [
+        {"ts_iso": "2026-01-01T00:00:01+00:00", "step_key": step.key, "seed": seed_for_episode(step.stage.seed, 0), "episode_id": 100, "outcome_state": 2},
+        {"ts_iso": "2026-01-01T00:00:02+00:00", "step_key": step.key, "seed": seed_for_episode(step.stage.seed, 1), "episode_id": 101, "outcome_state": 3},
+        {"ts_iso": "2026-01-01T00:00:03+00:00", "step_key": step.key, "seed": seed_for_episode(step.stage.seed, 3), "episode_id": 103, "outcome_state": 2},
+    ]
 
-    pending = build_pending(
-        suite,
-        _contest("a"),
-        1.0,
-        run_dir,
-        retry_failed=False,
-        record_root=tmp_path / "r",
-    )
-    retried = build_pending(
-        suite,
-        _contest("a"),
-        1.0,
-        run_dir,
-        retry_failed=True,
-        record_root=tmp_path / "r",
-    )
+    plain = decide_step(step, rows, live)
+    forced = decide_step(step, rows, live, force_retry=True)
 
-    assert [s.key for s in pending] == ["a/s2", "a/s3", "a/s4"]
-    assert [s.key for s in retried] == ["a/s1", "a/s2", "a/s3", "a/s4"]
+    assert plain.run_indices == [2]
+    assert (plain.kept_run, plain.kept_failed) == (3, 1)
+    assert forced.run_indices == [1, 2]
+    assert (forced.kept_run, forced.kept_failed) == (2, 0)
+    assert forced.retire_dirs == [tmp_path / "episode_001"]
 
 
 def test_planner_identity_prefers_the_mobile_cap_planners():
@@ -215,23 +201,3 @@ def test_default_run_id_names_lane_and_config_stems():
 
 def test_default_run_id_without_lane():
     assert _default_run_id("{stages: []}", "allplanners", None).endswith("-inline-allplanners")
-
-
-def _manifest(config_hash: str) -> Manifest:
-    return Manifest(
-        run_id="r",
-        created_at="2026-10-13T00:00:00+00:00",
-        arena_git_sha=None,
-        arena_git_dirty=False,
-        cli_args=[],
-        env_n=1,
-        headless=True,
-        config_hash=config_hash,
-        simulator=None,
-        scale_episodes=1.0,
-        suite_name="basic",
-        contest_name="basic",
-        suite={},
-        contest=[],
-        steps=[],
-    )
